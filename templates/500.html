@@ -1,0 +1,35 @@
+{% extends "error_base.html" %}
+
+{% block code %}500{% endblock %}
+
+{% block background %}#111{% endblock %}
+
+{% block extra_style %}
+        .code {
+            color: #d24b4b;
+            text-shadow: 0 0 20px rgba(139, 0, 0, 0.5);
+        }
+        .quote {
+            max-width: 400px;
+            margin-bottom: 2rem;
+        }
+        .drums {
+            font-size: 0.8rem;
+            color: #555;
+            letter-spacing: 0.3em;
+            margin-bottom: 2rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="code">500</div>
+    <h1>A Balrog of Morgoth.</h1>
+    <p class="quote">"The ground shook. Something has gone terribly wrong in the deep places of the server."</p>
+    <p class="drums">DOOM &middot; DOOM &middot; DOOM</p>
+    <a href="/">Flee to safety</a>
+{% endblock %}

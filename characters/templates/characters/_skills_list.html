@@ -1,0 +1,9 @@
+{% comment %}
+The skills list's contents (issue #338 item 3), rendered for the page and for
+the add-years response, so a run's live update and a reload show the same
+rows in the same order. Needs `skills_display`, `character` and `can_edit`.
+{% endcomment %}{% for skill in skills_display %}
+            {% include "characters/_skill_row.html" %}
+            {% empty %}
+            <p class="no-skills">No skills yet. Roll experience years to gain skills.</p>
+            {% endfor %}

@@ -1,0 +1,12 @@
+# Nightly trigger for tarmar-backup.service (issue #575). Installed and enabled
+# by deploy.sh. Persistent=true runs a missed backup at the next boot.
+[Unit]
+Description=Nightly Tarmar Studio database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

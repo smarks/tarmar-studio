@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Edit {{ party.name }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/parties.css' %}">
+{% endblock %}
+
+{% block content %}
+{# Each place the name shows is repainted when it is saved (issue #792). #}
+<h1>Edit <span data-name-chrome>{{ party.name }}</span></h1>
+
+{% comment %}Each field saves itself when it loses focus (issue #339, item 17),
+   like every other editable page; there is no Save button to forget.{% endcomment %}
+<div class="party-form">
+    <p class="party-autosave-note">Changes save as you leave each field.</p>
+    <div class="party-field" data-field="name">
+        <label class="party-field-label" for="party-name">Name <span class="field-required" title="Required">*</span></label>
+        <input type="text" id="party-name" class="autosave" maxlength="{{ name_max_length }}" value="{{ party.name }}" required>
+    </div>
+    <div class="party-field" data-field="description">
+        <label class="party-field-label" for="party-description">Description</label>
+        <textarea id="party-description" class="autosave" rows="4" maxlength="{{ description_max_length }}">{{ party.description }}</textarea>
+    </div>
+    <p>
+        <a href="{% url 'parties:detail' party.pk %}" class="button secondary">Back to <span data-name-chrome>{{ party.name }}</span></a>
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/autosave.js' %}"></script>
+<script>
+initAutosave({
+    updateUrl: '{% url "parties:update_field" party.pk %}',
+    validate: (field, value) => field !== 'name' || value !== '' || 'A party needs a name.',
+    // The heading, title, breadcrumb and "Back to" link name the party
+    // (issue #792); the server's saved value, not what was typed.
+    onSuccess: (field, value, data) => {
+        if (field !== 'name') return;
+        paintNameChrome(data.value, {
+            title: 'Edit ' + data.value,
+            breadcrumb: '.breadcrumb a[href="{% url 'parties:detail' party.pk %}"]',
+        });
+    },
+});
+</script>
+{% endblock %}

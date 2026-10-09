@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Tarmar Studio GM session reviews (issue #402). Checks the deploy host
+	     every minute for sessions a Game Master sent to Claude and reviews
+	     them with a read-only model run. See README.md beside this file.
+
+	     launchd expands nothing: change /Users/sam and the environment block
+	     when installing on another machine. -->
+	<key>Label</key>
+	<string>com.origamisoftware.tarmar-gm-review</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/sam/bin/tarmar-gm-review.sh</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/sam/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HOME</key>
+		<string>/Users/sam</string>
+		<key>DEPLOY_HOST_SSH</key>
+		<string>sam@192.168.4.163</string>
+		<key>REPO_CHECKOUT</key>
+		<string>/Users/sam/dev/tarmar-studio</string>
+		<key>REVIEW_SUPPORT_DIR</key>
+		<string>/Users/sam/bin/tarmar-gm-review</string>
+		<key>VAULT_REVIEWS_DIR</key>
+		<string>/Users/sam/obsidian-nexus/work/projects/gm-reviews</string>
+		<key>CLAUDE_BIN</key>
+		<string>/Users/sam/.local/bin/claude</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StartInterval</key>
+	<integer>60</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/sam</string>
+	<key>StandardOutPath</key>
+	<string>/Users/sam/Library/Logs/tarmar-gm-review.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/sam/Library/Logs/tarmar-gm-review.log</string>
+</dict>
+</plist>

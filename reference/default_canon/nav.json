@@ -1,0 +1,165 @@
+[
+  {
+    "title": "Magic Mechanics",
+    "slug": "magic-mechanics",
+    "dm_only": true,
+    "children": [
+      {
+        "title": "Mana Pool",
+        "slug": "mana-pool",
+        "dm_only": true
+      },
+      {
+        "title": "Push",
+        "slug": "push",
+        "dm_only": true
+      },
+      {
+        "title": "Borrowing",
+        "slug": "borrowing",
+        "dm_only": true
+      },
+      {
+        "title": "Channel",
+        "slug": "channel",
+        "dm_only": true
+      },
+      {
+        "title": "Runaway",
+        "slug": "runaway",
+        "dm_only": true
+      },
+      {
+        "title": "Counterspell",
+        "slug": "counterspell",
+        "dm_only": true
+      }
+    ]
+  },
+  {
+    "title": "The World",
+    "slug": "the-world",
+    "dm_only": true,
+    "children": [
+      {
+        "title": "The Corran Reach",
+        "slug": "corran-reach",
+        "dm_only": true,
+        "children": [
+          {
+            "title": "Brinemouth",
+            "slug": "brinemouth",
+            "dm_only": true
+          },
+          {
+            "title": "Lantern Rock",
+            "slug": "lantern-rock",
+            "dm_only": true
+          },
+          {
+            "title": "The Drowned Bell",
+            "slug": "the-drowned-bell",
+            "dm_only": true
+          },
+          {
+            "title": "Greyfen",
+            "slug": "greyfen",
+            "dm_only": true
+          },
+          {
+            "title": "Hollin Ford",
+            "slug": "hollin-ford",
+            "dm_only": true
+          },
+          {
+            "title": "Brannock, the Margrave's Crag",
+            "slug": "brannock",
+            "dm_only": true
+          },
+          {
+            "title": "Ostry Abbey",
+            "slug": "ostry-abbey",
+            "dm_only": true
+          },
+          {
+            "title": "Wendle Mill",
+            "slug": "wendle-mill",
+            "dm_only": true
+          },
+          {
+            "title": "The Tallow Hills",
+            "slug": "the-tallow-hills",
+            "dm_only": true
+          },
+          {
+            "title": "Harrowdeep",
+            "slug": "harrowdeep",
+            "dm_only": true
+          },
+          {
+            "title": "Ashcombe",
+            "slug": "ashcombe",
+            "dm_only": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "title": "GM Tools",
+    "slug": "gm-tools",
+    "dm_only": true,
+    "children": [
+      {
+        "title": "NPC Tables",
+        "slug": "npc-tables",
+        "dm_only": true
+      },
+      {
+        "title": "Job Generator",
+        "slug": "job-generator",
+        "dm_only": true
+      },
+      {
+        "title": "Dungeons & Ruins",
+        "slug": "dungeons-ruins",
+        "dm_only": true
+      },
+      {
+        "title": "Urban Intrigue",
+        "slug": "urban-intrigue",
+        "dm_only": true
+      },
+      {
+        "title": "Faction Generator",
+        "slug": "faction-generator",
+        "dm_only": true
+      },
+      {
+        "title": "Trade & Economics",
+        "slug": "trade-economics",
+        "dm_only": true
+      },
+      {
+        "title": "Hook Introduction",
+        "slug": "hook-introduction",
+        "dm_only": true
+      },
+      {
+        "title": "Hooks for New Characters",
+        "slug": "low-experience-hooks",
+        "dm_only": true
+      }
+    ]
+  },
+  {
+    "title": "Scenario Seeds",
+    "slug": "scenario-seeds",
+    "dm_only": true
+  },
+  {
+    "title": "Nobility Titles",
+    "slug": "nobility-titles",
+    "dm_only": true
+  }
+]

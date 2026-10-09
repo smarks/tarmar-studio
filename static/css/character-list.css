@@ -1,0 +1,54 @@
+/* Character list page. Lifted verbatim from the extra_styles block of
+   characters/templates/characters/character_list.html (issue #93). The
+   `main` rule that led that block is NOT here: its max-width is chosen by
+   an {% if is_manager %} tag, so it stays inline. It now parses after this
+   sheet instead of before it, which cannot change any winner -- `main` is a
+   bare type selector, this page sets no attributes on <main>, and every
+   selector below requires a class. */
+
+.filter-bar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.filter-bar select {
+    padding: 0.4rem;
+    min-width: 150px;
+}
+.import-form {
+    display: none;
+    margin: 0.5rem 0 1rem;
+    padding: 0.75rem;
+    background: var(--colour-surface-badge);
+    border: 1px solid var(--colour-border-soft);
+    border-radius: 4px;
+    align-items: center;
+    gap: 0.5rem;
+}
+.import-form.open { display: flex; flex-wrap: wrap; }
+.import-error {
+    color: var(--colour-critical-ink);
+    background: var(--colour-critical-surface);
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.9rem;
+}
+/* The pager's rules moved to base.css (issue #735). They were written here
+   when the character list was the only paginated page, and stayed here after
+   `templates/_pagination.html` became a shared partial -- so the five other
+   lists that include it rendered the chip with no fill at all. */
+
+/* Stacked-card layout on phones — a 12-column stat table is unreadable as a
+   horizontal scroll, so each row becomes a labelled card. The card itself is
+   base.css's table-stack (#338); this sheet adds only what the character
+   table's own cells need. */
+@media (max-width: 600px) {
+    .character-table .cell-checkbox {
+        justify-content: flex-start;
+    }
+    .character-table .cell-actions {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+}

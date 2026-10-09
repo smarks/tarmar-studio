@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% load static roll_detail %}
+
+{% block title %}Ruin Generator{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/generators.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="page-width-900"{% endblock %}
+
+{% block extra_styles %}
+.ruin-site { list-style: none; padding-left: 0; }
+.ruin-site li { margin-bottom: 0.35rem; }
+.generator-card p { margin: 0.2rem 0; }
+{% endblock %}
+
+{% block content %}
+<h1>Ruin Generator</h1>
+<p>
+    Rolls the <a href="{% url 'reference:view' 'dm-rules/gm-tools/dungeons-ruins' %}">Dungeons &amp; Ruins</a>
+    tables and populates a site: origin, purpose, current state, occupants, rooms, and treasure.
+</p>
+
+{% if generate_error %}
+{% include "_notice.html" with message=generate_error %}
+{% endif %}
+
+<form method="get" action="{% url 'ruins:generate' %}" class="generator-form" id="ruin-form">
+    <label>Rooms ({{ min_rooms }}–{{ max_rooms }})
+        <input type="number" name="rooms" min="{{ min_rooms }}" max="{{ max_rooms }}" value="{{ form_rooms }}" required>
+    </label>
+    <label>Seed (blank for random)
+        <input type="text" name="seed" inputmode="numeric" value="{{ form_seed }}" placeholder="random">
+    </label>
+    <button type="submit" class="button">{% if ruin %}Generate another{% else %}Generate ruin{% endif %}</button>
+</form>
+
+{% if ruin %}
+<div id="ruin-result">
+    <h2>The Site <span class="generator-seed">seed {{ ruin.seed }}</span></h2>
+    <p class="generator-seed-note">This page's URL reproduces this exact ruin — bookmark or share it.</p>
+    <ul class="ruin-site">
+        {% for roll in ruin.site_rolls %}
+        <li>
+            <strong>{{ roll.table_title }}</strong> {{ roll.result }}
+            {% roll_detail roll %}
+        </li>
+        {% endfor %}
+    </ul>
+
+    <h2>Rooms</h2>
+    {% for room in ruin.rooms %}
+    <div class="generator-card">
+        <h3>Room {{ room.number }}</h3>
+        <p>
+            <strong>{{ room.contents.table_title }}</strong> {{ room.contents.result }}
+            {% roll_detail room.contents %}
+        </p>
+        <p>
+            <strong>{{ room.hazard.table_title }}:</strong> {{ room.hazard.result }}
+            {% roll_detail room.hazard %}
+        </p>
+    </div>
+    {% endfor %}
+
+    <h2>Treasure</h2>
+    <ul class="ruin-site">
+        <li>
+            <strong>{{ ruin.treasure_type.table_title }}:</strong> {{ ruin.treasure_type.result }}
+            {% roll_detail ruin.treasure_type %}
+        </li>
+        <li>
+            <strong>{{ ruin.treasure_complication.table_title }}:</strong> {{ ruin.treasure_complication.result }}
+            {% roll_detail ruin.treasure_complication %}
+        </li>
+    </ul>
+</div>
+{% endif %}
+{% endblock %}

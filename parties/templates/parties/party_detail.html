@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ party.name }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/parties.css' %}">
+{% endblock %}
+
+{% block content %}
+<h1>{{ party.name }}</h1>
+
+<p class="party-meta">
+    Formed by {{ party.owner.username }}
+    {% if can_manage %}
+    — <a href="{% url 'parties:edit' party.pk %}">Edit name &amp; description</a>
+    {% endif %}
+</p>
+
+{% if party.description %}
+<p class="party-description">{{ party.description|linebreaksbr }}</p>
+{% endif %}
+
+{% if error %}
+<p class="party-error" role="alert">{{ error }}</p>
+{% endif %}
+
+{% with summary=party.experience_summary %}
+{% if summary %}
+<p class="party-summary">
+    {{ summary.count }} member{{ summary.count|pluralize }} —
+    average level {{ summary.average_level|floatformat:1 }}
+    {% if summary.min_level == summary.max_level %}
+    (all level {{ summary.min_level }})
+    {% else %}
+    (levels {{ summary.min_level }}&ndash;{{ summary.max_level }})
+    {% endif %}
+</p>
+{% endif %}
+{% endwith %}
+
+<h2>Roster</h2>
+{% if memberships %}
+<ul class="party-roster">
+    {% comment %}
+    Visibility-aware rows: a member the reader can see gets the full card
+    (linked name, owner, level, visibility badge); one they cannot — a
+    private character that isn't theirs, or a soft-deleted one — renders
+    name-only, with no link, owner, or stats. The name itself always
+    shows: Spencer's ruling is that membership survives going private,
+    and a roster of anonymous blanks would say less than it hides.
+    {% endcomment %}
+    {% for membership in memberships %}
+    <li class="party-member{% if not membership.character_visible %} party-member-hidden{% endif %}">
+        <div class="party-member-words">
+            {% if membership.character_visible %}
+            <strong><a href="{% url 'characters:edit' membership.character.pk %}">{{ membership.character.name }}</a></strong>
+            <span class="party-member-detail">
+                {% if membership.character.user == user %}yours{% else %}{{ membership.character.user.username }}'s{% endif %}
+                — level {{ membership.character.level }}
+            </span>
+            <span class="status-badge {% if membership.character.is_public %}visibility-public{% else %}visibility-private{% endif %}">{{ membership.character.is_public|yesno:"Public,Private" }}</span>
+            {% else %}
+            <strong>{{ membership.character.name }}</strong>
+            <span class="party-member-detail">Sheet not visible to you</span>
+            {% endif %}
+        </div>
+        {% if membership.can_withdraw or can_manage %}
+        <form method="post" action="{% url 'parties:remove_member' party.pk %}" class="party-member-action"
+              data-confirm="{% if membership.can_withdraw %}Withdraw{% else %}Remove{% endif %} {{ membership.character.name }} from {{ party.name }}?"
+              data-confirm-label="{% if membership.can_withdraw %}Withdraw{% else %}Remove{% endif %}">
+            {% csrf_token %}
+            <input type="hidden" name="membership_id" value="{{ membership.pk }}">
+            <button type="submit" class="button secondary">
+                {% if membership.can_withdraw %}Withdraw{% else %}Remove{% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="party-none">No members yet{% if can_manage %} — seat the first one below{% endif %}.</p>
+{% endif %}
+
+{% if can_manage %}
+<h2>Add Members</h2>
+{% if addable_characters %}
+<label class="party-filter-label">
+    <span class="sr-only">Filter characters by name</span>
+    <input type="search" id="party-character-filter" class="party-filter"
+           data-filter-list="party-addable-list"
+           placeholder="Filter by name or player&hellip;">
+</label>
+<ul class="party-addable" id="party-addable-list">
+    {% for character in addable_characters %}
+    <li class="party-addable-row"
+        data-filter-text="{{ character.name|lower }} {{ character.user.username|lower }}">
+        <div class="party-member-words">
+            <strong>{{ character.name }}</strong>
+            <span class="party-member-detail">
+                {% if character.user == user %}yours{% else %}{{ character.user.username }}'s{% endif %}
+                — level {{ character.level }}
+            </span>
+        </div>
+        <form method="post" action="{% url 'parties:add_member' party.pk %}" class="party-member-action">
+            {% csrf_token %}
+            <input type="hidden" name="character_id" value="{{ character.pk }}">
+            <button type="submit" class="button">Add</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="party-none">Every character you can seat is already in this party.</p>
+{% endif %}
+
+{% comment %}Disband (issue #339, item 18): a soft delete for the owner or a
+   DM/admin, restorable from the party list; members' characters untouched.{% endcomment %}
+<h2>Disband</h2>
+<form method="post" action="{% url 'parties:disband' party.pk %}" class="party-disband"
+      data-confirm="Disband {{ party.name }}? Its members' characters are not changed, and you can restore the party from the party list."
+      data-confirm-label="Disband" data-confirm-danger="true">
+    {% csrf_token %}
+    <button type="submit" class="button delete-btn">Disband {{ party.name }}</button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/roster-filter.js' %}"></script>
+{% endblock %}

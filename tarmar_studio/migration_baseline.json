@@ -1,0 +1,15 @@
+{
+  "_about": "Issue #575. Migrations at or before these nodes predate the expand/contract rule and are not checked by tarmar_studio/tests/test_migration_safety.py. Every migration after them must leave the previous release working against the new schema, or be listed in allowed with the reason it is a deliberate contract step. Move the baseline forward only by hand, and never past a migration that has not yet been deployed.",
+  "baseline": {
+    "accounts": "0011_add_phone_discord_validators",
+    "battle": "0012_battle_deleted_at_battle_is_deleted",
+    "bestiary": "0003_reset_beast_pk_sequence",
+    "characters": "0010_character_is_public",
+    "common": "0002_ratelimitcounter",
+    "gm": "0011_turn_original_reply",
+    "parties": "0002_party_soft_delete"
+  },
+  "allowed": {
+    "gm.0019_drop_retired_supplies_column": "Issue #623, the contract half of #575's rule. CampaignState.supplies has been read by nothing since gm.0018_supply_items, which shipped to production in 0244f8e on 2026-09-21; fadcee9 has shipped since, and both the serving colour and the rollback target run code that does not select the column."
+  }
+}

@@ -1,0 +1,94 @@
+#!/usr/bin/env -S uv run python
+"""Project task runner."""
+
+import os
+import platform
+import subprocess
+import sys
+
+# Homebrew prefix on Apple Silicon. weasyprint loads libgobject/libpango via
+# cffi.dlopen(), but macOS dyld does not search /opt/homebrew/lib by default,
+# so we inject it into DYLD_FALLBACK_LIBRARY_PATH for every subprocess.
+HOMEBREW_LIB = "/opt/homebrew/lib"
+
+
+def build_env(*, debug: bool = False) -> dict[str, str]:
+    """Build subprocess env, adding macOS dylib search path for weasyprint."""
+    env = dict(os.environ)
+    if platform.system() == "Darwin":
+        existing = env.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+        paths = [path for path in existing.split(":") if path]
+        if HOMEBREW_LIB not in paths:
+            paths.insert(0, HOMEBREW_LIB)
+            env["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join(paths)
+    if debug:
+        env["DEBUG"] = "true"
+    return env
+
+
+COMMANDS = {
+    "dev": ["python", "manage.py", "runserver"],
+    "test": ["pytest"],
+    "lint": ["ruff", "check", ".", "--fix"],
+    "format": ["ruff", "format", "."],
+    "check": ["pre-commit", "run", "--all-files"],
+    # Every suite a deploy depends on, in one pass, recording the commit that
+    # passed for deploy.sh to check (issue #576). pytest, Jest and Playwright
+    # run twice: as the checkout stands, and against the default canon (#920).
+    "gate": ["python", "scripts/gate.py"],
+    "migrate": ["python", "manage.py", "migrate"],
+    "simulate": ["python", "manage.py", "simulate"],
+    "update-cov": ["python", "scripts/update_coverage_threshold.py"],
+    "verify": ["python", "scripts/verify_deployment.py"],
+}
+
+# Commands that use npm instead of uv
+NPM_COMMANDS = {
+    "test:js": ["npm", "test"],
+    "test:e2e": ["npm", "run", "test:e2e"],
+    "coverage:e2e": ["npm", "run", "coverage:e2e"],
+    "test:all": None,  # Special handling
+}
+
+
+def main():
+    all_commands = {**COMMANDS, **NPM_COMMANDS}
+
+    if len(sys.argv) < 2 or sys.argv[1] not in all_commands:
+        print("Usage: ./run <command>")
+        print("\nPython Commands:")
+        for cmd in COMMANDS:
+            print(f"  {cmd}")
+        print("\nJavaScript Commands:")
+        for cmd in NPM_COMMANDS:
+            print(f"  {cmd}")
+        sys.exit(1)
+
+    command_name = sys.argv[1]
+    extra_args = sys.argv[2:]
+
+    env = build_env(debug=command_name == "dev")
+
+    # Handle special test:all command
+    if command_name == "test:all":
+        result1 = subprocess.run(["uv", "run", "pytest", *extra_args], env=env)
+        result2 = subprocess.run(["npm", "test"], env=env)
+        result3 = subprocess.run(["npm", "run", "test:e2e"], env=env)
+        sys.exit(max(result1.returncode, result2.returncode, result3.returncode))
+
+    # Handle NPM commands
+    if command_name in NPM_COMMANDS:
+        cmd = NPM_COMMANDS[command_name]
+        result = subprocess.run([*cmd, *extra_args], env=env)
+    else:
+        # Handle uv commands
+        cmd = COMMANDS[command_name]
+        result = subprocess.run(["uv", "run", *cmd, *extra_args], env=env)
+
+    # Exit with the child's status. Without this every command reported success,
+    # so CI's `./run check` step stayed green through failing pre-commit hooks.
+    sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+# WAL-mode sidecar files (dev SQLite runs with journal_mode=WAL)
+db.sqlite3-shm
+db.sqlite3-wal
+media/
+staticfiles/
+
+# uv
+.uv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
+# Node.js. No trailing slash: the worktree recipe in CLAUDE.md symlinks
+# node_modules in from the main checkout, and a directory-only rule
+# leaves that symlink untracked in every worktree.
+node_modules
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# Coverage
+/.nyc_output/
+/coverage/
+
+# CLI data (local only)
+cli/photo_db/
+cli/saves/
+
+# Blue-green runtime state. .deploy.lock is the file take_deploy_lock opens
+# (issue #668): it stays on disk after every run, and an untracked file that
+# is not ignored makes `./run gate` refuse on the deploy host, where the gate
+# is exactly what a commit with no gate record needs.
+.deploy-state
+.deploy.lock
+# The Tarmar canon commit the live colour was deployed with (issue #921).
+.deploy-canon
+
+# Runtime data (GM retrieval index, built by manage.py build_gm_index)
+/var/
+
+# Runtime audit log (settings.LOGGING); shared between release checkouts
+/logs/
+
+# The Tarmar canon lives in its own private repository, smarks/tarmar-canon,
+# loaded through TARMAR_CANON_DIR (issue #921). A copy dropped back here for
+# local work must never be committed to this repository.
+reference/content/dm-rules/

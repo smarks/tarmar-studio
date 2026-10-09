@@ -1,0 +1,10 @@
+{
+  "region": {
+    "slug": "corran-reach",
+    "title": "The Corran Reach",
+    "image": "default-canon/corran-reach-map.svg",
+    "gazetteer": "the-world/corran-reach",
+    "charts": []
+  },
+  "case_sensitive_place_names": []
+}

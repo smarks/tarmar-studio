@@ -1,0 +1,1076 @@
+/* Site-wide design system. Lifted verbatim from the inline <style> block
+   that used to live in templates/base.html (issue #93). base.html links
+   this sheet in exactly the position that <style> element occupied, so
+   every rule here still parses before a page's own {% block extra_styles %}
+   and before any sheet a page adds through {% block extra_head %}. */
+
+/* Colour tokens (issue #312). Every literal colour base.css used to write
+   132 times across 47 shades now lives here once, named for what it does
+   rather than what it looks like. Two rules of thumb the names follow:
+
+   - A handful of tokens are reused for more than one purpose (--colour-ink
+     as both the default text colour and a solid button's fill; --colour-surface
+     as both the page ground and the text on a dark button) because those
+     rules genuinely paint the same literal colour today -- merging them
+     loses nothing. Each such case is called out below.
+   - Near-identical greys that are NOT the same value (#666 vs #6b6b6b, or
+     the three light-grey border shades #ccc/#ddd/#eee) keep separate tokens.
+     Merging them would change what renders. */
+:root {
+    /* Neutral scale: ink, surfaces, and structural borders/hairlines. */
+    --colour-surface: #fff; /* Page ground and dropdown-menu background; also the inverse text colour on dark-filled buttons. */
+    --colour-ink: #333; /* Default text ink; also a solid button's fill and the input focus border -- the same literal dark neutral. */
+    --colour-ink-secondary: #555; /* Secondary text (labels, table headers); also a solid button's hover fill. */
+    --colour-ink-muted: #666; /* Muted text (badges, footer links, subtitles); also the secondary-button fill. */
+    --colour-ink-breadcrumb: #6b6b6b; /* Breadcrumb trail text -- close to but distinct from --colour-ink-muted. */
+    --colour-ink-faint: #6d6d6d; /* Faintest text: formula hints, footer copy, gaits with nothing to report. Was #888 (3.54:1 on the page ground), then #767676 (issue #709) -- which cleared 4.5:1 on the page ground alone and measured 4.17:1 on --colour-surface-muted and 3.99:1 on --colour-surface-tint. #6d6d6d is the lightest grey that clears 4.5:1 on all three (issue #730). */
+    --colour-ink-disabled: #999; /* Text of an inactive control, and the "saving" field-state border. WCAG 1.4.3 exempts an inactive component, which is the whole point of greying it out -- so this one stays light, and live text never borrows it (issues #709, #732). */
+    --colour-ink-placeholder: #767676; /* A form field's placeholder. Live text in an enabled field, so it is held to 4.5:1 like body copy; --colour-ink-disabled read 2.85:1 on the field's white ground. This is the nearest grey to it that clears 4.5:1 there, 4.54:1 (issue #732). */
+    --colour-border-input: #ccc; /* Default form-input border; also the breadcrumb separator glyph. */
+    --colour-border-soft: #ddd; /* Menu divider and role-badge border. */
+    --colour-hairline: #eee; /* The ubiquitous 1px divider: header, footer, menu, hr, table rows. */
+    --colour-border-breadcrumb-link: #e4e4e4; /* Breadcrumb link's underline. */
+    --colour-surface-muted: #f5f5f5; /* Panel/hover backgrounds and disabled-field fill. */
+    --colour-surface-subtle: #f9f9f9; /* A second, very-light panel background (deleted rows, readonly fields). */
+    --colour-surface-badge: #f7f7f7; /* Role-badge pill background. */
+    --colour-shadow: rgba(0, 0, 0, 0.1); /* Dropdown menu's drop shadow. */
+    --colour-border-parchment: #b8a56a; /* The warm rule on generator cards and bestiary panels. Was written as var(--border-color, #b8a56a) in three sheets; --border-color was never defined anywhere, so #b8a56a is what always rendered. */
+
+    /* Danger -- the legacy #c00 family: the danger button, field-error text,
+       and the old .errors block. */
+    --colour-danger: #c00;
+    --colour-danger-strong: #a00; /* Danger button's hover fill. */
+    --colour-danger-surface: #fee; /* .errors block background. */
+
+    /* Critical -- the notice/autosave family. A distinct, muted-maroon red;
+       do not merge with --colour-danger above. */
+    --colour-critical-ink: #b03a2e;
+    --colour-critical-surface: #fdecea;
+
+    /* Row action buttons. */
+    --colour-delete: #dc3545;
+    --colour-delete-strong: #c82333;
+    --colour-restore: #218838; /* Restore button's fill, with --colour-surface printed on it. Was #28a745, 3.13:1 under white -- a failure hidden until #736 stopped a :hover ground from standing in for the resting one, because the hover fill below was the only ground on file. This is the nearest green of the same hue and saturation that clears 4.5:1, 4.52:1. */
+    --colour-restore-strong: #19692b; /* Restore button's hover fill. Was #218838, which the resting fill has taken; this is the same lightness step darker again, so pressing still reads as a change (issue #736). */
+
+    /* Autosave field states. */
+    --colour-field-success: #090;
+    --colour-field-success-surface: #f0fff0;
+    --colour-field-error-surface: #fff0f0;
+
+    /* Persistent in-page notices (replace alert()). */
+    --colour-notice-success-ink: #1c7c3b;
+    --colour-notice-success-surface: #e7f6ec;
+    --colour-notice-info-ink: #1f5fa8;
+    --colour-notice-info-surface: #eef4fb;
+    --colour-notice-confirm-surface: #fffdf3;
+    --colour-accent-gold: #c9a227; /* Confirm-notice border; also the breadcrumb link's focus/hover underline. */
+
+    /* Status and visibility badges. */
+    --colour-status-success-ink: #155724;
+    --colour-status-success-surface: #d4edda;
+    --colour-status-danger-ink: #721c24;
+    --colour-status-danger-surface: #f8d7da;
+    --colour-status-neutral-ink: #383d41;
+    --colour-status-neutral-surface: #e2e3e5;
+    --colour-status-info-ink: #004085;
+    --colour-status-info-surface: #cce5ff;
+    --colour-status-warning-ink: #856404;
+    --colour-status-warning-surface: #fff3cd;
+    /* Component palettes (#338 item 11): every colour a page sheet paints
+       lives here, so a component sheet names a role, never a literal. */
+    /* Character sheet. */
+    --colour-surface-tint: #f0f0f0; /* Bar, readout and summary fills; also the faintest row divider. */
+    --colour-border-card: #e0e0e0; /* Card, skill-row and section borders. */
+    --colour-surface-section: #fafafa; /* Stats-section and creation-option panels; zebra rows in reference tables. */
+    --colour-ink-heading: #444; /* Section headings (h2/h3/h4) on panels. */
+    --colour-ink-strong: #222; /* Help-body prose. */
+    --colour-sheet-negative: #b71e1e; /* Warnings, negative values, fumbles and death text. Was #dc2626, which read at 4.24:1 on --colour-surface-tint, 4.41:1 on the death card's ground and 3.34:1 on the remove button's. This is the lightest red of the same hue that clears 4.5:1 on all of them (issue #730). */
+    --colour-sheet-negative-surface: #fee2e2; /* Remove button and the overloaded load badge. */
+    --colour-sheet-negative-border: #fecaca; /* Remove button border/hover, death card border, heavy load badge. */
+    --colour-sheet-negative-surface-faint: #fef2f2; /* Death card ground. */
+    --colour-sheet-positive: #11823b; /* Positive values and equipped markers. Was #16a34a, which read at 3.30:1 as text on the white sheet; this is the lightest green of the same hue that clears 4.5:1 there and on a muted row (issue #730). */
+    --colour-sheet-highlight: #2563eb; /* A highlighted summary value. */
+    --colour-accent-teal: #417f8f; /* Open help summary, focused skill name ring, current page in the pager. Two of those three are a fill with --colour-surface printed on it: the pager's current-page chip at 15.2px and the open help summary's '?' at 12px, neither of them large text. Was #4a90a2, 3.62:1 under white; this is the nearest teal of the same hue and saturation that clears 4.5:1, 4.51:1 (issue #732). */
+    --colour-border-cool: #c5cdd2; /* Help panels and equipment filter controls. */
+    --colour-help-surface: #e7ecef; /* Help summary ground. */
+    --colour-help-surface-hover: #d6dde2; /* Help summary hover ground. */
+    --colour-help-ink: #4a4a4a; /* Help summary text. */
+    --colour-load-unencumbered-surface: #dcfce7;
+    --colour-load-unencumbered-ink: #166534;
+    --colour-load-light-surface: #fef9c3;
+    --colour-load-light-ink: #854d0e;
+    --colour-load-medium-surface: #fed7aa;
+    --colour-load-medium-ink: #9a3412;
+    --colour-load-heavy-ink: #991b1b; /* Heavy badge; its ground is --colour-sheet-negative-border. */
+    --colour-load-overloaded-ink: #7f1d1d; /* Overloaded badge; its ground is --colour-sheet-negative-surface. */
+    --colour-off-budget-rule: #b8860b; /* Point-buy off-budget callout. */
+    --colour-off-budget-surface: #fdf6e3;
+    --colour-off-budget-ink: #6b4e00;
+    /* Battle and bestiary: formerly their sheets' private token sets. */
+    --colour-ink-deep: #2b2b2b;
+    --colour-surface-warm: #faf9f6;
+    --colour-accent-gold-strong: #a8871f; /* Gold as a fill, a border or a focus ring. Too light to read as text on a light ground -- use --colour-accent-gold-on-light for that. */
+    --colour-accent-gold-ink: #241d05; /* Near-black on gold: white would sit at ~2.3:1. */
+    --colour-accent-gold-on-light: #8b6f1a; /* Gold as text on a light ground: the stage numeral, the muster index, the AI's pick, who holds control. --colour-accent-gold-strong read at 3.41:1 there and --colour-accent-gold at 2.42:1; this is the lightest gold of the same hue that clears 4.5:1 on white, on a pressed turn option and on the warm panel (issue #730). */
+    --colour-pool-death: #b03030; /* Body/ST pool bars; also read by battle.js. */
+    --colour-pool-fatigue: #2e8b57; /* Fatigue pool bar; also read by battle.js. */
+    --colour-confirm-hover: #8f2626; /* Confirm button hover fill. */
+    --colour-surface-gold-pressed: #fdf8ea; /* A pressed turn option or spell. */
+    --colour-border-open-seat: #bdbdbd; /* Dashed border of an open lobby seat and an empty muster. */
+    --colour-track: #8883; /* Translucent track behind pool and capacity bars. */
+    --colour-underline-dotted: #8886; /* Dotted underline on a combatant's name. */
+    --colour-highlight-target: #ffd70044; /* A battle event linked to by #fragment. */
+    --colour-setup-error-surface: #fdf3f3;
+    /* GM chat. */
+    --colour-ink-indicator: #6e6e6e; /* GM mode indicator text. Was #777, which measured 4.25:1 on the panel's tinted ground at 12px (issue #709). */
+    --colour-chat-delete-hover: #c0392b;
+    --colour-chat-user-surface: #e8e8e8; /* The user's own message bubble. */
+    --colour-chat-notice-surface: #f8f5ea;
+    --colour-chat-notice-rule: #b8a36a;
+    --colour-chat-dice-border: #e0dcce; /* Dice-roll block border; also the notice bubble's border. */
+    --colour-chat-dice-surface: #f0ede4;
+    --colour-grounding-surface: #fdf3e3; /* The 'not grounded in the rules' notice. */
+    --colour-grounding-border: #e8d5a8;
+    --colour-grounding-rule: #c9922f;
+    --colour-grounding-ink: #6b4e17;
+    --font-mono: "SF Mono", Monaco, "Courier New", monospace; /* Dice logs, seeds and roll notation. */
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--colour-surface);
+    color: var(--colour-ink);
+}
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--colour-hairline);
+    /* Anchors the dropdown menu, which hangs from the header's real bottom
+       edge — the header is two rows tall on phones (issue #206). */
+    position: relative;
+}
+.logo {
+    display: flex;
+    align-items: center;
+}
+.logo a {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--colour-ink);
+    text-decoration: none;
+    font-size: 1.25rem;
+    font-weight: 500;
+    /* The logo is one line, always. Without this the flex row let it wrap
+       to two lines under the identity block on phones (issue #206). */
+    white-space: nowrap;
+}
+.logo img {
+    height: 32px;
+    width: auto;
+}
+.menu-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+}
+.menu-toggle span {
+    display: block;
+    width: 24px;
+    height: 2px;
+    background: var(--colour-ink);
+    margin: 5px 0;
+    transition: 0.3s;
+}
+/* Who is signed in, sitting against the hamburger (issue #200). The
+   margin-left: auto absorbs the header's free space, so the block and the
+   toggle stay pinned to the right edge together while the logo keeps the
+   left. min-width: 0 lets the username ellipsis instead of forcing the
+   header wider on narrow viewports. */
+.header-identity {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.15rem;
+    margin-left: auto;
+    margin-right: 0.75rem;
+    min-width: 0;
+    text-align: right;
+    font-size: 0.8rem;
+    color: var(--colour-ink);
+}
+.identity-user {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    /* Never grow past the identity block: a wider row would bleed left,
+       over the logo, because the column parent aligns it flex-end
+       (issue #206). The username ellipsis absorbs the squeeze. */
+    max-width: 100%;
+}
+.identity-username {
+    font-weight: 600;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.role-badge {
+    padding: 0 0.4rem;
+    border: 1px solid var(--colour-border-soft);
+    border-radius: 999px;
+    background: var(--colour-surface-badge);
+    color: var(--colour-ink-muted);
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1.5;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+.identity-since {
+    font-size: 0.7rem;
+    /* Was --colour-ink-disabled (#999), 2.84:1 on the page ground at 11.2px
+       (issue #709). This line is live text on every signed-in page, not a
+       disabled control, so it is held to 4.5:1 like any other body copy. */
+    color: var(--colour-ink-muted);
+    white-space: nowrap;
+}
+.menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 2rem;
+    background: var(--colour-surface);
+    border: 1px solid var(--colour-hairline);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px var(--colour-shadow);
+    min-width: 150px;
+    z-index: 100;
+}
+.menu.open {
+    display: block;
+}
+.menu a {
+    display: block;
+    padding: 0.75rem 1rem;
+    color: var(--colour-ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.menu a:hover {
+    background: var(--colour-surface-muted);
+}
+/* Menu items rendered as <button> (e.g. logout) match the links. */
+.menu .menu-link {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    color: var(--colour-ink);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--colour-hairline);
+    font: inherit;
+    cursor: pointer;
+}
+.menu .menu-link:hover {
+    background: var(--colour-surface-muted);
+}
+.menu a.disabled {
+    color: var(--colour-ink-disabled);
+    pointer-events: none;
+    cursor: default;
+}
+.menu a.disabled:hover {
+    background: none;
+}
+.menu-divider {
+    border-top: 1px solid var(--colour-border-soft);
+    margin: 0.25rem 0;
+}
+.menu-section {
+    padding: 0.5rem 1rem 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.menu a.submenu {
+    padding-left: 1.5rem;
+    font-size: 0.9rem;
+}
+main {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+/* Page widths (issue #338 item 24). A page that wants a column other than the
+   600px default names it in {% block main_attrs %}, instead of a bare `main {}`
+   in its own sheet or template whose win depended on loading after this one.
+   `main.page-width-*` outranks the bare `main` default wherever it loads. */
+main.page-width-700 { max-width: 700px; }
+main.page-width-800 { max-width: 800px; }
+main.page-width-820 { max-width: 820px; }
+main.page-width-900 { max-width: 900px; }
+main.page-width-1000 { max-width: 1000px; }
+main.page-width-1100 { max-width: 1100px; }
+main.page-width-1200 { max-width: 1200px; }
+main.page-width-1240 { max-width: 1240px; }
+main.page-width-none { max-width: none; }
+/* Site-wide navigation trail (issue #189). Every page below the home page
+   says where it sits and links every step above it — a back affordance that
+   survives a redirect or a form post, which browser history does not. */
+.breadcrumb {
+    margin-bottom: 1.25rem;
+    font-size: 0.85rem;
+    color: var(--colour-ink-breadcrumb);
+}
+.breadcrumb ol {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.breadcrumb li + li::before {
+    content: "\203A";
+    margin-right: 0.4rem;
+    color: var(--colour-border-input);
+}
+.breadcrumb a {
+    color: var(--colour-ink-breadcrumb);
+    text-decoration: none;
+    border-bottom: 1px solid var(--colour-border-breadcrumb-link);
+}
+.breadcrumb a:hover,
+.breadcrumb a:focus {
+    color: var(--colour-ink);
+    border-bottom-color: var(--colour-accent-gold);
+}
+/* The page you are on: named, never linked. */
+.breadcrumb [aria-current="page"] {
+    color: var(--colour-ink);
+    font-weight: 600;
+}
+h1 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    font-weight: 500;
+}
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+label {
+    font-size: 0.875rem;
+    color: var(--colour-ink-secondary);
+}
+input[type="text"], input[type="email"], input[type="tel"],
+input[type="password"], select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    font-size: 1rem;
+}
+/* Focus is visible sitewide (issue #701). This rule used to read
+   `outline: none; border-color: var(--colour-ink)`, so the only signal a
+   keyboard user got on any input or select anywhere in the app was a 1px
+   border moving from grey to near-black -- and on the Games Master page the
+   computed style at every stop reported no outline and no shadow at all.
+   The border tint stays because it reads well with a mouse; the outline is
+   what a keyboard user needs, and :focus-visible keeps it off a click.
+   battle.css:119 already wrote this idiom; it is the sitewide one now. */
+input:focus, select:focus, textarea:focus {
+    border-color: var(--colour-ink);
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="separator"]:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+input:disabled, select:disabled {
+    background: var(--colour-surface-muted);
+    color: var(--colour-ink-disabled);
+}
+input[readonly] {
+    background: var(--colour-surface-subtle);
+    color: var(--colour-ink-muted);
+    cursor: default;
+}
+/* A classless submit's look. :where() keeps it at zero specificity so any
+   button family's own class rule wins (#477); before, this bare selector
+   (0,1,1) beat every single-class rule and battle.css fought it back. */
+:where(button[type="submit"]) {
+    padding: 0.625rem 1rem;
+    background: var(--colour-ink);
+    color: var(--colour-surface);
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+:where(button[type="submit"]):hover {
+    background: var(--colour-ink-secondary);
+}
+.error {
+    color: var(--colour-danger);
+    font-size: 0.75rem;
+}
+.errors {
+    background: var(--colour-danger-surface);
+    border: 1px solid var(--colour-danger);
+    padding: 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+.errors ul {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+.links {
+    margin-top: 1rem;
+    font-size: 0.875rem;
+}
+.links a {
+    color: var(--colour-ink);
+}
+/* Table styles */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 1rem;
+}
+th, td {
+    padding: 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+th {
+    font-weight: 500;
+    color: var(--colour-ink-secondary);
+}
+.formula {
+    font-size: 0.75rem;
+    color: var(--colour-ink-faint);
+}
+/* Wide tables scroll horizontally instead of breaking the page. */
+.table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+/* Stacked-card layout on phones: a table with class table-stack drops its
+   header row and shows each row as a card, every cell labelled by its own
+   data-label (#338 item 15). The users list and the character list each
+   carried this block. Selectors name the table element as well as the class
+   so they outrank a page sheet's one-class desktop rules (.users-table td),
+   which load after this sheet. Page-specific cells (the character list's
+   checkbox and action wrap) add to it in their own sheet. */
+@media (max-width: 600px) {
+    table.table-stack thead {
+        display: none;
+    }
+    table.table-stack,
+    table.table-stack tbody,
+    table.table-stack tr,
+    table.table-stack td {
+        display: block;
+        width: 100%;
+    }
+    table.table-stack tr {
+        border: 1px solid var(--colour-border-soft);
+        border-radius: 6px;
+        margin-bottom: 1rem;
+        padding: 0.4rem 0.6rem;
+    }
+    table.table-stack td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.3rem 0;
+        border: none;
+        text-align: right;
+    }
+    table.table-stack td[data-label]::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: var(--colour-ink-muted);
+    }
+    table.table-stack .cell-name {
+        font-size: 1.05rem;
+    }
+    table.table-stack .cell-actions {
+        justify-content: flex-start;
+        border-top: 1px solid var(--colour-hairline);
+        margin-top: 0.3rem;
+        padding-top: 0.5rem;
+    }
+}
+/* Button styles */
+.button, a.button {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    margin: 0.25rem;
+    background: var(--colour-ink);
+    color: var(--colour-surface);
+    text-decoration: none;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+.button:hover, a.button:hover {
+    background: var(--colour-ink-secondary);
+}
+/* A submitting .button is a size larger than a link .button: the size the
+   bare submit rule used to impose, now declared by the family (#477). */
+.button[type="submit"] {
+    padding: 0.625rem 1rem;
+    font-size: 1rem;
+    border: none;
+}
+.button.secondary {
+    background: var(--colour-ink-muted);
+}
+.button.danger {
+    background: var(--colour-danger);
+}
+.button.danger:hover {
+    background: var(--colour-danger-strong);
+}
+/* The character sheet's own rules live in character-edit.css (#338 item 10);
+   .actions and hr below are shared by many pages. */
+.actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+}
+hr {
+    border: none;
+    border-top: 1px solid var(--colour-hairline);
+    margin: 1.5rem 0;
+}
+/* Auto-save form state styles */
+[data-field].saving input,
+[data-field].saving select,
+[data-field].saving textarea {
+    border-color: var(--colour-ink-disabled);
+    background: var(--colour-surface-muted);
+}
+[data-field].saved input,
+[data-field].saved select,
+[data-field].saved textarea {
+    border-color: var(--colour-field-success);
+    background: var(--colour-field-success-surface);
+}
+[data-field].error input,
+[data-field].error select,
+[data-field].error textarea {
+    border-color: var(--colour-danger);
+    background: var(--colour-field-error-surface);
+}
+/* Bulk actions bar */
+.bulk-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--colour-surface-muted);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+.bulk-actions.hidden {
+    display: none;
+}
+/* A destructive control waits quietly until it has something to act on
+   (issue #713). The bulk bar's two buttons used to sit there in full red and
+   green reading "0 selected", and the equipment panel's "Delete Selected (0)"
+   was the loudest thing on a panel that said "No equipment". Disabled now
+   drops the fill entirely rather than only fading it. */
+.bulk-actions button:disabled,
+.delete-btn-outline:disabled {
+    opacity: 1;
+    cursor: not-allowed;
+    background: none;
+    border: 1px solid var(--colour-border-input);
+    color: var(--colour-ink-muted);
+}
+.selected-count {
+    color: var(--colour-ink-muted);
+    font-size: 0.9rem;
+}
+/* Action buttons */
+.delete-btn, .button.delete-btn {
+    background: var(--colour-delete);
+    color: var(--colour-surface);
+}
+.delete-btn:hover, .button.delete-btn:hover {
+    background: var(--colour-delete-strong);
+}
+.restore-btn, .button.restore-btn {
+    background: var(--colour-restore);
+    color: var(--colour-surface);
+}
+.restore-btn:hover, .button.restore-btn:hover {
+    background: var(--colour-restore-strong);
+}
+/* The quiet, outlined delete for a row that already reads as a list of people
+   (the users list). .delete-btn above is the solid one; the two used to share
+   that class name, and users-list.css repainted it (#338 item 13). */
+.delete-btn-outline {
+    background: none;
+    border: 1px solid var(--colour-danger);
+    color: var(--colour-danger);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+}
+.delete-btn-outline:hover {
+    background: var(--colour-danger);
+    color: var(--colour-surface);
+}
+.action-btn {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.8rem;
+    margin-right: 0.25rem;
+}
+/* The row's Delete keeps its class (scripts and specs find it by that name)
+   and loses its fill: one primary action per row, and this is not it
+   (issue #713). */
+.delete-btn.delete-btn-quiet,
+.button.delete-btn.delete-btn-quiet {
+    background: none;
+    border: 1px solid var(--colour-danger);
+    color: var(--colour-danger);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.delete-btn.delete-btn-quiet:hover,
+.button.delete-btn.delete-btn-quiet:hover {
+    background: var(--colour-danger);
+    color: var(--colour-surface);
+}
+/* The three export formats, folded behind one summary (issue #713). */
+.row-exports > summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+.row-exports > summary:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+.row-exports-list {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-size: 0.8rem;
+}
+/* Table checkbox styling */
+.character-table input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.status-alive {
+    background: var(--colour-status-success-surface);
+    color: var(--colour-status-success-ink);
+}
+.status-dead {
+    background: var(--colour-status-danger-surface);
+    color: var(--colour-status-danger-ink);
+}
+.status-deleted {
+    background: var(--colour-status-neutral-surface);
+    color: var(--colour-status-neutral-ink);
+}
+.status-played {
+    background: var(--colour-status-info-surface);
+    color: var(--colour-status-info-ink);
+}
+.status-ready {
+    background: var(--colour-status-success-surface);
+    color: var(--colour-status-success-ink);
+}
+/* A character the rules cannot use yet (issue #571): still missing its
+   attributes or its Fatigue roll. */
+.incomplete-mark {
+    background: var(--colour-status-warning-surface);
+    color: var(--colour-status-warning-ink);
+}
+.incomplete-note {
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+}
+/* Character visibility badges (issue #273): amber for public -- it is the
+   exception worth noticing -- and the deleted-grey for private, the default. */
+.visibility-public {
+    background: var(--colour-status-warning-surface);
+    color: var(--colour-status-warning-ink);
+}
+.visibility-private {
+    background: var(--colour-status-neutral-surface);
+    color: var(--colour-status-neutral-ink);
+}
+/* Deleted row styling */
+.deleted-row {
+    background: var(--colour-surface-subtle);
+}
+/* A deleted row is dimmed, not disabled -- its text is still read and its
+   link is still followed (Restore), so it is held to 4.5:1 like any other
+   copy. --colour-ink-disabled was 2.71:1 on the row's own ground (#709). */
+.deleted-row td {
+    color: var(--colour-ink-muted);
+}
+.deleted-row td a {
+    color: var(--colour-ink-muted);
+}
+/* A required field is marked, and a field's constraint is stated beside it
+   rather than only in the refusal (issue #714). */
+.field-required {
+    color: var(--colour-danger);
+    font-weight: 700;
+}
+.field-hint {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--colour-ink-muted);
+}
+
+/* The pages of a paginated list (issue #735). `templates/_pagination.html` is
+   included by six templates across five apps -- the character list, the
+   deleted-characters page, the party list, the users list, the GM review list
+   and the bestiary catalog twice -- so its look belongs to the sheet every
+   page loads. These rules spent their first life in character-list.css, which
+   one of those six links, and the other five drew the pager as bare text with
+   bare links: no chip, no fill, no padding. */
+.pagination {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 1rem;
+    justify-content: center;
+    font-size: 0.95rem;
+}
+.pagination a,
+.pagination .page-current {
+    padding: 0.3rem 0.6rem;
+    border-radius: 3px;
+    text-decoration: none;
+}
+.pagination a {
+    background: var(--colour-surface-tint);
+    color: var(--colour-ink);
+}
+.pagination a:hover {
+    background: var(--colour-border-card);
+}
+/* The teal darkened in #732 so white on this fill clears 4.5:1; the chip is
+   15.2px regular, which is not the large text WCAG allows 3:1 for. */
+.pagination .page-current {
+    background: var(--colour-accent-teal);
+    color: var(--colour-surface);
+}
+
+/* Footer styles */
+footer {
+    border-top: 1px solid var(--colour-hairline);
+    padding: 1rem 2rem;
+    margin-top: 2rem;
+    font-size: 0.75rem;
+    color: var(--colour-ink-faint);
+    text-align: center;
+}
+/* Underlined always (issue #709). These links sit inside the footer's own
+   muted copy, and colour alone separated them at 1.61:1 against a 3:1
+   requirement -- WCAG 1.4.1 / axe's link-in-text-block. An underline is a
+   non-colour distinction, so the pair passes however close the greys are. */
+footer a {
+    color: var(--colour-ink-muted);
+    text-decoration: underline;
+}
+footer a:hover {
+    color: var(--colour-ink);
+}
+footer .footer-content {
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+/* Mobile responsive styles */
+@media (max-width: 480px) {
+    header {
+        padding: 0.75rem 1rem;
+        /* Two rows: logo and hamburger keep the first, the identity takes
+           a full second row of its own — there is no phone width where
+           logo, username, and badges all fit one row (issue #206). */
+        flex-wrap: wrap;
+    }
+    /* Phones: keep the identity to one truncated line — the session-start
+       time lives on in the profile and the admin users list. */
+    .header-identity {
+        order: 1;
+        flex-basis: 100%;
+        flex-direction: row;
+        justify-content: flex-end;
+        align-items: center;
+        margin: 0.25rem 0 0;
+        font-size: 0.75rem;
+    }
+    .identity-username {
+        max-width: 6rem;
+    }
+    .identity-since {
+        display: none;
+    }
+    .menu {
+        right: 1rem;
+        left: 1rem;
+        min-width: auto;
+    }
+    main {
+        padding: 1.25rem 1rem;
+    }
+    h1 {
+        font-size: 1.25rem;
+    }
+    .actions {
+        flex-direction: column;
+    }
+    .actions .button,
+    .actions button {
+        width: 100%;
+        text-align: center;
+    }
+    .formula {
+        display: block;
+        padding-left: 0;
+        margin-top: 0.25rem;
+    }
+    table {
+        font-size: 0.875rem;
+    }
+    th, td {
+        padding: 0.5rem 0.25rem;
+    }
+}
+/* Autosave inline error indicator. Persistent (no auto-dismiss). */
+[data-field].error input,
+[data-field].error select,
+[data-field].error textarea {
+    border-color: var(--colour-critical-ink) !important;
+}
+.autosave-error {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.15rem 0.4rem;
+    background: var(--colour-critical-surface);
+    color: var(--colour-critical-ink);
+    border: 1px solid var(--colour-critical-ink);
+    border-radius: 3px;
+    font-size: 0.8rem;
+}
+/* In-page notices (replace alert()) — persistent, dismissible. */
+#notice-region {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+#notice-region:not(:empty) {
+    margin-bottom: 1rem;
+}
+.notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 4px;
+    border: 1px solid;
+    font-size: 0.9rem;
+}
+.notice-text {
+    flex: 1;
+}
+.notice-error {
+    background: var(--colour-critical-surface);
+    color: var(--colour-critical-ink);
+    border-color: var(--colour-critical-ink);
+}
+.notice-success {
+    background: var(--colour-notice-success-surface);
+    color: var(--colour-notice-success-ink);
+    border-color: var(--colour-notice-success-ink);
+}
+.notice-info {
+    background: var(--colour-notice-info-surface);
+    color: var(--colour-notice-info-ink);
+    border-color: var(--colour-notice-info-ink);
+}
+.notice-dismiss {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+
+/* Sends a failed GM turn again (issue #410); sits beside the dismiss button. */
+.notice-retry {
+    background: none;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 0.1rem 0.6rem;
+}
+/* In-page confirmation (issue #190). A panel in the notice region, not a
+   modal: no overlay, no aria-modal, no focus trap. The page behind stays
+   usable, and the question persists until it is answered. */
+.notice-confirm {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    background: var(--colour-notice-confirm-surface);
+    color: var(--colour-ink);
+    border-color: var(--colour-accent-gold);
+}
+.notice-confirm .notice-text {
+    flex: 1 1 16rem;
+}
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+.confirm-actions .button {
+    margin: 0;
+}
+@media (max-width: 480px) {
+    .notice-confirm .confirm-actions {
+        width: 100%;
+    }
+    .notice-confirm .confirm-actions .button {
+        flex: 1 1 auto;
+        text-align: center;
+    }
+}
+
+/* Visually hidden but read by screen readers (battle setup's filter label,
+   the parties add-member filter, table action-column headers, the GM panel's
+   pickers, a lobby seat's control label). Lives here so every stylesheet
+   family shares the one definition; battle.css and chat.css each used to keep
+   a .visually-hidden copy of it (#338 item 14). */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* The prompt panel's field (issue #339, item 9). promptDialog reuses
+   .notice-confirm's frame and adds one line of input, laid out under the
+   question so a long question does not squeeze the box. */
+.notice-prompt .notice-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.notice-prompt-input {
+    width: 100%;
+    max-width: 32rem;
+    padding: 0.4rem 0.5rem;
+    font: inherit;
+    border: 1px solid var(--colour-accent-gold);
+    border-radius: 4px;
+}
+
+/* "Play with the Game Master" (issues #827, #828): gm/_play_with_gm.html,
+   rendered on the character sheet and in the home page's roster. Here rather
+   than in either page's sheet because both pages render the one partial. */
+.play-with-gm {
+    display: flex;
+    /* The bare form rule above stacks a form's controls in a column. */
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1rem;
+}
+/* Rendered hidden and revealed by its script (the endpoint speaks JSON only);
+   the display rule above would otherwise override the attribute. */
+.play-with-gm[hidden] {
+    display: none;
+}
+.play-with-gm select {
+    width: auto;
+    max-width: 100%;
+    min-width: 0;
+    flex: 0 1 18rem;
+}
+.play-with-gm .button {
+    margin: 0;
+}
+.play-with-gm-compact {
+    margin: 0;
+}
+/* The refusal line stays until the next attempt; the attribute hides it
+   while it is empty. */
+.play-with-gm-error {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--colour-danger);
+    font-size: 0.875rem;
+}
+.play-with-gm-error[hidden] {
+    display: none;
+}
+
+/* The loaded canon, named on the GM chat page and the reference pages (#918). */
+.canon-line {
+    margin: 0 0 0.5rem;
+    color: var(--colour-ink-muted);
+    font-size: 0.875rem;
+}

@@ -1,0 +1,273 @@
+/* Bestiary catalog and beast detail (issue #192).
+ *
+ * Both pages used to carry their rules in an inline <style> block, including
+ * two different `main { max-width }` overrides. They share this sheet now —
+ * same idiom as battle.css and reference.css.
+ *
+ * The flow the issue asked for is navigational, so the design work is in the
+ * generate panel: a beast page has to let you roll another without returning
+ * to the catalog form. The trail that used to live here became the
+ * site-wide breadcrumb in base.css (issue #189).
+ */
+
+
+/* --- Catalog ------------------------------------------------------------ */
+
+.bestiary-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: flex-end;
+    margin-bottom: 1.5rem;
+}
+
+.bestiary-toolbar form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: flex-end;
+}
+
+.bestiary-toolbar label {
+    display: block;
+    font-size: 0.85rem;
+}
+
+.beast-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+.beast-card {
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--colour-border-parchment);
+    border-radius: 6px;
+}
+
+.beast-card h3 {
+    margin: 0 0 0.25rem;
+}
+
+.beast-card h3 a {
+    text-decoration: none;
+}
+
+.beast-meta {
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+.beast-stats {
+    margin: 0.4rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+}
+
+.beast-attacks {
+    margin: 0.25rem 0 0;
+    padding-left: 1.1rem;
+    font-size: 0.9rem;
+}
+
+.generated-section {
+    margin-top: 2.5rem;
+}
+
+/* --- Detail ------------------------------------------------------------- */
+
+.beast-statblock {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--colour-border-parchment);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+}
+
+.beast-statblock table {
+    border-collapse: collapse;
+}
+
+.beast-statblock td {
+    padding: 0.15rem 0.9rem 0.15rem 0;
+}
+
+.beast-provenance {
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+/* base.css spaces h1 but leaves h2 flush against whatever precedes it, which
+   ran the stat block into "Attacks" and "Attacks" into "Special abilities". */
+.bestiary-detail-main h2 {
+    margin: 1.5rem 0 0.5rem;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.bestiary-detail-main .generate-panel h2 {
+    margin: 0 0 0.75rem;
+}
+
+.beast-attacks li {
+    margin-bottom: 0.2rem;
+}
+
+/* --- Generate panel ------------------------------------------------------ */
+
+/* Rolling again is the thing you do repeatedly on this page, so it gets a
+   panel of its own rather than a lone button under the stat block: one
+   route keeps the parameters that made this beast, the other loosens them. */
+.generate-panel {
+    margin-top: 2rem;
+    padding: 1rem 1.15rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface-warm);
+}
+
+.generate-panel h2 {
+    margin: 0 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-ink-breadcrumb);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.generate-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.generate-options form {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0;
+    height: 100%;
+}
+
+/* The category route has an extra control, so its button would otherwise sit
+   a row lower than the other one. */
+.generate-options form .button {
+    margin-top: auto;
+}
+
+.generate-options p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.generate-options label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+}
+
+@media (max-width: 480px) {
+    .generate-options .button,
+    .bestiary-toolbar .button {
+        width: 100%;
+        text-align: center;
+    }
+}
+
+/* --- Silhouette plates ---------------------------------------------------- */
+
+/* Original art, drawn in bestiary/art.py and rendered inline (issue #193).
+   Sized here rather than in the SVG so the two contexts — a thumbnail beside
+   a card heading, a larger plate beside the beast's name — stay in one
+   place. */
+.beast-plate {
+    display: block;
+    flex: 0 0 auto;
+    border-radius: 8px;
+}
+
+.beast-plate-card {
+    width: 56px;
+    height: 56px;
+}
+
+.beast-plate-detail {
+    width: 96px;
+    height: 96px;
+}
+
+.beast-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.4rem;
+}
+
+.beast-card-head h3 {
+    margin: 0;
+}
+
+.beast-card-head .beast-meta {
+    margin-bottom: 0;
+}
+
+.beast-headline {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.beast-headline h1 {
+    margin: 0;
+}
+
+@media (max-width: 480px) {
+    .beast-plate-detail {
+        width: 72px;
+        height: 72px;
+    }
+}
+
+/* Encounter generator (issue #213) */
+
+.encounter-result {
+    margin-top: 1.5rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--colour-border-parchment);
+    border-radius: 6px;
+}
+
+.encounter-result h2 {
+    margin-top: 0;
+}
+
+.encounter-count {
+    font-weight: normal;
+    opacity: 0.75;
+}
+
+.encounter-rolls {
+    padding-left: 1.25rem;
+}
+
+.encounter-reference {
+    margin-top: 2rem;
+}
+
+.encounter-table {
+    columns: 2;
+    max-width: 40rem;
+}
+
+/* Clear both toolbar filters at once (issue #703). */
+.bestiary-filter-clear {
+    align-self: center;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+}

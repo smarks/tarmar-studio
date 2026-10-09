@@ -1,0 +1,1677 @@
+/**
+ * Battle detail page: SVG hex arena + per-turn event log + Advance turn.
+ *
+ * State-driven per house rules: the arena and roster render entirely from the
+ * server's view model (embedded via json_script on load, returned by the
+ * advance endpoint thereafter), so a full reload reproduces exactly what
+ * incremental updates showed. The view model is profile-neutral (#251) — the
+ * server converts a classic Melee battle's rectangular offset field and its
+ * ST pool into the same shape a Tarmar battle answers in, so this file draws
+ * both without knowing which rules produced them. The event log is
+ * server-rendered for existing turns, and new turns arrive from the endpoints
+ * already rendered by the same battle/_turn_group.html partial (#504), which
+ * appendTurns() inserts. Nothing is transient: every roll and decision stays
+ * on the page until the user navigates away.
+ *
+ * postJson/postForSuccess/bindCommitKeys/uiNotify and the inline field-error
+ * pair come from api.js, which base.html loads in <head>. Node/Jest has no shared script
+ * scope, so require it there; either way the names end up on the global
+ * object.
+ */
+if (typeof module !== 'undefined' && module.exports) {
+    require('./api.js');
+}
+
+(function (root) {
+    const HEX_SIZE = 10; // SVG units per hex circumradius
+    const SQRT3 = Math.sqrt(3);
+
+    // Which way up the hexes sit. The server names it per battle: the Tarmar
+    // arena is pointy-top, the classic Melee map flat-top (the orientation the
+    // printed map uses). It is a layout parameter, not a second renderer.
+    const FLAT = 'flat';
+
+    /**
+     * A candidate's score at the width its rationale was written to.
+     *
+     * The engine sends score_text so the number beside an option matches the
+     * "... = 0.500" its rationale ends in (#301); a bare float renders at
+     * whatever width repr chose. Battles logged before that field existed
+     * fall back to the raw score.
+     */
+    function scoreText(candidate) {
+        return candidate.score_text === undefined
+            ? candidate.score
+            : candidate.score_text;
+    }
+
+    /**
+     * Axial (q, r) to pixel centre, in the given orientation.
+     *
+     * Both profiles' coordinates reach the page as axial (q, r) — the server
+     * converts classic's 1-based offset col/row through the arena's own
+     * layout — so this is the one place hexes become pixels.
+     */
+    function axialToPixel(q, r, orientation) {
+        if (orientation === FLAT) {
+            return {
+                x: HEX_SIZE * 1.5 * q,
+                y: HEX_SIZE * SQRT3 * (r + q / 2),
+            };
+        }
+        return {
+            x: HEX_SIZE * (SQRT3 * q + (SQRT3 / 2) * r),
+            y: HEX_SIZE * 1.5 * r,
+        };
+    }
+
+    /** The six corner points of a hex centred on (cx, cy), in orientation. */
+    function hexCorners(cx, cy, size, orientation) {
+        const skew = orientation === FLAT ? 0 : -30;
+        const points = [];
+        for (let corner = 0; corner < 6; corner += 1) {
+            const angle = (Math.PI / 180) * (60 * corner + skew);
+            points.push(
+                `${(cx + size * Math.cos(angle)).toFixed(2)},${(cy + size * Math.sin(angle)).toFixed(2)}`
+            );
+        }
+        return points.join(' ');
+    }
+
+    /** Half the width and height of one hex, so a viewBox can clear its edges. */
+    function hexHalfSize(orientation) {
+        return orientation === FLAT
+            ? { x: HEX_SIZE, y: (HEX_SIZE * SQRT3) / 2 }
+            : { x: (HEX_SIZE * SQRT3) / 2, y: HEX_SIZE };
+    }
+
+    /**
+     * The viewBox that frames these cells with a hex of margin.
+     *
+     * Derived from the cells the server sent rather than from an arena
+     * radius, because the two profiles' fields are different shapes: a disc
+     * centred on the origin, and a rectangle running away from it.
+     */
+    function arenaViewBox(cells, orientation) {
+        if (!cells.length) { return '0 0 100 100'; }
+        const half = hexHalfSize(orientation);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        cells.forEach(([q, r]) => {
+            const { x, y } = axialToPixel(q, r, orientation);
+            minX = Math.min(minX, x - half.x);
+            maxX = Math.max(maxX, x + half.x);
+            minY = Math.min(minY, y - half.y);
+            maxY = Math.max(maxY, y + half.y);
+        });
+        const margin = HEX_SIZE;
+        return [
+            (minX - margin).toFixed(2),
+            (minY - margin).toFixed(2),
+            (maxX - minX + 2 * margin).toFixed(2),
+            (maxY - minY + 2 * margin).toFixed(2),
+        ].join(' ');
+    }
+
+    function svgElement(tag, attributes) {
+        const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+            node.setAttribute(name, value);
+        });
+        return node;
+    }
+
+    /** Fraction of a pool remaining, clamped to [0, 1] for the bar width. */
+    function poolFraction(current, maximum) {
+        if (!maximum || maximum <= 0) { return 0; }
+        return Math.max(0, Math.min(1, current / maximum));
+    }
+
+    // Pool bar colours by the server's pool key. Unknown pools still draw,
+    // in the neutral tone, rather than vanishing.
+    // The death, fatigue and gold tones are base.css tokens (#338 item 12),
+    // read from the page so the stylesheet stays their one definition.
+    function cssToken(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+    const POOL_COLOURS = {
+        fatigue: cssToken('--colour-pool-fatigue'),
+        body: cssToken('--colour-pool-death'),
+        st: cssToken('--colour-pool-death'),
+    };
+    const DEFAULT_POOL_COLOUR = '#5a6270';
+
+    // Team tints (#275): mid-lightness, well-separated hues that read on
+    // both the light and dark themes, assigned by order of first appearance
+    // in the view's roster and repeating past six teams. Deliberately away
+    // from the character blue (#4a6da7) and beast brown (#8a5a2b) so a
+    // free-for-all marker never masquerades as a team.
+    const TEAM_TINTS = [
+        '#c96f2a', // orange
+        '#7d5bbe', // violet
+        '#1f8a70', // teal
+        '#c25588', // magenta
+        '#6b8e23', // olive
+        '#3f7cac', // steel blue
+    ];
+
+    /** Teams in this view, in order of first appearance in the roster. */
+    function teamOrderOf(view) {
+        const order = [];
+        (view.combatants || []).forEach((combatant) => {
+            if (combatant.team && !order.includes(combatant.team)) {
+                order.push(combatant.team);
+            }
+        });
+        return order;
+    }
+
+    /** The tint for one team, or null for the free-for-all (no team). */
+    function teamTint(teamOrder, team) {
+        const index = teamOrder.indexOf(team);
+        if (index === -1) { return null; }
+        return TEAM_TINTS[index % TEAM_TINTS.length];
+    }
+
+    /**
+     * Render the hex arena from the server's view model: the cells it sent,
+     * then one marker per living combatant — a facing wedge, a body circle,
+     * the name, and a bar per pool.
+     *
+     * Every piece of geometry here arrives computed: which hexes make the
+     * field, which hexes a figure covers, and which way it faces. The page
+     * turns those into pixels and paints; it works out nothing about the
+     * rules, which is what lets one renderer draw both profiles.
+     */
+    function renderArena(svg, view) {
+        svg.textContent = '';
+        const arena = view.arena || {};
+        const orientation = arena.orientation;
+        const cells = arena.cells || [];
+        svg.setAttribute('viewBox', arenaViewBox(cells, orientation));
+
+        cells.forEach(([q, r]) => {
+            const { x, y } = axialToPixel(q, r, orientation);
+            svg.appendChild(svgElement('polygon', {
+                points: hexCorners(x, y, HEX_SIZE - 0.4, orientation),
+                fill: 'none',
+                stroke: 'currentColor',
+                'stroke-opacity': '0.15',
+                'stroke-width': '0.5',
+            }));
+        });
+
+        const teamOrder = teamOrderOf(view);
+        (view.combatants || []).forEach((combatant) => {
+            if (!combatant.alive) { return; }
+            const { x, y } = axialToPixel(combatant.q, combatant.r, orientation);
+            // A teamed combatant wears its team's tint (#275); the free
+            // pool keeps the historic character blue and beast brown.
+            const bodyColour = teamTint(teamOrder, combatant.team)
+                || (combatant.is_beast ? '#8a5a2b' : '#4a6da7');
+            const group = svgElement('g', {
+                class: `arena-combatant${combatant.conscious ? '' : ' is-down'}`
+                    + (combatant.is_beast ? ' is-beast' : '')
+                    // Only a figure this viewer may read is offered as a
+                    // target for the click that opens its panel (#302).
+                    + (combatant.detail ? ' is-selectable' : ''),
+                'data-combatant': combatant.combatant_id,
+                'data-team': combatant.team || '',
+            });
+            // Multi-hex figures paint their whole footprint under the marker.
+            const footprint = combatant.footprint || [];
+            if (footprint.length > 1) {
+                footprint.forEach(([hq, hr]) => {
+                    const centre = axialToPixel(hq, hr, orientation);
+                    group.appendChild(svgElement('polygon', {
+                        class: 'footprint-hex',
+                        points: hexCorners(
+                            centre.x, centre.y, HEX_SIZE - 0.6, orientation
+                        ),
+                        fill: bodyColour,
+                        'fill-opacity': '0.3',
+                        stroke: bodyColour,
+                        'stroke-width': '0.5',
+                    }));
+                });
+            }
+            // Facing wedge: a small triangle pointing at the faced hex. The
+            // server sends the step to that hex, so the angle is the pixel
+            // direction of the step — no direction table on this side.
+            const [stepQ, stepR] = combatant.facing_vector || [1, 0];
+            const faced = axialToPixel(
+                combatant.q + stepQ, combatant.r + stepR, orientation
+            );
+            const angle = Math.atan2(faced.y - y, faced.x - x);
+            const tipX = x + Math.cos(angle) * HEX_SIZE * 0.95;
+            const tipY = y + Math.sin(angle) * HEX_SIZE * 0.95;
+            const leftX = x + Math.cos(angle + 0.5) * HEX_SIZE * 0.55;
+            const leftY = y + Math.sin(angle + 0.5) * HEX_SIZE * 0.55;
+            const rightX = x + Math.cos(angle - 0.5) * HEX_SIZE * 0.55;
+            const rightY = y + Math.sin(angle - 0.5) * HEX_SIZE * 0.55;
+            group.appendChild(svgElement('polygon', {
+                class: 'facing-wedge',
+                points: `${tipX.toFixed(2)},${tipY.toFixed(2)} ${leftX.toFixed(2)},${leftY.toFixed(2)} ${rightX.toFixed(2)},${rightY.toFixed(2)}`,
+                fill: cssToken('--colour-accent-gold'),
+            }));
+            group.appendChild(svgElement('circle', {
+                cx: x, cy: y, r: HEX_SIZE * 0.5,
+                fill: combatant.conscious ? bodyColour : '#777',
+                stroke: '#222', 'stroke-width': '0.5',
+            }));
+            group.appendChild(Object.assign(svgElement('text', {
+                x, y: y - HEX_SIZE * 0.85,
+                'text-anchor': 'middle',
+                'font-size': '3.4',
+                fill: 'currentColor',
+            }), { textContent: shortName(combatant.name) }));
+            // One bar per pool, stacked under the name — two for a Tarmar
+            // combatant (fatigue, body), one for a classic figure (ST).
+            (combatant.pools || []).forEach((pool, index) => {
+                const width = HEX_SIZE * 1.4;
+                group.appendChild(svgElement('rect', {
+                    class: `pool-${pool.key}`,
+                    x: x - width / 2,
+                    y: y + HEX_SIZE * (0.5 + index * 0.12),
+                    width: (
+                        width * poolFraction(pool.current, pool.maximum)
+                    ).toFixed(2),
+                    height: 1.1,
+                    fill: POOL_COLOURS[pool.key] || DEFAULT_POOL_COLOUR,
+                }));
+            });
+            svg.appendChild(group);
+        });
+        renderGroundWeapons(svg, view, orientation);
+    }
+
+    /**
+     * What a hex's lying weapons are called, for its tooltip and its label.
+     *
+     * @param {{weapons: string[]}} entry - one of the view's ground_weapons
+     * @returns {string} e.g. "Lying here: Broadsword, Dagger"
+     */
+    function groundWeaponLabel(entry) {
+        return `Lying here: ${(entry.weapons || []).join(', ')}`;
+    }
+
+    /**
+     * Draw the weapons lying on the field (issue #878): a small blade in the
+     * hex's left-hand corner, clear of a figure standing on it, named in the
+     * hex's tooltip. PICK UP WEAPON (q) takes one from the figure's own hex
+     * or the next, so where each lies is what a player needs to see. Drawn
+     * over the figures, so a figure's marker never hides the tooltip.
+     */
+    function renderGroundWeapons(svg, view, orientation) {
+        (view.ground_weapons || []).forEach((entry) => {
+            const { x, y } = axialToPixel(entry.q, entry.r, orientation);
+            const label = groundWeaponLabel(entry);
+            const group = svgElement('g', {
+                class: 'arena-ground-weapon',
+                'data-q': entry.q,
+                'data-r': entry.r,
+                role: 'img',
+                'aria-label': label,
+            });
+            group.appendChild(Object.assign(
+                svgElement('title', {}), { textContent: label }
+            ));
+            const centreX = x - HEX_SIZE * 0.62;
+            const centreY = y + HEX_SIZE * 0.1;
+            const reach = HEX_SIZE * 0.2;
+            // The blade, hilt low-left and point up-right, and its crossguard.
+            group.appendChild(svgElement('line', {
+                class: 'ground-weapon-blade',
+                x1: (centreX - reach).toFixed(2), y1: (centreY + reach).toFixed(2),
+                x2: (centreX + reach).toFixed(2), y2: (centreY - reach).toFixed(2),
+                stroke: 'currentColor', 'stroke-width': '0.9',
+                'stroke-linecap': 'round',
+            }));
+            group.appendChild(svgElement('line', {
+                class: 'ground-weapon-guard',
+                x1: (centreX - reach * 0.9).toFixed(2), y1: (centreY - reach * 0.1).toFixed(2),
+                x2: (centreX - reach * 0.1).toFixed(2), y2: (centreY + reach * 0.9).toFixed(2),
+                stroke: 'currentColor', 'stroke-width': '0.7',
+                'stroke-linecap': 'round',
+            }));
+            if ((entry.weapons || []).length > 1) {
+                group.appendChild(Object.assign(svgElement('text', {
+                    class: 'ground-weapon-count',
+                    x: (centreX + reach).toFixed(2),
+                    y: (centreY + reach * 1.6).toFixed(2),
+                    'font-size': '2.4',
+                    fill: 'currentColor',
+                }), { textContent: String(entry.weapons.length) }));
+            }
+            svg.appendChild(group);
+        });
+    }
+
+    /** "Arena Duel 3 Archer" -> "3 Archer" (drop the battle-name prefix). */
+    function shortName(name) {
+        const match = /(\d+ .*)$/.exec(name);
+        return match ? match[1] : name;
+    }
+
+    /**
+     * The rules' letter for a menu key, for the badge a player reads.
+     *
+     * The engine keys a variant of a lettered option by a token of its own:
+     * "sprint" is MOVE (a) at the Sprint gait, and "<key>_yield" is that
+     * option with its movement taken in Final Movement (tarmar-engine 0.9.5).
+     * The badge shows the option's letter from action-options.md; the name
+     * beside it already says "(SPRINT)" or "(YIELD: ...)". The key itself is
+     * still what the choice submits. Grapple tokens ("hold_still") print as
+     * they are.
+     */
+    function optionLetter(key) {
+        const base = String(key).replace(/_yield$/, '');
+        return base === 'sprint' ? 'a' : base;
+    }
+
+    /** Terminal statuses: the battle can advance no further (#289). */
+    const TERMINAL_STATUSES = ['finished', 'stalemate'];
+
+    /**
+     * Status chip text for a server status code. ``labels`` is the model's
+     * STATUS_CHOICES, which the page embeds as #battle-status-labels
+     * (#338 item 20) rather than this file restating them; a code missing
+     * from it still reads, capitalised.
+     */
+    function statusLabel(status, labels) {
+        return (labels && labels[status])
+            || status.charAt(0).toUpperCase() + status.slice(1);
+    }
+
+    /** Map a battle_state/advance response's seats list by combatant id. */
+    function seatsById(seats) {
+        const map = {};
+        (seats || []).forEach((seat) => { map[seat.combatant_id] = seat; });
+        return map;
+    }
+
+    // The persistent inline error inside a roster card is the same span, the
+    // same class and the same role autosave.js hangs on a refused field, and
+    // was written out here a second time. Both ask api.js for it now
+    // (issue #338 item 2).
+    //
+    // What is NOT shared is the rest of the rename: initAutosave binds fields
+    // that are already in the page, keyed by data-field, posting {field,
+    // value} to one URL. A rename creates its input by swapping out a heading
+    // on a roster that repaints every couple of seconds, and posts
+    // {combatant_id, name}. Running one through the other would couple two
+    // different lifecycles for the sake of a six-line keyboard contract.
+    const showRenameError = showFieldError;
+    const clearRenameError = clearFieldError;
+
+    /**
+     * Swap a roster name for an editable field. Blur/Enter saves through the
+     * rename endpoint, Escape cancels; a rejected save reverts the name and
+     * leaves a persistent inline error (no modals, no transient UI).
+     */
+    function startRename(card, title, combatant, options) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'combatant-rename-input';
+        input.value = combatant.name;
+        let cancelled = false;
+        title.replaceWith(input);
+        input.focus();
+        input.select();
+        bindCommitKeys(input, { onCancel: () => { cancelled = true; } });
+        input.addEventListener('blur', () => {
+            const value = input.value.trim();
+            if (cancelled || !value || value === combatant.name) {
+                input.replaceWith(title);
+                return;
+            }
+            postForSuccess(options.url, {
+                combatant_id: combatant.combatant_id,
+                name: value,
+            })
+            .then(({ succeeded, data }) => {
+                if (succeeded) {
+                    // The server's state is the single source of truth; the
+                    // caller re-renders roster and arena from it.
+                    options.onRenamed(data);
+                } else {
+                    input.replaceWith(title);
+                    showRenameError(
+                        card, data && data.error ? data.error : 'Rename failed'
+                    );
+                }
+            })
+            .catch(() => {
+                input.replaceWith(title);
+                showRenameError(card, FIELD_NETWORK_ERROR);
+            });
+        });
+    }
+
+    /**
+     * One roster card per combatant, dead ones linking their fatal rolls.
+     * Reads the server's view model, so a classic figure's single ST bar and
+     * a Tarmar combatant's fatigue/body pair render through the same loop.
+     * With ``renameOptions`` ({url, csrf, onRenamed}) the names become
+     * click-to-edit fields saved through the rename endpoint. ``seatMap``
+     * (combatant id -> seat summary) tags player-controlled combatants
+     * with who plays them. ``openDetail`` is the Set of combatant ids whose
+     * attribute panel the reader has opened (#302) — carried across
+     * re-renders, because the poll repaints this list every couple of
+     * seconds and a panel that closed itself would be a transient popup by
+     * another name.
+     */
+    function renderRoster(container, view, renameOptions, seatMap, openDetail) {
+        container.textContent = '';
+        const teamOrder = teamOrderOf(view);
+        if (!teamOrder.length) {
+            // Free-for-all: the flat roster, exactly as before teams.
+            (view.combatants || []).forEach((combatant) => {
+                container.appendChild(
+                    combatantCard(combatant, renameOptions, seatMap, openDetail)
+                );
+            });
+            return;
+        }
+        // Teamed battle (#275): one group per team in appearance order,
+        // headed and tinted, then whoever fights alone under their own head.
+        const grouped = teamOrder.map((team) => ({
+            team,
+            tint: teamTint(teamOrder, team),
+            combatants: (view.combatants || []).filter(
+                (combatant) => combatant.team === team
+            ),
+        }));
+        const free = (view.combatants || []).filter(
+            (combatant) => !combatant.team
+        );
+        if (free.length) {
+            grouped.push({ team: 'Free-for-all', tint: null, combatants: free });
+        }
+        grouped.forEach((group) => {
+            const head = document.createElement('div');
+            head.className = 'roster-team-head';
+            if (group.tint) {
+                const swatch = document.createElement('span');
+                swatch.className = 'roster-team-swatch';
+                swatch.style.backgroundColor = group.tint;
+                head.appendChild(swatch);
+            }
+            head.appendChild(document.createTextNode(group.team));
+            container.appendChild(head);
+            group.combatants.forEach((combatant) => {
+                container.appendChild(
+                    combatantCard(combatant, renameOptions, seatMap, openDetail)
+                );
+            });
+        });
+    }
+
+    /**
+     * The attribute panel inside a roster card (#302).
+     *
+     * Everything in it was computed and formatted server-side (see
+     * battle/viewmodel.py) — this walks groups and rows and knows nothing
+     * about either rules profile's vocabulary. A <details>, not a popup:
+     * it opens on the reader's click and stays open until they close it,
+     * which is why the open ids live in ``openDetail`` rather than in the
+     * element the next poll throws away.
+     */
+    function detailPanel(combatant, openDetail) {
+        const panel = document.createElement('details');
+        panel.className = 'combatant-detail';
+        panel.open = Boolean(openDetail && openDetail.has(combatant.combatant_id));
+        const summary = document.createElement('summary');
+        summary.textContent = 'Full attributes';
+        panel.appendChild(summary);
+        (combatant.detail.groups || []).forEach((group) => {
+            const section = document.createElement('section');
+            section.className = 'detail-group';
+            const heading = document.createElement('h4');
+            heading.textContent = group.label;
+            section.appendChild(heading);
+            const rows = document.createElement('dl');
+            rows.className = 'detail-rows';
+            (group.rows || []).forEach((row) => {
+                const term = document.createElement('dt');
+                term.textContent = row.label;
+                const value = document.createElement('dd');
+                const figure = document.createElement('span');
+                figure.className = 'detail-value';
+                figure.textContent = row.value;
+                value.appendChild(figure);
+                if (row.note) {
+                    const note = document.createElement('small');
+                    note.className = 'detail-note';
+                    note.textContent = row.note;
+                    value.appendChild(note);
+                }
+                rows.appendChild(term);
+                rows.appendChild(value);
+            });
+            section.appendChild(rows);
+            panel.appendChild(section);
+        });
+        if (openDetail) {
+            panel.addEventListener('toggle', () => {
+                if (panel.open) {
+                    openDetail.add(combatant.combatant_id);
+                } else {
+                    openDetail.delete(combatant.combatant_id);
+                }
+            });
+        }
+        return panel;
+    }
+
+    /** One roster card (see renderRoster, which owns the grouping). */
+    function combatantCard(combatant, renameOptions, seatMap, openDetail) {
+        const card = document.createElement('div');
+        card.className = 'combatant-card'
+            + (combatant.alive && combatant.conscious ? '' : ' is-down');
+        card.dataset.combatant = combatant.combatant_id;
+
+        const title = document.createElement('strong');
+        title.textContent = shortName(combatant.name);
+        // Only the figures the server says this viewer may rename (#762): in
+        // a Games Master session's fight the foes are not the player's.
+        const seatFacts = (seatMap || {})[combatant.combatant_id];
+        if (renameOptions && !(seatFacts && seatFacts.can_rename === false)) {
+            title.classList.add('combatant-name');
+            title.title = 'Click to rename';
+            title.setAttribute('role', 'button');
+            title.tabIndex = 0;
+            const beginEdit = () => {
+                clearRenameError(card);
+                startRename(card, title, combatant, renameOptions);
+            };
+            title.addEventListener('click', beginEdit);
+            title.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    beginEdit();
+                }
+            });
+        }
+        card.appendChild(title);
+
+        // The line the server wrote: each profile says what a standing
+        // combatant *is* in its own vocabulary, and both say Dead and
+        // Unconscious the same way.
+        const status = document.createElement('div');
+        status.className = 'combatant-status';
+        status.textContent = combatant.status;
+        card.appendChild(status);
+
+        // Who decides for this figure (#308). The sentence is the
+        // server's (battle.control.mode_line) — the browser does not
+        // re-derive the battle-default-versus-override precedence, it
+        // shows the answer. "Played by you" survives as the friendlier
+        // wording for your own seat.
+        const seat = (seatMap || {})[combatant.combatant_id];
+        if (seat && (seat.control_line || seat.player)) {
+            const controller = document.createElement('div');
+            controller.className = 'combatant-controller';
+            controller.dataset.mode = seat.effective_control_mode || '';
+            if (!seat.control_line) {
+                // A payload from before control modes: say what it knows.
+                controller.textContent = seat.is_you
+                    ? 'Played by you'
+                    : `Played by ${seat.player}`;
+            } else if (seat.you_decide
+                    && seat.effective_control_mode === 'manual') {
+                // "You" only where being asked is actually true: whoever
+                // runs the battle *would* decide for an automatic figure
+                // if it went manual, which is not the same as playing it.
+                controller.textContent = 'Manual — played by you';
+            } else {
+                controller.textContent = seat.control_line;
+            }
+            card.appendChild(controller);
+        }
+        // Who plays a saved character (#853): its owner, unless a Game
+        // Master takes an absent owner's seat. The server says which of the
+        // two hand-offs this viewer may make; initBattlePage posts them.
+        if (seat) {
+            [
+                ['take_seat_url', 'Take this seat (owner absent)', 'take'],
+                ['return_seat_url', 'Give the seat back to its owner', 'return'],
+            ].forEach(([key, label, kind]) => {
+                if (!seat[key]) { return; }
+                const handOff = document.createElement('button');
+                handOff.type = 'button';
+                handOff.className = 'battle-button battle-button-outline seat-hand-off';
+                handOff.dataset.seatUrl = seat[key];
+                handOff.dataset.seatHandOff = kind;
+                handOff.textContent = label;
+                card.appendChild(handOff);
+            });
+        }
+
+        (combatant.pools || []).forEach((pool) => {
+            const label = document.createElement('div');
+            label.className = 'pool-label';
+            label.textContent = `${pool.label} ${pool.current}/${pool.maximum}`;
+            card.appendChild(label);
+            const bar = document.createElement('div');
+            bar.className = `pool-bar ${pool.key}`;
+            const fill = document.createElement('span');
+            fill.style.width = `${poolFraction(pool.current, pool.maximum) * 100}%`;
+            bar.appendChild(fill);
+            card.appendChild(bar);
+        });
+
+        if (!combatant.alive && combatant.fatal_chain
+                && combatant.fatal_chain.length) {
+            const chain = document.createElement('div');
+            chain.className = 'fatal-chain';
+            chain.appendChild(document.createTextNode('Fatal rolls: '));
+            combatant.fatal_chain.forEach((sequence, index) => {
+                if (index) { chain.appendChild(document.createTextNode(', ')); }
+                const link = document.createElement('a');
+                link.href = `#event-${sequence}`;
+                link.textContent = `#${sequence}`;
+                chain.appendChild(link);
+            });
+            card.appendChild(chain);
+        }
+        // Last in the card: the condition gauges stay the thing you read at
+        // a glance, and the sheet is what you open when you need it.
+        if (combatant.detail) {
+            card.appendChild(detailPanel(combatant, openDetail));
+        }
+        return card;
+    }
+
+    /**
+     * The AI's favorite among a pending menu.
+     *
+     * The server marks it (``ai_choice``, #775): a player's menu also holds
+     * each attack aimed at every other target, and one of those may score
+     * above the AI's own pick. A menu stored before the mark falls back to
+     * the highest score, first wins ties — the pick max() made server-side.
+     */
+    function topCandidateIndex(candidates) {
+        const marked = (candidates || []).findIndex((candidate) => candidate.ai_choice);
+        if (marked !== -1) { return marked; }
+        let best = 0;
+        (candidates || []).forEach((candidate, index) => {
+            if (candidate.score > candidates[best].score) { best = index; }
+        });
+        return best;
+    }
+
+    /**
+     * The cast candidates on a menu (one per castable spell), and the rest.
+     * Casting collapses into a single CAST SPELL option so a wizard's
+     * spells do not flood the action list — the spells live in the cast
+     * stage the option opens.
+     */
+    function splitCastCandidates(candidates) {
+        const plain = [];
+        const casts = [];
+        (candidates || []).forEach((candidate, index) => {
+            (candidate.spell_key ? casts : plain).push({ candidate, index });
+        });
+        return { plain, casts };
+    }
+
+    /**
+     * Render the turn panel from the pending decision (state-driven: the
+     * whole panel re-renders from data on every change, and a reload shows
+     * exactly the same thing from the server-embedded copy).
+     *
+     * Three shapes: hidden (nothing pending), the awaited player's action
+     * menu (candidates with the policy's scores as advice; click to select,
+     * confirm to send), or a waiting notice naming who the battle waits on
+     * (with the DM's let-the-AI-choose escape hatch).
+     *
+     * The cast flow (#250, melee's gate ported to this command bar): every
+     * cast candidate collapses into one CAST SPELL option, and declaring it
+     * opens a spell stage in place — never a modal, nothing transient. The
+     * stage lists the caster's whole hand from ``pending.magic``, the
+     * unavailable ones disabled with the server's reason, and NOTHING is
+     * pre-selected: a declared cast owes an explicit spell pick before the
+     * confirm ungates, or an explicit stand-down back to the plain menu.
+     * The AI's favourite is tagged as advice, never as a selection.
+     *
+     * ``options``: { isDm, selectedIndex, castOpen, showScoring, busy,
+     * onSelect(index), onCastOpen(), onCastClose(), onToggleScoring(),
+     * onConfirm(candidate), onAiChoose() }.
+     */
+    /**
+     * The empty pool a stage falls back to when the server published no
+     * magic for the awaited caster — a wizard's hand is never guessed at.
+     */
+    function emptyMagic() {
+        return { pool_label: 'Mana', pool: 0, max_pool: 0, spells: [] };
+    }
+
+    /**
+     * The key that pairs a published spell row with its menu candidate:
+     * the spell AND the figure it is aimed at (#263). The spell alone is
+     * not enough — the classic profile offers one cast per (spell, target)
+     * pair, so keying by spell would collapse a wizard's targets to
+     * whichever came last and cast at the wrong figure.
+     */
+    function castKey(spellKey, targetId) {
+        const target = (targetId === null || targetId === undefined)
+            ? '' : String(targetId);
+        return `${spellKey}\u0000${target}`;
+    }
+
+    /**
+     * Which control inside the turn panel keyboard focus should land on
+     * after the panel is rebuilt (#646).
+     *
+     * Every selection empties the panel and builds every button again, so
+     * the button the person just activated leaves the document and focus
+     * falls back to <body> — putting a keyboard user back at the top of a
+     * regenerated menu on every keystroke that changes anything. Each
+     * control carries a ``data-focus-key`` that survives the rebuild, and
+     * the panel remembers the last one, so an action in flight (which
+     * disables the confirm button and therefore drops focus) still lands
+     * the person back where they were once it answers.
+     *
+     * Focus elsewhere on the page is left alone: this only claims it back
+     * when it was in the panel, or when nothing holds it at all.
+     *
+     * @param {HTMLElement} panel
+     * @returns {string} The key to restore, or '' to leave focus alone.
+     */
+    function focusKeyToRestore(panel) {
+        const active = document.activeElement;
+        if (active && panel.contains(active) && active.dataset.focusKey) {
+            return active.dataset.focusKey;
+        }
+        if (!active || active === document.body) {
+            return panel.dataset.lastFocusKey || '';
+        }
+        return '';
+    }
+
+    /**
+     * Focus the rebuilt control that ``key`` names, or the nearest thing
+     * that still makes sense. A spell row and the stand-down button both
+     * disappear when the cast stage closes; their reader belongs on the
+     * CAST SPELL option that opened it, not at the top of the menu.
+     *
+     * @param {HTMLElement} panel
+     * @param {string} key
+     */
+    function restoreTurnPanelFocus(panel, key) {
+        if (!key) { return; }
+        panel.dataset.lastFocusKey = key;
+        const byKey = (wanted) => Array.prototype.find.call(
+            panel.querySelectorAll('[data-focus-key]'),
+            (node) => node.dataset.focusKey === wanted
+        );
+        let target = byKey(key);
+        if ((!target || target.disabled)
+                && (key.startsWith('spell-') || key === 'cast-standdown')) {
+            target = byKey('cast');
+        }
+        if (target && !target.disabled) { target.focus(); }
+    }
+
+    /**
+     * The spell stage a declared cast opens: the caster's pool, then their
+     * whole known hand. A spell the server marked uncastable renders
+     * disabled with its reason, so a wizard sees why Lightning Bolt is out
+     * of reach instead of wondering where it went. The stand-down button
+     * ends the declaration without spending the turn.
+     *
+     * Every word of a row comes from the server (#263): its name, what the
+     * cast costs, and what it needs to land. The page knows only that a
+     * caster has a named pool and some rows — which is what lets one stage
+     * serve Tarmar's mana and classic's ST without printing either
+     * profile's numbers under the other's label.
+     */
+    function buildCastStage(pending, casts, aiPick, opts) {
+        const stage = document.createElement('div');
+        stage.className = 'turn-cast-stage';
+        stage.setAttribute('role', 'group');
+        stage.setAttribute('aria-label', 'Spells');
+
+        const magic = pending.magic || emptyMagic();
+        const pool = document.createElement('p');
+        pool.className = 'turn-cast-pool';
+        pool.textContent =
+            `${magic.pool_label} ${magic.pool} of ${magic.max_pool}.`
+            + ' Pick a spell to cast.';
+        stage.appendChild(pool);
+
+        const castByKey = new Map(casts.map((entry) => [
+            castKey(entry.candidate.spell_key, entry.candidate.target_id),
+            entry,
+        ]));
+        (magic.spells || []).forEach((spell) => {
+            const entry = castByKey.get(castKey(spell.key, spell.target_id));
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'turn-spell';
+            // Keyed by the candidate it stands for, so the key survives a
+            // rebuild. A row with no candidate is disabled and can never
+            // hold focus, so it needs none.
+            if (entry) { button.dataset.focusKey = `spell-${entry.index}`; }
+            button.disabled = !spell.castable || !entry;
+            const selected = Boolean(entry) && entry.index === opts.selectedIndex;
+            button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+
+            const name = document.createElement('span');
+            name.className = 'turn-spell-name';
+            name.textContent = spell.name;
+            button.appendChild(name);
+
+            const cost = document.createElement('span');
+            cost.className = 'turn-spell-cost';
+            cost.textContent = spell.cost;
+            button.appendChild(cost);
+
+            if (entry && entry.index === aiPick) {
+                const tag = document.createElement('span');
+                tag.className = 'turn-option-ai-pick';
+                tag.textContent = 'AI pick';
+                button.appendChild(tag);
+            }
+
+            const note = document.createElement('span');
+            note.className = 'turn-spell-note';
+            if (button.disabled) {
+                note.textContent = spell.reason || 'not castable this turn';
+                note.classList.add('is-blocked');
+            } else {
+                note.textContent = spell.note;
+            }
+            button.appendChild(note);
+
+            if (entry) {
+                button.addEventListener('click', () => {
+                    if (opts.onSelect) { opts.onSelect(entry.index); }
+                });
+            }
+            stage.appendChild(button);
+        });
+
+        const standDown = document.createElement('button');
+        standDown.type = 'button';
+        standDown.className = 'battle-button battle-button-quiet turn-cast-standdown';
+        standDown.dataset.focusKey = 'cast-standdown';
+        standDown.textContent = "Don't cast — pick another action";
+        standDown.addEventListener('click', () => {
+            if (opts.onCastClose) { opts.onCastClose(); }
+        });
+        stage.appendChild(standDown);
+        return stage;
+    }
+
+    function renderTurnPanel(panel, pending, options) {
+        const focusKey = focusKeyToRestore(panel);
+        panel.textContent = '';
+        if (!pending) {
+            panel.hidden = true;
+            delete panel.dataset.lastFocusKey;
+            return;
+        }
+        panel.hidden = false;
+        const opts = options || {};
+
+        if (!pending.is_you) {
+            const notice = document.createElement('p');
+            notice.className = 'turn-waiting';
+            notice.append('Waiting for ');
+            const who = document.createElement('strong');
+            who.textContent = pending.display_name;
+            notice.appendChild(who);
+            if (pending.player) {
+                notice.append(` — played by ${pending.player} — to choose an action.`);
+            } else {
+                notice.append(' to choose an action.');
+            }
+            panel.appendChild(notice);
+            if (opts.isDm) {
+                const aiButton = document.createElement('button');
+                aiButton.type = 'button';
+                aiButton.className = 'battle-button battle-button-outline turn-ai-choose';
+                aiButton.dataset.focusKey = 'ai-choose';
+                aiButton.textContent = 'Have the AI choose for them';
+                aiButton.disabled = Boolean(opts.busy);
+                aiButton.addEventListener('click', () => {
+                    if (opts.onAiChoose) { opts.onAiChoose(); }
+                });
+                panel.appendChild(aiButton);
+            }
+            restoreTurnPanelFocus(panel, focusKey);
+            return;
+        }
+
+        const heading = document.createElement('p');
+        heading.className = 'turn-prompt';
+        heading.append('Your move — ');
+        const name = document.createElement('strong');
+        name.textContent = pending.display_name;
+        heading.appendChild(name);
+        heading.append(`, turn ${pending.turn}. Pick one action.`);
+        panel.appendChild(heading);
+
+        const menu = document.createElement('div');
+        menu.className = 'turn-options';
+        menu.setAttribute('role', 'group');
+        menu.setAttribute('aria-label', 'Action options');
+        const aiPick = topCandidateIndex(pending.candidates);
+        const { plain, casts } = splitCastCandidates(pending.candidates);
+
+        /**
+         * One menu row: letter, rules name, an optional AI-pick tag, then
+         * what a player weighs (#788) — the plain line and what it costs,
+         * both the server's words — and the AI's scoring when the reader
+         * has asked to see it. A row the server wrote no plain line for (a
+         * classic figure's) keeps the scoring as its line, as it always had.
+         */
+        function buildOption(letter, name, advice, pressed, focusKeyOfOption, described) {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'turn-option';
+            option.dataset.focusKey = focusKeyOfOption;
+            option.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+            const letterNode = document.createElement('span');
+            letterNode.className = 'turn-option-letter';
+            letterNode.textContent = optionLetter(letter);
+            option.appendChild(letterNode);
+            const label = document.createElement('span');
+            label.className = 'turn-option-name';
+            label.textContent = name;
+            option.appendChild(label);
+            const plainLine = described && described.plain;
+            if (plainLine) {
+                const plainNode = document.createElement('span');
+                plainNode.className = 'turn-option-plain';
+                plainNode.textContent = plainLine;
+                option.appendChild(plainNode);
+                const costNode = document.createElement('span');
+                costNode.className = 'turn-option-cost';
+                costNode.textContent = described.cost
+                    ? `Costs ${described.cost}.` : 'Costs nothing.';
+                option.appendChild(costNode);
+            }
+            if (!plainLine || opts.showScoring) {
+                const adviceNode = document.createElement('span');
+                adviceNode.className = 'turn-option-advice';
+                adviceNode.textContent = advice;
+                option.appendChild(adviceNode);
+            }
+            return option;
+        }
+
+        /** The 'AI pick' tag, placed right after the option's name. */
+        function tagAiPick(option) {
+            const tag = document.createElement('span');
+            tag.className = 'turn-option-ai-pick';
+            tag.textContent = 'AI pick';
+            option.insertBefore(tag, option.querySelector('.turn-option-name').nextSibling);
+        }
+
+        plain.forEach(({ candidate, index }) => {
+            const option = buildOption(
+                candidate.letter,
+                candidate.name,
+                `score ${scoreText(candidate)} — ${candidate.rationale}`,
+                index === opts.selectedIndex,
+                `option-${index}`,
+                candidate
+            );
+            if (index === aiPick) { tagAiPick(option); }
+            option.addEventListener('click', () => {
+                if (opts.onSelect) { opts.onSelect(index); }
+            });
+            menu.appendChild(option);
+        });
+
+        if (casts.length) {
+            const magic = pending.magic || emptyMagic();
+            // Casts, not spells: the classic profile offers the same spell
+            // at each figure it could be aimed at, and the stage lists one
+            // row per offer, so counting spells would undercount the stage.
+            const ready = casts.length === 1 ? '1 cast ready'
+                : `${casts.length} casts ready`;
+            const castOption = buildOption(
+                casts[0].candidate.letter,
+                'CAST SPELL',
+                `${magic.pool_label} ${magic.pool} of ${magic.max_pool}`
+                + ` — ${ready}`,
+                Boolean(opts.castOpen),
+                'cast'
+            );
+            castOption.classList.add('turn-option-cast');
+            if (casts.some(({ index }) => index === aiPick)) {
+                tagAiPick(castOption);
+            }
+            castOption.addEventListener('click', () => {
+                if (opts.onCastOpen) { opts.onCastOpen(); }
+            });
+            menu.appendChild(castOption);
+        }
+        panel.appendChild(menu);
+
+        // The AI's scoring behind a switch the reader holds (#788): every
+        // number is still on the page for anyone who wants the working, but
+        // no longer the first thing a player reads. It stays as set, across
+        // repaints and reloads, until the reader changes it.
+        if (plain.some(({ candidate }) => candidate.plain)) {
+            const scoring = document.createElement('button');
+            scoring.type = 'button';
+            scoring.className = 'battle-button battle-button-quiet turn-scoring-toggle';
+            scoring.dataset.focusKey = 'scoring';
+            scoring.setAttribute('aria-pressed', opts.showScoring ? 'true' : 'false');
+            scoring.textContent = opts.showScoring
+                ? "Hide the AI's scoring" : "Show the AI's scoring";
+            scoring.addEventListener('click', () => {
+                if (opts.onToggleScoring) { opts.onToggleScoring(); }
+            });
+            panel.appendChild(scoring);
+        }
+
+        if (casts.length && opts.castOpen) {
+            panel.appendChild(buildCastStage(pending, casts, aiPick, opts));
+        }
+
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = 'battle-button battle-button-primary turn-confirm';
+        confirm.dataset.focusKey = 'confirm';
+        confirm.textContent = 'Take this action';
+        confirm.disabled = opts.selectedIndex == null || Boolean(opts.busy);
+        confirm.addEventListener('click', () => {
+            if (opts.onConfirm && opts.selectedIndex != null) {
+                opts.onConfirm(pending.candidates[opts.selectedIndex]);
+            }
+        });
+        panel.appendChild(confirm);
+        restoreTurnPanelFocus(panel, focusKey);
+    }
+
+    /**
+     * Append the turn sections the server rendered (#504).
+     *
+     * Each entry is ``{turn, html}``: one battle/_turn_group.html section
+     * holding that turn's new events, the same partial the page renders, so
+     * this file writes no event markup of its own. A turn not yet on the page
+     * is appended whole; a turn already there (a paused turn resumed by an
+     * act or a poll) takes the new events into its existing list, so each
+     * turn keeps one section.
+     */
+    function appendTurns(log, turns) {
+        const emptyNotice = log.querySelector('#battle-log-empty');
+        if (emptyNotice && turns.length) { emptyNotice.remove(); }
+        turns.forEach(({ turn, html }) => {
+            const fragment = document.createElement('template');
+            fragment.innerHTML = html.trim();
+            const incoming = fragment.content.querySelector('.turn-group');
+            if (!incoming) { return; }
+            const existing = log.querySelector(`.turn-group[data-turn="${turn}"]`);
+            if (!existing) {
+                log.appendChild(incoming);
+                return;
+            }
+            const list = existing.querySelector('.turn-events');
+            Array.from(incoming.querySelectorAll('.turn-events > .battle-event'))
+                .forEach((item) => { list.appendChild(item); });
+        });
+    }
+
+    /**
+     * Empty the log back to its no-turns-yet state — what a restart leaves
+     * behind. ``emptyHtml`` is the restart response's ``empty_log_html``,
+     * rendered from battle/_log_empty.html, the partial the page itself
+     * renders for a battle with no turns, so this file writes no notice of
+     * its own (#508).
+     */
+    function resetLog(log, emptyHtml) {
+        log.textContent = '';
+        const fragment = document.createElement('template');
+        fragment.innerHTML = (emptyHtml || '').trim();
+        log.appendChild(fragment.content);
+    }
+
+    /** Poll cadence for lobby seats and awaited player turns. */
+    const POLL_INTERVAL_MS = 2000;
+
+    /** Wire the page up. No-op on pages without the battle detail markup. */
+    /**
+     * Wire the "Show every die roll" checkbox to the log's own class.
+     *
+     * The roll events are always written by the engine and always rendered
+     * into the DOM; this only decides whether they are on screen (#301). The
+     * choice is remembered per reader in localStorage, so it survives a
+     * reload the way any other setting would, and the control itself is
+     * always present -- nothing appears or vanishes on its own.
+     */
+    const DICE_PREFERENCE_KEY = 'battle.showDiceRolls';
+
+    /**
+     * Whether this reader has asked to see the AI's scoring on the turn
+     * menu (#788), remembered per reader like the dice switch above. Off
+     * until asked for: the plain lines lead.
+     */
+    const SCORING_PREFERENCE_KEY = 'battle.showScoring';
+
+    function scoringPreference() {
+        try {
+            return window.localStorage.getItem(SCORING_PREFERENCE_KEY) === 'shown';
+        } catch (error) {
+            return false; // private browsing, blocked storage: the default
+        }
+    }
+
+    function rememberScoringPreference(shown) {
+        try {
+            window.localStorage.setItem(SCORING_PREFERENCE_KEY, shown ? 'shown' : 'hidden');
+        } catch (error) {
+            // Nothing to remember it with; the switch still holds for this page.
+        }
+    }
+
+    function initDiceToggle(log, scope) {
+        const toggle = (scope || document).querySelector('#battle-log-dice');
+        if (!toggle || !log) { return; }
+        let stored = null;
+        try {
+            stored = window.localStorage.getItem(DICE_PREFERENCE_KEY);
+        } catch (error) {
+            stored = null; // private browsing, blocked storage: use the default
+        }
+        const apply = (shown) => {
+            toggle.checked = shown;
+            log.classList.toggle('dice-hidden', !shown);
+        };
+        apply(stored !== 'hidden');
+        toggle.addEventListener('change', () => {
+            apply(toggle.checked);
+            try {
+                window.localStorage.setItem(
+                    DICE_PREFERENCE_KEY, toggle.checked ? 'shown' : 'hidden'
+                );
+            } catch (error) {
+                // Nothing to remember it with; the class still applies now.
+            }
+        });
+    }
+
+    /**
+     * Wire a started battle's arena: the map, roster, log, turn panel, the
+     * Advance and Restart buttons, and the poll.
+     *
+     * ``scope`` is the element holding the arena markup
+     * (battle/_arena.html plus its controls); it defaults to the document,
+     * which is what the battle page needs. The GM chat embeds the same
+     * partial in its side panel (#345): the load-time call below finds it
+     * there just the same, and a container built after load is wired by
+     * calling this with that container. Every lookup is by id within the
+     * scope, so a page carries one arena. Wiring twice is a no-op.
+     * @param {ParentNode} [scope]
+     */
+    function initBattlePage(scope) {
+        const root = scope || document;
+        const byId = (id) => root.querySelector(`#${id}`);
+        const viewScript = byId('battle-view');
+        const arena = byId('battle-arena');
+        if (!viewScript || !arena) { return; }
+        if (arena.dataset.wired) { return; }
+        arena.dataset.wired = 'true';
+        const roster = byId('battle-roster');
+        const log = byId('battle-log');
+        const button = byId('advance-turn');
+        const statusChip = byId('battle-status');
+        const turnLabel = byId('battle-turn');
+        const panel = byId('turn-panel');
+        const seatsScript = byId('battle-seats');
+        const labelsScript = byId('battle-status-labels');
+        const statusLabels = labelsScript ? JSON.parse(labelsScript.textContent) : {};
+        const pendingScript = byId('battle-pending');
+        const isDm = Boolean(panel && panel.dataset.isDm);
+        const staleSlot = byId('battle-stale-slot');
+
+        /**
+         * Show the stale-pools notice the server rendered, or clear it (#842).
+         * The server renders it from the advance endpoint or a poll, whose
+         * own path the Game Master's form would otherwise return to, so the
+         * form is pointed back at this page (the battle's or the GM chat's).
+         */
+        // The notice last rendered, so a poll that brings a new one -- the
+        // records moved while a player's move is awaited -- counts as a
+        // change (#892).
+        let lastStaleHtml = staleSlot ? staleSlot.innerHTML.trim() : '';
+        function renderStale(html) {
+            if (!staleSlot) { return; }
+            staleSlot.innerHTML = html || '';
+            lastStaleHtml = (html || '').trim();
+            const back = staleSlot.querySelector('input[name="next"]');
+            if (back) {
+                back.value = `${window.location.pathname}${window.location.search}`;
+            }
+        }
+
+        initDiceToggle(log, root);
+
+        // What to draw, not the rules state: the server computes this per
+        // profile (see battle/viewmodel.py).
+        let view = JSON.parse(viewScript.textContent);
+        let seats = seatsScript ? JSON.parse(seatsScript.textContent) : [];
+        let pending = pendingScript ? JSON.parse(pendingScript.textContent) : null;
+        let currentStatus = null;
+        let currentTurn = null;
+        let selectedIndex = null;
+        // The cast stage is open when the player has declared a cast and
+        // not yet picked a spell or stood down (#250's cast gate).
+        let castOpen = false;
+        let showScoring = scoringPreference();
+        let actionBusy = false;
+        // Battle-global sequence high-water mark, for incremental polling.
+        let lastSequence = (view.next_sequence || 1) - 1;
+        // Which combatants' attribute panels the reader has open (#302).
+        // The poll repaints the roster every couple of seconds; this is
+        // what keeps an opened panel open across those repaints.
+        const openDetail = new Set();
+
+        // Click-to-rename options for roster cards, when the template
+        // supplies the endpoint. A saved rename re-renders roster and arena
+        // from the server-returned state (state-driven, house rules).
+        const renameOptions = roster.dataset.renameUrl ? {
+            url: roster.dataset.renameUrl,
+            onRenamed: (data) => {
+                if (data && data.view) { view = data.view; }
+                renderArena(arena, view);
+                renderRoster(
+                    roster, view, renameOptions, seatsById(seats), openDetail
+                );
+            },
+        } : undefined;
+
+        /** A cast selection is dropped whenever the stage closes. */
+        function closeCastStage() {
+            castOpen = false;
+            const candidates = (pending && pending.candidates) || [];
+            const selected = selectedIndex == null ? null : candidates[selectedIndex];
+            if (selected && selected.spell_key) { selectedIndex = null; }
+        }
+
+        function renderPanel() {
+            if (!panel) { return; }
+            // The pause these buttons are being built for. Held here rather
+            // than read from `pending` when a button is pressed, so the body
+            // names the menu the person actually looked at even if the poll
+            // has moved the battle on since (#644). The server refuses the
+            // mismatch and the arena shows why.
+            const answering = pending;
+            renderTurnPanel(panel, answering, {
+                isDm,
+                selectedIndex,
+                castOpen,
+                showScoring,
+                busy: actionBusy,
+                onToggleScoring: () => {
+                    showScoring = !showScoring;
+                    rememberScoringPreference(showScoring);
+                    renderPanel();
+                },
+                onSelect: (index) => {
+                    selectedIndex = index === selectedIndex ? null : index;
+                    renderPanel();
+                },
+                onCastOpen: () => {
+                    if (castOpen) { closeCastStage(); } else { castOpen = true; }
+                    renderPanel();
+                },
+                onCastClose: () => {
+                    closeCastStage();
+                    renderPanel();
+                },
+                onConfirm: (candidate) => submitAction({
+                    combatant_id: answering.combatant_id,
+                    turn: answering.turn,
+                    letter: candidate.letter,
+                    target_id: candidate.target_id,
+                    spell_key: candidate.spell_key || '',
+                }),
+                onAiChoose: () => submitAction({
+                    combatant_id: answering.combatant_id,
+                    turn: answering.turn,
+                    ai: true,
+                }),
+            });
+        }
+
+        // Advance, restart, act, and the state poll all answer in the same
+        // shape — status, turn, view, events, seats, pending — so one
+        // function applies any of them to the page.
+        function applyBattleResponse(data) {
+            view = data.view;
+            seats = data.seats || seats;
+            appendTurns(log, data.turns_html || []);
+            renderArena(arena, view);
+            renderRoster(
+                roster, view, renameOptions, seatsById(seats), openDetail
+            );
+            statusChip.textContent = statusLabel(data.status, statusLabels);
+            turnLabel.textContent = data.turn;
+            currentStatus = data.status;
+            currentTurn = data.turn;
+            lastSequence = (view.next_sequence || 1) - 1;
+            const wasPendingFor = pending && pending.combatant_id;
+            pending = data.pending || null;
+            if (!pending || pending.combatant_id !== wasPendingFor) {
+                selectedIndex = null;
+                castOpen = false;
+            }
+            renderPanel();
+            // The board has changed, and in a fight that writes to records
+            // so has each saved character's record (#750, #751): anything on
+            // the page drawn from those records -- the GM chat's Characters
+            // tab -- refetches on this rather than waiting for a chat frame.
+            document.dispatchEvent(
+                new CustomEvent('battle-applied', {
+                    detail: {
+                        status: data.status,
+                        live: data.live,
+                        bareHanded: data.bare_handed,
+                    },
+                })
+            );
+            // Every response says whether the records moved under the fight,
+            // a poll while a player's move is awaited included (#842).
+            if (Object.prototype.hasOwnProperty.call(data, 'stale_html')) {
+                renderStale(data.stale_html);
+            }
+            if (button) {
+                // The label and the disabled state are the server's
+                // (views.advance_control): in a mixed battle the button
+                // has to name whose move it stopped for, and that answer
+                // belongs beside the rule that produces it. Older payloads
+                // carry no readout, so the status rule stays as the
+                // fallback rather than blanking the button.
+                if (data.advance) {
+                    button.textContent = data.advance.label;
+                    button.disabled = !data.advance.enabled;
+                } else {
+                    button.disabled = TERMINAL_STATUSES.includes(data.status)
+                        || data.status === 'awaiting';
+                }
+            }
+        }
+
+        /**
+         * POST an action endpoint and hand the parsed body back, or null
+         * after leaving a persistent notice describing the failure.
+         * ``action`` names the attempt in that notice ("Advancing the turn").
+         */
+        async function postAction(url, action, body, onRefused) {
+            try {
+                const { ok, status, data, parseError } = await postJson(url, body);
+                if (!ok && onRefused && onRefused(data, status)) {
+                    // The caller rendered the refusal from state it was sent.
+                    return null;
+                }
+                if (!ok) {
+                    // A non-JSON error page leaves data empty: the status line
+                    // is all there is to say.
+                    const detail = data.error
+                        ? `HTTP ${status}: ${data.error}`
+                        : `HTTP ${status}`;
+                    uiNotify(`${action} failed (${detail}).`);
+                    return null;
+                }
+                if (parseError) {
+                    // Accepted, but with nothing readable to render from.
+                    throw parseError;
+                }
+                return data;
+            } catch (error) {
+                uiNotify(`${action} failed (${error.message}).`);
+                return null;
+            }
+        }
+
+        async function submitAction(body) {
+            if (!panel || actionBusy) { return; }
+            actionBusy = true;
+            renderPanel();
+            const data = await postAction(
+                panel.dataset.actUrl, 'Sending the action', body
+            );
+            actionBusy = false;
+            if (!data) {
+                renderPanel();
+                return;
+            }
+            applyBattleResponse(data);
+        }
+
+        /**
+         * Follow the battle from the poll endpoint while someone else can
+         * move it: players follow the whole battle; the DM only needs the
+         * poll while a player's choice is being awaited. A turn counter or
+         * sequence going backwards means a restart happened elsewhere —
+         * reload for the clean server-rendered slate.
+         */
+        async function pollOnce() {
+            const shouldPoll = !TERMINAL_STATUSES.includes(currentStatus)
+                && (!isDm || currentStatus === 'awaiting');
+            if (!panel || !shouldPoll) { return; }
+            let response;
+            try {
+                response = await fetch(
+                    `${panel.dataset.stateUrl}?after=${lastSequence}`
+                );
+            } catch (error) {
+                return; // transient network trouble; the next tick retries
+            }
+            if (!response.ok) { return; }
+            const data = await response.json();
+            const nextSequence = (data.view.next_sequence || 1) - 1;
+            if (data.turn < currentTurn || nextSequence < lastSequence) {
+                window.location.reload();
+                return;
+            }
+            const changed = data.status !== currentStatus
+                || data.turn !== currentTurn
+                || nextSequence !== lastSequence
+                || (data.events || []).length > 0
+                || (typeof data.stale_html === 'string'
+                    && data.stale_html.trim() !== lastStaleHtml);
+            if (changed) { applyBattleResponse(data); }
+        }
+
+        renderArena(arena, view);
+        renderRoster(roster, view, renameOptions, seatsById(seats), openDetail);
+
+        // Selecting a figure on the map opens that combatant's panel in the
+        // roster and brings the card into view (#302). Delegated, so it
+        // survives the re-render the poll does; and it opens the one panel
+        // the card already owns rather than floating a second copy over the
+        // map, which would be the transient popup the house rule forbids.
+        arena.addEventListener('click', (event) => {
+            const marker = event.target.closest
+                && event.target.closest('[data-combatant]');
+            if (!marker) { return; }
+            const combatantId = Number(marker.dataset.combatant);
+            const card = roster.querySelector(
+                `[data-combatant="${combatantId}"]`
+            );
+            const detail = card && card.querySelector('.combatant-detail');
+            if (!detail) { return; }
+            openDetail.add(combatantId);
+            detail.open = true;
+            card.scrollIntoView({ block: 'nearest' });
+        });
+
+        currentStatus = statusChip.textContent.trim().toLowerCase();
+        currentStatus = Object.keys(statusLabels).find(
+            (key) => statusLabels[key].toLowerCase() === currentStatus
+        ) || currentStatus;
+        currentTurn = Number(turnLabel.textContent) || 0;
+        renderPanel();
+        if (panel && panel.dataset.stateUrl) {
+            setInterval(pollOnce, POLL_INTERVAL_MS);
+        }
+
+        if (button) {
+            // A record-writing fight whose records moved is refused (#842):
+            // the server sends the notice and the Game Master's control, and
+            // they stay in the slot until a reload or an advance clears them.
+            const showStale = (data, status) => {
+                if (status !== 409 || !staleSlot || !data || !data.stale_html) {
+                    return false;
+                }
+                renderStale(data.stale_html);
+                if (data.advance) {
+                    button.textContent = data.advance.label;
+                }
+                return true;
+            };
+            let refusedAsStale = false;
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                refusedAsStale = false;
+                const data = await postAction(
+                    button.dataset.url, 'Advancing the turn', undefined,
+                    (body, status) => {
+                        refusedAsStale = showStale(body, status);
+                        return refusedAsStale;
+                    }
+                );
+                if (!data) {
+                    button.disabled = refusedAsStale;
+                    return;
+                }
+                applyBattleResponse(data);
+            });
+        }
+
+        // A seat hand-off (#853): delegated, because the roster repaints on
+        // every poll. The answer is the battle payload, so the roster that
+        // comes back says who plays the figure now.
+        roster.addEventListener('click', async (event) => {
+            const handOff = event.target.closest
+                && event.target.closest('[data-seat-url]');
+            if (!handOff) { return; }
+            handOff.disabled = true;
+            const data = await postAction(
+                handOff.dataset.seatUrl,
+                handOff.dataset.seatHandOff === 'take'
+                    ? 'Taking the seat' : 'Giving the seat back'
+            );
+            if (!data) {
+                handOff.disabled = false;
+                return;
+            }
+            applyBattleResponse(data);
+        });
+
+        // Restart confirms in place: the button swaps for a confirm/cancel
+        // pair (no modal — state-driven UI, house rule), and confirming
+        // clears the log the server has already emptied.
+        const restartGroup = byId('restart-group');
+        const restartButton = byId('restart-battle');
+        const restartConfirm = byId('restart-confirm');
+        const restartCancel = byId('restart-cancel');
+        if (restartGroup && restartButton && restartConfirm && restartCancel) {
+            const setConfirming = (confirming) => {
+                restartGroup.dataset.confirming = confirming ? 'true' : 'false';
+            };
+            restartButton.addEventListener('click', () => {
+                setConfirming(true);
+                restartConfirm.focus();
+            });
+            restartCancel.addEventListener('click', () => {
+                setConfirming(false);
+                restartButton.focus();
+            });
+            restartConfirm.addEventListener('click', async () => {
+                restartConfirm.disabled = true;
+                const data = await postAction(
+                    restartButton.dataset.url,
+                    'Restarting the battle'
+                );
+                restartConfirm.disabled = false;
+                setConfirming(false);
+                if (!data) { return; }
+                resetLog(log, data.empty_log_html);
+                applyBattleResponse(data);
+            });
+        }
+    }
+
+    /**
+     * True while the viewer is mid-interaction in the lobby (a claim form
+     * open, a control focused): reloading then would throw away their
+     * keystrokes, so the poll holds off until they settle.
+     */
+    function lobbyEditing(lobby, activeElement) {
+        if (lobby.querySelector('details[open]')) { return true; }
+        return Boolean(activeElement) && lobby.contains(activeElement)
+            && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(
+                activeElement.tagName
+            );
+    }
+
+    /**
+     * Wire the lobby page: poll the state endpoint and reload whenever the
+     * seats change under the viewer or the battle starts. The reload lands
+     * on the server-rendered truth — same state-driven idiom as the battle
+     * page, with the whole document as the render target.
+     */
+    function initLobbyPage() {
+        const lobby = document.getElementById('battle-lobby');
+        const seatsScript = document.getElementById('battle-seats');
+        if (!lobby || !seatsScript || !lobby.dataset.stateUrl) { return; }
+        let baseline = JSON.stringify(JSON.parse(seatsScript.textContent));
+        setInterval(async () => {
+            if (lobbyEditing(lobby, document.activeElement)) { return; }
+            let response;
+            try {
+                response = await fetch(lobby.dataset.stateUrl);
+            } catch (error) {
+                return; // transient network trouble; the next tick retries
+            }
+            if (!response.ok) { return; }
+            const data = await response.json();
+            if (data.status !== 'lobby'
+                    || JSON.stringify(data.seats) !== baseline) {
+                window.location.reload();
+            }
+        }, POLL_INTERVAL_MS);
+    }
+
+    if (typeof document !== 'undefined') {
+        initBattlePage();
+        initLobbyPage();
+    }
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = {
+            axialToPixel,
+            hexCorners,
+            hexHalfSize,
+            arenaViewBox,
+            poolFraction,
+            shortName,
+            groundWeaponLabel,
+            optionLetter,
+            statusLabel,
+            seatsById,
+            topCandidateIndex,
+            teamOrderOf,
+            teamTint,
+            renderArena,
+            renderRoster,
+            detailPanel,
+            renderTurnPanel,
+            appendTurns,
+            resetLog,
+            lobbyEditing,
+            initDiceToggle,
+            initBattlePage,
+            initLobbyPage,
+        };
+    }
+    root.battlePage = { initBattlePage, initLobbyPage };
+}(typeof window !== 'undefined' ? window : globalThis));

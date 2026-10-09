@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700" viewBox="0 0 1000 700" role="img" aria-labelledby="corran-reach-title">
+  <title id="corran-reach-title">The Corran Reach: a tidal river running west from chalk hills to the sea</title>
+  <rect width="1000" height="700" fill="#efe6cf"/>
+  <!-- The sea, with the estuary cut into the coast. -->
+  <path d="M0 0 H150 C170 120 140 200 190 280 C230 330 300 330 330 360 C300 390 230 390 200 430 C160 500 190 600 160 700 H0 Z" fill="#b9cfd6" stroke="#6f8f99" stroke-width="2"/>
+  <!-- Greyfen: salt marsh south of the estuary. -->
+  <path d="M200 430 C260 420 330 430 380 470 C400 520 340 560 280 560 C230 560 190 520 200 430 Z" fill="#cbd3b2" stroke="#8a9670" stroke-dasharray="6 4"/>
+  <g stroke="#8a9670" stroke-width="1.5">
+    <path d="M230 470 l10 -14 M250 490 l10 -14 M275 470 l10 -14 M300 500 l10 -14 M330 480 l10 -14 M260 520 l10 -14 M310 530 l10 -14"/>
+  </g>
+  <!-- The Tallow Hills: chalk downs to the north and east. -->
+  <g fill="none" stroke="#a08a5c" stroke-width="2">
+    <path d="M560 150 q30 -40 60 0 M640 120 q30 -40 60 0 M720 160 q30 -40 60 0 M800 130 q30 -40 60 0 M680 220 q30 -40 60 0 M780 230 q30 -40 60 0"/>
+    <path d="M870 300 q30 -45 60 0 M900 380 q30 -45 60 0"/>
+  </g>
+  <!-- The Corran, from the hills to the estuary. -->
+  <path d="M960 340 C900 330 870 360 820 350 C760 340 740 380 690 370 C640 360 610 330 560 345 C510 360 480 400 430 390 C390 382 360 362 330 360" fill="none" stroke="#6f8f99" stroke-width="9" stroke-linecap="round"/>
+  <!-- Ostry Abbey's island in mid-river. -->
+  <ellipse cx="610" cy="340" rx="16" ry="8" fill="#9fb48a" stroke="#5f7550"/>
+  <!-- The Drowned Bell's tower in the estuary. -->
+  <rect x="218" y="316" width="8" height="16" fill="#5b4a3a"/>
+  <!-- Roads. -->
+  <g fill="none" stroke="#7a5c3a" stroke-width="2" stroke-dasharray="8 5">
+    <path d="M300 326 C350 320 400 340 455 380"/>
+    <path d="M455 380 C520 420 600 420 700 400 C780 390 850 380 925 350"/>
+  </g>
+  <g font-family="Georgia, 'Times New Roman', serif" fill="#3b2f22">
+    <text x="60" y="360" font-size="22" font-style="italic" fill="#45626b">The Western Sea</text>
+    <text x="520" y="60" font-size="30" letter-spacing="3">THE CORRAN REACH</text>
+    <text x="700" y="455" font-size="18" font-style="italic" fill="#45626b">River Corran</text>
+  </g>
+  <g font-family="Georgia, 'Times New Roman', serif" font-size="17" fill="#3b2f22">
+    <circle cx="300" cy="326" r="7" fill="#7a3b2a"/><text x="310" y="310">Brinemouth</text>
+    <circle cx="150" cy="300" r="6" fill="#7a3b2a"/><text x="150" y="285" text-anchor="middle">Lantern Rock</text>
+    <circle cx="222" cy="313" r="5" fill="#7a3b2a"/><text x="232" y="262">The Drowned Bell</text>
+    <circle cx="290" cy="500" r="6" fill="#7a3b2a"/><text x="290" y="590" text-anchor="middle">Greyfen</text>
+    <circle cx="455" cy="380" r="7" fill="#7a3b2a"/><text x="455" y="420" text-anchor="middle">Hollin Ford</text>
+    <circle cx="540" cy="300" r="7" fill="#7a3b2a"/><text x="540" y="282" text-anchor="middle">Brannock</text>
+    <circle cx="610" cy="340" r="5" fill="#7a3b2a"/><text x="625" y="325">Ostry Abbey</text>
+    <circle cx="760" cy="350" r="6" fill="#7a3b2a"/><text x="760" y="385" text-anchor="middle">Wendle Mill</text>
+    <text x="690" y="200" text-anchor="middle" font-style="italic">The Tallow Hills</text>
+    <circle cx="840" cy="260" r="6" fill="#7a3b2a"/><text x="840" y="290" text-anchor="middle">Harrowdeep</text>
+    <circle cx="925" cy="350" r="7" fill="#7a3b2a"/><text x="925" y="420" text-anchor="middle">Ashcombe</text>
+    <text x="925" y="438" text-anchor="middle" font-size="13" font-style="italic">to the Uplands</text>
+  </g>
+</svg>

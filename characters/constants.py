@@ -1,0 +1,214 @@
+"""Shared numeric and string constants for character views.
+
+Keeps magic numbers in one place so behavior stays consistent across endpoints
+and the test suite can assert against the same values. A couple of one-line
+helpers that operate purely on those constants live here too, so both
+``characters.views`` and ``characters.skills`` can reach them without either
+importing the other.
+"""
+
+import re
+
+# Attribute caps (Strength/Dex/Con can rise to 30 via experience).
+MAX_ATTRIBUTE_VALUE = 30
+
+# The age every character starts at, before any prior experience. One number,
+# read by ``Character.age``'s field default, by the aging schedule's zero point
+# (``characters.skills.aging_stage_for_age``), and by the printed rules test.
+STARTING_AGE = 16
+
+# The "_format" marker on a character export document; the importer (and the
+# GM's /character command, issue #344) accept only documents carrying it.
+CHARACTER_EXPORT_FORMAT = "tarmar-character"
+
+# The aging schedule advances one stage every this many years of life. Prior
+# experience used to be sold in 4-year terms and aging was keyed to the term
+# number; since issue #221 experience is bought a year at a time and aging is
+# keyed to age, so this is what turns an age into a stage of the aging table.
+YEARS_PER_AGING_STAGE = 4
+
+# The attribute a "+1 STR"/"+1 DEX"/"+1 CON" experience result raises, keyed by
+# the short name the result carries. Lives here rather than in ``skills.py``
+# because both the simulator (which raises its running score) and
+# ``Character._apply_attribute_bonus`` (which writes the gain back) read it, and
+# they must agree on which attribute a result names -- issue #629 was the two
+# sides disagreeing on how much a result was worth.
+ATTRIBUTE_BONUS_FIELDS: dict[str, str] = {
+    "str": "strength",
+    "dex": "dexterity",
+    "con": "constitution",
+}
+
+# The six core attributes, as (model field name, sheet label), in rolling order.
+# Single source of truth for anything that walks the core six: the 3d6 roller,
+# the point-buy builder, and the creation form.
+CORE_ATTRIBUTE_FIELDS = (
+    ("strength", "STR"),
+    ("dexterity", "DEX"),
+    ("intelligence", "INT"),
+    ("wisdom", "WIS"),
+    ("constitution", "CON"),
+    ("charisma", "CHR"),
+)
+
+# Point-buy character creation. The rules let a player either roll 3d6 per
+# attribute or "divide 65 points between the six core attributes". The per
+# attribute bounds mirror what 3d6 can produce, so a bought character starts in
+# the same range as a rolled one. (The model validators allow 1-30 because
+# experience can push STR/DEX/CON past 18 later; that is not a starting range.)
+POINT_BUY_TOTAL = 65
+POINT_BUY_MIN_ATTRIBUTE = 3
+POINT_BUY_MAX_ATTRIBUTE = 18
+
+
+def point_buy_budget_note(spent: int) -> str | None:
+    """How far a bought set of attributes sits off the point budget.
+
+    The one wording of that sentence. The creation form writes it into the
+    character's dice log (``characters.dice``) and the GM session's
+    ``/character`` save reports it back to a DM (issue #352), so an
+    off-budget character says the same thing wherever it was built.
+
+    Args:
+        spent: The sum of the six core attributes.
+
+    Returns:
+        The sentence, or ``None`` when ``spent`` is exactly on budget.
+    """
+    if spent == POINT_BUY_TOTAL:
+        return None
+    direction = "over" if spent > POINT_BUY_TOTAL else "under"
+    return (
+        f"Point-buy total: {spent} — {abs(spent - POINT_BUY_TOTAL)} "
+        f"{direction} the {POINT_BUY_TOTAL}-point budget."
+    )
+
+
+# The Fatigue roll is the 2d6 component of the Fatigue pool
+# (reference/content/public-rules/characters/derived-pools.md: "Fatigue = CON +
+# WIS + INT + (DEX or STR, whichever is higher) + 2d6"), so those two dice are
+# the whole of what the field can hold. It used to be bounded only by the
+# smallint ceiling, and 30000 flowed straight into Fatigue, Body, the injury
+# thresholds and battle seating (issue #653). Unlike a stated attribute, this
+# is a die roll rather than a build choice, so there is no Game Master override:
+# code owns the dice.
+FATIGUE_ROLL_MINIMUM = 2
+FATIGUE_ROLL_MAXIMUM = 12
+
+# The literacy roll's bounds: the 3d6 an origin's literacy check is made on
+# (reference/content/public-rules/characters/location.md, issue #741). Like the
+# Fatigue roll, a die roll rather than a build choice, so the column holds what
+# the dice can produce and nothing wider.
+LITERACY_ROLL_MINIMUM = 3
+LITERACY_ROLL_MAXIMUM = 18
+
+# Injury thresholds. Both pools take -2 to all rolls from 5 down to 1 -- a flat
+# band, not a fraction of the pool -- so it is the same number for every
+# character. See reference/content/public-rules/characters/injury-thresholds-death.md.
+SEVERE_INJURY_BAND_TOP = 5
+
+# Equipment quantity and weight bounds.
+MAX_EQUIPMENT_QUANTITY = 999
+MAX_EQUIPMENT_WEIGHT_LBS = 1000
+MAX_EQUIPMENT_NOTES_LENGTH = 200
+MAX_EQUIPMENT_NAME_LENGTH = 100
+MAX_EQUIPMENT_DAMAGE_LENGTH = 20
+
+# Inclusive bounds for to_hit_mod / damage_mod / critical_mod / stops_mod / dex_mod
+# and analogues. Anything outside this range is rejected.
+MAX_EQUIPMENT_MODIFIER = 10
+
+# Armor stops + dex penalty caps.
+MAX_ARMOR_STOPS = 10
+MAX_ARMOR_DEX_PENALTY_MAGNITUDE = 10
+
+# Damage dice format: optional dN where N is small, plus optional +/- modifier.
+# Examples: "1d6", "2d8+1", "1d10-2". Rejects "999d999" etc.
+# \A and \Z anchor the full string (unlike $, which matches before a trailing \n).
+DAMAGE_DICE_PATTERN = re.compile(r"\A\d{1,2}d\d{1,3}(?:[+-]\d{1,3})?\Z")
+
+# Character name allowed characters: letters (any unicode letter), digits,
+# spaces, hyphens, underscores, periods, apostrophes. No emoji, no zero-width
+# joiners, no control chars. \A...\Z forbids trailing newlines.
+# The characters a name may use, as a regex character-class body. Exposed so
+# patterns that allow a little more (battle combatant names) extend it rather
+# than restate it.
+CHARACTER_NAME_CHARACTERS = r"\w \-.\'"
+CHARACTER_NAME_PATTERN = re.compile(rf"\A[{CHARACTER_NAME_CHARACTERS}]+\Z", re.UNICODE)
+MAX_CHARACTER_NAME_LENGTH = 100
+#: The name a character takes when nothing gives it one (the Games Master
+#: chat's unnamed character, a blank account name; issue #870).
+UNNAMED_CHARACTER = "Unnamed character"
+
+# Control characters (C0 and C1) plus the Unicode line/paragraph separators.
+# Used on the free-text fields CHARACTER_NAME_PATTERN does not cover -- equipment
+# names/notes and skill names -- where a wide charset has to stay allowed because
+# players legitimately type apostrophes, quotes and parentheses: "Bob's 6\" dagger",
+# "sword (+1 to hit)".
+#
+# Quotes and angle brackets stay allowed on purpose; the browser side escapes them
+# for both text and quoted-attribute contexts (escapeHtml in character_edit.html).
+# Control characters, by contrast, have no use in a single-line name or note and
+# they corrupt the machinery around them -- JSON embedded in a page, audit log
+# lines, exports -- so they are removed on the way in.
+CONTROL_CHARACTERS_PATTERN = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def strip_control_characters(text: str) -> str:
+    """Remove control characters from a single-line free-text field.
+
+    Control characters become a single space rather than vanishing, so
+    ``"line one\\nline two"`` does not collapse into ``"line onetwo"``; runs of
+    whitespace are then collapsed and the result stripped.
+
+    Args:
+        text: Raw user-supplied text.
+
+    Returns:
+        The text with control characters removed and whitespace normalized.
+    """
+    return " ".join(CONTROL_CHARACTERS_PATTERN.sub(" ", text).split())
+
+
+#: Every character the name rule refuses (the complement of
+#: :data:`CHARACTER_NAME_CHARACTERS`).
+CHARACTER_NAME_REFUSED = re.compile(rf"[^{CHARACTER_NAME_CHARACTERS}]", re.UNICODE)
+
+
+def name_within_rule(text: str, *, fallback: str) -> str:
+    """A name the name rule accepts, made from text nobody typed as a name.
+
+    Issue #870: three paths stored a name they built from something else --
+    the Games Master chat's label for a character, a Game Master's account
+    name on the creation page, a battle's free-text name -- without asking
+    the rule, so the character's own export could not be imported. Each now
+    makes its name here: every character the rule refuses is taken out
+    (``"Aldwin, the Grey"`` becomes ``"Aldwin the Grey"``, the account
+    ``"probe.gm+1@x"`` becomes ``"probe.gm1x"``), whitespace is collapsed and
+    the result capped at :data:`MAX_CHARACTER_NAME_LENGTH`. A name somebody
+    typed as a name is refused instead, as the sheet refuses it.
+
+    Args:
+        text: What the name is made from.
+        fallback: The name when nothing of ``text`` is left; it must itself
+            pass the rule.
+
+    Returns:
+        A name :data:`CHARACTER_NAME_PATTERN` matches.
+    """
+    kept = CHARACTER_NAME_REFUSED.sub("", strip_control_characters(text))
+    name = " ".join(kept.split())[:MAX_CHARACTER_NAME_LENGTH].rstrip()
+    return name if name else fallback
+
+
+# The six core attributes, in character-sheet order. Each has a max of 30 on the
+# model. Creation, export, and beast variation all build their field lists from
+# this rather than restating the six names (issue #337).
+CHARACTER_ATTRIBUTE_FIELDS: tuple[str, ...] = (
+    "strength",
+    "dexterity",
+    "intelligence",
+    "wisdom",
+    "constitution",
+    "charisma",
+)

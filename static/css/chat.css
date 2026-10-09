@@ -1,0 +1,1259 @@
+/* ===== Chat Layout (light theme) ===== */
+
+/* The phone session bar's height, shared by the bar and the panel overlay
+   that opens beneath it (issue #431). */
+:root {
+    --gm-mobile-bar-height: 3rem;
+}
+
+/* Override base main constraints for chat pages */
+/* The chat's full-bleed column: no page padding or margin. Its width is
+   base.css's main.page-width-none, chosen in main_attrs (#338 item 24). */
+.chat-main {
+    padding: 0;
+    margin: 0;
+}
+
+/* The full-window GM pages (chat and map) fill the window exactly (issue
+   #431). They used to subtract a guessed 60px header, but the header renders
+   at 75px on desktop and two rows (~89px) on phones, so the bottom of every
+   page, the message box included, sat below the fold. The page is now a
+   window-high column: the header keeps its natural height, main takes what is
+   left, and the footer stays at the bottom in a compact row. dvh, not vh, so a
+   phone's browser toolbar cannot cover the input. */
+body:has(> main.chat-main) {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+}
+body:has(> main.chat-main) > header,
+body:has(> main.chat-main) > footer {
+    flex: none;
+}
+body:has(> main.chat-main) > footer {
+    margin-top: 0;
+    padding: 0.35rem 1rem;
+}
+main.chat-main {
+    flex: 1;
+    min-height: 0;
+}
+
+/* Mobile-only session switcher (desktop uses the sidebar). */
+.mobile-session-bar {
+    display: none;
+}
+
+/* The chat page carries the site's trail above the chat (issue #339, item
+   13). The page is one window-high column: the trail takes its own short row
+   and the chat takes what is left, so the input never falls below the fold.
+   Scoped to .chat-page; the map page shares .chat-main and keeps its own. */
+.chat-page {
+    display: flex;
+    flex-direction: column;
+}
+.chat-page > .breadcrumb {
+    flex: none;
+    margin: 0;
+    padding: 0.4rem 1rem;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+
+/* ===== Chat layout ===== */
+.chat-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    /* The phone panel overlay is placed against the chat, not the window. */
+    position: relative;
+}
+
+/* Sidebar */
+.sidebar {
+    width: 260px;
+    background: var(--colour-surface-subtle);
+    border-right: 1px solid var(--colour-hairline);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.sidebar-header h3 { font-size: 0.9rem; font-weight: 600; color: var(--colour-ink-secondary); }
+.session-list {
+    list-style: none;
+    overflow-y: auto;
+    flex: 1;
+}
+.session-item {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.session-item a {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    padding: 0.5rem 1rem;
+    color: var(--colour-ink);
+    text-decoration: none;
+}
+.session-item a:hover { background: var(--colour-surface-tint); }
+.session-item.active a { background: var(--colour-hairline); border-left: 3px solid var(--colour-ink); }
+.session-name { display: block; font-size: 0.9rem; }
+.session-meta { font-size: 0.75rem; color: var(--colour-ink-faint); }
+.session-delete-btn {
+    flex: 0 0 auto;
+    width: 2rem;
+    border: none;
+    background: transparent;
+    /* Live text on an enabled control, so it may not borrow
+       --colour-ink-disabled: that grey is the signal that a control cannot be
+       used, and it read 2.71:1 on the sidebar's ground here while the audit
+       measured only the hover pairing (issue #736). --colour-ink-placeholder
+       clears 4.5:1 on white but only 4.31:1 on this sidebar, and less again
+       on the tint a hovered row paints, so this takes the muted ink #709 gave
+       .deleted-row td for the same reason: 5.45:1 at rest. */
+    color: var(--colour-ink-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.session-delete-btn:hover { color: var(--colour-chat-delete-hover); background: var(--colour-surface-tint); }
+
+/* Stats sidebar */
+.stats-panel {
+    padding: 1rem;
+    overflow-y: auto;
+    flex: 1;
+}
+.stat-item { margin-bottom: 0.75rem; }
+.stat-value { font-size: 1.5rem; font-weight: 700; color: var(--colour-ink); }
+.stat-label { display: block; font-size: 0.8rem; color: var(--colour-ink-faint); }
+.stats-panel h4 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: var(--colour-ink-faint);
+    margin: 1rem 0 0.5rem;
+}
+.stat-list { list-style: none; }
+.stat-list li {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    padding: 0.2rem 0;
+}
+.stat-list .count { color: var(--colour-ink-faint); }
+
+/* Chat container */
+.chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem 1.5rem;
+}
+
+/* Mode indicator and control (issues #353, #372): a quiet strip above the
+   transcript naming which Game Master this session is talking to, and
+   changing it. Part of the page, with nothing to dismiss and nothing that
+   floats over the conversation. Everyone sees it, because anyone may switch
+   their own session. */
+.gm-mode-indicator {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.4rem 1.5rem;
+    border-bottom: 1px solid var(--colour-hairline);
+    background: var(--colour-surface-subtle);
+    font-size: 0.75rem;
+    color: var(--colour-ink-indicator);
+}
+.gm-mode-name {
+    font-weight: 600;
+    color: var(--colour-ink-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+/* The control sits at the far end of the strip so the name reads first. */
+.gm-mode-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+}
+.gm-mode-switch select {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid var(--colour-border-soft);
+    border-radius: 3px;
+    background: var(--colour-surface);
+    color: var(--colour-ink-secondary);
+}
+
+/* Messages */
+.message {
+    margin-bottom: 1rem;
+    max-width: 80%;
+}
+.message.user {
+    margin-left: auto;
+}
+.message.assistant {
+    margin-right: auto;
+}
+.message-role {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--colour-ink-faint);
+    margin-bottom: 0.2rem;
+}
+.message.user .message-role { text-align: right; }
+.message-content {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    overflow-wrap: break-word;
+}
+.message.user .message-content {
+    background: var(--colour-chat-user-surface);
+    border-bottom-right-radius: 2px;
+}
+.message.assistant .message-content {
+    background: var(--colour-surface-muted);
+    border: 1px solid var(--colour-hairline);
+    border-bottom-left-radius: 2px;
+}
+
+/* A save notice (issue #344): plain text with the sheet's line breaks kept. */
+.message.assistant.notice .message-content {
+    white-space: pre-wrap;
+    background: var(--colour-chat-notice-surface);
+    border-color: var(--colour-chat-dice-border);
+    border-left: 3px solid var(--colour-chat-notice-rule);
+}
+
+/* A grounding block the server could not attach to the turn (issue #374).
+   Warmer than an error and colder than the GM's own voice: the turn worked,
+   but it was answered with less than the usual grounding. It has no dismiss
+   control because nothing here dismisses itself either — it scrolls away with
+   the turn it belongs to. */
+.message.assistant .grounding-notice {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    padding: 0.5rem 1rem;
+    margin-top: 0.35rem;
+    background: var(--colour-grounding-surface);
+    border: 1px solid var(--colour-grounding-border);
+    border-left: 3px solid var(--colour-grounding-rule);
+    border-radius: 4px;
+    color: var(--colour-grounding-ink);
+}
+
+/* The server-rolled dice line a /roll answer carries (issue #175). */
+.message.assistant .dice-roll {
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+    margin-bottom: 0.25rem;
+    background: var(--colour-chat-dice-surface);
+    border: 1px solid var(--colour-chat-dice-border);
+    border-radius: 8px;
+    border-bottom-left-radius: 2px;
+}
+
+/* GM choice bar (issue #342): one button per numbered option the reply ends
+   with, plus "Something else…" for a typed action. Sits inside the GM
+   message so it shares its width; stays until the player sends anything. */
+.choice-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+.choice-btn {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    max-width: 100%;
+    background: var(--colour-surface);
+    color: var(--colour-ink);
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.choice-btn:hover,
+.choice-btn:focus-visible {
+    background: var(--colour-surface-muted);
+    border-color: var(--colour-ink);
+}
+/* The ring #701 restored sitewide, written out here because base.css's rule
+   names input/select/textarea and a choice button is a <button>. It used to
+   carry `outline: none` in the rule above, which removed the ring from
+   exactly the state it exists for -- and this is a primary control, the way a
+   reader answers a GM turn that ends in a numbered list (#342). The darker
+   border is the mouse affordance; the outline is what a keyboard user needs
+   (issue #737). Same idiom as .battle-button:focus-visible. */
+.choice-btn:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+.choice-btn .choice-key {
+    flex: 0 0 auto;
+    min-width: 1.25em;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-ink-faint);
+    border: 1px solid var(--colour-border-soft);
+    border-radius: 3px;
+    padding: 0 0.3em;
+}
+.choice-btn .choice-label {
+    overflow-wrap: anywhere;
+}
+.choice-btn-other {
+    font-style: italic;
+    color: var(--colour-ink-secondary);
+    border-style: dashed;
+}
+
+/* Markdown inside messages */
+.message-content h1, .message-content h2, .message-content h3 {
+    margin: 0.5em 0 0.3em;
+    font-size: 1em;
+    font-weight: 700;
+}
+.message-content p { margin: 0.3em 0; }
+.message-content ul, .message-content ol { margin: 0.3em 0; padding-left: 1.5em; }
+.message-content code {
+    background: rgba(0,0,0,0.06);
+    padding: 0.15em 0.3em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+.message-content pre {
+    background: var(--colour-surface-tint);
+    padding: 0.75em;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+}
+.message-content pre code { background: none; padding: 0; }
+.message-content table {
+    border-collapse: collapse;
+    margin: 0.5em 0;
+    width: 100%;
+}
+.message-content th, .message-content td {
+    border: 1px solid var(--colour-border-soft);
+    padding: 0.3em 0.6em;
+    text-align: left;
+    font-size: 0.9em;
+}
+.message-content th { background: var(--colour-surface-muted); }
+.message-content blockquote {
+    border-left: 3px solid var(--colour-ink);
+    padding-left: 0.75em;
+    color: var(--colour-ink-muted);
+    margin: 0.5em 0;
+}
+
+/* Command bar */
+.command-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1.5rem;
+    border-top: 1px solid var(--colour-hairline);
+}
+.cmd-btn {
+    background: var(--colour-surface-muted);
+    color: var(--colour-ink-secondary);
+    border: 1px solid var(--colour-border-soft);
+    padding: 0.3rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.cmd-btn:hover { background: var(--colour-hairline); color: var(--colour-ink); }
+/* A command-bar link (the reviews list, issue #572) looks like its buttons. */
+a.cmd-btn { display: inline-flex; align-items: center; text-decoration: none; }
+
+/* Input bar */
+.chat-input {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    border-top: 1px solid var(--colour-hairline);
+    background: var(--colour-surface-subtle);
+}
+/* The message box has been a textarea since #716's low finding, and these
+   three rules still said `input`, so none of them reached it: the field took
+   the browser's default ground, ink, border and placeholder instead of the
+   site's, and the #999 the contrast audit reported for it was a colour no
+   browser ever painted (issue #732). Both spellings are named so a
+   single-line field added to this bar later is styled with it.
+
+   The `outline: none` this rule used to carry is gone with it. It is the
+   exact declaration issue #701 took out of base.css -- it left a keyboard
+   user nothing but a 1px border tint, and the Games Master page was the page
+   that complaint named. Reaching the field at last would have put it back on
+   the app's most-used control. The site's focus ring applies here now, and
+   base.css's `textarea:focus` border tint still comes with it. */
+.chat-input textarea,
+.chat-input input {
+    flex: 1;
+    background: var(--colour-surface);
+    color: var(--colour-ink);
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    padding: 0.6rem 1rem;
+    font-size: 0.95rem;
+}
+.chat-input textarea:focus,
+.chat-input input:focus { border-color: var(--colour-ink); }
+/* A placeholder is live text in an enabled field, not an inactive control, so
+   it is held to 4.5:1 rather than borrowing the disabled grey (issue #732). */
+.chat-input textarea::placeholder,
+.chat-input input::placeholder { color: var(--colour-ink-placeholder); }
+.chat-input button {
+    background: var(--colour-ink);
+    color: var(--colour-surface);
+    border: none;
+    padding: 0.6rem 1.25rem;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+}
+.chat-input button:hover { background: var(--colour-ink-secondary); }
+.chat-input button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Empty state */
+.chat-layout .empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--colour-ink-faint);
+}
+.chat-layout .empty-state p { margin: 0.5rem 0; }
+.hint { font-size: 0.85rem; }
+
+/* The GM is working (issue #398): shown from send until the turn ends. */
+.gm-status {
+    margin: 0 0 0.35rem;
+    color: var(--colour-ink-muted);
+    font-style: italic;
+    font-size: 0.9rem;
+}
+.gm-status::after {
+    content: '';
+    animation: dots 1.5s infinite;
+}
+
+/* Thinking spinner */
+.thinking-indicator {
+    color: var(--colour-ink-faint);
+    font-style: italic;
+    padding: 0.5rem 1rem;
+}
+.thinking-indicator::after {
+    content: '';
+    animation: dots 1.5s infinite;
+}
+@keyframes dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+/* A Games Master turn against a real model runs for tens of seconds, and the
+   status line animated its ellipsis for every one of them (issue #708).
+   battle.css:568 already honoured this preference; the chat sheet did not.
+   The static "..." stays, so the working state is still readable. */
+@media (prefers-reduced-motion: reduce) {
+    .gm-status::after,
+    .thinking-indicator::after {
+        animation: none;
+        content: '...';
+    }
+}
+
+/* Buttons */
+.btn {
+    background: var(--colour-surface-muted);
+    color: var(--colour-ink);
+    border: 1px solid var(--colour-border-soft);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.btn:hover { background: var(--colour-hairline); }
+.btn-sm { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
+/* A submitting .btn / .btn-sm (the panel's Attach and Fight, the no-script
+   Change mode) has always rendered as the classless submit does: full size,
+   charcoal, borderless. Declared here now that base.css's bare submit rule no
+   longer outranks class rules (#477); .btn-sm's small size is for the
+   non-submit buttons. */
+.btn[type="submit"] {
+    padding: 0.625rem 1rem;
+    font-size: 1rem;
+    border: none;
+    background: var(--colour-ink);
+    color: var(--colour-surface);
+}
+.btn[type="submit"]:hover { background: var(--colour-ink-secondary); }
+
+/* ===== Side panel (issue #341) =====
+   A tab strip over one container per tab; gm-panel.js toggles the
+   containers' [hidden]. Colours are the base.css tokens (issue #312).
+
+   The panel's width is the viewer's (issue #351): gm-panel-layout.js writes
+   an inline width from what it stored, and the 320px here is what a first
+   visit -- or a browser that refuses storage -- gets. The 8px of left
+   padding is the room the grab handle sits in, so nothing under it is
+   covered; border-box keeps the width the viewer dragged to exact. */
+.gm-panel {
+    position: relative;
+    width: 320px;
+    padding-left: 8px;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--colour-surface-subtle);
+    border-left: 1px solid var(--colour-hairline);
+    overflow: hidden;
+}
+/* The strip scrolls rather than overlapping itself (issue #699). Four groups
+   sharing 311px with `flex: 1` gave each 78px, which does not hold a label
+   and its split button: the "+" for Campaign was drawn on top of the final
+   "n", and the "−" belonging to Characters was not drawn at all. Each group
+   takes the width it needs now and the strip scrolls sideways when they do
+   not all fit. */
+.gm-panel-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--colour-hairline);
+    background: var(--colour-surface);
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+/* One tab: its button, and the small control that gives it a pane of its
+   own beside whatever is already open (gm-panel-layout.js builds both). */
+.gm-panel-tab-group {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: stretch;
+    border-bottom: 3px solid transparent;
+}
+.gm-panel-tab-group:has(.gm-panel-tab-button[aria-pressed="true"]) {
+    border-bottom-color: var(--colour-ink);
+}
+.gm-panel-tab-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 0.6rem 0.4rem;
+    border: none;
+    background: transparent;
+    color: var(--colour-ink-muted);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.gm-panel-split {
+    flex: 0 0 auto;
+    width: 1.5rem;
+    border: none;
+    background: transparent;
+    color: var(--colour-ink-faint);
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.gm-panel-split:hover:not(:disabled) {
+    color: var(--colour-ink);
+    background: var(--colour-surface-muted);
+}
+.gm-panel-split[aria-pressed="true"]:not(:disabled) { color: var(--colour-ink); }
+.gm-panel-split:disabled { opacity: 0.35; cursor: default; }
+.gm-panel-tab-button:hover { color: var(--colour-ink); }
+.gm-panel-tab-button[aria-pressed="true"] { color: var(--colour-ink); }
+.gm-panel-tab {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.75rem 1rem;
+}
+/* The Battle tab lights up while a fight is under way (issue #345): a dot
+   after the label, set by the server from the battle's status. */
+.gm-panel-tab-button.is-live::after {
+    content: "";
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-left: 0.4rem;
+    border-radius: 50%;
+    background: var(--colour-accent-gold);
+    vertical-align: middle;
+}
+/* ===== Panel width, panes and pop-out (issue #351) =====
+   The grab handle down the panel's left edge: drag it, double-click it to
+   go back to the default width, or focus it and use the arrow keys. It
+   sits in the panel's left padding, so it covers nothing. */
+.gm-panel-resize {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 8px;
+    z-index: 2;
+    cursor: col-resize;
+    touch-action: none;
+}
+/* A short grip bar down the middle of the handle: enough to say the edge
+   can be taken hold of, without reading as a second border. */
+.gm-panel-resize::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    width: 2px;
+    height: 2.5rem;
+    margin-top: -1.25rem;
+    border-radius: 1px;
+    background: var(--colour-border-soft);
+}
+.gm-panel-resize:hover::after,
+.gm-panel-resize:focus::after {
+    top: 0;
+    height: 100%;
+    margin-top: 0;
+    border-radius: 0;
+    background: var(--colour-accent-gold);
+}
+/* The handle is a real tab stop with arrow-key resizing
+   (gm-panel-layout.js), and this rule used to strip its outline and put
+   nothing back, so a keyboard user landing here saw nothing at all
+   (issue #701). base.css gives every [role="separator"] a focus-visible
+   outline now; the gold fill below is the mouse-hover affordance. */
+.gm-panel-resize:focus { background: var(--colour-accent-gold); }
+/* While a drag is under way the pointer keeps its meaning everywhere and
+   nothing selects text under it. */
+body.gm-panel-resizing, body.gm-panel-resizing * { cursor: col-resize !important; }
+body.gm-panel-resizing-rows, body.gm-panel-resizing-rows * { cursor: row-resize !important; }
+body.gm-panel-resizing, body.gm-panel-resizing-rows { user-select: none; }
+
+/* The stack of open panes, dividing the panel's height between them. */
+.gm-panel-stack {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.gm-pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.gm-pane[hidden] { display: none; }
+.gm-pane + .gm-pane { border-top: 1px solid var(--colour-hairline); }
+.gm-pane-title {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.25rem 0.5rem 0.25rem 0.25rem;
+    background: var(--colour-surface);
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.gm-pane-name {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--colour-ink-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gm-pane-title button {
+    flex: 0 0 auto;
+    padding: 0.2rem 0.35rem;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--colour-ink-muted);
+    font-size: 0.9rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.gm-pane-title button:hover:not(:disabled) {
+    color: var(--colour-ink);
+    background: var(--colour-surface-muted);
+}
+.gm-pane-title button:disabled { opacity: 0.3; cursor: default; }
+.gm-pane-close { font-size: 1.1rem; }
+.gm-pane-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.gm-pane-body[hidden] { display: none; }
+.gm-pane-collapsed { flex: 0 0 auto; }
+/* The pane while its page is open in another window: what it says is
+   state, not a message that fades (house rule: no transient UI). */
+.gm-pane-detached {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+}
+.gm-pane-detached[hidden] { display: none; }
+.gm-pane-detached-text {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+}
+/* The divider between two panes, dragged or arrowed to divide the height. */
+.gm-pane-divider {
+    flex: 0 0 auto;
+    height: 7px;
+    background: var(--colour-hairline);
+    cursor: row-resize;
+    touch-action: none;
+}
+.gm-pane-divider:hover,
+.gm-pane-divider:focus { background: var(--colour-accent-gold); }
+/* Focus outline comes from base.css's [role="separator"]:focus-visible rule
+   (issue #701); this used to strip it and leave the stop invisible. */
+.gm-panel-picker {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.gm-panel-picker select {
+    flex: 1;
+    min-width: 0;
+    padding: 0.35rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.gm-panel-error {
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    background: var(--colour-status-danger-surface);
+    color: var(--colour-status-danger-ink);
+    font-size: 0.85rem;
+}
+.gm-sheet {
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--colour-hairline);
+    font-size: 0.85rem;
+}
+.gm-sheet-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+.gm-sheet-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+.gm-sheet-name a { color: var(--colour-ink); text-decoration: none; }
+.gm-sheet-name a:hover { text-decoration: underline; }
+.gm-sheet-status { font-size: 0.75rem; color: var(--colour-ink-faint); }
+.gm-sheet-dead .gm-sheet-status { color: var(--colour-danger); }
+.gm-sheet-detach {
+    border: none;
+    background: transparent;
+    color: var(--colour-ink-faint);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.gm-sheet-detach:hover { color: var(--colour-danger-strong); }
+.gm-sheet-attributes {
+    width: 100%;
+    margin: 0.5rem 0;
+    border-collapse: collapse;
+    text-align: center;
+}
+.gm-sheet-attributes th {
+    font-size: 0.7rem;
+    color: var(--colour-ink-faint);
+    font-weight: 600;
+}
+.gm-sheet-attributes td { padding: 0.15rem 0; }
+.gm-sheet-value { font-weight: 700; }
+.gm-sheet-base { display: block; font-size: 0.7rem; color: var(--colour-ink-faint); }
+.gm-sheet-modifier { display: block; font-size: 0.75rem; color: var(--colour-ink-muted); }
+.gm-sheet-pools,
+.gm-sheet-facts {
+    display: grid;
+    gap: 0.25rem 0.75rem;
+    margin: 0.5rem 0;
+}
+.gm-sheet-pools { grid-template-columns: repeat(5, 1fr); text-align: center; }
+.gm-sheet-pools div { display: flex; flex-direction: column-reverse; }
+.gm-sheet-pools dt,
+.gm-sheet-facts dt { font-size: 0.7rem; color: var(--colour-ink-faint); }
+.gm-sheet-pools dd { font-size: 1.1rem; font-weight: 700; margin: 0; }
+/* The injury table's row for the current pools (issue #751). */
+.gm-sheet-condition { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--colour-ink-muted); }
+/* Luck, once per session per level (issue #861): the count and the spend. */
+.gm-luck-form {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.5rem;
+    margin: 0.5rem 0 0;
+    font-size: 0.8rem;
+}
+.gm-luck-form .gm-luck-roll { flex: 1 1 8rem; min-width: 0; width: auto; }
+.gm-luck-count { flex-basis: 100%; color: var(--colour-ink-muted); }
+.gm-sheet-facts div { display: flex; gap: 0.5rem; }
+.gm-sheet-facts dd { margin: 0; }
+.gm-sheet h5 {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--colour-ink-faint);
+    margin: 0.75rem 0 0.25rem;
+}
+.gm-sheet-list { list-style: none; margin: 0; padding: 0; }
+.gm-sheet-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.1rem 0;
+}
+/* --colour-ink-faint clears AA on the page ground but not on the panel's
+   tinted one, where these two sit (issue #709). */
+.gm-sheet-note { color: var(--colour-ink-muted); font-weight: normal; }
+.gm-sheet-empty { color: var(--colour-ink-muted); }
+
+/* The draft character the session is still building (issue #356). Marked off
+   from the saved sheets below it because it is not saved: the server keeps
+   its numbers, and /character is what turns it into a real character. */
+.gm-draft {
+    border-top: none;
+    border-left: 3px solid var(--colour-accent, var(--colour-ink-faint));
+    padding-left: 0.6rem;
+}
+.gm-draft-note {
+    margin: 0.15rem 0 0.5rem;
+    color: var(--colour-ink-faint);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+.gm-draft-unset { color: var(--colour-ink-faint); }
+.gm-draft-account li { font-size: 0.8rem; }
+
+/* The Map tab (issue #343): picker and follow box, zoom buttons, a clipped
+   viewport whose image carries the pan/zoom transform, and a caption. */
+.gm-panel-map {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.gm-panel-map[hidden] { display: none; }
+.gm-map-follow-label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
+    white-space: nowrap;
+}
+.gm-map-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.5rem;
+}
+.gm-map-zoom-level {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--colour-ink-faint);
+}
+.gm-map-viewport {
+    flex: 1;
+    min-height: 240px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--colour-hairline);
+    border-radius: 4px;
+    background: var(--colour-surface);
+    cursor: grab;
+    touch-action: none;
+}
+.gm-map-viewport.gm-map-dragging { cursor: grabbing; }
+.gm-map-image {
+    display: block;
+    width: 100%;
+    height: auto;
+    transform-origin: 0 0;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+.gm-map-caption {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+}
+.gm-map-caption-title { font-weight: 600; color: var(--colour-ink); }
+.gm-map-caption-place { margin-left: 0.25rem; }
+/* The party is somewhere no chart shows (issue #579). */
+.gm-map-unmapped {
+    margin: 0.35rem 0 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+    font-style: italic;
+}
+
+/* ===== Battle tab (issue #345) =====
+   The battle app's arena partial, in one column, nothing sticky: the tab
+   scrolls as a whole. battle.css still owns the map, roster, log and turn
+   panel; these rules only fit them to the panel's width. */
+.gm-fight-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.35rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.gm-panel-status {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+}
+/* Who would fight bare-handed (issue #844): state, not a toast. */
+.gm-panel-unarmed {
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    background: var(--colour-status-warning-surface);
+    color: var(--colour-status-warning-ink);
+    font-size: 0.85rem;
+}
+.gm-battle-header { margin-bottom: 0.5rem; }
+/* One line, cut with an ellipsis: the pane is narrow, and a long name wrapped
+   a word to a line beside the chips (issue #831). The link's title holds it whole. */
+.gm-battle-name {
+    margin: 0 0 0.35rem;
+    font-size: 0.95rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* How the fight ended (issue #785): it stays until the next fight. */
+.gm-battle-verdict {
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.65rem;
+    border-left: 3px solid var(--colour-border-input);
+    font-size: 0.85rem;
+    white-space: pre-line;
+}
+.gm-battle-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.75rem;
+}
+.gm-panel-battle .battle-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+}
+.gm-panel-battle .battle-arena-panel { position: static; }
+.gm-panel-battle #battle-arena { max-height: none; }
+.gm-panel-battle #battle-log {
+    max-height: 18rem;
+    overflow-y: auto;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .sidebar { display: none; }
+    /* The panel hides with the sidebar; the mobile bar's Panel button opens
+       it over the chat (gm-panel.js toggles .gm-panel-open). There is
+       nothing to drag on a phone: the panel is an overlay at the width the
+       screen allows, so the handle goes and its padding with it. */
+    .gm-panel { display: none; padding-left: 0; }
+    .gm-panel-resize { display: none; }
+    .gm-panel.gm-panel-open {
+        display: flex;
+        /* Over the chat, starting under the mobile bar so its Panel button
+           stays reachable to close it, and below the header however tall it
+           renders (issue #431); it used to be pinned 60px from the window
+           top. The bar's height is set, not measured, from the same token. */
+        position: absolute;
+        top: var(--gm-mobile-bar-height);
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-width: 420px;
+        z-index: 20;
+        box-shadow: 0 0 12px var(--colour-shadow);
+    }
+    .chat-layout { display: block; flex: 1; min-height: 0; }
+    .chat-container { height: 100%; }
+    .message { max-width: 95%; }
+    /* Surface session switching on mobile, where the sidebar is hidden. */
+    .mobile-session-bar {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        height: var(--gm-mobile-bar-height);
+        padding: 0 1rem;
+        border-bottom: 1px solid var(--colour-hairline);
+        background: var(--colour-surface-subtle);
+    }
+    .mobile-session-bar select {
+        flex: 1;
+        min-width: 0;
+        padding: 0.4rem;
+        border: 1px solid var(--colour-border-input);
+        border-radius: 4px;
+        font-size: 0.9rem;
+    }
+    .chat-messages { padding: 1rem; }
+    .command-bar, .chat-input { padding-left: 1rem; padding-right: 1rem; }
+    /* Wide markdown tables in GM replies scroll instead of breaking the page. */
+    .message-content table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+    }
+}
+
+/* ===== The map on its own page (issue #351) =====
+   gm/map.html renders the panel's Map partial full window; the section is
+   the same one the pane holds, given the whole page to fill. */
+.gm-map-page {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0.75rem 1rem 1rem;
+}
+.gm-map-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+.gm-map-page-header h2 { font-size: 1.1rem; }
+.gm-map-page .gm-panel-map { flex: 1; min-height: 0; }
+/* The picker is a control, not a banner: full window is no reason for a
+   dropdown the width of the page. */
+.gm-map-page .gm-panel-picker { justify-content: flex-start; }
+.gm-map-page .gm-panel-picker select { flex: 0 1 20rem; }
+
+/* The session's name, editable in place (issue #339, item 10). Sits above
+   the transcript, in the chat column, so the thing being named and the
+   thing it names are together. The saving/saved/error states come from
+   base.css's [data-field] rules — the studio's one autosave vocabulary. */
+.chat-session-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.5rem 0;
+}
+.session-name-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--colour-ink-faint);
+}
+.session-name-field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.session-name-input {
+    width: 100%;
+    max-width: 30rem;
+    padding: 0.25rem 0.4rem;
+    font: inherit;
+    font-weight: 600;
+    color: var(--colour-ink);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+.session-name-input:hover { border-color: var(--colour-border-soft); }
+/* The ground and border change stay; the `outline: none` that came with them
+   is gone (issue #737). This is an <input>, so base.css's sitewide
+   :focus-visible rule paints the ring -- the declaration here was suppressing
+   it and substituting a tint on a border that is transparent at rest, which
+   is the swap #701 rejected for the whole app. */
+.session-name-input:focus {
+    background: var(--colour-surface);
+    border-color: var(--colour-ink-faint);
+}
+.session-name-none {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--colour-ink-faint);
+}
+/* Which session this one continues the campaign of (issue #761). */
+.session-continued {
+    margin: 0.25rem 0 0;
+    font-size: 0.8rem;
+    color: var(--colour-ink-faint);
+}
+/* The offer to continue the last campaign, on the new-session page (#761). */
+.chat-layout .empty-state .gm-campaign-continue {
+    margin-top: 1.5rem;
+    color: var(--colour-ink-secondary);
+}
+@media (max-width: 768px) {
+    .chat-session-header { padding-left: 1rem; padding-right: 1rem; }
+}
+
+/* Notices beside the input (issue #436): results of Transcript and Send to
+   Claude, and the question Send to Claude asks, where the player is looking. */
+.chat-notices {
+    padding: 0 1.5rem;
+}
+.chat-notices:empty {
+    display: none;
+}
+@media (max-width: 768px) {
+    .chat-notices {
+        padding: 0 1rem;
+    }
+}
+
+/* The Campaign tab (issue #579): where the party is, who and what is in
+   play, and what is still open. Read from the records the plan actions
+   write, so the pane shows the same state the model was handed. */
+.gm-campaign-where {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.25rem 0.75rem;
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+}
+.gm-campaign-where dt {
+    color: var(--colour-ink-muted);
+}
+.gm-campaign-where dd {
+    margin: 0;
+}
+.gm-campaign-group {
+    margin-bottom: 1rem;
+}
+.gm-campaign-group h3 {
+    margin: 0 0 0.35rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--colour-ink-muted);
+}
+.gm-campaign-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+}
+.gm-campaign-list li {
+    padding: 0.35rem 0;
+    border-top: 1px solid var(--colour-hairline);
+}
+.gm-campaign-name {
+    display: block;
+}
+.gm-campaign-detail {
+    display: block;
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+}
+.gm-panel-empty {
+    margin: 0;
+    color: var(--colour-ink-muted);
+    font-size: 0.85rem;
+}
+.gm-campaign-resolved {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
+}
+
+/* The message box is a textarea now, so a multi-paragraph action can be typed
+   (#716, low finding). It starts one line tall and grows with its contents;
+   chat.js does the measuring and Enter still sends. */
+.chat-input #user-input {
+    resize: none;
+    overflow-y: auto;
+    line-height: 1.4;
+    font: inherit;
+    font-size: 1rem;
+}
+
+/* Where a long session was folded (issue #791): the recap the model reads in
+   place of the messages above, set apart from the conversation. */
+.gm-fold-recap {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border: 1px dashed var(--colour-border-input);
+    border-radius: 4px;
+}
+.gm-fold-recap .message-role { margin: 0 0 0.25rem; font-size: 0.8rem; }
+.gm-fold-note {
+    margin: 0 0 0.5rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
+}
+.gm-fold-recap .message-content { white-space: pre-wrap; }
+
+/* A Game Master's hand edits of the campaign's records (issues #789-#791). */
+.gm-hand-edit { margin: 0.25rem 0; font-size: 0.85rem; }
+.gm-hand-edit summary { cursor: pointer; color: var(--colour-ink-muted); }
+.gm-hand-form {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0.35rem 0;
+}
+.gm-hand-form label { display: grid; gap: 0.15rem; }
+.gm-hand-form input,
+.gm-hand-form textarea {
+    min-width: 0;
+    padding: 0.3rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    font: inherit;
+}
+.gm-hand-form button { justify-self: start; }
+.gm-hand-mark { font-style: italic; }

@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% load static %}
+{% load local_time %}
+{% block title %}Game Master — Tarmar Studio{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/battle.css' %}">
+<link rel="stylesheet" href="{% static 'css/chat.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="chat-main chat-page page-width-none"{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <!-- Sidebar: sessions -->
+    <aside class="sidebar" id="sidebar">
+        {% include "_canon_line.html" %}
+        <div class="sidebar-header">
+            <h3>Sessions</h3>
+            <button class="btn btn-sm" onclick="newSession()">+ New</button>
+        </div>
+        {% comment %}
+        Every session in the rail carries its date (issues #705 and #712). Two
+        sessions opened with the same first line were two entries reading
+        "I walk into the crypt." and "I walk into the crypt.", separable only
+        by a message count, and the delete confirmation then asked which of
+        them to delete without saying. The rail was also the one list of
+        things that happened in the app carrying no date at all. {% local_time %}
+        is the app's own helper, so this reads in the viewer's zone like the
+        header and the character list.
+        {% endcomment %}
+        <ul class="session-list" id="session-list">
+            {% for s in sessions %}
+            <li class="session-item {% if active_session and active_session.pk == s.pk %}active{% endif %}"
+                data-id="{{ s.pk }}">
+                <a href="?session={{ s.pk }}">
+                    <span class="session-name">{{ s.name }}</span>
+                    <span class="session-meta">{% local_time s.created_at "M d, Y" style="date" %} &middot; <span class="session-count">{{ s.message_count }} msg{{ s.message_count|pluralize }}</span></span>
+                </a>
+                <button type="button" class="session-delete-btn"
+                        aria-label="Delete session {{ s.name }}, started {{ s.created_at|date:'M d, Y' }}" title="Delete session"
+                        onclick="deleteSession({{ s.pk }}, '{{ s.name|escapejs }}', '{{ s.created_at|date:'M d, Y'|escapejs }}')">&times;</button>
+            </li>
+            {% endfor %}
+        </ul>
+    </aside>
+
+    <!-- Chat area -->
+    <div class="chat-container">
+        <!-- Mobile-only session switcher (the sidebar is hidden on small screens) -->
+        <div class="mobile-session-bar">
+            <label class="sr-only" for="mobile-session-select">Session</label>
+            <select id="mobile-session-select"
+                    onchange="if (this.value) window.location.href = '?session=' + this.value;">
+                <option value="">Sessions…</option>
+                {% for s in sessions %}
+                <option value="{{ s.pk }}" data-message-count="{{ s.message_count }}" data-name="{{ s.name }}" data-started="{{ s.created_at|date:"M d, Y" }}"{% if active_session and active_session.pk == s.pk %} selected{% endif %}>{{ s.name }} &mdash; {{ s.created_at|date:"M d, Y" }} ({{ s.message_count }})</option>
+                {% endfor %}
+            </select>
+            <button type="button" class="btn btn-sm" onclick="newSession()">+ New</button>
+            <button type="button" class="btn btn-sm" id="gm-panel-toggle" aria-controls="gm-panel" aria-expanded="false">Panel</button>
+        </div>
+        {% comment %}Mode indicator and mode control (issues #353, #372). It
+        names the mode this session is in and changes it, in the same place:
+        the badge that only reported the mode was, for a Game Master, a label
+        on a decision he had never been allowed to make. Everyone sees it now,
+        because everyone may switch. Part of the page and always present,
+        never a banner that dismisses itself; the select posts an ordinary
+        form and the page comes back rendered from the stored mode, so what is
+        on screen is what the model was told.{% endcomment %}
+        <div class="gm-mode-indicator" id="gm-mode-indicator">
+            <span class="gm-mode-name">{{ session_mode_label }}</span>
+            <span class="gm-mode-note">{{ session_mode_description }}</span>
+            <form class="gm-mode-switch" method="post" action="{% url 'gm:mode' %}">
+                {% csrf_token %}
+                {% if active_session %}<input type="hidden" name="session_id" value="{{ active_session.pk }}">{% endif %}
+                <label class="sr-only" for="gm-mode-select">Game Master mode</label>
+                <select id="gm-mode-select" name="mode" onchange="this.form.submit()">
+                    {% for option in session_mode_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+                {# Reachable without JavaScript, and dead weight with it, so it #}
+                {# is here rather than beside the select the change already submits. #}
+                <noscript><button type="submit" class="btn btn-sm">Change mode</button></noscript>
+            </form>
+        </div>
+        {% comment %}
+        The session's name, editable in place (issue #339, item 10). It used
+        to be reachable only through a command-bar button labelled "Save"
+        that opened the browser's prompt() and then reloaded the page — so
+        the one control that renamed a session was named after something
+        else, looked nothing like the rest of the app, and threw the screen
+        away to show a result. It is a field here, autosaving on blur like
+        every other editable field in the studio, and the sidebar entry
+        updates in place beside it.
+        {% endcomment %}
+        <div class="chat-session-header">
+            {% if active_session %}
+            <label class="session-name-label" for="session-name">Session</label>
+            <div class="session-name-field" data-field="name">
+                <input type="text" id="session-name" class="autosave session-name-input"
+                       value="{{ active_session.name }}" autocomplete="off"
+                       maxlength="{{ session_name_max_length }}"
+                       data-session-id="{{ active_session.pk }}">
+            </div>
+            {% else %}
+            <p class="session-name-none">A new session takes its name from your
+               first message. You can rename it here afterwards.</p>
+            {% endif %}
+            {% if active_session.continued_from %}
+            {% comment %}Read from the session's own column (issue #761), so it stays as long as the session does.{% endcomment %}
+            <p class="session-continued" id="gm-session-continued">Continues the campaign of
+               <a href="{% url 'gm:chat' %}?session={{ active_session.continued_from.pk }}">{{ active_session.continued_from.name }}</a>:
+               its place, people, things, threads, supplies and rulings were copied into this session{% if carried_recap %}{% if carried_recap.whole %}, and a recap of the whole of it opens this conversation{% else %}, and its recap up to its last fold opens this conversation (the recap of the rest could not be written){% endif %}{% elif continued_recap_pending %}; a recap of it is written when you send your first message, and opens this conversation{% endif %}.</p>
+            {% endif %}
+        </div>
+        <div class="chat-messages" id="messages">
+            {% if not history %}
+            <div class="empty-state">
+                {% comment %}The page addresses the reader the way the mode
+                they are in does (issues #353, #372): the play-mode opening line
+                invites them into a scene, which is the one thing the aide must
+                not do. It follows the mode, not the account's role — a Game
+                Master who has chosen to play is asked what he does.{% endcomment %}
+                {% if session_mode == 'aide' %}
+                <p>Ask a rules question, or ask for NPCs, an encounter, loot, or read-aloud text.</p>
+                {% else %}
+                <p>Describe your character concept or say what you'd like to do.</p>
+                {% endif %}
+                <p class="hint">Type /help in the input for available commands.</p>
+                {% if campaign_offer %}
+                {% comment %}Continuing a campaign (issue #761): offered from the records the last played session holds, and done only when asked. Nothing carries over on its own.{% endcomment %}
+                <form class="gm-campaign-continue" id="gm-campaign-continue" method="post" action="{% url 'gm:continue' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="session_id" value="{{ campaign_offer.session.pk }}">
+                    <p>Or pick up where <strong>{{ campaign_offer.session.name }}</strong> left off, carrying over {{ campaign_offer.parts|join:", " }}.</p>
+                    <button type="submit" class="btn btn-sm" id="gm-campaign-continue-button">Continue the campaign</button>
+                </form>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% for msg in history %}
+            {% comment %}A die the GM asked the server to roll (issue #363) comes
+            back as the same chip the live turn showed, built server-side so the
+            page never formats or recomputes a roll.{% endcomment %}
+            {% if msg.kind == 'dice' %}
+            <div class="message assistant">
+                <div class="dice-roll">{{ msg.content }}</div>
+            </div>
+            {% elif msg.kind == 'fold_recap' %}
+            {% comment %}Where a long session was folded (issue #791): the entries above
+            are what the model now reads as this recap. A Game Master may correct
+            it; the server checks the account too.{% endcomment %}
+            <section class="message gm-fold-recap" id="gm-fold-recap" aria-labelledby="gm-fold-recap-heading">
+                <h3 class="message-role" id="gm-fold-recap-heading">Recap so far</h3>
+                <p class="gm-fold-note">The {{ msg.covers }} message{{ msg.covers|pluralize }} above {{ msg.covers|pluralize:"is,are" }} now read by the Game Master as this recap, not word for word.</p>
+                <div class="message-content" id="gm-fold-recap-text">{{ msg.content }}</div>
+                <p class="gm-panel-status" id="gm-fold-recap-status" role="status"{% if not msg.set_by %} hidden{% endif %}>{{ msg.set_by|default:"" }}</p>
+                {% if is_game_master %}
+                <details class="gm-hand-edit">
+                    <summary>Correct the recap</summary>
+                    <form class="gm-hand-form" id="gm-fold-recap-form" data-url="{% url 'gm:recap' active_session.pk %}" data-change="edit">
+                        <label class="sr-only" for="gm-fold-recap-input">Recap</label>
+                        <textarea id="gm-fold-recap-input" name="text" rows="5" maxlength="2000" required>{{ msg.content }}</textarea>
+                        <button type="submit" class="btn btn-sm">Save the recap</button>
+                    </form>
+                    <p class="gm-panel-error" id="gm-fold-recap-error" role="alert" hidden></p>
+                </details>
+                {% endif %}
+            </section>
+            {% else %}
+            {% comment %}A kind on a visible entry marks a notice (issue #344: the
+            /character save report) -- shown as text, never markdown.{% endcomment %}
+            <div class="message {{ msg.role }}{% if msg.kind %} notice{% endif %}"{% if msg.kind == 'fight_verdict' %} data-battle-verdict="{{ msg.battle_id }}:{{ msg.battle_ending }}"{% endif %}>
+                {% comment %}A notice is the app speaking, not the Game Master (issue #339, item 11; #785).{% endcomment %}
+                <div class="message-role">{% if msg.role == 'user' %}You{% elif msg.kind %}Notice{% else %}GM{% endif %}</div>
+                <div class="message-content" {% if msg.role == 'assistant' and not msg.kind %}data-markdown{% endif %}>{{ msg.content }}</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        <!-- Command bar -->
+        <div class="command-bar">
+            <button class="cmd-btn" onclick="sendCommand('roll', '3d6')" title="Roll 3d6">Roll 3d6</button>
+            <button class="cmd-btn" onclick="sendCommand('state')" title="Game state summary">State</button>
+            <button class="cmd-btn" id="gm-fight-button" type="button" title="Take the fight to the hex board (the GM picks the foes)">Fight</button>
+            {# It renames the session; it is called Rename (issue #339, item 10). #}
+            <button class="cmd-btn" onclick="promptSave()" title="Rename this session">Rename</button>
+            {# The whole session as a file, hidden entries included, for a bug report (issue #389). #}
+            <button class="cmd-btn" id="gm-transcript-button" type="button" onclick="sendCommand('transcript')" title="Download this whole session as a text file, for debugging">Transcript</button>
+            {% if is_game_master %}
+            {# The session, frozen, to Claude for review (issue #402). Game Masters only; the endpoint checks too. #}
+            <button class="cmd-btn" id="gm-review-button" type="button" onclick="sendCommand('review')" title="Send this whole session to Claude to review for problems">Send to Claude</button>
+            {# Every review sent, and what each found (issue #572). #}
+            <a class="cmd-btn" id="gm-reviews-link" href="{% url 'gm:reviews' %}" title="See every session sent to Claude and what the reviews found">Claude's reviews</a>
+            {% endif %}
+        </div>
+
+        <!-- Input -->
+        {% comment %}What the GM is doing, for the whole of a turn (issue #398). Part of the
+           page and emptied when the turn ends, never a toast on a timer.{% endcomment %}
+        {% comment %}Notices and questions for this page land here, beside the input
+           the player is looking at, not at the top of the page where they were
+           easily missed (issue #436). notify.js uses an existing #notice-region
+           before it makes one of its own.{% endcomment %}
+        <div id="notice-region" class="chat-notices" aria-live="polite"></div>
+        <p class="gm-status" id="gm-status" role="status" aria-live="polite" hidden></p>
+        {% comment %}A turn the server is still running after the page lost its stream or
+           was reloaded (issue #515). It stays until the reply lands or the turn fails.{% endcomment %}
+        <p class="gm-status gm-turn-running" id="gm-turn-running" role="status" aria-live="polite" hidden></p>
+        <form class="chat-input" id="chat-form" onsubmit="return handleSubmit(event)">
+            {% csrf_token %}
+            {% comment %}A textarea, not a single-line input (#716, low finding):
+               a multi-paragraph action could not be typed at all. Enter still
+               sends -- chat.js keeps that -- and Shift+Enter makes a new line,
+               which is the convention every chat box uses.{% endcomment %}
+            <textarea id="user-input" rows="1" placeholder="{% if session_mode == 'aide' %}Ask the aide{% else %}What do you do?{% endif %}" autocomplete="off" autofocus></textarea>
+            <button type="submit" id="send-btn">Send</button>
+        </form>
+    </div>
+
+    {% comment %}
+    Side panel (issue #341): a tab strip over one container per tab.
+    gm-panel.js registers every button carrying data-panel-tab and shows the
+    container whose data-panel-container matches. To add a tab (Map #343,
+    Battle #345): drop a button here with data-panel-tab="<name>" and
+    aria-controls="gm-panel-<name>", and {% include %} a partial whose root
+    element is <section id="gm-panel-<name>" data-panel-container="<name>"
+    role="region" hidden>. The panel hides on small screens like the
+    session sidebar; the "Panel" button in the mobile bar opens it.
+
+    gm-panel-layout.js (issue #351) builds the rest of the panel's chrome
+    around whatever tabs are registered: the grab handle that sets the
+    panel's width, a pane box with a title bar per tab so two can be open
+    at once, and the control that opens a pane's page in its own window
+    (the partial says where its own page is, in data-popout-url). A new tab
+    needs nothing more than the two lines above to join in.
+    {% endcomment %}
+    <aside class="gm-panel" id="gm-panel" aria-label="Session panel">
+        {% comment %}
+        A group of buttons, not a tablist (issue #707). axe reported
+        aria-required-children as critical here: gm-panel-layout.js wraps each
+        pane button with a split button, and a split button is not a tab, so a
+        screen reader announcing the strip mis-counted the tabs and read the
+        split controls as though they were panes. The description was wrong in
+        the first place -- since the split feature, several panes can be open
+        at once, which is precisely what a tablist is not. aria-pressed says
+        what these buttons actually do, and the split buttons can live where
+        they belong.
+        {% endcomment %}
+        <div class="gm-panel-tabs" role="group" aria-label="Session panels">
+            <button type="button" class="gm-panel-tab-button" id="gm-panel-tab-characters" data-panel-tab="characters" aria-controls="gm-panel-characters" aria-pressed="false">Characters</button>
+            <button type="button" class="gm-panel-tab-button" id="gm-panel-tab-campaign" data-panel-tab="campaign" aria-controls="gm-panel-campaign" aria-pressed="false">Campaign</button>
+            <button type="button" class="gm-panel-tab-button" id="gm-panel-tab-map" data-panel-tab="map" aria-controls="gm-panel-map" aria-pressed="false">Map</button>
+            <button type="button" class="gm-panel-tab-button{% if battle_live %} is-live{% endif %}" id="gm-panel-tab-battle" data-panel-tab="battle" aria-controls="gm-panel-battle" aria-pressed="false"{% if battle_live %} title="A fight is under way"{% endif %}>Battle</button>
+        </div>
+        {% include "gm/_panel_characters.html" %}
+        {% include "gm/_panel_campaign.html" %}
+        {% include "gm/_panel_map.html" %}
+        {% include "gm/_panel_battle.html" %}
+    </aside>
+</div>
+
+{% comment %}
+The endpoints, CSRF token and active session id chat.js needs. These were
+declared as globals by an inline script block; json_script keeps the values out
+of executable context and leaves this page with no inline JavaScript at all
+(issue #63). GMChatView builds the dict. #gm-panel-config is the same for
+gm-panel-characters.js (issue #341).
+{% endcomment %}
+{{ chat_config|json_script:"chat-config" }}
+{{ panel_config|json_script:"gm-panel-config" }}
+<script src="{% static 'js/marked.min.js' %}"></script>
+<script src="{% static 'js/dompurify.min.js' %}"></script>
+<script src="{% static 'js/autosave.js' %}"></script>
+<script src="{% static 'js/chat.js' %}"></script>
+<script src="{% static 'js/gm-panel-layout.js' %}"></script>
+<script src="{% static 'js/gm-panel.js' %}"></script>
+<script src="{% static 'js/gm-panel-characters.js' %}"></script>
+<script src="{% static 'js/gm-records.js' %}"></script>
+<script src="{% static 'js/gm-panel-map.js' %}"></script>
+<script src="{% static 'js/battle.js' %}"></script>
+<script src="{% static 'js/gm-panel-battle.js' %}"></script>
+{% endblock %}

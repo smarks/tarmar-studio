@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% load static %}
+{% load local_time %}
+{% block title %}Claude's reviews — Tarmar Studio{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/gm-reviews.css' %}">
+{% endblock %}
+
+{% comment %}
+Every GM session this Game Master sent to Claude, and where each review
+stands (issue #572). Rendered from the database. While a listed review is
+still waiting or being reviewed, gm-reviews.js asks the statuses endpoint
+about those reviews and reloads the page when one has moved on; nothing
+appears or goes away on a timer.
+{% endcomment %}
+
+{% block content %}
+<section class="gm-reviews" id="gm-reviews"
+         data-statuses-url="{% url 'gm:review_statuses' %}">
+    <h1>Claude's reviews</h1>
+    <p class="gm-reviews-intro">Every session you sent to Claude, what you asked it to look at, and whether the findings are in.</p>
+
+    <form class="gm-reviews-filter" method="get" action="{% url 'gm:reviews' %}">
+        <label for="gm-reviews-status">Show</label>
+        <select id="gm-reviews-status" name="status">
+            {% for value, label in filter_choices %}
+            <option value="{{ value }}"{% if value == status_filter %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="button">Filter</button>
+    </form>
+
+    {% if reviews %}
+    <div class="table-wrap">
+        <table class="gm-reviews-table table-stack" id="gm-reviews-table">
+            <thead>
+                <tr>
+                    <th>Review</th>
+                    <th>Sent</th>
+                    <th>By</th>
+                    <th>Session</th>
+                    <th>Note</th>
+                    <th>Status</th>
+                    <th>Runner</th>
+                    <th>Took</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for review in reviews %}
+                <tr class="gm-reviews-row" data-review-id="{{ review.pk }}" data-review-status="{{ review.status }}">
+                    <td data-label="Review"><a class="gm-reviews-link" href="{% url 'gm:review' review.pk %}">Review {{ review.pk }}</a></td>
+                    <td data-label="Sent">{% local_time review.created_at "Y-m-d H:i" %}</td>
+                    <td data-label="By">{% if review.requested_by %}{{ review.requested_by.username }}{% else %}<span class="gm-reviews-empty">A removed account</span>{% endif %}</td>
+                    <td data-label="Session">{% if review.session %}<a class="gm-reviews-session" href="{% url 'gm:chat' %}?session={{ review.session_id }}">{{ review.session.name }}</a>{% else %}<span class="gm-reviews-empty">Deleted session</span>{% endif %}</td>
+                    <td data-label="Note" class="gm-reviews-note">{% if review.note %}{{ review.note }}{% else %}<span class="gm-reviews-empty">No note: the whole session.</span>{% endif %}</td>
+                    <td data-label="Status"><span class="gm-review-status gm-review-status-{{ review.status }}">{{ review.get_status_display }}</span>{% if review.failure %}<span class="gm-reviews-failure">{{ review.failure }}</span>{% endif %}</td>
+                    <td data-label="Runner">{{ review.runner|default:"—" }}</td>
+                    <td data-label="Took">{{ review.review_duration_text|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include "_pagination.html" with pagination_label="Review list pages" qs=preserved_query %}
+    {% else %}
+    <p class="gm-reviews-none" id="gm-reviews-none">{% if status_filter == "all" %}No reviews yet. Press Send to Claude on a Game Master session to ask for one.{% else %}No reviews match this filter.{% endif %}</p>
+    {% endif %}
+
+    {% if open_review_ids %}
+    <p class="gm-reviews-watching" id="gm-reviews-watching">Some reviews are still open; this page reloads itself when one of them changes.</p>
+    {% endif %}
+</section>
+{{ open_review_ids|json_script:"gm-reviews-open" }}
+<script src="{% static 'js/gm-reviews.js' %}"></script>
+{% endblock %}

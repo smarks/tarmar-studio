@@ -1,0 +1,17 @@
+{% comment %}
+Why a record-writing fight will not advance (issue #842), and the Game
+Master's control that takes the pools from the records. Rendered inside
+_arena_advance.html's #battle-stale-slot on load, and returned as stale_html
+by an advance the server refused, which battle.js puts in the same slot, so
+the page carries one copy of this markup.
+{% endcomment %}
+<p class="battle-stale-pools" id="battle-stale-pools" role="status">{{ advance.stale }}.</p>
+{% if advance.resnapshot_url %}
+<form method="post" action="{{ advance.resnapshot_url }}" class="battle-resnapshot-form">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <button type="submit" id="resnapshot-pools" class="battle-button battle-button-outline">
+        Take the pools from the records
+    </button>
+</form>
+{% endif %}

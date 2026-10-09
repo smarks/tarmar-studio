@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{ theme.key }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ theme.site_name }}{% endblock %}</title>
+    {% load static %}
+    {% load account_tags %}
+    {% load local_time %}
+    <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
+    {% comment %}
+    The CSRF token, once, for every page that extends this one (issue #338).
+    api.js's csrfToken() reads it from here, so no page has to interpolate the
+    token into a script literal, hang it on an element as data-csrf, ship it
+    as a json_script config key, or read it back out of a rendered form. The
+    meta tag precedes api.js so the token is already in the document when the
+    first consumer script runs.
+    {% endcomment %}
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    {% comment %}
+    api.js publishes csrfToken/postWithCsrf/postJson/uiNotify/uiConfirm as
+    globals. It loads here in <head>, not at the foot of <body> like notify.js,
+    because several pages put their own <script> tags inside the content block
+    — those parse before anything at the end of the body, and they reference
+    these names. No `defer`, for the same reason.
+    {% endcomment %}
+    <script src="{% static 'js/api.js' %}"></script>
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    {% if theme.stylesheet %}<link rel="stylesheet" href="{% static theme.stylesheet %}">{% endif %}
+    {% comment %}
+    base.css holds what used to be this element's contents. The empty
+    <style> below stays where that block ended so a page's extra_styles
+    still parse after base.css and before any extra_head sheet.
+    {% endcomment %}
+    <style>
+        {% block extra_styles %}{% endblock %}
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <div class="logo"><a href="{% url 'landing' %}">{% if theme.logo %}<img src="{% static theme.logo %}" alt="{{ theme.site_name }}" width="52" height="32"> {% endif %}<span class="logo-name">{{ theme.site_name }}</span>{% if theme.tagline %}<span class="logo-tagline">{{ theme.tagline }}</span>{% endif %}</a></div>
+        {% if user.is_authenticated %}
+        {% comment %}
+        Who is signed in, beside the hamburger (issue #200). "Signed in
+        since" shows user.last_login raw: Django refreshes last_login during
+        login, before any page renders, so for the viewing user the value IS
+        the moment the current session began — the label says exactly what
+        the field holds, with no session bookkeeping needed.
+        {% endcomment %}
+        <div class="header-identity">
+            <span class="identity-user">
+                <span class="identity-username">{{ user.username }}</span>
+                {% role_names user as roles %}{% for role in roles %}<span class="role-badge">{{ role }}</span>{% endfor %}
+            </span>
+            {% if user.last_login %}
+            <span class="identity-since">Signed in since {% local_time user.last_login "M d, Y H:i" %}</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        <button class="menu-toggle" id="menuToggle" aria-label="Menu" aria-expanded="false" aria-controls="menu">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+        {% load menu %}<nav class="menu" id="menu">
+            {% if theme.nav == 'arena' %}
+            {% comment %}
+            The arena's menu (issue #269): battles first, then only what an
+            arena visitor needs. The full studio nav is the tarmar door's
+            job; a single quiet cross-link acknowledges the studio exists.
+            Same template, branched on the theme the host already selected —
+            never on a second parsing of the hostname. The account links
+            below both menus are one partial, _menu_account.html (#338).
+            {% endcomment %}
+            <div class="menu-section">{{ theme.site_name }}</div>
+            {% menu_link 'battle:list' 'Battles' page='battles' %}
+            <div class="menu-divider"></div>
+            {% else %}
+            <div class="menu-section">{{ theme.site_name }}</div>
+            {% menu_link 'home' 'Home' page='home' %}
+            {% menu_link 'about' 'About' page='about' %}
+            {% menu_link 'characters:list' 'Characters' page='characters' %}
+            {% menu_link 'parties:list' 'Parties' page='parties' %}
+            {% comment %}
+            Battles is main-menu furniture, not an admin tool (issue #339,
+            item 1). Since #250/#305 a player or a guest may open a battle,
+            claim a seat and play it, so a link that only DMs could see left
+            everyone else with a feature reachable only by pasted URL. The
+            Admin section below keeps the tools that really are DM-only.
+            {% endcomment %}
+            {% menu_link 'battle:list' 'Battles' page='battles' %}
+            {% menu_link 'reference:index' 'Reference' page='reference' %}
+            {% menu_link 'gm:chat' 'Game Master' page='gm' %}
+            {% if user.is_authenticated and character %}
+                {# CharacterEditView sets active_page "character_editor"; this is the entry that value marks, so the editor gets the same you-are-here treatment as every other page in the menu. Deliberately not reusing "characters" for the editor: that would grey out the Characters link, and .disabled sets pointer-events: none, stranding you on the sheet. #}
+                <div class="menu-section">Character</div>
+                {# Someone who may only read this character is not offered an editor (issue #339, item 34). #}
+                {% if can_edit %}{% menu_link 'characters:edit' 'Character Editor' pk=character.pk page='character_editor' %}{% else %}{% menu_link 'characters:edit' 'Character Sheet' pk=character.pk page='character_editor' %}{% endif %}
+                <div class="menu-section">Export Character</div>
+                {% menu_link 'character_export:export_pdf' 'Export PDF' pk=character.pk %}
+                {% menu_link 'character_export:export_markdown' 'Export Markdown' pk=character.pk %}
+            {% endif %}
+            <div class="menu-divider"></div>
+            {% endif %}
+            {% include "_menu_account.html" %}
+        </nav>
+        {% if user.is_authenticated %}
+        <form id="logout-form" action="{% url 'logout' %}" method="post" style="display: none;">
+            {% csrf_token %}
+        </form>
+        {% endif %}
+    </header>
+    <main {% block main_attrs %}{% endblock %}>
+        {% include "_breadcrumb.html" %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <div class="footer-content">
+            {% if git_sha %}<span>Version: <a href="{{ repo_url }}/commit/{{ git_sha }}" target="_blank" rel="noopener">{{ git_sha_short }}</a></span>{% endif %}
+            {% if git_date %}<span>Updated: {{ git_date }}</span>{% endif %}
+            <span><a href="https://origamisoftware.com" target="_blank" rel="noopener">Origami Software</a></span>
+            {% if theme.attribution %}<span class="theme-attribution">{{ theme.attribution }}</span>{% endif %}
+        </div>
+    </footer>
+    <script>
+        (function () {
+            const menuToggle = document.getElementById('menuToggle');
+            const menu = document.getElementById('menu');
+            function setMenuOpen(open) {
+                menu.classList.toggle('open', open);
+                menuToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            menuToggle.addEventListener('click', function () {
+                setMenuOpen(!menu.classList.contains('open'));
+            });
+            document.addEventListener('click', function (e) {
+                if (!e.target.closest('#menu') && !e.target.closest('#menuToggle')) {
+                    setMenuOpen(false);
+                }
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && menu.classList.contains('open')) {
+                    setMenuOpen(false);
+                    menuToggle.focus();
+                }
+            });
+        })();
+    </script>
+    {% load static %}
+    <script src="{% static 'js/notify.js' %}"></script>
+    <script src="{% static 'js/local-time.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

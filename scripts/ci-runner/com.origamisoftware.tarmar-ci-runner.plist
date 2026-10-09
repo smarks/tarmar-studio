@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The GitHub Actions runner for tarmar-studio (issue #576), as a
+	     LaunchDaemon so it runs from boot with nobody logged in, under its
+	     own account and group so a job can read nothing of the developer's.
+	     install-runner.sh beside this file creates that account, installs
+	     the runner under it, and copies this plist into
+	     /Library/LaunchDaemons. scripts/test_ci_runner.py holds the paths
+	     here and the ones the script uses together.
+
+	     launchd expands nothing, so every path is absolute and names the
+	     runner account. -->
+	<key>Label</key>
+	<string>com.origamisoftware.tarmar-ci-runner</string>
+	<key>UserName</key>
+	<string>tarmarci</string>
+	<!-- Its own group, not staff: a developer's home is mode 750 with group
+	     staff, so staff can read into it. -->
+	<key>GroupName</key>
+	<string>tarmarci</string>
+	<!-- runsvc.sh is the wrapper the runner's own svc.sh installs at the
+	     runner root: it exports the PATH recorded at registration and keeps
+	     the listener alive. It resolves ./bin and ./externals against the
+	     working directory, which must therefore be the runner root. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/tarmarci/actions-runner-tarmar/runsvc.sh</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/tarmarci/actions-runner-tarmar</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- Homebrew first: uv, node and npx live there. -->
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HOME</key>
+		<string>/Users/tarmarci</string>
+		<key>LANG</key>
+		<string>en_US.UTF-8</string>
+		<!-- Tells the runner it was started by a service manager. -->
+		<key>ACTIONS_RUNNER_SVC</key>
+		<string>1</string>
+	</dict>
+	<!-- Without this launchd throttles an unclassified daemon's CPU and I/O,
+	     which would slow pytest across cores and make Playwright's timing
+	     flaky. The runner's own service template sets the same. -->
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- A listener that exits is restarted, whatever the reason: the runner
+	     restarts itself after a self-update and launchd must bring it back.
+	     The cost: after the runner is deregistered, launchd keeps restarting
+	     a listener that exits at once, every ThrottleInterval, until the
+	     daemon is booted out (see README, "Remove"). -->
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<key>StandardOutPath</key>
+	<string>/Users/tarmarci/Library/Logs/tarmar-ci-runner/stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/tarmarci/Library/Logs/tarmar-ci-runner/stderr.log</string>
+</dict>
+</plist>

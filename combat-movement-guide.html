@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Combat and Movement Guide</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #34495e;
+            --accent: #3498db;
+            --light: #ecf0f1;
+            --border: #bdc3c7;
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--primary);
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+        
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            border-bottom: 3px solid var(--accent);
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+        }
+        
+        h2 {
+            color: var(--secondary);
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 8px;
+            margin-top: 40px;
+        }
+        
+        h3 {
+            color: var(--accent);
+            margin-top: 25px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        th, td {
+            border: 1px solid var(--border);
+            padding: 10px 12px;
+            text-align: left;
+        }
+        
+        th {
+            background: var(--secondary);
+            color: white;
+            font-weight: 600;
+        }
+        
+        tr:nth-child(even) {
+            background: var(--light);
+        }
+        
+        tr:hover {
+            background: #d5dbdb;
+        }
+        
+        .formula {
+            background: var(--light);
+            padding: 10px 15px;
+            border-left: 4px solid var(--accent);
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1em;
+        }
+        
+        .note {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 12px 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        
+        .note strong {
+            color: #856404;
+        }
+        
+        ul, ol {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        
+        li {
+            margin: 5px 0;
+        }
+        
+        .facing-diagram {
+            font-family: 'Courier New', monospace;
+            background: white;
+            padding: 20px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin: 15px 0;
+            white-space: pre;
+            line-height: 1.4;
+        }
+        
+        .megahex-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .megahex-container img {
+            max-width: 300px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        
+        .megahex-container figcaption {
+            margin-top: 10px;
+            font-style: italic;
+            color: var(--secondary);
+        }
+        
+        hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 30px 0;
+        }
+        
+        .quick-ref {
+            background: white;
+            border: 2px solid var(--accent);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .quick-ref h3 {
+            margin-top: 0;
+            color: var(--primary);
+        }
+        
+        @media print {
+            body {
+                background: white;
+                max-width: none;
+            }
+            
+            h2 {
+                page-break-before: auto;
+            }
+            
+            table {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<h1>Combat and Movement Guide</h1>
+
+<h2>CORE CONCEPTS</h2>
+
+<h3>Attributes</h3>
+
+<table>
+    <tr>
+        <th>Attribute</th>
+        <th>Abbreviation</th>
+        <th>Governs</th>
+    </tr>
+    <tr>
+        <td><strong>Strength</strong></td>
+        <td>ST</td>
+        <td>Hit points, fatigue pool, carrying capacity</td>
+    </tr>
+    <tr>
+        <td><strong>Dexterity</strong></td>
+        <td>DX</td>
+        <td>Action order, success rolls, base movement, avoiding mishaps</td>
+    </tr>
+    <tr>
+        <td><strong>Intelligence</strong></td>
+        <td>IQ</td>
+        <td>Number of skills/spells known, resistance to mental effects</td>
+    </tr>
+    <tr>
+        <td><strong>Wisdom</strong></td>
+        <td>WIS</td>
+        <td>Number of skills/spells known, resistance to mental effects</td>
+    </tr>
+</table>
+
+<hr>
+
+<h2>THE TURN</h2>
+
+<p>A turn represents approximately <strong>five seconds</strong> of action. Nothing happens simultaneously—each movement and action can affect what follows.</p>
+
+<h3>Turn Sequence</h3>
+
+<table>
+    <tr>
+        <th>Phase</th>
+        <th>Name</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td>1</td>
+        <td><strong>Initiative</strong></td>
+        <td>Each side rolls 1 die. Winner chooses to move first or second.</td>
+    </tr>
+    <tr>
+        <td>2</td>
+        <td><strong>Renew Spells</strong></td>
+        <td>Pay ST to maintain continuing spells. Unrenewed spells end before movement.</td>
+    </tr>
+    <tr>
+        <td>3</td>
+        <td><strong>First Movement</strong></td>
+        <td>First player moves all figures. Movement stops upon engagement.</td>
+    </tr>
+    <tr>
+        <td>4</td>
+        <td><strong>Second Movement</strong></td>
+        <td>Second player moves all figures. Additional players move in initiative order.</td>
+    </tr>
+    <tr>
+        <td>5</td>
+        <td><strong>Actions</strong></td>
+        <td>All figures act in adjDX order (highest first). One action per figure.</td>
+    </tr>
+    <tr>
+        <td>6</td>
+        <td><strong>Forced Retreat</strong></td>
+        <td>Figures that dealt physical hits and took none may push enemies back 1 hex.</td>
+    </tr>
+</table>
+
+<hr>
+
+<h2>MOVEMENT</h2>
+
+<h3>Hex Size</h3>
+
+<p>A hex is approximately <strong>4 feet (1.3 meters)</strong> across—roughly the space one combatant controls in melee.</p>
+
+<h3>Megahex</h3>
+
+<p>A <strong>megahex</strong> is a cluster of 7 hexes: 1 center hex surrounded by 6 adjacent hexes. Megahexes are used for measuring missile range.</p>
+
+<figure class="megahex-container">
+    <img src="megahex.png" alt="A megahex showing 7 hexes - 1 center surrounded by 6">
+    <figcaption>A megahex: 7 hexes (1 center + 6 surrounding)</figcaption>
+</figure>
+
+<h3>Base Movement Allowance</h3>
+
+<div class="formula"><strong>MA = DX − 2</strong> (minimum 4)</div>
+
+<table>
+    <tr>
+        <th>DX</th>
+        <th>Base MA</th>
+    </tr>
+    <tr><td>8</td><td>6</td></tr>
+    <tr><td>9</td><td>7</td></tr>
+    <tr><td>10</td><td>8</td></tr>
+    <tr><td>11</td><td>9</td></tr>
+    <tr><td>12</td><td>10</td></tr>
+    <tr><td>13</td><td>11</td></tr>
+    <tr><td>14</td><td>12</td></tr>
+</table>
+
+<h3>Encumbrance</h3>
+
+<p>Encumbrance is based on weight carried compared to ST.</p>
+
+<table>
+    <tr>
+        <th>Load Level</th>
+        <th>Weight Carried</th>
+        <th>MA Modifier</th>
+        <th>Restrictions</th>
+    </tr>
+    <tr>
+        <td>Unencumbered</td>
+        <td>Up to ST lbs</td>
+        <td>0</td>
+        <td>—</td>
+    </tr>
+    <tr>
+        <td>Light</td>
+        <td>ST+1 to ST×1.5 lbs</td>
+        <td>−1</td>
+        <td>—</td>
+    </tr>
+    <tr>
+        <td>Medium</td>
+        <td>ST×1.5+1 to ST×2 lbs</td>
+        <td>−2</td>
+        <td>Cannot Run</td>
+    </tr>
+    <tr>
+        <td>Heavy</td>
+        <td>ST×2+1 to ST×2.5 lbs</td>
+        <td>−4</td>
+        <td>Cannot Run or Jog</td>
+    </tr>
+    <tr>
+        <td>Overloaded</td>
+        <td>Over ST×2.5 lbs</td>
+        <td>Walk only, 1 hex max</td>
+        <td>—</td>
+    </tr>
+</table>
+
+<div class="note">
+    <strong>Dropping a Pack:</strong> Free action at the start of your movement. Recalculate encumbrance immediately. Picking up and securing a dropped pack takes one full turn (no other actions).
+</div>
+
+<h3>Movement Speeds</h3>
+
+<table>
+    <tr>
+        <th>Speed</th>
+        <th>Distance</th>
+        <th>Fatigue Cost</th>
+        <th>Available Actions</th>
+    </tr>
+    <tr>
+        <td><strong>Run</strong></td>
+        <td>Full MA</td>
+        <td>1 per turn</td>
+        <td>None (movement only)</td>
+    </tr>
+    <tr>
+        <td><strong>Jog</strong></td>
+        <td>Half MA</td>
+        <td>None (combat) / 1 per 10 min (travel)</td>
+        <td>Charge Attack, Dodge, Drop prone</td>
+    </tr>
+    <tr>
+        <td><strong>Walk</strong></td>
+        <td>Up to 2 hexes</td>
+        <td>None</td>
+        <td>Ready Weapon</td>
+    </tr>
+    <tr>
+        <td><strong>Walk (slow)</strong></td>
+        <td>Up to 1 hex</td>
+        <td>None</td>
+        <td>Cast Spell, Missile Attack, Disbelieve</td>
+    </tr>
+    <tr>
+        <td><strong>Stand Still</strong></td>
+        <td>0</td>
+        <td>None</td>
+        <td>Stand Up, Pick Up Weapon</td>
+    </tr>
+</table>
+
+<p><strong>Engaged figures</strong> can only Shift (1 hex, stay adjacent) or Stand Still. Running and Jogging require being disengaged.</p>
+
+<h3>Fatigue</h3>
+
+<div class="formula"><strong>Fatigue Pool = ST</strong></div>
+
+<table>
+    <tr>
+        <th>Activity</th>
+        <th>Fatigue Cost</th>
+    </tr>
+    <tr><td>Running</td><td>1 per turn</td></tr>
+    <tr><td>Jogging (combat)</td><td>None</td></tr>
+    <tr><td>Jogging (travel)</td><td>1 per 10 minutes</td></tr>
+    <tr><td>Walking</td><td>None</td></tr>
+    <tr><td>Walking (travel)</td><td>Recover 1 per hour</td></tr>
+    <tr><td>Resting</td><td>Recover 1 per 10 minutes</td></tr>
+</table>
+
+<p><strong>Exhaustion:</strong> When fatigue spent equals ST, you are <strong>exhausted</strong>:</p>
+<ul>
+    <li>MA halved (round down)</li>
+    <li>−2 DX on all rolls</li>
+    <li>Cannot Run</li>
+    <li>Must rest to recover</li>
+</ul>
+
+<p><strong>Collapse:</strong> If forced to spend fatigue beyond ST (e.g., spell casting, forced march), make a 3-dice save vs. ST or fall unconscious.</p>
+
+<h3>Facing</h3>
+
+<p>Each figure faces one hex side. This determines front, side, and rear hexes.</p>
+
+<div class="facing-diagram">
+        [Front] [Front] [Front]
+              \   |   /
+               \  |  /
+          [Side]--●--[Side]
+                  |
+               [Rear]
+</div>
+
+<ul>
+    <li><strong>Physical attacks:</strong> Only into your front hexes</li>
+    <li><strong>Spells:</strong> Your hex, adjacent hexes, or any hex "in front" of you</li>
+    <li><strong>Prone/crawling figures:</strong> All hexes count as rear (except for spell-casting direction)</li>
+</ul>
+
+<h3>Engagement</h3>
+
+<table>
+    <tr>
+        <th>Figure Type</th>
+        <th>Engaged When...</th>
+    </tr>
+    <tr>
+        <td>One-hex figure</td>
+        <td>In an armed enemy's front hex</td>
+    </tr>
+    <tr>
+        <td>3–6 hex figure</td>
+        <td>In front hexes of 2+ one-hex figures (or 1 multi-hex figure)</td>
+    </tr>
+    <tr>
+        <td>7-hex figure</td>
+        <td>In front hexes of 3+ one-hex figures (or 1 multi-hex figure)</td>
+    </tr>
+</table>
+
+<ul>
+    <li>Figures <strong>stop immediately</strong> when they become engaged</li>
+    <li>Multi-hex figures can push back smaller figures (combined ST of smaller figures must be less than pusher's ST)</li>
+</ul>
+
+<hr>
+
+<h2>ACTIONS</h2>
+
+<h3>Movement Limits for Actions</h3>
+
+<table>
+    <tr>
+        <th>Action</th>
+        <th>Max Movement</th>
+        <th>Speed</th>
+    </tr>
+    <tr>
+        <td>Movement only</td>
+        <td>Full MA</td>
+        <td>Run</td>
+    </tr>
+    <tr>
+        <td>Charge Attack, Dodge, Drop prone</td>
+        <td>Half MA</td>
+        <td>Jog</td>
+    </tr>
+    <tr>
+        <td>Ready New Weapon</td>
+        <td>2 hexes</td>
+        <td>Walk</td>
+    </tr>
+    <tr>
+        <td>Cast Spell, Missile Attack, Disbelieve</td>
+        <td>1 hex</td>
+        <td>Walk (slow)</td>
+    </tr>
+    <tr>
+        <td>Stand Up, Pick Up Weapon</td>
+        <td>0</td>
+        <td>Stand Still</td>
+    </tr>
+</table>
+
+<h3>Disengaged Figure Actions</h3>
+
+<table>
+    <tr>
+        <th>Speed</th>
+        <th>Maximum Movement</th>
+        <th>Available Actions</th>
+    </tr>
+    <tr>
+        <td>Run</td>
+        <td>Full MA</td>
+        <td>None (movement only)</td>
+    </tr>
+    <tr>
+        <td>Jog</td>
+        <td>Up to half MA</td>
+        <td>Charge Attack (melee or spell, not missiles), Dodge, Drop prone/kneeling</td>
+    </tr>
+    <tr>
+        <td>Walk</td>
+        <td>Up to 2 hexes</td>
+        <td>Ready New Weapon</td>
+    </tr>
+    <tr>
+        <td>Walk (slow)</td>
+        <td>Up to 1 hex</td>
+        <td>Cast Spell, Missile Attack, Disbelieve</td>
+    </tr>
+    <tr>
+        <td>Stand Still</td>
+        <td>0</td>
+        <td>Stand Up (entire turn, no other action)</td>
+    </tr>
+</table>
+
+<h3>Engaged Figure Actions</h3>
+
+<table>
+    <tr>
+        <th>Maximum Movement</th>
+        <th>Available Actions</th>
+    </tr>
+    <tr>
+        <td>Shift 1 hex (stay adjacent)</td>
+        <td>Melee Attack, Defend, Change Weapons, Attempt HTH, Cast Spell, Disbelieve, Disengage</td>
+    </tr>
+    <tr>
+        <td>Stand still</td>
+        <td>Last Missile Shot (must drop weapon next turn), Stand Up, Pick Up Weapon</td>
+    </tr>
+</table>
+
+<hr>
+
+<h2>ROLLING TO HIT</h2>
+
+<p>Roll <strong>3 dice</strong> and try to get your <strong>adjusted DX or less</strong>.</p>
+
+<h3>Automatic Results</h3>
+
+<table>
+    <tr>
+        <th>Roll</th>
+        <th>Result</th>
+    </tr>
+    <tr><td>3</td><td>Automatic hit, <strong>triple</strong> damage/effect</td></tr>
+    <tr><td>4</td><td>Automatic hit, <strong>double</strong> damage/effect</td></tr>
+    <tr><td>5</td><td>Automatic hit</td></tr>
+    <tr><td>16</td><td>Automatic miss</td></tr>
+    <tr><td>17</td><td>Automatic miss, drop weapon</td></tr>
+    <tr><td>18</td><td>Automatic miss, break weapon</td></tr>
+</table>
+
+<h3>Roll to Miss</h3>
+
+<p>When a missile passes through a hex with a friendly figure, roll to miss. Success means the missile continues past.</p>
+
+<table>
+    <tr>
+        <th>Roll</th>
+        <th>Result</th>
+    </tr>
+    <tr><td>adjDX or less</td><td>Successfully missed (missile continues)</td></tr>
+    <tr><td>14</td><td>Automatic hit</td></tr>
+    <tr><td>15–16</td><td>Double damage hit</td></tr>
+    <tr><td>17–18</td><td>Triple damage hit</td></tr>
+</table>
+
+<hr>
+
+<h2>DX ADJUSTMENTS</h2>
+
+<p>All adjustments are cumulative.</p>
+
+<h3>Positional Advantage (Physical Attacks)</h3>
+
+<table>
+    <tr>
+        <th>Situation</th>
+        <th>Adjustment</th>
+    </tr>
+    <tr><td>Striking from enemy's side hex</td><td>+2</td></tr>
+    <tr><td>Striking from enemy's rear hex</td><td>+4</td></tr>
+    <tr><td>Pole-weapon vs. charging opponent (you stood still)</td><td>+2</td></tr>
+    <tr><td>Crossbow fired from prone</td><td>+1</td></tr>
+</table>
+
+<h3>Target Conditions</h3>
+
+<table>
+    <tr>
+        <th>Condition</th>
+        <th>Adjustment</th>
+    </tr>
+    <tr><td>Target is invisible</td><td>−6</td></tr>
+    <tr><td>Target is in a shadow hex</td><td>−4</td></tr>
+    <tr><td>Target is a one-hex figure in flight</td><td>−4</td></tr>
+    <tr><td>Target is a giant snake</td><td>−3</td></tr>
+    <tr><td>Target is a multi-hex figure in flight</td><td>−1</td></tr>
+</table>
+
+<h3>Your Conditions</h3>
+
+<table>
+    <tr>
+        <th>Condition</th>
+        <th>Adjustment</th>
+    </tr>
+    <tr><td>Two-weapon fighting</td><td>−4 on both attacks</td></tr>
+    <tr><td>Knocked down last turn</td><td>No action except stand/crawl</td></tr>
+    <tr><td>Exhausted</td><td>−2</td></tr>
+</table>
+
+<h3>Range Adjustments</h3>
+
+<p><strong>Thrown Weapons:</strong> −1 per hex to target</p>
+
+<p><strong>Missile Weapons:</strong></p>
+
+<table>
+    <tr>
+        <th>Range (Megahexes)</th>
+        <th>Adjustment</th>
+    </tr>
+    <tr><td>0–2 MH</td><td>0</td></tr>
+    <tr><td>3–4 MH</td><td>−1</td></tr>
+    <tr><td>5–6 MH</td><td>−2</td></tr>
+    <tr><td>7–8 MH</td><td>−3</td></tr>
+    <tr><td>(pattern continues)</td><td>−1 per 2 MH</td></tr>
+</table>
+
+<hr>
+
+<h2>DAMAGE AND PROTECTION</h2>
+
+<h3>Dealing Damage</h3>
+
+<p>After hitting, roll damage dice. Notation examples:</p>
+<ul>
+    <li><strong>2 dice</strong> = roll 2d6</li>
+    <li><strong>1+1</strong> = roll 1d6, add 1</li>
+    <li><strong>2−2</strong> = roll 2d6, subtract 2</li>
+</ul>
+
+<h3>Protection</h3>
+
+<p>Armor and natural protection subtract hits <strong>from each attack</strong>.</p>
+
+<h3>Injury Effects</h3>
+
+<table>
+    <tr>
+        <th>Condition</th>
+        <th>Effect</th>
+    </tr>
+    <tr><td>ST reduced to 1</td><td>Unconscious</td></tr>
+    <tr><td>ST reduced to 0</td><td>Dead</td></tr>
+    <tr><td>Took 5+ hits in one turn</td><td>−2 DX next turn</td></tr>
+    <tr><td>Took 8+ hits in one turn</td><td>Fall down immediately, lose action this turn</td></tr>
+</table>
+
+<hr>
+
+<h2>SPECIAL SITUATIONS</h2>
+
+<h3>Disengaging</h3>
+
+<ul>
+    <li>Use Disengage action instead of attacking</li>
+    <li>Move 1 hex in any direction during your action</li>
+    <li>Faster enemies (higher adjDX) can still strike you</li>
+    <li>Slower enemies attack at penalty = difference in adjDX</li>
+</ul>
+
+<h3>Defending and Dodging</h3>
+
+<table>
+    <tr>
+        <th>Action</th>
+        <th>Usable By</th>
+        <th>Defends Against</th>
+        <th>Effect</th>
+    </tr>
+    <tr>
+        <td>Dodge</td>
+        <td>Disengaged figures</td>
+        <td>Missiles and thrown weapons only</td>
+        <td>Attacker rolls 4 dice</td>
+    </tr>
+    <tr>
+        <td>Defend</td>
+        <td>Engaged figures</td>
+        <td>Melee and non-missile attacks only</td>
+        <td>Attacker rolls 4 dice</td>
+    </tr>
+</table>
+
+<p><strong>4-Dice Special Results:</strong> 4–5 auto-hit; 20+ auto-miss; 21–22 drop weapon; 23–24 break weapon</p>
+
+<h3>Forced Retreat</h3>
+
+<p>If you dealt physical hits and took none:</p>
+<ol>
+    <li>Push enemy back 1 hex in any direction</li>
+    <li>Choose to advance into vacated hex or stand still</li>
+    <li>If enemy has no hex to retreat to, they roll 3 dice vs. DX or fall</li>
+</ol>
+
+<h3>Crawling and Prone</h3>
+
+<ul>
+    <li>Crawling MA = 2</li>
+    <li>Crawling/prone figures have all rear hexes (cannot attack)</li>
+    <li>Prone behind a body: missiles may hit the body instead (roll 1 die; 1–3 hits body if target prone, 1–4 if kneeling)</li>
+</ul>
+
+<h3>Flight</h3>
+
+<ul>
+    <li>Half flying MA on takeoff turn</li>
+    <li>Cannot move on landing turn</li>
+    <li>Fliers don't engage ground figures unless they choose to</li>
+    <li>Two fliers can pass at "different heights" if both agree</li>
+</ul>
+
+<hr>
+
+<h2>QUICK REFERENCE SUMMARY</h2>
+
+<div class="quick-ref">
+
+<h3>Turn Order</h3>
+<ol>
+    <li>Initiative (roll off, winner picks move order)</li>
+    <li>Renew Spells</li>
+    <li>Movement (by side, in initiative order)</li>
+    <li>Actions (by individual adjDX, highest first)</li>
+    <li>Forced Retreat</li>
+</ol>
+
+<h3>Key Numbers</h3>
+<table>
+    <tr>
+        <th>Situation</th>
+        <th>Roll</th>
+    </tr>
+    <tr><td>To hit</td><td>3 dice ≤ adjDX</td></tr>
+    <tr><td>Defending/Dodging target</td><td>4 dice ≤ adjDX</td></tr>
+    <tr><td>Saving roll</td><td>3 dice ≤ attribute (usually DX or IQ)</td></tr>
+    <tr><td>Auto-hit</td><td>3, 4, or 5</td></tr>
+    <tr><td>Auto-miss</td><td>16, 17, or 18</td></tr>
+</table>
+
+<h3>Movement Quick Reference</h3>
+<table>
+    <tr>
+        <th>DX</th>
+        <th>Base MA</th>
+        <th>Run (Full)</th>
+        <th>Jog (Half)</th>
+    </tr>
+    <tr><td>8</td><td>6</td><td>6 hexes</td><td>3 hexes</td></tr>
+    <tr><td>10</td><td>8</td><td>8 hexes</td><td>4 hexes</td></tr>
+    <tr><td>12</td><td>10</td><td>10 hexes</td><td>5 hexes</td></tr>
+    <tr><td>14</td><td>12</td><td>12 hexes</td><td>6 hexes</td></tr>
+</table>
+
+<h3>Encumbrance Quick Reference</h3>
+<table>
+    <tr>
+        <th>Load</th>
+        <th>Weight</th>
+        <th>MA Mod</th>
+        <th>Can Run?</th>
+        <th>Can Jog?</th>
+    </tr>
+    <tr><td>Unencumbered</td><td>≤ ST</td><td>0</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Light</td><td>≤ ST×1.5</td><td>−1</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Medium</td><td>≤ ST×2</td><td>−2</td><td>No</td><td>Yes</td></tr>
+    <tr><td>Heavy</td><td>≤ ST×2.5</td><td>−4</td><td>No</td><td>No</td></tr>
+    <tr><td>Overloaded</td><td>&gt; ST×2.5</td><td>Walk only</td><td>No</td><td>No</td></tr>
+</table>
+
+<h3>Fatigue Quick Reference</h3>
+<table>
+    <tr>
+        <th>Activity</th>
+        <th>Cost</th>
+    </tr>
+    <tr><td>Run</td><td>1 per turn</td></tr>
+    <tr><td>Jog (combat)</td><td>None</td></tr>
+    <tr><td>Jog (travel)</td><td>1 per 10 min</td></tr>
+    <tr><td>Walk</td><td>None</td></tr>
+    <tr><td>Rest</td><td>Recover 1 per 10 min</td></tr>
+    <tr><td>Exhausted</td><td>−2 DX, half MA, no running</td></tr>
+</table>
+
+</div>
+
+</body>
+</html>

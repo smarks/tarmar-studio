@@ -1,0 +1,100 @@
+{% comment %}
+One character in the Characters tab, whichever way it joined the session
+(issue #848). An attached character and one the session built used to be
+drawn by two templates from two snapshots, and a line added to one --
+Physical and Mental, the load, the purse, the spells (#872) -- was missing
+from the other. Both come through here now, from one CharacterSheet.
+
+Takes:
+  sheet    gm.character_sheet.CharacterSheet -- every figure shown.
+  ledger   gm.ledger.DraftLedger, for a character this session built: what
+           only such a character shows (what it still needs, the skill-point
+           account, what the pools wait for). Absent for an attached one.
+  heading  The name to head it with (a built character's may carry its label).
+  character  The record, for a built character's link and missing parts.
+  first    True for the first built character, which carries the ids the
+           page and its tests find the ledger by.
+
+The class names gm-draft-background and gm-draft-wealth are older than this
+partial and kept as they were, since the specs find those lines by them.
+{% endcomment %}
+{% load gm_play %}
+<article class="gm-sheet{% if ledger %} gm-draft{% endif %}{% if not sheet.is_alive %} gm-sheet-dead{% endif %}"{% if ledger and first %} id="gm-draft-ledger"{% endif %} data-character-id="{{ sheet.pk }}"{% if not ledger %}
+         data-popout-item data-popout-url="{% url 'characters:edit' sheet.pk %}" data-popout-label="{{ sheet.name }}"{% endif %}>
+    <header class="gm-sheet-header">
+        <h4 class="gm-sheet-name"><a href="{% url 'characters:edit' sheet.pk %}">{{ heading|default:sheet.name }}</a></h4>
+        {% if ledger %}
+        <span class="gm-sheet-status">{% if character.is_complete %}Complete{% else %}Being built{% for mark in character.missing_parts %} · <span class="status-badge incomplete-mark">{{ mark }}</span>{% endfor %}{% endif %}{% if not sheet.is_alive %} · Dead{% if sheet.death_cause %} — {{ sheet.death_cause }}{% endif %}{% endif %}</span>
+        {% else %}
+        <span class="gm-sheet-status">{% if sheet.is_alive %}Alive{% else %}Dead{% if sheet.death_cause %} — {{ sheet.death_cause }}{% endif %}{% endif %}</span>
+        <button type="button" class="gm-sheet-detach" data-character-id="{{ sheet.pk }}" aria-label="Detach {{ sheet.name }}" title="Detach from this session">&times;</button>
+        {% endif %}
+    </header>
+    {% if ledger %}<p class="gm-draft-note">The server keeps these numbers, not the Game Master. Every change is saved to the character as it happens.</p>{% endif %}
+
+    <table class="gm-sheet-attributes">
+        <tr>{% for line in sheet.attributes %}<th>{{ line.label }}</th>{% endfor %}</tr>
+        {% comment %}Three states (issue #374): decided, rolled but not yet aged or modified, and not rolled at all. A rolled attribute shows its score even while the rest are open.{% endcomment %}
+        <tr>{% for line in sheet.attributes %}<td>{% if line.modifier is not None %}<span class="gm-sheet-value">{{ line.effective }}</span>{% if line.effective != line.base %}<span class="gm-sheet-base" title="Before aging">({{ line.base }})</span>{% endif %}<span class="gm-sheet-modifier">{% if line.modifier >= 0 %}+{% endif %}{{ line.modifier }}</span>{% elif line.is_set %}<span class="gm-sheet-value">{{ line.base }}</span><span class="gm-sheet-modifier gm-draft-unset" title="Aging and the modifier are computed once all six attributes are rolled">&mdash;</span>{% else %}<span class="gm-sheet-value gm-draft-unset" title="Not rolled yet">&mdash;</span>{% endif %}</td>{% endfor %}</tr>
+    </table>
+
+    {% if sheet.condition %}<p class="gm-sheet-condition">{{ sheet.condition|capfirst }}</p>{% endif %}
+    <dl class="gm-sheet-pools">
+        {# Current against maximum (issue #751): after a fight, what it left them. #}
+        {% if sheet.fatigue is not None %}
+        <div><dt>Fatigue</dt><dd class="gm-sheet-fatigue">{{ sheet.current_fatigue }}/{{ sheet.fatigue }}</dd></div>
+        <div><dt>Body</dt><dd class="gm-sheet-body">{{ sheet.current_body }}/{{ sheet.body }}</dd></div>
+        {% else %}
+        <div><dt>Fatigue</dt><dd class="gm-sheet-fatigue"><span class="gm-draft-unset" title="Needs {{ ledger.pools_pending }} first">&mdash;</span></dd></div>
+        <div><dt>Body</dt><dd class="gm-sheet-body"><span class="gm-draft-unset" title="Needs {{ ledger.pools_pending }} first">&mdash;</span></dd></div>
+        {% endif %}
+        <div><dt>Mana</dt><dd class="gm-sheet-mana">{{ sheet.current_mana }}/{{ sheet.mana }}</dd></div>
+        <div><dt>Physical</dt><dd class="gm-sheet-physical">{% if sheet.physical is not None %}{{ sheet.physical }}{% else %}<span class="gm-draft-unset" title="Needs STR, DEX and CON first">&mdash;</span>{% endif %}</dd></div>
+        <div><dt>Mental</dt><dd class="gm-sheet-mental">{% if sheet.mental is not None %}{{ sheet.mental }}{% else %}<span class="gm-draft-unset" title="Needs WIS, INT and CHR first">&mdash;</span>{% endif %}</dd></div>
+    </dl>
+
+    {# Luck, once per session per level (issue #861): the count and the spend. #}
+    {% luck_control panel_luck sheet.pk %}
+    {% if ledger %}
+    <h5>Skill points <span class="gm-sheet-note"{% if first %} id="gm-draft-free-points"{% endif %}>{{ ledger.skill_points.remaining }} free</span></h5>
+    <ul class="gm-sheet-list gm-draft-account">
+        <li><span>Earned from XP thresholds</span><span class="gm-sheet-note">{{ ledger.skill_points.from_experience_xp }}</span></li>
+        <li><span>Earned from track grants</span><span class="gm-sheet-note">{{ ledger.skill_points.from_track_grants }}</span></li>
+        {% if ledger.skill_points.from_game_master %}<li><span>Granted by the Game Master</span><span class="gm-sheet-note">{{ ledger.skill_points.from_game_master }}</span></li>{% endif %}
+        <li><span>Spent</span><span class="gm-sheet-note">{{ ledger.skill_points.spent }}</span></li>
+        {% if ledger.skill_points.unexplained %}<li><span>Not accounted for</span><span class="gm-sheet-note">{{ ledger.skill_points.unexplained }} free point{{ ledger.skill_points.unexplained|pluralize }} this breakdown cannot explain</span></li>{% endif %}
+        <li><span><strong>Free now</strong></span><span class="gm-sheet-note"><strong>{{ ledger.skill_points.remaining }}</strong></span></li>
+    </ul>
+    <h5>Skills</h5>
+    {% else %}
+    <h5>Skills <span class="gm-sheet-note">{{ sheet.free_skill_points }} free pts</span></h5>
+    {% endif %}
+    <ul class="gm-sheet-list">
+        {% for skill in sheet.skills %}
+        <li><span>{{ skill.name|title }}</span><span class="gm-sheet-note">Level {{ skill.level_display }} ({{ skill.points }} pts)</span></li>
+        {% empty %}
+        <li class="gm-sheet-empty">No skills yet</li>
+        {% endfor %}
+    </ul>
+
+    <h5>Equipment{% if sheet.encumbrance_level %} <span class="gm-sheet-note gm-sheet-encumbrance">{{ sheet.encumbrance_level|title }}</span>{% endif %}</h5>
+    <ul class="gm-sheet-list">
+        {% for item in sheet.equipment %}
+        <li><span>{{ item.name }}{% if item.quantity != 1 %} ×{{ item.quantity }}{% endif %}</span><span class="gm-sheet-note">{% if item.equipped %}equipped{% endif %}{% if item.equipped and item.in_pack %}, {% endif %}{% if item.in_pack %}in pack{% endif %}</span></li>
+        {% empty %}
+        <li class="gm-sheet-empty">No equipment</li>
+        {% endfor %}
+    </ul>
+
+    <dl class="gm-sheet-facts">
+        {# What nobody rolled is marked (issue #754), read off the record's flags. #}
+        <div><dt>Background</dt><dd class="gm-draft-background">{{ sheet.provenance_class|title }} &mdash; {{ sheet.provenance_detail }}{% if not sheet.provenance_recorded %} (not rolled){% endif %}, {{ sheet.location }}{% if not sheet.location_recorded %} (not rolled){% endif %}</dd></div>
+        {# Right after Background, as on the sheet (review of #848). #}
+        <div><dt>Literacy</dt><dd{% if ledger and first %} id="gm-draft-literacy"{% endif %}>{{ sheet.literacy }}</dd></div>
+        <div><dt>Wealth</dt><dd class="gm-draft-wealth">{{ sheet.wealth_level }}, {{ sheet.starting_coin|default_if_none:"Consult GM for" }} coin{% if not sheet.wealth_recorded %} (not rolled){% endif %}{% if sheet.money_earned %} + {{ sheet.money_earned }} earned{% endif %}</dd></div>
+        <div><dt>Purse</dt><dd class="gm-sheet-purse">{{ sheet.purse }}</dd></div>
+        {% if sheet.spells %}<div><dt>Spells</dt><dd class="gm-sheet-spells">{{ sheet.spells|join:", " }}</dd></div>{% endif %}
+        <div><dt>XP</dt><dd>{{ sheet.total_xp }} (level {{ sheet.level }})</dd></div>
+        <div><dt>Age</dt><dd>{{ sheet.age }}, {{ sheet.experience_years }} years of experience</dd></div>
+    </dl>
+</article>

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ current_title }} - Reference - Tarmar Studio{% endblock %}
+{% block main_attrs %}class="reference-page page-width-1200"{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/reference-shared.css' %}">
+<link rel="stylesheet" href="{% static 'css/reference.css' %}">
+{% endblock %}
+
+{% block content %}
+<nav class="sidebar">
+    <form action="{% url 'reference:search' %}" method="get" class="search-form">
+        <input type="search" name="q" placeholder="Search...">
+        <button type="submit">Go</button>
+    </form>
+    {% include "_canon_line.html" %}
+    <button type="button" class="toc-toggle" id="tocToggle" aria-expanded="false" aria-controls="tocList">Contents</button>
+    <ul id="tocList">
+        {% include "reference/_nav_items.html" with items=nav %}
+    </ul>
+</nav>
+<article class="content">
+    {{ content|safe }}
+</article>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    (function () {
+        var toggle = document.getElementById('tocToggle');
+        var list = document.getElementById('tocList');
+        if (!toggle || !list) return;
+        toggle.addEventListener('click', function () {
+            var open = list.classList.toggle('open');
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    })();
+</script>
+{% endblock %}

@@ -1,0 +1,38 @@
+/* User administration list. Lifted verbatim from the extra_styles block of
+   accounts/templates/accounts/users_list.html (issue #93). */
+
+.users-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.users-table th,
+.users-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.users-table th {
+    font-weight: 500;
+    color: var(--colour-ink-secondary);
+    font-size: 0.875rem;
+}
+.users-table tr:hover {
+    background: var(--colour-surface-subtle);
+}
+.users-table a {
+    color: var(--colour-ink);
+    text-decoration: none;
+}
+.users-table a:hover {
+    text-decoration: underline;
+}
+.roles {
+    font-size: 0.75rem;
+    color: var(--colour-ink-muted);
+}
+.last-login {
+    font-size: 0.75rem;
+    color: var(--colour-ink-muted);
+    white-space: nowrap;
+}
+/* The stacked-card layout on phones is base.css's table-stack (#338). */

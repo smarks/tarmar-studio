@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% load static %}
+{% load sign_in %}
+{% load local_time %}
+
+{% block title %}Battles{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/battle.css' %}">
+{% endblock %}
+
+{% comment %}
+battle-page (without battle-main) puts the battle token palette in scope so
+the row-action buttons render in the detail page's vocabulary, while the
+page keeps the site's default column width.
+{% endcomment %}
+{% block main_attrs %}class="battle-page"{% endblock %}
+
+{% block content %}
+{% comment %}
+The list is just the list now (#271): battle assembly moved to its own
+staged setup page, and this page keeps only the way in — the New battle
+button, and any drafts still on the DM's desk.
+{% endcomment %}
+<div class="battle-list-masthead">
+    <h1>Battle Royale Simulator</h1>
+    {% comment %}
+    Anyone may open a battle since #305, so the button is unconditional and
+    it is the *limits* that are conditional. When a guest is at one, the
+    button is disabled and the reason sits beside it — the same sentence
+    the create endpoint refuses with, so the page cannot promise what the
+    server will decline. It stays on the page; nothing here dismisses
+    itself (house rule).
+    {% endcomment %}
+    <form method="post" action="{% url 'battle:setup-create' %}">
+        {% csrf_token %}
+        <button type="submit" class="battle-button battle-button-primary"
+                {% if creation_blocker %}disabled{% endif %}>
+            New battle
+        </button>
+    </form>
+</div>
+
+{% if is_guest %}
+<section class="guest-standing" aria-label="Playing as a guest">
+    <h2 class="guest-standing-title">You are playing as a guest</h2>
+    <p class="guest-standing-note">{{ guest_keep_note }}</p>
+    {% if creation_blocker %}
+    <p class="guest-standing-limit">{{ creation_blocker }}</p>
+    {% endif %}
+    <p class="guest-standing-actions">
+        <a class="battle-button battle-button-outline battle-button-compact"
+           href="{% sign_in_url %}">Sign in</a>
+        <a class="battle-button battle-button-quiet battle-button-compact"
+           href="{% url 'register' %}?next={{ request.get_full_path|urlencode }}">Make an account</a>
+        — either one keeps the battles you have going here.
+    </p>
+</section>
+{% endif %}
+
+{% if drafts %}
+<section class="battle-drafts">
+    <h2>Drafts on your desk</h2>
+    <ul class="battle-draft-list">
+        {% for draft in drafts %}
+        <li class="battle-draft">
+            <a href="{% url 'battle:setup' draft.pk %}" class="battle-draft-name">
+                {{ draft.name|default:"Unnamed battle" }}
+            </a>
+            <span class="battle-draft-meta">
+                {{ draft.roster_json|length }} mustered —
+                {% local_time draft.updated_at "Y-m-d H:i" %}
+            </span>
+            <a class="battle-button battle-button-outline battle-button-compact"
+               href="{% url 'battle:setup' draft.pk %}">Resume</a>
+            <form method="post" action="{% url 'battle:setup-discard' draft.pk %}"
+                  data-confirm="Discard {{ draft.name|default:'this unnamed draft' }}? The draft and its muster are thrown away for good."
+                  data-confirm-label="Discard"
+                  data-confirm-danger="true">
+                {% csrf_token %}
+                <button type="submit"
+                        class="battle-button battle-button-quiet battle-button-compact">
+                    Discard
+                </button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+<section class="battle-list">
+    <h2>Battles</h2>
+    {% comment %}
+    The status filter (#339, item 5). The list grew forever and had no way to
+    narrow it; deleting a battle now takes it off the live list, and the
+    Deleted bucket is where it goes — the only place a restore is offered.
+    Plain links, so which bucket is showing is in the URL and a reload or a
+    shared link lands on the same list. The current one is marked and not a
+    link, matching how the main menu marks the page you are on.
+    {% endcomment %}
+    <nav class="battle-list-filter" aria-label="Filter battles">
+        {% for value, label in show_choices %}
+        {% if value == show %}
+        <span class="battle-list-filter-current" aria-current="true">{{ label }}</span>
+        {% else %}
+        <a href="?show={{ value }}">{{ label }}</a>
+        {% endif %}
+        {% endfor %}
+    </nav>
+    {% comment %}
+    Every battle is on everyone's list (#250): the Players column tells a
+    lobby's story ("1 of 2 seats claimed — starting soon"), and the last
+    column carries the one verb this viewer has a right to — the DM opens,
+    a seated player plays, a joiner joins, everyone else watches. Finished
+    battles stay listed: their event log replays from the database, so a
+    Watch on a finished battle is the full replay.
+    {% endcomment %}
+    {% if battles %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                {# Which rules a battle runs under (#339, item 7). #}
+                <th>Rules</th>
+                <th>Players</th>
+                <th>Turn</th>
+                <th>Created</th>
+                <th><span class="sr-only">Open</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for battle in battles %}
+            <tr>
+                <td><a href="{% url 'battle:detail' battle.pk %}">{{ battle.name }}</a></td>
+                <td>
+                    {{ battle.get_status_display }}{% if battle.status == "lobby" %}
+                    <span class="battle-starting-soon">starting soon</span>{% endif %}
+                </td>
+                <td>{{ battle.get_rules_profile_display }}</td>
+                <td>
+                    {% if battle.status == "lobby" %}
+                    {{ battle.seat_claimed }} of {{ battle.seat_total }} seat{{ battle.seat_total|pluralize }} claimed
+                    {% elif battle.seat_claimed %}
+                    {{ battle.seat_claimed }} playing
+                    {% else %}
+                    AI only
+                    {% endif %}
+                </td>
+                <td>{{ battle.turn_number }}</td>
+                <td>{% local_time battle.created_at "Y-m-d H:i" %}</td>
+                <td class="battle-row-actions">
+                    {% comment %}
+                    The verb this viewer has a right to (#339, item 6). It
+                    asked ``user.can_manage_users`` alone, so a player or a
+                    guest looking at the battle they made themselves was
+                    offered "Watch" — the one verb that is never true of the
+                    person who runs it. ``viewer_owns`` is that question,
+                    answered per row by the same rule the endpoints use.
+                    {% endcomment %}
+                    <a class="battle-button battle-button-outline battle-button-compact"
+                       href="{% url 'battle:detail' battle.pk %}">{% if battle.viewer_owns %}Open{% elif battle.viewer_seated %}Play{% elif battle.status == "lobby" %}Join{% else %}Watch{% endif %}</a>
+                    {% if battle.viewer_owns %}
+                    {% if battle.is_deleted %}
+                    <form method="post" action="{% url 'battle:restore' battle.pk %}">
+                        {% csrf_token %}
+                        <button type="submit"
+                                class="battle-button battle-button-quiet battle-button-compact">
+                            Restore
+                        </button>
+                    </form>
+                    {% else %}
+                    <form method="post" action="{% url 'battle:delete' battle.pk %}"
+                          data-confirm="Delete &quot;{{ battle.name }}&quot;? It leaves every list; its log is kept and you can restore it."
+                          data-confirm-label="Delete"
+                          data-confirm-danger="true">
+                        {% csrf_token %}
+                        <button type="submit"
+                                class="battle-button battle-button-quiet battle-button-compact">
+                            Delete
+                        </button>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% include "_pagination.html" with pagination_label="Battle list pages" qs=list_query %}
+    {% elif show == "deleted" %}
+    <p>No deleted battles. Deleting one puts it here, with its log, until you
+       restore it.</p>
+    {% elif show != "all" %}
+    <p>No battles in this state right now. All battles, above, shows the rest.</p>
+    {% elif is_guest %}
+    <p>No battles here yet. New battle, above, opens the muster — and a
+       battle you start as a guest is listed here for you while it runs.</p>
+    {% else %}
+    <p>No battles yet. New battle, above, opens the muster.</p>
+    {% endif %}
+</section>
+{% endblock %}

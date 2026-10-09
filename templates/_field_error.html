@@ -1,0 +1,7 @@
+{% comment %}
+The first error on one form field, under its input (#338 item 9):
+
+    {% include "_field_error.html" with field=form.username %}
+
+Renders nothing when the field is valid.
+{% endcomment %}{% if field.errors %}<span class="error">{{ field.errors.0 }}</span>{% endif %}

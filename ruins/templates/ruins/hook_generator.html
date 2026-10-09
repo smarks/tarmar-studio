@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load static roll_detail %}
+
+{% block title %}Hook Generator{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/generators.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="page-width-900"{% endblock %}
+
+{% block extra_styles %}
+.hook-match { margin-bottom: 0.75rem; }
+.hook-meta { font-size: 0.85rem; opacity: 0.8; margin: 0.2rem 0; }
+.hook-region p, .hook-body p { margin: 0.4rem 0; }
+{% endblock %}
+
+{% block content %}
+<h1>Hook Generator</h1>
+<p>
+    Rolls one hook from
+    <a href="{% url 'reference:view' 'dm-rules/gm-tools/low-experience-hooks' %}">Hooks for New Characters</a>,
+    matched to a party's experience: the roster's average level picks the band, and one die picks the hook.
+</p>
+
+{% if generate_error %}
+{% include "_notice.html" with message=generate_error %}
+{% endif %}
+
+<form method="get" action="{% url 'hooks:generate' %}" class="generator-form" id="hook-form">
+    <label>Party
+        <select name="party">
+            <option value="">No party — pick a level</option>
+            {% for party in parties %}
+            <option value="{{ party.pk }}" {% if form_party == party.pk|stringformat:"s" %}selected{% endif %}>
+                {{ party.name }}{% if party.summary %} ({{ party.summary.count }} member{{ party.summary.count|pluralize }}, avg level {{ party.summary.average_level|floatformat:1 }}){% else %} (no members){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>Level (if no party)
+        <select name="level">
+            {% for level in levels %}
+            <option value="{{ level }}" {% if form_level == level|stringformat:"s" %}selected{% endif %}>Level {{ level }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>Seed (blank for random)
+        <input type="text" name="seed" inputmode="numeric" value="{{ form_seed }}" placeholder="random">
+    </label>
+    <button type="submit" class="button">{% if generated %}Generate another{% else %}Generate hook{% endif %}</button>
+</form>
+
+{% if outgrown_level %}
+<div id="hook-outgrown" class="notice" role="status">
+    {% if outgrown_party %}
+    <strong>{{ outgrown_party.name }}</strong>
+    ({{ outgrown_summary.count }} member{{ outgrown_summary.count|pluralize }},
+    levels {{ outgrown_summary.min_level }}–{{ outgrown_summary.max_level }},
+    average {{ outgrown_summary.average_level|floatformat:1 }}) rolls as level {{ outgrown_level }} —
+    {% else %}
+    Level {{ outgrown_level }} —
+    {% endif %}
+    beyond every band these hooks publish. This party has outgrown local trouble:
+    see <a href="{% url 'reference:view' 'dm-rules/scenario-seeds' %}">Scenario Seeds</a>,
+    or pick a published level above to roll anyway.
+</div>
+{% endif %}
+
+{% if generated %}
+<div id="hook-result">
+    <h2>The Hook <span class="generator-seed">seed {{ generated.seed }}</span></h2>
+    <p class="generator-seed-note">This page's URL reproduces this exact hook — bookmark or share it.</p>
+    {% if generated_party %}
+    <p class="hook-match">
+        <strong>{{ generated_party.name }}</strong> —
+        {{ generated_summary.count }} member{{ generated_summary.count|pluralize }},
+        levels {{ generated_summary.min_level }}–{{ generated_summary.max_level }},
+        average {{ generated_summary.average_level|floatformat:1 }} —
+        rolls as <strong>level {{ generated.level }}</strong>.
+    </p>
+    {% else %}
+    <p class="hook-match">Rolling as <strong>level {{ generated.level }}</strong>.</p>
+    {% endif %}
+    <p class="hook-match">
+        {{ generated.eligible_count }} hook{{ generated.eligible_count|pluralize }} banded for level {{ generated.level }}
+        {% roll_detail generated.roll %}
+    </p>
+    <div class="generator-card">
+        <h3>
+            <a href="{% url 'reference:view' 'dm-rules/gm-tools/low-experience-hooks' %}#{{ generated.hook.anchor }}">{{ generated.hook.title }}</a>
+        </h3>
+        <p class="hook-meta">
+            {{ generated.hook.section }} &middot; {{ generated.hook.hook_type }} &middot;
+            Levels {{ generated.hook.band_label }}
+        </p>
+        <div class="hook-region"><strong>Region:</strong> {{ region_html|safe }}</div>
+        <div class="hook-body">{{ body_html|safe }}</div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

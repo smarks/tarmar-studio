@@ -1,0 +1,23 @@
+{% comment %}
+Pages of a paginated list (issue #339, item 29). Every ListView with a
+paginate_by includes this, so a list longer than one page never silently
+hides the rest. `pagination_label` names the list for screen readers; `qs` is
+any filter query the page links must keep.
+
+`page_param` names the query parameter this pager turns, defaulting to
+ListView's own `page`. A page carrying two independent lists — the bestiary
+catalog and its generated variants (#674) — includes this twice, each with
+its own parameter and each keeping the other's position in `qs`.
+{% endcomment %}
+{% if is_paginated %}
+{% firstof page_param 'page' as turns %}
+<nav class="pagination" aria-label="{{ pagination_label|default:'Pages' }}">
+    {% if page_obj.has_previous %}
+    <a href="?{% if qs %}{{ qs }}&amp;{% endif %}{{ turns }}={{ page_obj.previous_page_number }}" rel="prev">&laquo; Previous</a>
+    {% endif %}
+    <span class="page-current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a href="?{% if qs %}{{ qs }}&amp;{% endif %}{{ turns }}={{ page_obj.next_page_number }}" rel="next">Next &raquo;</a>
+    {% endif %}
+</nav>
+{% endif %}

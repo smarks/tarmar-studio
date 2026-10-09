@@ -1,0 +1,35 @@
+{% comment %}
+One battle log entry (#504). The only place an event's markup is written:
+_turn_group.html includes it for the battle page and for the turn fragments
+the advance, restart, act and poll endpoints return, so the live log and a
+reloaded page cannot disagree. A candidate prints score_text, the width its
+rationale was written to (#301); decisions logged before that field existed
+fall back to the raw score.
+{% endcomment %}
+<li id="event-{{ event.sequence }}"
+    class="battle-event event-{{ event.event_type }}">
+    {% if event.event_type == "decision" %}
+    <details>
+        <summary>{{ event.message }}</summary>
+        <ul>
+            {% for candidate in event.payload.candidates %}
+            <li>
+                ({{ candidate.letter }}) {{ candidate.name }} —
+                score {{ candidate.score_text|default:candidate.score }}: {{ candidate.rationale }}
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% elif event.event_type == "death" %}
+    {{ event.message }}
+    {% if event.payload.fatal_chain %}
+    <span class="fatal-chain">(fatal rolls:
+        {% for sequence in event.payload.fatal_chain %}
+        <a href="#event-{{ sequence }}">#{{ sequence }}</a>{% if not forloop.last %}, {% endif %}
+        {% endfor %})
+    </span>
+    {% endif %}
+    {% else %}
+    {{ event.message }}
+    {% endif %}
+</li>

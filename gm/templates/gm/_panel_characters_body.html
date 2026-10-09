@@ -1,0 +1,39 @@
+{% comment %}
+The contents of the Characters tab (issues #341, #356, #571), inside its
+<section> in gm/_panel_characters.html. gm-panel-characters.js swaps this in
+from gm:characters_panel while a turn runs, so the section itself -- and
+whether it is shown -- stays put.
+{% endcomment %}
+    <form class="gm-panel-picker" id="gm-character-picker">
+        <label class="sr-only" for="gm-character-select">Character to attach</label>
+        <select id="gm-character-select" {% if not attachable_characters %}disabled{% endif %}>
+            {% if attachable_characters %}
+            <option value="">Pick a character…</option>
+            {% comment %}A Game Master's picker carries his players' characters, one group per owner (issue #759); a player's has one owner and no group label.{% endcomment %}
+            {% for group in attachable_groups %}
+            {% if group.owner %}<optgroup label="{{ group.owner }}">{% endif %}
+            {% for character in group.characters %}
+            <option value="{{ character.pk }}">{{ character.name }}</option>
+            {% endfor %}
+            {% if group.owner %}</optgroup>{% endif %}
+            {% endfor %}
+            {% else %}
+            <option value="">No characters to attach</option>
+            {% endif %}
+        </select>
+        <button type="submit" class="btn btn-sm" id="gm-character-attach" {% if not attachable_characters %}disabled{% endif %}>Attach</button>
+    </form>
+    <p class="gm-panel-error" id="gm-panel-characters-error" role="alert" hidden></p>
+
+
+    <div class="gm-sheets" id="gm-sheets">
+    {% comment %}Characters this session built lead (issues #356, #571), then the attached ones; one partial draws both (issue #848).{% endcomment %}
+    {% for panel_draft in panel_drafts %}
+    {% include "gm/_panel_sheet.html" with sheet=panel_draft.sheet ledger=panel_draft.ledger heading=panel_draft.heading character=panel_draft.character first=forloop.first %}
+    {% endfor %}
+    {% for sheet in panel_characters %}
+    {% include "gm/_panel_sheet.html" with sheet=sheet ledger=None heading=sheet.name character=None first=False %}
+    {% empty %}
+    {% if not panel_drafts %}<p class="gm-sheet-empty" id="gm-sheets-empty">No characters in this session yet. Attach one above and the GM will know their sheet.</p>{% endif %}
+    {% endfor %}
+    </div>

@@ -1,0 +1,21 @@
+{% comment %}
+The Characters tab of the GM side panel (issue #341). Included by gm/chat.html
+inside <aside id="gm-panel">; gm-panel.js shows and hides it by the
+data-panel-container name, and gm-panel-characters.js drives the attach and
+detach controls. Every number here comes from the CharacterSheet snapshot the
+view builds (gm/character_sheet.py). The model reads the same record through
+each turn's state block (gm/turn_engine/state.py, key_figures), which carries
+most of this sheet but not all of it (issue #771).
+The draft character the session is still building (issue #356) leads the list:
+the same DraftLedger snapshot the model is handed as its hidden ledger block,
+so the pane and the GM can never disagree about a total. Every character the
+session is building is listed, the one being worked on first, each under the
+heading the model's block uses (issue #390).
+Nothing is edited here: each sheet links to the character's edit page --
+and data-popout-item marks each sheet as a target for the pane's "open in
+its own window" control (issue #351), which opens the sheet nearest the top
+of the pane: with several attached, the one the viewer is reading.
+{% endcomment %}
+<section class="gm-panel-tab" id="gm-panel-characters" data-panel-container="characters" role="region" aria-labelledby="gm-panel-tab-characters" data-popout-empty="Attach a character to open a sheet in its own window" hidden>
+{% include "gm/_panel_characters_body.html" %}
+</section>

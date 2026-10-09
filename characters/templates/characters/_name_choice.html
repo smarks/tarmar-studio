@@ -1,0 +1,15 @@
+{% comment %}
+The character's name on creation (issue #786). Included inside BOTH creation
+forms, like the visibility choice, so whichever button submits carries it;
+`field_id` keeps the two inputs' ids apart. `name` is what a refused
+submission typed. A player must give one; a Game Master may leave it blank
+and the character takes the account's name, as every character did before.
+The server checks it by the same rule as the sheet's rename.
+{% endcomment %}
+<div class="name-choice">
+    <label for="{{ field_id }}">Name</label>
+    <input type="text" id="{{ field_id }}" name="name" value="{{ name }}" maxlength="{{ name_max_length }}" autocomplete="off"{% if not name_optional %} required{% endif %}>
+    {% if name_optional %}
+    <p class="name-choice-note">Left blank, it takes your account&rsquo;s name, {{ request.user.username }}.</p>
+    {% endif %}
+</div>

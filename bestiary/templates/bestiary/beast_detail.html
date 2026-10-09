@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load static %}
+{% load bestiary_art %}
+
+{% block title %}{{ beast.name }} — Bestiary{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/bestiary.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="bestiary-detail-main bestiary-page page-width-820"{% endblock %}
+
+{% block content %}
+{% comment %}
+The plate is original silhouette art (issue #193), not a portrait: it says
+the beast's category and how much table it takes, and its tint tells this
+entry apart from its neighbours. See bestiary/art.py.
+{% endcomment %}
+<div class="beast-headline">
+    {% beast_plate beast "detail" %}
+    <h1>{{ beast.name }}</h1>
+</div>
+<p class="beast-provenance">
+    {{ beast.get_category_display }}
+    {% if beast.is_generated %}
+    &middot; generated variant{% if beast.base_beast %} of <a href="{{ beast.base_beast.get_absolute_url }}">{{ beast.base_beast.name }}</a>{% endif %}
+    {% endif %}
+    {% if beast.source_page %}&middot; stats derived from The Fantasy Trip Bestiary, p. {{ beast.source_page }}{% endif %}
+</p>
+
+{% if beast.is_generated %}
+{% comment %}Generated variants only (issue #339, item 21); canon beasts have no delete.{% endcomment %}
+<form method="post" action="{% url 'bestiary:delete' beast.slug %}" class="beast-delete"
+              data-confirm="Delete the generated variant {{ beast.name }}? The catalog beast it came from stays."
+              data-confirm-label="Delete" data-confirm-danger="true">
+            {% csrf_token %}
+            <button type="submit" class="button delete-btn">Delete this variant</button>
+        </form>
+{% endif %}
+
+<p>{{ beast.description }}</p>
+
+<div class="beast-statblock" id="beast-statblock">
+    <table>
+        <tr><td>STR {{ beast.strength }}</td><td>DEX {{ beast.dexterity }}</td><td>INT {{ beast.intelligence }}</td></tr>
+        <tr><td>WIS {{ beast.wisdom }}</td><td>CON {{ beast.constitution }}</td><td>CHA {{ beast.charisma }}</td></tr>
+    </table>
+    <p>
+        Fatigue {{ beast.fatigue_pool }} &middot; Body {{ beast.body_pool }}<br>
+        Armour: {{ beast.armour_tier }} ({{ beast.stops }} stops)<br>
+        Movement: {{ beast.movement }} hexes &middot; Size: {{ beast.size_hexes }} hex{{ beast.size_hexes|pluralize:"es" }}
+    </p>
+</div>
+
+{% if beast.attacks %}
+<h2>Attacks</h2>
+<ul class="beast-attacks">
+    {% for attack in beast.attacks %}
+    <li><strong>{{ attack.name }}</strong>{% if attack.damage %} ({{ attack.damage }}){% endif %} — {{ attack.weapon_class }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if beast.special_abilities %}
+<h2>Special abilities</h2>
+<p>{{ beast.special_abilities }}</p>
+{% endif %}
+
+{% comment %}
+Generating again used to mean going back to the catalog and refilling the
+form — and a generated variant offered no way to generate at all. Both
+routes live here now: the same parameters that produced this beast, or the
+category loosened to any difficulty band.
+{% endcomment %}
+<section class="generate-panel" id="generate-panel">
+    <h2>Generate another</h2>
+    <div class="generate-options">
+        <form method="post" action="{% url 'bestiary:generate' %}">
+            {% csrf_token %}
+            <input type="hidden" name="name" value="{{ generate_name }}">
+            <p>Roll a fresh variant of <strong>{{ generate_name }}</strong>.</p>
+            <button type="submit" class="button">Another {{ generate_name }} variant</button>
+        </form>
+
+        <form method="post" action="{% url 'bestiary:generate' %}">
+            {% csrf_token %}
+            <input type="hidden" name="category" value="{{ generate_category }}">
+            <p>Or draw a different beast from {{ beast.get_category_display }}.</p>
+            <label>
+                Difficulty
+                <select name="difficulty">
+                    <option value="">Any</option>
+                    {% for band in difficulty_bands %}
+                    <option value="{{ band }}">{{ band|capfirst }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit" class="button secondary">Draw from {{ beast.get_category_display }}</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% load static %}
+{% load local_time %}
+
+{% block title %}Parties{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/parties.css' %}">
+{% endblock %}
+
+{% block content %}
+<h1>Parties</h1>
+
+<p>
+    <a href="{% url 'parties:create' %}" class="button">Form a New Party</a>
+</p>
+
+{% if parties %}
+<div class="table-wrap">
+    <table class="party-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Owner</th>
+                <th>Members</th>
+                <th>Formed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for party in parties %}
+            <tr>
+                <td data-label="Name"><a href="{% url 'parties:detail' party.pk %}">{{ party.name }}</a></td>
+                <td data-label="Owner">{{ party.owner.username }}</td>
+                <td data-label="Members">{{ party.member_count }}</td>
+                <td data-label="Formed">{% local_time party.created_at "M d, Y" %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% include "_pagination.html" with pagination_label="Party list pages" %}
+{% endif %}
+
+{% if disbanded_parties %}
+{% comment %}Only the parties this reader may restore (issue #339, item 18).{% endcomment %}
+<h2>Disbanded parties</h2>
+<ul class="party-disbanded" id="party-disbanded-list">
+    {% for party in disbanded_parties %}
+    <li class="party-member">
+        <div class="party-member-words">
+            <strong>{{ party.name }}</strong>
+            <span class="party-member-detail">formed by {{ party.owner.username }}</span>
+        </div>
+        <form method="post" action="{% url 'parties:restore' party.pk %}" class="party-member-action"
+              data-confirm="Restore {{ party.name }}?" data-confirm-label="Restore">
+            {% csrf_token %}
+            <button type="submit" class="button">Restore</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="party-none">No parties yet — form the first one.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% comment %}
+The Campaign tab of the GM side panel (issue #579). Included by gm/chat.html
+inside <aside id="gm-panel">; gm-panel.js shows and hides it by the
+data-panel-container name, and gm-panel-characters.js swaps its body while a
+turn runs, as it does for the Characters tab.
+
+Where the party is, who and what is in play, and what is still open -- all of
+it from the records the plan actions write, which is the same state block the
+model is handed. The Game Master can see what the GM was told, instead of
+inferring it from the prose.
+{% endcomment %}
+<section class="gm-panel-tab" id="gm-panel-campaign" data-panel-container="campaign" role="region" aria-labelledby="gm-panel-tab-campaign" hidden>
+{% include "gm/_panel_campaign_body.html" %}
+</section>

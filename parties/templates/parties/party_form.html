@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}New party{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/parties.css' %}">
+{% endblock %}
+
+{% block content %}
+{% comment %}Create only: an existing party is edited on its autosaving edit
+   page, party_edit.html (issue #339, item 17).{% endcomment %}
+<h1>Form a New Party</h1>
+
+<form method="post" class="party-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <ul class="party-form-errors">
+        {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% comment %}Required and unmarked before (issue #714): the form refused
+       without a name and said so only afterwards.{% endcomment %}
+    <label class="party-field">
+        <span class="party-field-label">Name <span class="field-required" title="Required">*</span></span>
+        {{ form.name }}
+        {% for error in form.name.errors %}<span class="party-form-errors">{{ error }}</span>{% endfor %}
+    </label>
+    <label class="party-field">
+        <span class="party-field-label">Description</span>
+        {{ form.description }}
+        {% for error in form.description.errors %}<span class="party-form-errors">{{ error }}</span>{% endfor %}
+    </label>
+    <p>
+        <button type="submit" class="button">Form Party</button>
+        <a href="{% url 'parties:list' %}" class="button secondary">Cancel</a>
+    </p>
+</form>
+{% endblock %}

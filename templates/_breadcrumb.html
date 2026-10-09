@@ -1,0 +1,17 @@
+{% comment %}
+The site-wide trail (issue #189). base.html renders this above every page's
+content whenever the view supplied a `breadcrumb`; a page without one — the
+home page itself, the login and gate screens — simply renders nothing.
+{% endcomment %}
+{% if breadcrumb %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+    <ol>
+        {% for step in breadcrumb %}
+        <li>
+            {% if step.url %}<a href="{{ step.url }}">{{ step.label }}</a>
+            {% else %}<span aria-current="page">{{ step.label }}</span>{% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+</nav>
+{% endif %}

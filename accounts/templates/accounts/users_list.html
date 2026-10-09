@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load static %}
+{% load account_tags %}
+{% load local_time %}
+
+{% block title %}Users{% endblock %}
+{% block main_attrs %}class="page-width-800"{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/users-list.css' %}">
+{% endblock %}
+
+{% block content %}
+<h1>Users</h1>
+
+<p><a href="{% url 'characters:list' %}" class="button secondary">Manage Characters</a></p>
+
+<div class="table-wrap">
+<table class="users-table table-stack">
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Real Name</th>
+            <th>Email</th>
+            <th>Roles</th>
+            <th>Last login</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for u in users %}
+        <tr data-user-id="{{ u.pk }}">
+            <td class="cell-name" data-label="Username"><a href="{% url 'user_profile' u.pk %}">{{ u.username }}</a></td>
+            <td data-label="Real Name">{{ u.real_name|default:"-" }}</td>
+            <td data-label="Email">{{ u.email|default:"-" }}</td>
+            <td class="roles" data-label="Roles">{% display_roles u %}</td>
+            <td class="last-login" data-label="Last login">{% if u.last_login %}{% local_time u.last_login "M d, Y H:i" %}{% else %}—{% endif %}</td>
+            <td class="cell-actions">
+                {% comment %}
+                No button where the endpoint would refuse: not on your own row,
+                and not on an Admin's unless you hold the Admin role yourself
+                (issue #632).
+                {% endcomment %}
+                {% if u.pk != request.user.pk %}{% if request.user.is_role_admin or not u.is_role_admin %}
+                <button class="delete-btn-outline" data-user-id="{{ u.pk }}" data-username="{{ u.username }}" data-delete-url="{% url 'delete_user' u.pk %}">Delete</button>
+                {% endif %}{% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="6">No users found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% include "_pagination.html" with pagination_label="User list pages" %}
+{% endblock %}
+
+{% block extra_js %}
+{# The Delete buttons are wired by users-list.js (issue #338 item 18). #}
+<script src="{% static 'js/users-list.js' %}"></script>
+{% endblock %}

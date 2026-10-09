@@ -1,0 +1,38 @@
+/* Account profile page. Lifted verbatim from the extra_styles block of
+   accounts/templates/accounts/profile.html (issue #93). */
+
+.checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.checkbox-field input[type="checkbox"] {
+    width: auto;
+}
+.checkbox-field label {
+    color: var(--colour-ink);
+}
+.section-header {
+    font-size: 1rem;
+    font-weight: 500;
+    margin-top: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.roles-display {
+    font-size: 0.875rem;
+    color: var(--colour-ink-muted);
+    padding: 0.5rem 0;
+}
+.back-link {
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+.back-link a {
+    color: var(--colour-ink);
+}
+.profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}

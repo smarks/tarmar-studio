@@ -1,0 +1,189 @@
+/* Landing/home page. Lifted verbatim from the extra_styles block of
+   accounts/templates/accounts/home.html (issue #93). */
+
+main.home-page {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+}
+/* height: auto releases the markup's height="700" attribute (issue #698).
+   Without it max-width: 100% shrank the picture to the phone's 326px while
+   the box stayed 700px tall -- capped to the max-height at 624px -- and
+   object-fit: contain letterboxed the picture inside it, leaving ~200px of
+   blank page above and below. On desktop the same rule quietly cropped 20px
+   off the image, which is why it went unnoticed. */
+.hero-image {
+    max-width: 100%;
+    height: auto;
+    max-height: calc(100vh - 220px);
+    object-fit: contain;
+    border-radius: 6px;
+}
+/* One row wherever it fits (the gap narrows with the window first), wrapping
+   rather than pushing the page sideways between the phone breakpoint and a
+   full desktop width. */
+.home-nav {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 1rem clamp(1.75rem, 3.6vw, 3.25rem);
+    margin-top: 1.75rem;
+}
+.home-nav a {
+    color: var(--colour-ink);
+    text-decoration: none;
+    font-size: 1.35rem;
+    white-space: nowrap;
+}
+.home-nav a:hover {
+    text-decoration: underline;
+}
+.tagline {
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+    font-style: italic;
+    color: var(--colour-ink-muted);
+    text-align: center;
+    max-width: 500px;
+}
+.get-started {
+    margin-top: 1.25rem;
+    width: 100%;
+    max-width: 780px;
+    text-align: left;
+    border: 1px solid var(--colour-hairline);
+    border-radius: 8px;
+    padding: 2rem 2.5rem;
+}
+.get-started h2 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+.get-started .tagline {
+    margin-top: 0;
+    margin-bottom: 1.1rem;
+    max-width: none;
+    font-size: 1.15rem;
+    font-style: normal;
+    text-align: left;
+}
+.get-started ol {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+.get-started li {
+    margin-bottom: 0.7rem;
+    line-height: 1.6;
+    font-size: 1.3rem;
+}
+.get-started a {
+    color: var(--colour-ink);
+}
+.get-started a:hover {
+    text-decoration: underline;
+}
+.get-started .more {
+    text-align: center;
+    margin-top: 1.5rem;
+    font-size: 1.2rem;
+}
+/* Narrow screens: a smaller nav with tighter rows */
+@media (max-width: 600px) {
+    .home-nav {
+        gap: 1.25rem 1.75rem;
+    }
+    .home-nav a {
+        font-size: 1.1rem;
+    }
+    .get-started {
+        padding: 1.5rem 1.25rem;
+    }
+    .get-started li {
+        font-size: 1.1rem;
+    }
+}
+
+/* "Your table" (issue #827): what belongs to the signed-in player, above the
+   front page everyone sees. Three parts side by side where they fit, stacked
+   where they do not. */
+.your-table {
+    width: 100%;
+    max-width: 1050px;
+    margin-bottom: 2rem;
+}
+.your-table h1 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+}
+.your-table-parts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem;
+}
+.your-table-part {
+    border: 1px solid var(--colour-hairline);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+}
+.your-table-part h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem;
+}
+.your-table-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.your-table-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem 0.75rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.your-table-list li:last-child {
+    border-bottom: none;
+}
+/* A character's row keeps its Play button on the right; a long name wraps
+   inside its own cell rather than pushing the button onto a line of its own. */
+.your-table-list .your-table-character {
+    flex-wrap: nowrap;
+}
+.your-table-character .play-with-gm-slot {
+    flex: none;
+}
+.your-table-name {
+    display: inline-flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.your-table a:not(.button) {
+    color: var(--colour-ink);
+}
+.your-table-when {
+    font-size: 0.875rem;
+    color: var(--colour-ink-muted);
+}
+.your-table-more {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+    margin: 0.75rem 0 0;
+    font-size: 0.95rem;
+}
+.your-table-empty {
+    margin: 0 0 0.75rem;
+    color: var(--colour-ink-secondary);
+}

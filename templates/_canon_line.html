@@ -1,0 +1,6 @@
+{% comment %}
+Names the canon the app loaded (reference.paths.CANON_LABEL, issue #918), so a
+Game Master never mistakes the generic default world for the Tarmar canon.
+Static: it states configuration, so it never changes while the page is open.
+{% endcomment %}
+<p class="canon-line">World: {{ canon_label }}</p>

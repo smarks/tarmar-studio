@@ -1,0 +1,25 @@
+{% extends "error_base.html" %}
+
+{% block code %}405{% endblock %}
+
+{% block background %}#171a1f{% endblock %}
+
+{% block extra_style %}
+        .code {
+            color: #6f7c8a;
+        }
+{% endblock %}
+
+{% block content %}
+    {% comment %}A GET to a POST-only URL used to answer with a completely
+       blank page: status 405, no body, no template, nothing on screen at all
+       (#716, low finding). /tarmar/battles/setup/ and
+       /tarmar/gm/bestiary/generate/ are both reachable that way, by a pasted
+       link or a refresh, and both drew a white void. This is the fourth
+       status page beside the 403, 404 and 500 ones.{% endcomment %}
+    <div class="code">405</div>
+    <h1>That door only opens one way.</h1>
+    <p class="quote">"This address answers an action, not a visit. It was reached by following a link or reloading a page that had already done its work."</p>
+    {% if allowed_methods %}<p class="attribution">It answers: {{ allowed_methods }}</p>{% endif %}
+    <a href="/">Back to the front door</a>
+{% endblock %}

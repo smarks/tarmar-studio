@@ -1,0 +1,23 @@
+{% extends "error_base.html" %}
+
+{% block code %}403{% endblock %}
+
+{% block background %}#16161f{% endblock %}
+
+{% block extra_style %}
+        .code {
+            color: #8a7650;
+        }
+{% endblock %}
+
+{% block content %}
+    {% comment %}Shown by Django's permission-denied view whenever a page refuses a
+       signed-in account, e.g. a Game Master page opened by a player (issue #339,
+       item 14). Before this template existed the refusal was Django's bare
+       "403 Forbidden".{% endcomment %}
+    <div class="code">403</div>
+    <h1>You shall not pass.</h1>
+    <p class="quote">"This door is kept for a Game Master. Your account cannot open it; if you think it should, ask whoever runs your table."</p>
+    <p class="attribution">&mdash; At the gate of the Game Master's pages</p>
+    <a href="/">Return to the Shire</a>
+{% endblock %}

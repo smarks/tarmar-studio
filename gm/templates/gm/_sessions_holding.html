@@ -1,0 +1,30 @@
+{% comment %}
+The Games Master sessions of other accounts that hold this character (issue
+#871), rendered by gm.templatetags.gm_play.sessions_holding for the
+character's owner only. A Game Master may attach any player's character to
+his session; this is how the owner sees that and takes it back. Each
+withdraw is a plain form post that comes back to this sheet, which renders
+the list from the links as they stand, so nothing here is transient. While a
+session's fight is on the board with the character in it, the line names the
+fight and links the owner to their seat (#853).
+{% endcomment %}
+{% if holding %}
+<section class="sessions-holding" id="sessions-holding" aria-labelledby="sessions-holding-heading">
+    <h2 id="sessions-holding-heading">At a Game Master's table</h2>
+    <ul class="sessions-holding-list">
+        {% for entry in holding %}
+        <li class="sessions-holding-entry" data-session-id="{{ entry.session.pk }}">
+            <span>{{ character.name }} is in <strong>{{ entry.session.name }}</strong>, run by {{ entry.session.user.username }}.</span>
+            {% if entry.battle %}
+            <a class="sessions-holding-fight" href="{% url 'battle:detail' entry.battle.pk %}">The fight is on the board: play {{ character.name }}'s turns</a>
+            {% endif %}
+            <form method="post" action="{% url 'gm:character_withdraw' character.pk %}" class="sessions-holding-withdraw">
+                {% csrf_token %}
+                <input type="hidden" name="session_id" value="{{ entry.session.pk }}">
+                <button type="submit" class="button secondary">Withdraw from this session</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}

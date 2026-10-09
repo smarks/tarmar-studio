@@ -1,0 +1,21 @@
+{% comment %}
+The Game Master's form for one person or thing (issue #790): correcting the
+row given as `entity`, or adding one of `kind` when `entity` is None.
+Included by gm/_panel_campaign_body.html for a Game Master's account only.
+Every field is sent as it stands, so a wrong detail can be cleared.
+{% endcomment %}
+{% url 'gm:entities' campaign_session.pk as entities_url %}
+<details class="gm-hand-edit{% if not entity %} gm-hand-add{% endif %}"{% if not entity %} id="gm-add-{{ kind }}"{% endif %}>
+    <summary>{% if entity %}Correct{% elif kind == "person" %}Add someone{% else %}Add a thing{% endif %}</summary>
+    <form class="gm-hand-form" data-url="{{ entities_url }}" data-change="save">
+        <input type="hidden" name="kind" value="{{ kind }}">
+        {% if entity %}<input type="hidden" name="entity_id" value="{{ entity.pk }}">{% endif %}
+        <label>Name <input type="text" name="name" value="{{ entity.name|default:'' }}" maxlength="80" required></label>
+        <label>Where <input type="text" name="where" value="{{ entity.where|default:'' }}" maxlength="200"></label>
+        {% if kind == "person" %}<label>Wants <input type="text" name="wants" value="{{ entity.wants|default:'' }}" maxlength="200"></label>{% endif %}
+        <label>{% if kind == "person" %}Attitude{% else %}State{% endif %} <input type="text" name="condition" value="{{ entity.condition|default:'' }}" maxlength="200"></label>
+        <label>Notes <input type="text" name="notes" value="{{ entity.notes|default:'' }}" maxlength="200"></label>
+        <button type="submit" class="btn btn-sm">{% if entity %}Save{% else %}Record{% endif %}</button>
+    </form>
+</details>
+{% if entity %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ entities_url }}" data-change="remove" data-entity-id="{{ entity.pk }}" data-confirm="Remove {{ entity.name }} from this session?">Remove</button>{% endif %}

@@ -1,0 +1,24 @@
+{% comment %}
+Delete this battle (#339, item 5). One partial, included wherever the control
+belongs, so the wording and the confirmation cannot drift between the lobby
+and the started page.
+
+Soft delete: the battle leaves every list and its log is kept, which is what
+the confirmation says. `data-confirm` is notify.js's inline question — the
+same in-page panel every other confirmation in the app uses, never the
+browser's native confirm().
+
+Nothing renders for a viewer who may not delete, and the endpoint enforces
+the same rule; the template only agrees with it.
+{% endcomment %}
+{% if can_delete and not battle.is_deleted %}
+<form method="post" action="{% url 'battle:delete' battle.pk %}"
+      data-confirm="Delete &quot;{{ battle.name }}&quot;? It leaves every list; its log is kept and you can restore it."
+      data-confirm-label="Delete"
+      data-confirm-danger="true">
+    {% csrf_token %}
+    <button type="submit" class="battle-button battle-button-quiet">
+        Delete this battle
+    </button>
+</form>
+{% endif %}

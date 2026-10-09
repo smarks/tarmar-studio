@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Create a Character{% endblock %}
+{% block main_attrs %}class="page-width-700"{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/character-create.css' %}">
+{% endblock %}
+
+{% block content %}
+{% if next_url %}
+<p class="setup-return">
+    <a href="{{ next_url }}">&larr; Back to the battle setup</a>
+    — it is saved and waiting.
+</p>
+{% endif %}
+<h1>Create a Character</h1>
+
+<p>
+    Name your character and choose how to determine the six core attributes.
+    Everything else — height, weight, appearance, provenance, wealth, location
+    and fatigue — is rolled either way.
+</p>
+
+{% if point_buy_error %}
+<div class="errors" id="point-buy-server-error">
+    <strong>That character was not created.</strong> {{ point_buy_error }}
+</div>
+{% endif %}
+
+<section class="creation-option">
+    <h2>Roll 3d6</h2>
+    <p>Roll 3d6 for each of the six core attributes, in order.</p>
+    <form method="post" action="{% url 'characters:create' %}">
+        {% csrf_token %}
+        <input type="hidden" name="method" value="roll">
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+        {% include "characters/_name_choice.html" with field_id="roll-name" %}
+        {% include "characters/_visibility_choice.html" %}
+        <button type="submit" class="button">Roll a New Character</button>
+    </form>
+</section>
+
+<section class="creation-option">
+    <h2>Divide {{ point_buy_total }} Points</h2>
+    <p>
+        Split exactly {{ point_buy_total }} points between the six core
+        attributes. Each attribute must be between {{ point_buy_min }} and
+        {{ point_buy_max }}.
+        {% if can_exceed_point_buy %}
+        As an admin or DM you may go over or under the {{ point_buy_total }}
+        points — the tally warns you, and the character records it.
+        {% endif %}
+    </p>
+    <form method="post" action="{% url 'characters:create' %}" id="point-buy-form">
+        {% csrf_token %}
+        <input type="hidden" name="method" value="point-buy">
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+        {% include "characters/_name_choice.html" with field_id="point-buy-name" %}
+        <div class="point-buy-grid">
+            {% for attribute in core_attributes %}
+            <div>
+                <label for="point-buy-{{ attribute.field }}">{{ attribute.label }}</label>
+                <input type="number"
+                       id="point-buy-{{ attribute.field }}"
+                       name="{{ attribute.field }}"
+                       class="point-buy-input"
+                       min="{{ point_buy_min }}"
+                       max="{{ point_buy_max }}"
+                       step="1"
+                       required
+                       value="{{ attribute.value }}">
+            </div>
+            {% endfor %}
+        </div>
+        <p class="point-buy-tally" id="point-buy-tally">
+            Spent <span id="point-buy-spent">&mdash;</span> of {{ point_buy_total }}.
+            Remaining: <span class="remaining" id="point-buy-remaining">&mdash;</span>
+        </p>
+        {% if can_exceed_point_buy %}
+        {% comment %}Permanent element, written by the tally script on every keystroke and
+           emptied when the buy is back on budget. Never shown on a timer.{% endcomment %}
+        <p class="point-buy-off-budget" id="point-buy-off-budget"></p>
+        {% endif %}
+        {% include "characters/_visibility_choice.html" %}
+        <button type="submit" class="button" id="point-buy-submit">Create with Point-Buy</button>
+    </form>
+</section>
+
+<p class="links"><a href="{% url 'characters:list' %}">Back to characters</a></p>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/point-buy.js' %}"></script>
+<script>
+    initPointBuy({
+        total: {{ point_buy_total }},
+        min: {{ point_buy_min }},
+        max: {{ point_buy_max }},
+        allowOffBudget: {{ can_exceed_point_buy|yesno:"true,false" }}
+    });
+</script>
+{% endblock %}

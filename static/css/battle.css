@@ -1,0 +1,1866 @@
+/* Battle simulator detail page (issue #188).
+ *
+ * The page is a control desk for a running simulation: a command bar that
+ * says what the battle is and carries the three things you can do to it,
+ * then the arena beside the roster and the event log. It replaces the
+ * inline <style> block battle_detail.html used to carry — same idiom as
+ * character-edit.css and reference.css, so the rules are cacheable and the
+ * template holds markup only.
+ *
+ * Tokens extend base.css rather than restating it: gold #c9a227 is already
+ * the site accent (the logo, the arena facing wedge), and the monospace
+ * stack is the one base.css gives the dice log. Seeds, turn counts, and
+ * roll notation are the subject's own vernacular, so they are set in mono
+ * and the prose around them stays in the site sans.
+ */
+
+/* The old 600px column is what made the page feel clustered: the arena, the
+   roster, and the log were all competing for it. */
+
+/* --- Command bar ------------------------------------------------------- */
+
+.battle-command-bar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+    margin: -0.5rem 0 1.75rem;
+    padding: 0.9rem 0 1rem;
+    background: var(--colour-surface);
+    border-bottom: 2px solid var(--colour-accent-gold);
+}
+
+.battle-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.battle-identity h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 500;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+/* Seed, status, turn: the simulator's status line, set in the same mono the
+   roll lines use so the numbers read as machine output. */
+.battle-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.battle-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 3px;
+    background: var(--colour-surface-warm);
+    color: var(--colour-ink-deep);
+    white-space: nowrap;
+}
+
+.battle-chip-label {
+    color: var(--colour-ink-breadcrumb);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.65rem;
+}
+
+.battle-chip strong {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Two groups, one divider: the button you press every turn is not adjacent
+   to the two that throw the log away or leave the page. */
+.battle-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.battle-actions-secondary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-left: 1rem;
+    border-left: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.battle-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.55rem 1.1rem;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.battle-button:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+
+.battle-button-primary {
+    background: var(--colour-accent-gold);
+    color: var(--colour-accent-gold-ink);
+    font-weight: 600;
+}
+
+.battle-button-primary:hover:not(:disabled) {
+    background: var(--colour-accent-gold-strong);
+}
+
+.battle-button-outline {
+    background: var(--colour-surface);
+    border-color: var(--colour-ink-deep);
+    color: var(--colour-ink-deep);
+}
+
+.battle-button-outline:hover:not(:disabled) {
+    background: var(--colour-surface-warm);
+}
+
+.battle-button-quiet {
+    background: none;
+    color: var(--colour-ink-breadcrumb);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.battle-button-quiet:hover {
+    color: var(--colour-ink-deep);
+}
+
+.battle-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* Restart asks before it clears the log — inline, in place, no modal
+   (the state-driven house rule). The confirm pair replaces the button. */
+.battle-restart-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.battle-restart-group[data-confirming="false"] .battle-restart-confirm,
+.battle-restart-group[data-confirming="false"] .battle-restart-cancel,
+.battle-restart-group[data-confirming="true"] .battle-restart-start {
+    display: none;
+}
+
+.battle-button-confirm {
+    background: var(--colour-pool-death);
+    border-color: var(--colour-pool-death);
+    color: var(--colour-surface);
+    font-weight: 600;
+}
+
+/* The way out of the confirm. Bordered, not underlined: "New battle" is the
+   page's only quiet link, and two identical links side by side would read
+   as the same kind of thing. */
+.battle-button-dismiss {
+    background: var(--colour-surface);
+    border-color: var(--colour-border-breadcrumb-link);
+    color: var(--colour-ink-breadcrumb);
+}
+
+.battle-button-dismiss:hover {
+    border-color: var(--colour-ink-breadcrumb);
+    color: var(--colour-ink-deep);
+}
+
+.battle-button-confirm:hover:not(:disabled) {
+    background: var(--colour-confirm-hover);
+}
+
+/* --- Layout ------------------------------------------------------------ */
+
+.battle-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 1.75rem;
+    align-items: start;
+}
+
+.battle-panel {
+    min-width: 0;
+}
+
+.battle-panel h2 {
+    margin: 0 0 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-ink-breadcrumb);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.battle-arena-panel {
+    position: sticky;
+    top: 7.5rem;
+}
+
+#battle-arena {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 68vh;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface);
+    color: var(--colour-ink-deep);
+}
+
+.battle-side {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    min-width: 0;
+}
+
+/* --- Roster ------------------------------------------------------------ */
+
+.battle-roster {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 0.6rem;
+}
+
+.combatant-card {
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface-warm);
+    font-size: 0.85rem;
+}
+
+.combatant-card.is-down {
+    opacity: 0.55;
+}
+
+.combatant-status {
+    margin: 0.15rem 0 0.35rem;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.75rem;
+}
+
+.combatant-name {
+    cursor: text;
+    border-bottom: 1px dashed var(--colour-underline-dotted);
+}
+
+.combatant-name:hover,
+.combatant-name:focus {
+    border-bottom-color: var(--colour-accent-gold);
+}
+
+.combatant-rename-input {
+    font: inherit;
+    font-weight: bold;
+    width: 100%;
+}
+
+.pool-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.pool-bar {
+    height: 7px;
+    margin: 2px 0 4px;
+    border-radius: 3px;
+    background: var(--colour-track);
+    position: relative;
+    overflow: hidden;
+}
+
+.pool-bar span {
+    position: absolute;
+    inset: 0;
+    border-radius: 3px;
+}
+
+.pool-bar.fatigue span {
+    background: var(--colour-pool-fatigue);
+}
+
+.pool-bar.body span {
+    background: var(--colour-pool-death);
+}
+
+/* A classic Melee figure takes its damage on ST — one pool, not two, and the
+   same colour as body: it is the bar that runs out when a figure goes down. */
+.pool-bar.st span {
+    background: var(--colour-pool-death);
+}
+
+/* --- The attribute panel (issue #302) ----------------------------------
+
+   A roster card answers "how hurt is it?" at a glance. This answers "what
+   am I fighting?" when the DM asks — the sheet-level numbers, on the
+   battle page, without leaving it.
+
+   A <details> rather than a hovercard or a modal: it opens on a click and
+   stays open until the reader closes it (house rule — nothing transient),
+   and battle.js remembers which are open so the two-second poll's
+   re-render does not shut them.
+
+   The type does the grouping work. Section headings take the same small
+   uppercase the panel headings above them use, labels sit in the muted
+   ink, and values are set in the battle mono the chips and roll lines
+   already use, so a column of numbers scans as numbers. A note under a
+   value drops back to the page's prose face — it is a caveat, not data. */
+
+.combatant-detail {
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.combatant-detail > summary {
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.combatant-detail > summary:hover,
+.combatant-detail > summary:focus-visible {
+    color: var(--colour-ink-deep);
+}
+
+.combatant-detail[open] > summary {
+    margin-bottom: 0.45rem;
+    color: var(--colour-ink-deep);
+}
+
+.detail-group + .detail-group {
+    margin-top: 0.6rem;
+}
+
+.detail-group h4 {
+    margin: 0 0 0.2rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--colour-ink-deep);
+}
+
+.detail-rows {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    gap: 0.15rem 0.7rem;
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
+
+.detail-rows dt {
+    color: var(--colour-ink-breadcrumb);
+}
+
+.detail-rows dd {
+    margin: 0;
+    min-width: 0;
+    color: var(--colour-ink-deep);
+    overflow-wrap: anywhere;
+}
+
+.detail-value {
+    font-family: var(--font-mono);
+}
+
+.detail-note {
+    display: block;
+    font-size: 0.68rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* A figure whose panel this viewer may open is worth clicking; one whose
+   panel they may not is not, and says so by not changing the cursor. */
+.arena-combatant.is-selectable {
+    cursor: pointer;
+}
+
+.fatal-chain {
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.autosave-error {
+    display: block;
+    margin-top: 2px;
+}
+
+/* --- Event log --------------------------------------------------------- */
+
+.battle-log-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+#battle-log {
+    max-height: 58vh;
+    overflow-y: auto;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface-warm);
+}
+
+.turn-group + .turn-group {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.turn-group h3 {
+    margin: 0 0 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-ink-breadcrumb);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.turn-events {
+    margin: 0;
+    padding-left: 1.2rem;
+}
+
+.battle-event {
+    margin: 0.15rem 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
+.event-phase {
+    font-weight: bold;
+    margin-top: 0.5rem;
+}
+
+.battle-log-controls {
+    margin: 0 0 0.4rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.battle-log-controls label {
+    cursor: pointer;
+}
+
+/* How much of the log is on screen (#662). A line above the log, not a
+   control that vanishes: it says what is being shown and links to the
+   other end, and the link is a URL so a reload keeps the reader's
+   choice. */
+.battle-log-window {
+    margin: 0 0 0.4rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.event-roll {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+}
+
+/* Set by the "Show every die roll" checkbox. The roll events stay in the
+   DOM and in the database either way — this hides them, it never drops
+   them. */
+#battle-log.dice-hidden .event-roll {
+    display: none;
+}
+
+.event-death {
+    color: var(--colour-pool-death);
+    font-weight: bold;
+}
+
+.event-decision details {
+    display: inline-block;
+}
+
+.event-decision summary {
+    cursor: pointer;
+}
+
+.event-decision ul {
+    margin: 0.2rem 0 0.2rem 1.2rem;
+}
+
+.battle-event:target {
+    background: var(--colour-highlight-target);
+}
+
+/* --- Narrow viewports --------------------------------------------------- */
+
+/* One column, and nothing sticky: on a phone a pinned bar plus a pinned
+   arena would leave the log a slot to read through. */
+@media (max-width: 860px) {
+    .battle-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .battle-arena-panel {
+        position: static;
+    }
+    #battle-arena {
+        max-height: none;
+    }
+    #battle-log {
+        max-height: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .battle-command-bar {
+        position: static;
+        align-items: stretch;
+        gap: 0.9rem;
+    }
+    .battle-actions {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.6rem;
+        width: 100%;
+    }
+    .battle-actions-secondary {
+        padding-left: 0;
+        padding-top: 0.6rem;
+        border-left: none;
+        border-top: 1px solid var(--colour-border-breadcrumb-link);
+    }
+    .battle-restart-group,
+    .battle-actions-secondary {
+        flex-wrap: wrap;
+    }
+    .battle-restart-group,
+    .battle-button {
+        flex: 1 1 auto;
+    }
+}
+
+/* Phones: one card per row. Two columns at this width turns every card into
+   four wrapped lines. */
+@media (max-width: 480px) {
+    .battle-roster {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .battle-button {
+        transition: none;
+    }
+}
+
+/* --- Lobby (the muster, issue #250) ------------------------------------ */
+
+/* Seat cards borrow the roster-card idiom: same surface, same hairlines.
+   An open seat is an empty chair — dashed outline, nothing inside it yet —
+   and your own seat carries the gold rule the page reserves for "yours". */
+
+.battle-lobby-panel {
+    max-width: 860px;
+}
+
+.lobby-lede {
+    margin: 0 0 1.1rem;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.9rem;
+    max-width: 56ch;
+}
+
+/* Which rules a muster is fought under (#251) — read before claiming a
+   seat, so it sits with the lede rather than competing with it. */
+.lobby-rules {
+    margin: -0.6rem 0 1.1rem;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.9rem;
+    max-width: 56ch;
+}
+
+.lobby-auto-note {
+    color: var(--colour-ink-deep);
+    font-weight: 600;
+}
+
+.lobby-seats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.8rem;
+}
+
+.lobby-seat {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface-warm);
+    font-size: 0.9rem;
+}
+
+.lobby-seat.is-open {
+    border-style: dashed;
+    border-color: var(--colour-border-open-seat);
+    background: var(--colour-surface);
+}
+
+.lobby-seat.is-you {
+    border-left: 3px solid var(--colour-accent-gold);
+}
+
+.lobby-seat-name {
+    font-size: 0.95rem;
+}
+
+.lobby-seat-status {
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.78rem;
+}
+
+/* Ready is a fact, not a flash: the chip idiom from the command bar. */
+.lobby-ready-chip {
+    align-self: flex-start;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--colour-ink-breadcrumb);
+    background: var(--colour-surface);
+}
+
+.lobby-ready-chip.is-ready {
+    border-color: var(--colour-accent-gold);
+    background: var(--colour-accent-gold);
+    color: var(--colour-accent-gold-ink);
+    font-weight: 600;
+}
+
+/* The claim disclosure: state-driven, in place, no modal. */
+.seat-claim summary {
+    list-style: none;
+    width: 100%;
+}
+
+.seat-claim summary::-webkit-details-marker {
+    display: none;
+}
+
+.seat-claim[open] summary {
+    border-color: var(--colour-accent-gold-strong);
+}
+
+.seat-claim-forms {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.7rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.seat-claim-forms form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.seat-claim-forms label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.seat-claim-forms select {
+    font: inherit;
+    padding: 0.35rem;
+}
+
+.seat-claim-or {
+    margin: 0;
+    text-align: center;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.lobby-seat-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+}
+
+.lobby-seat-actions form {
+    display: contents;
+}
+
+/* --- Turn panel (remote play, issue #250) ------------------------------ */
+
+/* The decision moment sits under the command bar, full width, carrying the
+   same gold rule the bar ends in — the battle literally hangs on this line. */
+
+.battle-turn-panel {
+    margin: -0.75rem 0 1.5rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-left: 3px solid var(--colour-accent-gold);
+    border-radius: 6px;
+    background: var(--colour-surface-warm);
+}
+
+.turn-waiting,
+.turn-prompt {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.turn-waiting {
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-waiting strong,
+.turn-prompt strong {
+    color: var(--colour-ink-deep);
+}
+
+.turn-waiting + .turn-ai-choose {
+    margin-top: 0.7rem;
+}
+
+.turn-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 0.6rem;
+    margin: 0.8rem 0;
+}
+
+/* An option is a card you press, not a link: the selected one holds its
+   state (aria-pressed) with the gold border — nothing transient. */
+.turn-option {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline;
+    gap: 0.2rem 0.5rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface);
+    font: inherit;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.turn-option:hover {
+    border-color: var(--colour-ink-breadcrumb);
+}
+
+.turn-option:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+
+.turn-option[aria-pressed="true"] {
+    border-color: var(--colour-accent-gold);
+    box-shadow: inset 0 0 0 1px var(--colour-accent-gold);
+    background: var(--colour-surface-gold-pressed);
+}
+
+.turn-option-letter {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 3px;
+    padding: 0 0.3rem;
+}
+
+.turn-option-name {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.turn-option-ai-pick {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--colour-accent-gold-on-light);
+}
+
+.turn-option-advice {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* What a player weighs (#788): the plain line leads, its cost under it. The
+   AI's scoring (.turn-option-advice) follows only when asked for. */
+.turn-option-plain {
+    grid-column: 1 / -1;
+    font-size: 0.85rem;
+}
+
+.turn-option-cost {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-scoring-toggle {
+    margin: 0 0 0.8rem;
+}
+
+/* A weapon lying on the field (#878): the blade takes the text colour, like
+   the hex outlines, and is named in the hex's tooltip. */
+.arena-ground-weapon {
+    color: var(--colour-accent-gold-on-light);
+    cursor: help;
+}
+
+/* The cast stage (#250): the spell list a declared CAST SPELL opens, in
+   place under the menu — no modal, no overlay, and it stays until the
+   player picks a spell or stands down. Indented against the gold rule so
+   it reads as a second step inside the same decision, not a new panel. */
+.turn-cast-stage {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 0.6rem;
+    margin: 0 0 0.9rem 0.9rem;
+    padding: 0.8rem 0 0.8rem 0.9rem;
+    border-left: 2px solid var(--colour-accent-gold);
+}
+
+.turn-cast-pool,
+.turn-cast-standdown {
+    grid-column: 1 / -1;
+    margin: 0;
+    justify-self: start;
+}
+
+.turn-cast-pool {
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* A spell is the same pressable card as an action, one column narrower:
+   name and cost on the first line, the casting note beneath. */
+.turn-spell {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    gap: 0.2rem 0.5rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface);
+    font: inherit;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.turn-spell:hover:not(:disabled) {
+    border-color: var(--colour-ink-breadcrumb);
+}
+
+.turn-spell:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+
+.turn-spell[aria-pressed="true"] {
+    border-color: var(--colour-accent-gold);
+    box-shadow: inset 0 0 0 1px var(--colour-accent-gold);
+    background: var(--colour-surface-gold-pressed);
+}
+
+/* Out of reach, and saying so: dimmed but still legible — the reason is
+   the point of rendering it at all. */
+.turn-spell:disabled {
+    cursor: not-allowed;
+    background: var(--colour-surface-warm);
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-spell-name {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.turn-spell-cost {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-spell-note {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-spell-note.is-blocked {
+    font-style: italic;
+}
+
+.combatant-controller {
+    margin: 0.1rem 0 0.3rem;
+    font-size: 0.75rem;
+    color: var(--colour-accent-gold-on-light);
+    font-weight: 600;
+}
+
+@media (max-width: 640px) {
+    .lobby-seats,
+    .turn-options,
+    .turn-cast-stage {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .battle-start-form,
+    .battle-start-form .battle-button {
+        width: 100%;
+    }
+}
+
+/* --- Spectators and the battle list (#250) ----------------------------- */
+
+/* The one chip about the viewer rather than the battle: gold-edged so a
+   spectator knows their role at a glance without it shouting. */
+.battle-chip-watching {
+    border-color: var(--colour-accent-gold);
+    background: var(--colour-surface);
+}
+
+/* Row actions in the list table: the detail page's button vocabulary at a
+   table row's scale. */
+.battle-button-compact {
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+}
+
+/* A compact submit (the list's Delete / Restore) stays at the full battle
+   size it has always rendered at; compact applies to the link actions only
+   (#477 kept today's look). */
+.battle-button-compact[type="submit"] {
+    padding: 0.55rem 1.1rem;
+    font-size: 0.9rem;
+}
+
+/* A lobby row's state, spoken in the status column's margin. */
+.battle-starting-soon {
+    display: inline-block;
+    margin-left: 0.35rem;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.8em;
+    font-style: italic;
+    white-space: nowrap;
+}
+
+/* --- The battle list's masthead and drafts (#271) ---------------------- */
+
+.battle-list-masthead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.8rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.battle-list-masthead h1 {
+    margin: 0;
+}
+
+.battle-drafts {
+    margin-bottom: 2rem;
+}
+
+.battle-draft-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.battle-draft {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 1rem;
+    padding: 0.6rem 0.2rem;
+    border-top: 1px solid var(--colour-border-breadcrumb-link);
+    font-size: 0.9rem;
+}
+
+.battle-draft:last-child {
+    border-bottom: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.battle-draft-name {
+    font-weight: 600;
+    color: var(--colour-ink-deep);
+    text-decoration: none;
+}
+
+.battle-draft-name:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.battle-draft-meta {
+    color: var(--colour-ink-breadcrumb);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    margin-right: auto;
+}
+
+/* --- The staged setup page (#270/#271) --------------------------------- */
+
+/* The muster gets the whole desk: the page reads top to bottom as the
+   sequence it is — the terms, the muster, the march — with a roman numeral
+   in the simulator's mono marking each stage. The signature element is the
+   muster roll: a ruled ledger the roster accrues onto, one numbered line
+   per combatant, with a gold capacity bar where a cramped form once was. */
+
+
+.setup-masthead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+    margin-bottom: 2.5rem;
+}
+
+.setup-masthead h1 {
+    margin: 0 0 0.4rem;
+}
+
+.setup-lede {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.95rem;
+}
+
+/* An error is a fact about the page until the next action changes it. */
+.setup-error {
+    margin: 0 0 1.5rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--colour-pool-death);
+    border-left-width: 3px;
+    border-radius: 4px;
+    background: var(--colour-setup-error-surface);
+    color: var(--colour-pool-death);
+    font-size: 0.9rem;
+}
+
+.setup-stage {
+    margin-bottom: 3rem;
+}
+
+.setup-stage-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    margin: 0 0 1.2rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--colour-border-breadcrumb-link);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--colour-ink-breadcrumb);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.setup-stage-numeral {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    color: var(--colour-accent-gold-on-light);
+    min-width: 1.6rem;
+}
+
+/* -- Stage I: the terms -- */
+
+.setup-terms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem 2rem;
+    align-items: flex-start;
+}
+
+.setup-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.9rem;
+}
+
+.setup-field-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--colour-ink-breadcrumb);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+
+.setup-field input,
+.setup-field select {
+    font: inherit;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 4px;
+    background: var(--colour-surface);
+    color: var(--colour-ink-deep);
+}
+
+.setup-field input:focus-visible,
+.setup-field select:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 1px;
+}
+
+.setup-field-name {
+    flex: 1 1 auto;
+    min-width: min(18rem, 100%);
+}
+
+.setup-seed {
+    font-family: var(--font-mono);
+    max-width: 12rem;
+}
+
+/* The per-combatant control rows, folded away by default (issue #695). */
+.control-combatants-disclosure > summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.35rem 0;
+    color: var(--colour-ink-secondary);
+}
+
+.control-combatants-disclosure > summary:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+
+.setup-field-hint {
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* A required field says so before the submit, and its refusal is drawn where
+   the reader has to act (issues #702, #711, #714). */
+.setup-field-required {
+    color: var(--colour-danger);
+    font-weight: 700;
+}
+
+.setup-field-error {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--colour-danger);
+}
+
+.setup-field input[aria-invalid="true"] {
+    border-color: var(--colour-danger);
+}
+
+/* The shared autosave marks the container saved/error; the border says so
+   quietly and the inline .autosave-error span (a standing state, no toast)
+   carries the reason. */
+.setup-field.saved input,
+.setup-field.saved select {
+    border-color: var(--colour-accent-gold);
+}
+
+.setup-field.error input,
+.setup-field.error select {
+    border-color: var(--colour-pool-death);
+}
+
+.setup-field .autosave-error {
+    font-size: 0.75rem;
+    color: var(--colour-pool-death);
+}
+
+/* The autosave's standing status line: idle prose, then "Saved." or the
+   error — a state, never a toast. */
+.setup-save-note {
+    margin: 1rem 0 0;
+    font-size: 0.78rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.setup-save-note[data-state="error"] {
+    color: var(--colour-pool-death);
+}
+
+/* -- Stage II: the muster -- */
+
+.setup-muster {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 2.5rem;
+    align-items: start;
+}
+
+.setup-sources {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.setup-source-title {
+    margin: 0 0 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-ink-deep);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.setup-source-hint {
+    margin: 0 0 0.8rem;
+    max-width: 48ch;
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.setup-add-button {
+    background: var(--colour-surface);
+    border-color: var(--colour-ink-deep);
+    color: var(--colour-ink-deep);
+}
+
+.setup-add-button:hover:not(:disabled) {
+    background: var(--colour-surface-warm);
+    border-color: var(--colour-accent-gold-strong);
+}
+
+.setup-fighter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.5rem;
+}
+
+.setup-fighter-grid .setup-add-button {
+    width: 100%;
+}
+
+/* The saved-characters shelf: a ruled list, one line per character, with
+   its two verbs on the line — Seat, and the round trip's Edit. */
+.setup-character-filter {
+    width: 100%;
+    font: inherit;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.4rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 4px;
+}
+
+.setup-character-list {
+    margin: 0 0 0.8rem;
+    padding: 0;
+    list-style: none;
+    max-height: 21rem;
+    overflow-y: auto;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface);
+}
+
+.setup-character {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    padding: 0.55rem 0.8rem;
+    font-size: 0.88rem;
+}
+
+.setup-character + .setup-character {
+    border-top: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.setup-character-words {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.setup-character-owner {
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.setup-character-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.setup-character-actions .setup-add-button {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+/* The shelf's Seat submit keeps the full battle size it has always rendered
+   at; the smaller size above is for its non-submit neighbours (#477). */
+.setup-character-actions .setup-add-button[type="submit"] {
+    padding: 0.55rem 1.1rem;
+    font-size: 0.9rem;
+}
+
+.setup-character-edit {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.4rem;
+}
+
+.setup-new-character {
+    align-self: flex-start;
+}
+
+.setup-beast-form {
+    display: flex;
+    /* base.css's global form rule is a column; this one really is a row. */
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.8rem;
+    margin-bottom: 0.9rem;
+}
+
+.setup-beast-form .setup-field {
+    /* flex-basis would need to resolve against the row axis, but the field
+       is itself a column flex container and Safari/Chrome size it tall
+       instead — so grow from auto and floor the width. */
+    flex: 1 1 auto;
+    min-width: 11rem;
+}
+
+.setup-auto-start {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+    font-size: 0.85rem;
+    color: var(--colour-ink-deep);
+}
+
+/* -- The muster roll (the signature) -- */
+
+.setup-ledger {
+    position: sticky;
+    top: 1.5rem;
+    padding: 1.2rem 1.4rem 1.4rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 8px;
+    background: var(--colour-surface-warm);
+}
+
+.setup-ledger-head {
+    margin-bottom: 0.9rem;
+}
+
+.setup-capacity {
+    margin: 0.2rem 0 0.45rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.setup-capacity-count {
+    color: var(--colour-ink-deep);
+    font-weight: 600;
+}
+
+.setup-capacity-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--colour-track);
+    position: relative;
+    overflow: hidden;
+}
+
+.setup-capacity-bar span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 3px;
+    background: var(--colour-accent-gold);
+}
+
+.muster-roll {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: none;
+}
+
+.muster-entry {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.3rem 0.8rem;
+    padding: 0.65rem 0.2rem;
+    border-top: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.muster-entry:last-child {
+    border-bottom: 1px solid var(--colour-border-breadcrumb-link);
+}
+
+.muster-index {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--colour-accent-gold-on-light);
+    min-width: 1.4rem;
+    text-align: right;
+}
+
+.muster-words {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.muster-name {
+    font-size: 0.92rem;
+    overflow-wrap: anywhere;
+}
+
+.muster-note {
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.muster-entry.is-stale .muster-name {
+    color: var(--colour-pool-death);
+}
+
+.muster-entry.is-stale .muster-note {
+    color: var(--colour-pool-death);
+    font-style: italic;
+}
+
+.muster-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.muster-strike {
+    background: none;
+    border-color: transparent;
+    color: var(--colour-ink-breadcrumb);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+.muster-strike:hover {
+    color: var(--colour-pool-death);
+}
+
+.muster-empty {
+    margin: 0;
+    padding: 1.4rem 0.4rem;
+    border-top: 1px dashed var(--colour-border-open-seat);
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.88rem;
+    max-width: 40ch;
+}
+
+/* -- Stage III: the march -- */
+
+.setup-blockers {
+    margin: 0.9rem 0 0;
+    padding-left: 1.2rem;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.85rem;
+}
+
+.setup-march-note {
+    margin: 0.9rem 0 0;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.85rem;
+    max-width: 52ch;
+}
+
+/* One column on narrow screens; the ledger stops being sticky so the
+   sources and the roll read in sequence. */
+@media (max-width: 900px) {
+    .setup-muster {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.8rem;
+    }
+    .setup-ledger {
+        position: static;
+    }
+}
+
+@media (max-width: 640px) {
+    .setup-masthead {
+        flex-direction: column;
+    }
+    .setup-stage {
+        margin-bottom: 2.2rem;
+    }
+    .setup-character {
+        flex-wrap: wrap;
+    }
+    .setup-march .setup-begin {
+        width: 100%;
+    }
+}
+
+/* The lobby's claim hint and the round trip's way out (#270). */
+.seat-claim-hint {
+    font-size: 0.72rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.seat-claim-new {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+
+/* --- Teams (#275) ------------------------------------------------------ */
+
+/* A notice is a fact about the last action; like an error it stays until
+   the next action replaces the page (house rule: nothing transient). */
+.setup-notice {
+    margin: 0 0 1.5rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--colour-pool-fatigue);
+    border-left-width: 3px;
+    border-radius: 4px;
+    background: var(--colour-surface-warm);
+    color: var(--colour-ink-deep);
+    font-size: 0.9rem;
+}
+
+/* The muster roll grouped by team: a header per team, then its entries. */
+.muster-team {
+    margin-bottom: 1rem;
+}
+
+.muster-team-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.3rem 0;
+    border-bottom: 2px solid var(--colour-border-breadcrumb-link);
+}
+
+.muster-team-name {
+    margin: 0;
+    font-size: 0.9rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.muster-team-empty {
+    margin: 0;
+    padding: 0.6rem 0.4rem;
+    color: var(--colour-ink-breadcrumb);
+    font-size: 0.82rem;
+}
+
+.muster-team-form {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.muster-team-form select {
+    max-width: 11rem;
+    font-size: 0.78rem;
+}
+
+.setup-party-form,
+.setup-team-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+}
+
+/* The battle roster grouped by team. The roster is a grid of cards, so a
+   header spans the full row; the swatch carries the arena marker's tint. */
+.roster-team-head {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 0.3rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--colour-ink-breadcrumb);
+    border-bottom: 1px solid var(--colour-border-breadcrumb-link);
+    padding-bottom: 0.2rem;
+}
+
+.roster-team-swatch {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    flex: none;
+}
+
+/* Which side a lobby seat fights on; claiming keeps it. */
+.lobby-seat-team {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* --------------------------------------------------------------- guests
+   What a visitor without an account is told (issue #305). Three places,
+   one voice: the standing note on the battle list, and the per-control
+   limits on the setup page and in a lobby's seat card.
+
+   These are state-driven and permanent — rendered from what the server
+   knows about this visitor, and never dismissed on a timer (house rule:
+   no transient UI). They use the page's own ink and hairline tokens so
+   they read as part of the ledger rather than as an alert, and so the
+   text keeps the same contrast the rest of the page is held to. */
+.guest-standing {
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-left: 3px solid var(--colour-accent-gold);
+    background: var(--colour-surface-warm);
+    color: var(--colour-ink-deep);
+    padding: 0.85rem 1rem;
+    margin: 0 0 1.5rem;
+}
+
+.guest-standing-title {
+    font-size: 1rem;
+    margin: 0 0 0.35rem;
+    color: var(--colour-ink-deep);
+}
+
+.guest-standing-note,
+.guest-standing-limit,
+.guest-standing-actions {
+    margin: 0.35rem 0 0;
+    color: var(--colour-ink-deep);
+}
+
+.guest-standing-limit {
+    font-weight: 600;
+}
+
+.setup-guest-limit,
+.seat-guest-limit {
+    margin: 0.5rem 0;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-left: 3px solid var(--colour-accent-gold);
+    background: var(--colour-surface-warm);
+    color: var(--colour-ink-deep);
+}
+
+/* ---------------------------------------------------------------
+   The control desk (#308): who decides, at both levels.
+   Rendered from stored state — nothing here appears or fades on a
+   timer, and every control is a plain form the page reloads behind.
+   --------------------------------------------------------------- */
+
+.battle-control-panel {
+    margin-bottom: 1rem;
+}
+
+.control-lede {
+    margin: 0 0 0.75rem;
+    color: var(--colour-ink-deep);
+}
+
+.control-default {
+    color: var(--colour-accent-gold-on-light);
+}
+
+.control-count {
+    display: block;
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.control-battle-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.control-overrides-note {
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.9rem;
+    color: var(--colour-ink-deep);
+    opacity: 0.85;
+}
+
+.control-combatants {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.4rem;
+}
+
+.control-combatant {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    background: var(--colour-surface-warm);
+}
+
+.control-combatant-name {
+    font-weight: 600;
+    min-width: 9rem;
+}
+
+.control-combatant-line {
+    flex: 1 1 12rem;
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.control-combatant-form {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+/* Who decides for a seat, on its lobby card (issue #339, item 8). Set
+   apart from the "what sits here" line above it: the two answer different
+   questions and a player reads for the second one. */
+.lobby-seat-control {
+    color: var(--colour-ink-deep);
+    font-size: 0.78rem;
+}
+
+/* The battle's default control mode, in the lobby lede (issue #339, item 8). */
+.lobby-control-note {
+    display: block;
+    margin-top: 0.3rem;
+}
+
+/* A soft-deleted battle's page says so, and offers the way back
+   (issue #339, item 5). Part of the page, never a banner on a timer. */
+.battle-deleted-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem;
+    margin: 0 0 1.2rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--colour-ink-breadcrumb);
+    border-left-width: 3px;
+    border-radius: 4px;
+    /* The warm panel ground the rule always meant (#461): it named
+       --battle-panel, which was never defined, so the note rendered
+       transparent. --colour-surface-warm is the old --battle-surface. */
+    background: var(--colour-surface-warm);
+    font-size: 0.9rem;
+}
+.battle-deleted-note p {
+    margin: 0;
+}
+
+/* The list's status filter (issue #339, item 5): plain links, the current
+   bucket marked rather than linked. */
+.battle-list-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    margin: 0 0 0.9rem;
+    font-size: 0.85rem;
+}
+.battle-list-filter-current {
+    font-weight: 700;
+    color: var(--colour-ink-deep);
+}
+
+/* Open/Play/Join/Watch, and the row's delete or restore beside it. */
+.battle-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+/* Whether a fight counts (issues #750, #751): the setup choice, the line the
+   battle page and the GM chat's Battle tab carry while it is on, and the
+   lobby's note when a dead character's seat holds the start. */
+.setup-counts {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.5rem;
+}
+.setup-counts .setup-field-hint {
+    flex-basis: 100%;
+}
+.battle-counts-note,
+.lobby-blocked {
+    margin: 0.4rem 0 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-deep);
+    max-width: 56ch;
+}
+.lobby-blocked {
+    margin: -0.4rem 0 1.1rem;
+}

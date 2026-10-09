@@ -1,0 +1,1 @@
+{% if can_edit %}<div class="editable-field" data-field="{{ field }}"><input type="text" aria-label="{{ label }}" value="{{ value }}" maxlength="{{ max_length }}" class="autosave"></div>{% else %}{{ value }}{% if locked_reason %} <span class="formula field-locked-reason" data-locked-field="{{ field }}">{{ locked_reason }}</span>{% endif %}{% endif %}

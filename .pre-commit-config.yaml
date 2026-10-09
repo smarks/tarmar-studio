@@ -1,0 +1,41 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright type check
+        entry: uv run pyright
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: makemigrations-check
+        name: no model change without a migration
+        # DEBUG=true lets settings boot in a fresh worktree with no .env.
+        # deploy.sh runs the same check and fails the deploy (issue #575).
+        entry: env DEBUG=true uv run python manage.py makemigrations --check --dry-run
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # pytest, Jest and Playwright run in CI on the self-hosted runner
+      # (.github/workflows/ci.yml), which branch protection requires, not at
+      # commit (issue #576). Run them by hand before merging when useful.
+
+      - id: build-guides
+        name: tarmar guides (build/) are current + leak check
+        # Fails when build/ is stale or a deep secret leaks into player-facing
+        # output. It never rewrites or stages build/ itself (issue #576): a
+        # hook that `git add`s swept files into commits their author had not
+        # looked at. Rebuild with `uv run python scripts/build_guides.py` and
+        # stage build/ yourself. deploy.sh runs the same --check.
+        entry: uv run python scripts/build_guides.py --check
+        language: system
+        pass_filenames: false
+        always_run: true

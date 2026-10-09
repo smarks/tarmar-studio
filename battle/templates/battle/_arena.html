@@ -1,0 +1,81 @@
+{% comment %}
+The arena for a started battle (issue #345): the turn panel, the hex map,
+the roster, the event log, and the json_script blocks battle.js reads. The
+battle page includes it below its command bar and control desk; the GM
+chat's Battle tab includes the same partial (with _arena_advance.html and
+_arena_restart.html for the two buttons) inside the side panel, so the
+board beside the chat is this board. Both render from
+battle.views.arena_context.
+
+battle.js finds every element here by id within the scope it was given
+(initBattlePage(container)); at load it scans the document, which is why
+one arena per page is the rule and the ids need no prefix.
+{% endcomment %}
+<div id="turn-panel" class="battle-turn-panel"
+     data-act-url="{% url 'battle:act' battle.pk %}"
+     data-state-url="{% url 'battle:state' battle.pk %}"
+     {# The browser's name for "may run this battle" — ownership now, not #}
+     {# role (#305). The attribute keeps its name so battle.js is unchanged. #}
+     {% if can_control %}data-is-dm="true"{% endif %}
+     hidden></div>
+
+<div class="battle-layout">
+    <div class="battle-panel battle-arena-panel">
+        <h2>Arena</h2>
+        <svg id="battle-arena" viewBox="0 0 100 100" role="img"
+             aria-label="Hex arena map"></svg>
+    </div>
+
+    <div class="battle-side">
+        <div class="battle-panel">
+            <h2>Roster</h2>
+            <div id="battle-roster" class="battle-roster"
+                 {% if can_control %}data-rename-url="{% url 'battle:rename' battle.pk %}"{% endif %}></div>
+        </div>
+
+        <div class="battle-panel battle-log-panel">
+            <h2>Event log</h2>
+            <!-- Every die the engine throws is written to the log and
+                 rendered here. This control only chooses how much of it is
+                 on screen: it toggles a class on #battle-log, so it is a
+                 state the reader sets and nothing disappears on its own.
+                 Checked (dice shown) is the default (#301). -->
+            <p class="battle-log-controls">
+                <label for="battle-log-dice">
+                    <input type="checkbox" id="battle-log-dice" checked>
+                    Show every die roll
+                </label>
+            </p>
+            {% comment %}
+            The log opens on its last few turns (#662): a long battle writes
+            thousands of events and every viewer used to be sent all of them
+            on every load. Which end of the window a reader is on is a URL,
+            not a control that forgets itself — the link below survives a
+            reload, and nothing is held back without the page saying how
+            much.
+            {% endcomment %}
+            {% if earlier_turns %}
+            <p class="battle-log-window">
+                {% if showing_all_turns %}
+                Showing every turn.
+                <a href="{{ windowed_log_url }}">Show only the last {{ log_turn_window }} turns</a>.
+                {% else %}
+                Showing the last {{ log_turn_window }} turns.
+                <a href="{{ full_log_url }}">Show {{ earlier_turns }} earlier turn{{ earlier_turns|pluralize }}</a>.
+                {% endif %}
+            </p>
+            {% endif %}
+            <div id="battle-log">
+                {% for group in event_turns %}
+                {% include "battle/_turn_group.html" %}
+                {% empty %}
+                {% include "battle/_log_empty.html" %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{{ view_json|json_script:"battle-view" }}
+{{ pending|json_script:"battle-pending" }}
+{{ seats|json_script:"battle-seats" }}

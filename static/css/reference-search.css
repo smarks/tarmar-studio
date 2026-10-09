@@ -1,0 +1,57 @@
+/* Reference search results, everything not shared with the article page.
+   Loaded after reference-shared.css. Only `main` moved past that shared run
+   (issue #93). It is scoped to the page's own class, main.reference-search-page
+   (issue #338 item 24), which no shared selector names, so nothing matches the
+   same element and no winner can flip. */
+
+main.reference-search-page {
+    display: flex;
+    gap: 2rem;
+}
+/* The site-wide trail (issue #189) is a row of its own above the two
+   columns, not a third column beside them — as a plain flex child it stole
+   width from the content and pushed the wide tables into a sideways scroll. */
+main.reference-search-page {
+    flex-wrap: wrap;
+}
+main.reference-search-page > .breadcrumb {
+    flex: 1 0 100%;
+    margin-bottom: 0;
+}
+
+
+.search-results {
+    list-style: none;
+}
+.search-result {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.search-result:last-child {
+    border-bottom: none;
+}
+.search-result h2 {
+    font-size: 1.1rem;
+    margin: 0 0 0.5rem;
+}
+.search-result h2 a {
+    color: var(--colour-ink);
+    text-decoration: none;
+}
+.search-result h2 a:hover {
+    text-decoration: underline;
+}
+.search-result .snippet {
+    color: var(--colour-ink-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+.search-result .snippet mark {
+    background: var(--colour-status-warning-surface);
+    padding: 0.1rem 0.2rem;
+}
+.no-results {
+    color: var(--colour-ink-muted);
+    font-style: italic;
+}

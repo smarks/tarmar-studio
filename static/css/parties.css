@@ -1,0 +1,116 @@
+/* Parties (issue #274): the list table, the roster cards, and the
+   add-member shelf. Shapes and palette borrowed from the character list's
+   table and the battle setup's saved-character shelf so the three read as
+   one family. */
+
+.party-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.party-table th,
+.party-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+
+.party-meta {
+    color: var(--colour-ink-muted);
+}
+
+.party-description {
+    max-width: 60ch;
+}
+
+.party-summary {
+    font-style: italic;
+}
+
+.party-error {
+    color: var(--colour-danger);
+    border: 1px solid currentColor;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+}
+
+.party-roster,
+.party-addable {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-width: 44rem;
+}
+
+.party-member,
+.party-addable-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.25rem;
+}
+
+.party-member + .party-member,
+.party-addable-row + .party-addable-row {
+    border-top: 1px solid var(--colour-hairline);
+}
+
+.party-member-hidden strong {
+    color: var(--colour-ink-faint);
+}
+
+.party-member-words {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.party-member-detail {
+    color: var(--colour-ink-muted);
+    font-size: 0.9em;
+}
+
+.party-member-action {
+    margin: 0;
+}
+
+.party-filter {
+    width: 100%;
+    max-width: 24rem;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.5rem;
+}
+
+.party-form {
+    max-width: 36rem;
+}
+
+.party-field {
+    display: block;
+    margin-bottom: 1rem;
+}
+
+.party-field-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.party-field input,
+.party-field textarea {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    box-sizing: border-box;
+}
+
+.party-form-errors {
+    color: var(--colour-danger);
+    margin: 0.25rem 0;
+    padding-left: 1rem;
+}
+
+.party-none {
+    color: var(--colour-ink-muted);
+}

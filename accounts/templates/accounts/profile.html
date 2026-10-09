@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% load static account_tags %}
+
+{% block title %}Profile{% if profile_user != user %} - {{ profile_user.username }}{% endif %}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/profile.css' %}">
+{% endblock %}
+
+{% block content %}
+{% if profile_user != user %}
+<div class="back-link">
+    <a href="{% url 'users_list' %}">&larr; Back to Users</a>
+</div>
+{% endif %}
+
+<h1>{% if profile_user != user %}{{ profile_user.username }}'s {% endif %}Profile</h1>
+
+<div class="profile-form">
+    <div class="field">
+        <label for="id_username">Username</label>
+        <input type="text" id="id_username" value="{{ profile_user.username }}" readonly>
+    </div>
+
+    <div class="field" data-field="real_name">
+        <label for="id_real_name">Real Name</label>
+        <input type="text" name="real_name" id="id_real_name" maxlength="100" value="{{ profile_user.real_name }}" class="autosave">
+    </div>
+
+    <div class="field" data-field="email">
+        <label for="id_email">Email</label>
+        <input type="email" name="email" id="id_email" maxlength="254" value="{{ profile_user.email }}" class="autosave">
+    </div>
+
+    <div class="field" data-field="phone">
+        <label for="id_phone">Phone (SMS)</label>
+        <input type="tel" name="phone" id="id_phone" maxlength="20" value="{{ profile_user.phone }}" class="autosave">
+    </div>
+
+    <div class="field" data-field="discord">
+        <label for="id_discord">Discord</label>
+        <input type="text" name="discord" id="id_discord" maxlength="50" value="{{ profile_user.discord }}" class="autosave">
+    </div>
+
+    <div class="field" data-field="preferred_contact">
+        <label for="id_preferred_contact">Preferred Contact</label>
+        {% include "accounts/partials/contact_select.html" with selected=profile_user.preferred_contact autosave=True %}
+    </div>
+
+    <div class="section-header">Roles</div>
+
+    {% if can_edit_roles %}
+    <div class="checkbox-field" data-field="is_role_admin">
+        <input type="checkbox" name="is_role_admin" id="id_is_role_admin"{% if profile_user.is_role_admin %} checked{% endif %} class="autosave">
+        <label for="id_is_role_admin">Admin</label>
+    </div>
+
+    <div class="checkbox-field" data-field="is_dm">
+        <input type="checkbox" name="is_dm" id="id_is_dm"{% if profile_user.is_dm %} checked{% endif %} class="autosave">
+        <label for="id_is_dm">DM</label>
+    </div>
+
+    <div class="checkbox-field" data-field="is_player">
+        <input type="checkbox" name="is_player" id="id_is_player"{% if profile_user.is_player %} checked{% endif %} class="autosave">
+        <label for="id_is_player">Player</label>
+    </div>
+    {% else %}
+    <div class="roles-display">{% display_roles profile_user %}</div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/autosave.js' %}"></script>
+<script src="{% static 'accounts/js/preferred_contact.js' %}"></script>
+<script>
+    {% if profile_user.pk != user.pk %}
+    const updateUrl = '{% url "user_profile_update_field" profile_user.pk %}';
+    {% else %}
+    const updateUrl = '{% url "profile_update_field" %}';
+    {% endif %}
+    const { saveField } = initAutosave({ updateUrl: updateUrl });
+    initPreferredContact(saveField);
+</script>
+{% endblock %}

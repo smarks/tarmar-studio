@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Encounter generator{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/bestiary.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="bestiary-page"{% endblock %}
+
+{% block content %}
+<h1>Encounter generator</h1>
+<p>The Pillars wilderness tables: d20 for the terrain, d10 down into the
+humans, animals, and special tables when the roll says so. Rolls are seeded —
+the address of a result reproduces it exactly.</p>
+
+<div class="bestiary-toolbar">
+    <form method="post" action="{% url 'encounters:generator' %}">
+        {% csrf_token %}
+        <label>Terrain
+            <select name="terrain">
+                {% for terrain in terrains %}
+                <option value="{{ terrain }}" {% if terrain == selected_terrain %}selected{% endif %}>{{ terrain|capfirst }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" class="button">Roll encounter</button>
+    </form>
+</div>
+
+{% if result %}
+<section class="encounter-result">
+    <h2>{{ result.entry.name }}
+        {% if result.count %}<span class="encounter-count">&times; {{ result.count }}</span>{% endif %}
+    </h2>
+    <div class="beast-meta">{{ result.terrain|capfirst }} &middot; seed {{ request.GET.seed }}</div>
+    {% if result.entry.note %}<p>{{ result.entry.note }}</p>{% endif %}
+
+    <h3>How the dice got there</h3>
+    <ul class="encounter-rolls">
+        {% for roll in result.rolls %}
+        <li>
+            <strong>{{ roll.purpose }}</strong> — {{ roll.specification }}
+            rolled {{ roll.faces|join:", " }}{% if roll.modifier %} ({{ roll.modifier }} modifier){% endif %}
+            = {{ roll.total }}
+        </li>
+        {% endfor %}
+    </ul>
+
+    {% if beast %}
+    {% include "bestiary/_beast_card.html" with beast=beast %}
+    {% else %}
+    <p class="beast-meta">No bestiary entry for this one — it is the GM's to
+    portray.</p>
+    {% endif %}
+</section>
+{% endif %}
+
+<details class="encounter-reference">
+    <summary>The tables themselves</summary>
+
+    <h3>Terrain tables (d20)</h3>
+    {% for terrain, rows in main_tables.items %}
+    <h4>{{ terrain|capfirst }}</h4>
+    <ol class="encounter-table">
+        {% for entry in rows %}
+        <li>{{ entry.name }}{% if entry.count %} ({{ entry.count }}){% endif %}{% if entry.note %} — {{ entry.note }}{% endif %}</li>
+        {% endfor %}
+    </ol>
+    {% endfor %}
+
+    {% for name, per_terrain in subtables.items %}
+    <h3>{{ name|capfirst }} subtable (d10)</h3>
+    {% for terrain, rows in per_terrain.items %}
+    <h4>{{ terrain|capfirst }}</h4>
+    <ol class="encounter-table">
+        {% for entry in rows %}
+        <li>{{ entry.name }}{% if entry.count %} ({{ entry.count }}){% endif %}{% if entry.note %} — {{ entry.note }}{% endif %}</li>
+        {% endfor %}
+    </ol>
+    {% endfor %}
+    {% endfor %}
+</details>
+{% endblock %}

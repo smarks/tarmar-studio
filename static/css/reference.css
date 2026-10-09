@@ -1,0 +1,211 @@
+/* Reference article page, everything not shared with the search page.
+   Loaded after reference-shared.css. Two rules moved past that shared run
+   (issue #93); neither can flip a winner:
+     - `main.reference-page` is the page's own class (issue #338 item 24);
+       no shared selector names it, so none matches the same element.
+     - `.sidebar a.active` declares only font-weight. The one shared rule
+       that can match the same element, `.sidebar .children a`, declares
+       only color, and `.sidebar a` is lower specificity. */
+
+main.reference-page {
+    display: flex;
+    gap: 2rem;
+}
+/* The site-wide trail (issue #189) is a row of its own above the two
+   columns, not a third column beside them — as a plain flex child it stole
+   width from the content and pushed the wide tables into a sideways scroll. */
+main.reference-page {
+    flex-wrap: wrap;
+}
+main.reference-page > .breadcrumb {
+    flex: 1 0 100%;
+    margin-bottom: 0;
+}
+
+
+.sidebar a.active {
+    font-weight: 600;
+}
+
+.content h2 {
+    font-size: 1.25rem;
+    margin: 1.5rem 0 0.75rem;
+    font-weight: 500;
+}
+.content h3 {
+    font-size: 1.1rem;
+    margin: 1.25rem 0 0.5rem;
+    font-weight: 500;
+}
+.content p {
+    margin-bottom: 0.75rem;
+    line-height: 1.6;
+}
+.content ul, .content ol {
+    margin-bottom: 0.75rem;
+    padding-left: 1.5rem;
+}
+.content li {
+    margin-bottom: 0.25rem;
+    line-height: 1.6;
+}
+.content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+}
+.content em {
+    color: var(--colour-ink-secondary);
+}
+/* Rules tables are never scrolled or clipped — the whole table is always on
+   screen. Wide ones shrink and wrap while they still fit, then restack into
+   labelled blocks at the breakpoints further down. */
+.content table {
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+    width: 100%;
+    table-layout: auto;
+}
+.content th, .content td {
+    border: 1px solid var(--colour-border-soft);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    overflow-wrap: break-word;
+}
+/* Wide grids trade padding for column width so every column stays readable. */
+.content table[data-columns="6"] th, .content table[data-columns="6"] td,
+.content table[data-columns="7"] th, .content table[data-columns="7"] td,
+.content table[data-columns="8"] th, .content table[data-columns="8"] td,
+.content table[data-columns="9"] th, .content table[data-columns="9"] td,
+.content table[data-columns="10"] th, .content table[data-columns="10"] td {
+    padding: 0.35rem 0.4rem;
+    font-size: 0.85rem;
+}
+.content th {
+    background: var(--colour-surface-muted);
+    font-weight: 500;
+}
+.content tr:nth-child(even) {
+    background: var(--colour-surface-section);
+}
+/* Collapsible table of contents — shown as a toggle on small screens only.
+   It collapses at 1000px rather than at a phone width so the widest rules
+   tables get the full viewport instead of sharing it with the sidebar. */
+.toc-toggle {
+    display: none;
+}
+@media (max-width: 1000px) {
+    main.reference-page {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    .sidebar {
+        min-width: 0;
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--colour-hairline);
+        padding-right: 0;
+        padding-bottom: 0.5rem;
+    }
+    .toc-toggle {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 0.6rem 0.75rem;
+        margin-top: 0.5rem;
+        background: var(--colour-surface-muted);
+        border: 1px solid var(--colour-border-soft);
+        border-radius: 4px;
+        font-size: 0.95rem;
+        color: var(--colour-ink);
+        cursor: pointer;
+    }
+    .toc-toggle::after {
+        content: "▾";
+        float: right;
+    }
+    .toc-toggle[aria-expanded="true"]::after {
+        content: "▴";
+    }
+    .sidebar > ul {
+        display: none;
+        margin-top: 0.5rem;
+    }
+    .sidebar > ul.open {
+        display: block;
+    }
+    .sidebar a {
+        padding: 0.4rem 0;
+    }
+    .sidebar .children {
+        margin-left: 0.75rem;
+    }
+    /* Below the sidebar breakpoint the widest grids are still wider than the
+       screen, because a table never shrinks past the sum of its columns'
+       longest words and `overflow-wrap: break-word` (above) deliberately does
+       not count toward that intrinsic minimum. `anywhere` does, so the columns
+       can give up whole-word integrity — the last thing worth keeping — rather
+       than push a scrollbar under the page. Scoped to this breakpoint: on a
+       desktop there is room, and words stay whole. */
+    .content th, .content td {
+        overflow-wrap: anywhere;
+    }
+}
+
+/* Phone layout: a grid that narrow cannot stay a grid, so each row becomes a
+   bordered block and every cell shows its own column name — taken from the
+   data-label the view writes out of the header row. The whole table is still
+   there; it just reads top to bottom instead of left to right. */
+@media (max-width: 700px) {
+    .content table {
+        display: block;
+        border: none;
+        font-size: 0.9rem;
+    }
+    .content table[data-columns] th,
+    .content table[data-columns] td {
+        font-size: inherit;
+    }
+    .content thead {
+        /* Dropped, not visually hidden. Every cell below already carries its
+           own column name (the ::before further down), so a hidden header row
+           would only make a screen reader read the nine names twice — once as
+           a stray run of text, once per labelled cell. It also could not be
+           hidden honestly: a clipped 1px box still lays its row out at full
+           width, and that overflow escapes to the page (issue #160), while
+           `overflow: hidden`/`clip` only moves the sideways scroll from the
+           page onto the header box rather than removing it. */
+        display: none;
+    }
+    .content tbody,
+    .content tr {
+        display: block;
+    }
+    .content tr {
+        border: 1px solid var(--colour-border-soft);
+        border-radius: 6px;
+        margin-bottom: 0.6rem;
+        background: var(--colour-surface);
+    }
+    .content tr:nth-child(even) {
+        background: var(--colour-surface-section);
+    }
+    .content td {
+        display: flex;
+        gap: 0.75rem;
+        align-items: baseline;
+        border: none;
+        border-bottom: 1px solid var(--colour-hairline);
+        padding: 0.4rem 0.7rem;
+    }
+    .content tr td:last-child {
+        border-bottom: none;
+    }
+    .content td[data-label]::before {
+        content: attr(data-label);
+        flex: 0 0 7.5rem;
+        font-weight: 500;
+        color: var(--colour-ink-secondary);
+    }
+}

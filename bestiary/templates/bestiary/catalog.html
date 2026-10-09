@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% load static %}
+{% load bestiary_art %}
+
+{% block title %}Bestiary{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/bestiary.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="bestiary-catalog-main bestiary-page page-width-1100"{% endblock %}
+
+{% block content %}
+<h1>Bestiary</h1>
+
+{% if request.GET.generate_error %}
+{% comment %}The error rides the query string, so it stayed until the address
+   changed. The dismiss control is a link back to the plain catalog (issue
+   #339, item 33): it works without script and leaves nothing behind.{% endcomment %}
+<div class="notice notice-error" role="alert">
+    <span class="notice-text">{{ request.GET.generate_error }}</span>
+    <a class="notice-dismiss" href="{% url 'bestiary:catalog' %}" aria-label="Dismiss">×</a>
+</div>
+{% endif %}
+
+<div class="bestiary-toolbar">
+    {% comment %}
+    A name box beside the category one (issue #703). The catalog could only
+    be narrowed by category, so finding one beast among 239 meant Ctrl-F or a
+    very long scroll -- and the name is what a DM at the table actually has
+    in mind. Substring, case-insensitive, and it pages like the category
+    filter does.
+    {% endcomment %}
+    <form method="get" action="{% url 'bestiary:catalog' %}">
+        <label>Name
+            <input type="search" name="name" value="{{ name_filter }}"
+                   placeholder="part of a name" autocomplete="off">
+        </label>
+        <label>Category
+            <select name="category">
+                <option value="">All categories</option>
+                {% for key, label in categories %}
+                <option value="{{ key }}" {% if key == selected_category %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" class="button">Filter</button>
+        {% if name_filter or selected_category %}
+        <a class="bestiary-filter-clear" href="{% url 'bestiary:catalog' %}">Clear</a>
+        {% endif %}
+    </form>
+
+    <form method="post" action="{% url 'bestiary:generate' %}" id="generate-form">
+        {% csrf_token %}
+        <label>Exact name
+            <input type="text" name="name" placeholder="exact beast name">
+        </label>
+        <label>Or random from category
+            <select name="category">
+                <option value="">Any</option>
+                {% for key, label in categories %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Or difficulty
+            <select name="difficulty">
+                <option value="">Any</option>
+                {% for band in difficulty_bands %}
+                <option value="{{ band }}">{{ band|capfirst }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" class="button">Generate beast</button>
+    </form>
+
+    <a class="button" href="{% url 'encounters:generator' %}">Encounter generator</a>
+</div>
+
+<div class="beast-grid">
+    {% for beast in beasts %}
+    {% include "bestiary/_beast_card.html" with beast=beast show_attacks=True %}
+    {% empty %}
+    <p>No beasts in this category.</p>
+    {% endfor %}
+</div>
+{% include "_pagination.html" with qs=catalog_query pagination_label="Catalog pages" %}
+
+<div class="generated-section">
+    <h2>Generated variants</h2>
+    {% if generated_beasts %}
+    <div class="beast-grid">
+        {% for beast in generated_beasts %}
+        <div class="beast-card">
+            <div class="beast-card-head">
+                {% beast_plate beast %}
+                <div>
+                    <h3><a href="{{ beast.get_absolute_url }}">{{ beast.name }}</a></h3>
+                    <div class="beast-meta">
+                {{ beast.get_category_display }}
+                    {% if beast.base_beast %}&middot; variant of <a href="{{ beast.base_beast.get_absolute_url }}">{{ beast.base_beast.name }}</a>{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="beast-stats">
+                STR {{ beast.strength }} &middot; DEX {{ beast.dexterity }} &middot;
+                Fatigue {{ beast.fatigue_pool }} &middot; Body {{ beast.body_pool }}
+            </div>
+            {% comment %}Generated variants only (issue #339, item 21); canon beasts have no delete.{% endcomment %}
+            <form method="post" action="{% url 'bestiary:delete' beast.slug %}" class="beast-delete"
+              data-confirm="Delete the generated variant {{ beast.name }}? The catalog beast it came from stays."
+              data-confirm-label="Delete" data-confirm-danger="true">
+            {% csrf_token %}
+            <button type="submit" class="button delete-btn">Delete <span class="sr-only">{{ beast.name }}</span></button>
+        </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% include "_pagination.html" with page_obj=variant_page is_paginated=variant_is_paginated page_param=variant_page_param qs=variant_query pagination_label="Generated variant pages" %}
+    {% else %}
+    <p>None yet — use the generate form above.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% comment %}
+One character's Luck in this session (issue #861), rendered by
+gm.templatetags.gm_play.luck_control inside a sheet in the Characters tab.
+"Once per session per level, after seeing a roll's result you may add this
+skill's level to it." The count is the session's stored one; a spend posts to
+gm:spend_luck and gm-panel-characters.js refetches the tab from the answer,
+so the line always shows what is recorded.
+{% endcomment %}
+{% if account %}
+<form class="gm-luck-form" data-luck-url="{{ url }}" data-character-id="{{ character_id }}">
+    <span class="gm-luck-count">Luck +{{ account.level }}: {{ account.spent }} of {{ account.level }} used this session</span>
+    <label class="sr-only" for="gm-luck-roll-{{ character_id }}">Roll the Luck is added to</label>
+    <input type="text" id="gm-luck-roll-{{ character_id }}" class="gm-luck-roll" maxlength="120" placeholder="Added to which roll?" autocomplete="off">
+    <button type="submit" class="btn btn-sm gm-luck-spend">Spend Luck</button>
+</form>
+{% endif %}

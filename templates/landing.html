@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Tarmar Studio{% endblock %}
+
+{% block content %}
+<div style="text-align: center; padding: 2rem 1rem;">
+    <h1 style="font-size: 2rem; margin-bottom: 0.25rem;">Tarmar Studio</h1>
+    <p style="color: #666; margin-bottom: 3rem;">Choose your adventure</p>
+
+    <div style="display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;">
+        <a href="{% url 'home' %}" style="display: block; width: 280px; padding: 2rem; border: 1px solid #eee; border-radius: 8px; color: #333; text-decoration: none; transition: border-color 0.2s, transform 0.2s;">
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">&#9876;</div>
+            <h2 style="margin-bottom: 0.5rem; font-weight: 500;">Tarmar</h2>
+            <p style="color: #666; font-size: 0.9rem;">Character sheets, rules reference, and AI game master</p>
+        </a>
+    </div>
+</div>
+{% endblock %}

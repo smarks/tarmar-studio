@@ -1,0 +1,63 @@
+{% extends "error_base.html" %}
+
+{% block code %}404{% endblock %}
+
+{% block extra_style %}
+        .path {
+            font-family: "SF Mono", Monaco, "Courier New", monospace;
+            font-size: 0.8rem;
+            color: #555;
+            background: rgba(255,255,255,0.05);
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            margin-bottom: 2rem;
+            max-width: 90vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .stars {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: -1;
+        }
+        .star {
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background: #fff;
+            border-radius: 50%;
+            opacity: 0;
+            animation: twinkle 4s ease-in-out infinite;
+        }
+        @keyframes twinkle {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 0.8; }
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="stars" id="stars"></div>
+    <div class="code">404</div>
+    <h1>Not all those who wander are lost.</h1>
+    <p class="quote">"But you, it seems, have strayed from the path. This page exists neither in the Shire nor in any realm known to us."</p>
+    <p class="attribution">&mdash; Concerning the whereabouts of missing pages</p>
+    <div class="path">{{ request_path }}</div>
+    <a href="/">Return to the Shire</a>
+    <script>
+        (function() {
+            var s = document.getElementById('stars');
+            for (var i = 0; i < 60; i++) {
+                var d = document.createElement('div');
+                d.className = 'star';
+                d.style.left = Math.random() * 100 + '%';
+                d.style.top = Math.random() * 100 + '%';
+                d.style.animationDelay = Math.random() * 4 + 's';
+                d.style.animationDuration = (3 + Math.random() * 3) + 's';
+                s.appendChild(d);
+            }
+        })();
+    </script>
+{% endblock %}

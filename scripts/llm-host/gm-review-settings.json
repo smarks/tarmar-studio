@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": ["Read(./**)"],
+    "deny": [
+      "Bash",
+      "Write",
+      "Edit",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "NotebookEdit",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.claude/**)",
+      "Read(~/.config/**)",
+      "Read(**/.env)",
+      "Read(**/.secrets/**)",
+      "Read(**/credentials.json)"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{% comment %}
+One turn of the event log (#504): its heading and its events. The battle
+page renders one per turn; the endpoints render one per turn their events
+touch, and battle.js appends that section, or moves its events into the
+section already on the page for that turn.
+{% endcomment %}
+<section class="turn-group" data-turn="{{ group.turn }}">
+    <h3>Turn {{ group.turn }}</h3>
+    <ol class="turn-events">
+        {% for event in group.events %}
+        {% include "battle/_event.html" %}
+        {% endfor %}
+    </ol>
+</section>

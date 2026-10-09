@@ -1,0 +1,117 @@
+/* Character creation page. Lifted verbatim from the extra_styles block of
+   characters/templates/characters/character_create.html (issue #93). */
+
+.creation-option {
+    background: var(--colour-surface-section);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+}
+.creation-option h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+    color: var(--colour-ink-heading);
+}
+.creation-option p {
+    color: var(--colour-ink-secondary);
+    font-size: 0.875rem;
+    margin: 0 0 1rem;
+}
+.point-buy-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.point-buy-grid label {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--colour-ink-secondary);
+    margin-bottom: 0.25rem;
+}
+.point-buy-grid input {
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    font-size: 1rem;
+    font-family: inherit;
+}
+.point-buy-tally {
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+}
+.point-buy-tally .remaining {
+    font-weight: 600;
+}
+.point-buy-tally.over .remaining,
+.point-buy-tally.under .remaining {
+    color: var(--colour-danger);
+}
+/* The admin/DM off-budget warning (issue #299). It sits empty in the markup
+   and the tally script fills it, so an empty warning must take up no room --
+   :empty keeps the form from carrying a permanent blank gap. Styled as a
+   caution, not an error: the buy below it is submittable. */
+.point-buy-off-budget {
+    font-size: 0.875rem;
+    margin: -0.5rem 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border-left: 3px solid var(--colour-off-budget-rule);
+    background: var(--colour-off-budget-surface);
+    color: var(--colour-off-budget-ink);
+}
+.point-buy-off-budget:empty {
+    display: none;
+}
+
+/* Matches the .bulk-actions button:disabled treatment in base.html, so an
+   illegal buy visibly cannot be submitted rather than silently doing nothing. */
+#point-buy-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+@media (max-width: 480px) {
+    .point-buy-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* The battle setup's round trip (#270). */
+.setup-return {
+    margin: 0 0 1rem;
+    font-size: 0.9rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* The public/private choice on both creation forms (issue #273). */
+.visibility-choice {
+    border: 1px solid var(--colour-border-soft);
+    border-radius: 4px;
+    margin: 1rem 0;
+    padding: 0.5rem 1rem 0.75rem;
+}
+.visibility-choice legend {
+    font-weight: 600;
+    padding: 0 0.25rem;
+}
+.visibility-choice label {
+    display: block;
+    margin-top: 0.35rem;
+    cursor: pointer;
+}
+
+/* The name on creation (issue #786), first in each card's form; the form's
+   own gap spaces it from what follows. */
+.name-choice label {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--colour-ink-secondary);
+    margin-bottom: 0.25rem;
+}
+.name-choice input {
+    max-width: 24rem;
+}
+.creation-option .name-choice-note {
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+}

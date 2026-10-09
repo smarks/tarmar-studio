@@ -1,0 +1,109 @@
+[project]
+name = "tarmar-studio"
+version = "0.1.0"
+description = "Unified Django platform for the Tarmar tabletop RPG — character management, AI Game Master, and rules reference."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "Spencer Marks" }]
+keywords = ["tarmar", "tabletop-rpg", "django", "ollama", "game-master"]
+dependencies = [
+    "bleach>=6.3.0",
+    "django>=6.0.1",
+    "speak-friend @ git+https://github.com/smarks/speak-friend.git",
+    "origami-common @ git+https://github.com/smarks/origami-common.git",
+    "origami-auth @ git+https://github.com/smarks/origami-auth.git",
+    # Shared hex-grid library (coords, dice, pathfinding, layout), also
+    # consumed by melee and orge — battle/engine/hexes.py wraps it rather
+    # than reimplementing hex math. PINNED TO A RELEASE TAG (the house
+    # pattern documented in melee/requirements.txt): to bump, cut a new
+    # vX.Y.Z tag in the hexarena repo (its pyproject version must match the
+    # tag — a tag-version-guard workflow rejects a mismatch) and update the
+    # @vX.Y.Z below in a tarmar-studio commit that CI tests. For local
+    # development against an unreleased change, override with an editable
+    # checkout: uv pip install -e ../hexarena
+    "hexarena @ git+https://github.com/smarks/hexarena.git@v0.2.0",
+    "httpx>=0.28.1",
+    "markdown>=3.10",
+    "python-dotenv>=1.0.0",
+    # Shared Tarmar d20 combat core (matrix, modifiers, crit, Hybrid armour) —
+    # the single source of truth for the weapon-vs-armour resolution rules;
+    # `melee` pins the same package for its Tarmar profile. Local dev:
+    # uv pip install -e ../tarmar-rules
+    # PINNED TO A RELEASE TAG. To bump: cut a new vX.Y.Z tag in the lib (its
+    # pyproject version must match the tag — tarmar-rules' tag-version-guard
+    # workflow fails a mismatched tag push), then update the @vX.Y.Z here in a
+    # tarmar-studio commit that CI tests. (Pattern documented in melee's
+    # requirements.txt for hexarena/tarmar-rules/origami-auth.)
+    "tarmar-rules @ git+https://github.com/smarks/tarmar-rules.git@v0.3.0",
+    # Shared Tarmar turn engine (six-phase battle loop, actions, combat math,
+    # spells, utility AI policy), seeded from this repo's battle/engine in
+    # #240 milestone 1 — battle/engine/*, battle/spells.py and
+    # battle/policy.py are thin re-exports of it. Same tag-pin rules as
+    # hexarena/tarmar-rules above. Local dev:
+    # uv pip install -e ../tarmar-engine
+    "tarmar-engine @ git+https://github.com/smarks/tarmar-engine.git@v0.9.6",
+    "weasyprint>=67.0",
+    "whitenoise>=6.11.0",
+]
+
+[dependency-groups]
+dev = [
+    "django-stubs>=5.2.8",
+    "pre-commit>=4.5.1",
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-django>=4.11.1",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.14.11",
+    # pyright type-checks cli/gm.py, so the dev environment needs the CLI's
+    # imports resolvable or the type-check hook fails on `rich`.
+    { include-group = "cli" },
+]
+prod = [
+    "dj-database-url>=2.3.0",
+    "gunicorn>=23.0.0",
+    "psycopg[binary]>=3.2.0",
+    "whitenoise>=6.11.0",
+]
+cli = [
+    "rich>=14.0.0",
+]
+
+[project.scripts]
+tarmar = "cli.tarmar:main"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tarmar_studio.settings"
+python_files = ["test_*.py", "tests.py"]
+# -n auto spreads ~3,000 tests over the machine's cores (4 on the CI runner).
+# --dist loadgroup keeps the default load balancing but honours
+# @pytest.mark.xdist_group for any tests that must share one worker. (The
+# dotenv tests used to; since #471 they stage private temp files.) Living in addopts
+# rather than the CI workflow means a local `./run test` and the pre-commit
+# hook get the same behaviour and the same number — one source of truth.
+# Override with `-n0` for a serial run when debugging.
+addopts = "-n auto --dist loadgroup --cov=accounts --cov=characters --cov=reference --cov=common --cov=tarmar_studio --cov=character_export --cov=gm --cov=battle --cov=bestiary --cov=encounters --cov=ruins --cov=parties --cov-report=term-missing --cov-fail-under=98"
+
+[tool.coverage.run]
+# Same apps as addopts' --cov flags, and a test holds the two together
+# (issue #561). They drifted once: source omitted encounters and ruins, so
+# the ratchet measured a higher figure than the gate applied and stored a
+# threshold no gated run could clear.
+source = ["accounts", "characters", "reference", "common", "tarmar_studio", "character_export", "gm", "battle", "bestiary", "encounters", "ruins", "parties"]
+omit = ["*/migrations/*", "*/tests/*", "*/admin.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]

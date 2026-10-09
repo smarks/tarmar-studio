@@ -1,0 +1,25 @@
+{% load dice_display %}{% comment %}
+One run in the Experience History (issue #338 item 4): the page's log and the
+add-years response both render this from the stored log entry, and
+character-edit.js prepends what the server sent. Needs `run`; `open` expands
+it (the newest entry).
+{% endcomment %}{% with last_year=run.years|last %}
+                    <details class="term-entry"{% if open %} open{% endif %}>
+                        <summary>{{ run.track|track_label }}, {% if run.years.0.age == last_year.age %}Age {{ last_year.age }}{% else %}Age {{ run.years.0.age }}&ndash;{{ last_year.age }}{% endif %}</summary>
+                        <div class="term-details">
+                            <ul>
+                                {% for year in run.years %}
+                                <li>Year {{ year.year }}: {{ year.skill }} (rolled {{ year.roll }}){% if year.survival_check %} &mdash; survival {{ year.survival_check|survival_roll }}{% if year.survival_check.success %}: survived{% else %}: died{% endif %}{% endif %}</li>
+                                {% endfor %}
+                            </ul>
+                            {% if run.aging %}
+                            <p class="aging-warning">Aging penalties applied:
+                                {% for attr, penalty in run.aging.items %}
+                                {% if penalty != 0 %}{{ attr|upper|slice:":3" }} {{ penalty }}{% if not forloop.last %}, {% endif %}{% endif %}
+                                {% endfor %}
+                            </p>
+                            {% endif %}
+                            <p>+{{ run.xp_awarded }} XP, +{{ run.free_points_awarded }} free skill points</p>
+                        </div>
+                    </details>
+                    {% endwith %}

@@ -1,0 +1,53 @@
+/* The table-rolling generator pages — Ruin Generator and Hook Generator
+   (issue #338 item 8).
+
+   Both pages had typed the same seven rules into their own
+   {% block extra_styles %}, differing only in the class prefix: .ruin-form
+   against .hook-form, .ruin-seed against .hook-seed, .ruin-room against
+   .hook-card. Two prefixes for one component. The markup now uses the
+   .generator-* names below, and this sheet is the only place the rules live.
+
+   Anything that is genuinely one page's own — the ruin site list, the hook
+   band notice — stays in that page's extra_styles block. */
+
+.generator-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: flex-end;
+    margin-bottom: 1.5rem;
+}
+
+.generator-form label {
+    display: block;
+    font-size: 0.85rem;
+}
+
+.generator-seed-note {
+    font-size: 0.85rem;
+    opacity: 0.8;
+    margin-top: -1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* The seed chip beside a heading and the die-and-face trace after a result
+   were declared separately and identically on both pages; they are the same
+   monospace aside, so they share one rule. */
+.generator-seed,
+.roll-detail {
+    font-family: monospace;
+    font-size: 0.85rem;
+    opacity: 0.75;
+    white-space: nowrap;
+}
+
+.generator-card {
+    border: 1px solid var(--colour-border-parchment);
+    border-radius: 6px;
+    padding: 0.6rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.generator-card h3 {
+    margin: 0 0 0.4rem;
+}

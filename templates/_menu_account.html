@@ -1,0 +1,29 @@
+{% load menu %}{% comment %}
+The account end of the site menu, shared by both theme branches in base.html
+(#338 item 28): who you are, the admin tools you may use, and the way out, or
+the way in for a guest. The studio's generators live only on the studio menu,
+and the arena offers a single quiet link back to the studio.
+{% endcomment %}{% if user.is_authenticated %}
+                {% menu_link 'profile' user.username|add:' Profile' page='profile' submenu=False %}
+                {% if user.can_manage_users %}
+                <div class="menu-section">Admin</div>
+                {% menu_link 'users_list' 'Users' page='users' %}
+                {% if theme.nav != 'arena' %}
+                {% menu_link 'bestiary:catalog' 'Bestiary' page='bestiary' %}
+                {% menu_link 'ruins:generate' 'Ruin Generator' page='ruins' %}
+                {% menu_link 'hooks:generate' 'Hook Generator' page='hooks' %}
+                {% menu_link 'encounters:generator' 'Encounter Generator' page='encounters' %}
+                {% endif %}
+                {% if user.is_role_admin %}
+                {% menu_link 'admin:index' 'Django Admin' %}
+                {% endif %}
+                {% endif %}
+                <div class="menu-divider"></div>
+                {% if theme.nav == 'arena' %}
+                {% menu_link 'home' 'Tarmar Studio' submenu=False %}
+                {% endif %}
+                <button type="submit" form="logout-form" class="menu-link">Logout</button>
+            {% else %}
+                {% menu_link 'register' 'Register' page='register' submenu=False %}
+                {% menu_link 'login' 'Login' page='login' submenu=False %}
+            {% endif %}

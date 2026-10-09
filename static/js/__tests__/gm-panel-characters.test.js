@@ -1,0 +1,481 @@
+/**
+ * Unit tests for gm-panel-characters.js — the Characters tab's attach and
+ * detach controls (issue #341).
+ *
+ * The tab reloads the page after a successful change so the sheets are
+ * always server-rendered; these tests assert the request each control
+ * makes, the navigation that follows, and that failures land in the tab's
+ * own error element (which stays until the next action — no toasts).
+ */
+
+function setUpDom({ sessionId = null, withPicker = true, live = false, withCampaign = false } = {}) {
+    const config = JSON.stringify({
+        attachUrl: '/tarmar/gm/characters/attach/',
+        detachUrl: '/tarmar/gm/characters/detach/',
+        ...(live ? { charactersPanelUrlTemplate: '/tarmar/gm/sessions/{session_id}/characters/' } : {}),
+        ...(live && withCampaign
+            ? { campaignPanelUrlTemplate: '/tarmar/gm/sessions/{session_id}/campaign/' }
+            : {}),
+        sessionId,
+    });
+    document.body.innerHTML = `
+        <script id="gm-panel-config" type="application/json">${config}<\/script>
+        <section id="gm-panel-characters">
+            ${withPicker ? `
+            <form id="gm-character-picker">
+                <select id="gm-character-select">
+                    <option value="">Pick a character…</option>
+                    <option value="7">Aldwin</option>
+                </select>
+                <button type="submit">Attach</button>
+            </form>` : ''}
+            <p id="gm-panel-characters-error" role="alert" hidden></p>
+            <div id="gm-sheets">
+                <article class="gm-sheet" data-character-id="3">
+                    <button type="button" class="gm-sheet-detach" data-character-id="3">x</button>
+                </article>
+            </div>
+        </section>
+        ${withCampaign ? '<section id="gm-panel-campaign"><p id="gm-panel-campaign-error" role="alert" hidden></p><p>where: nowhere</p></section>' : ''}
+    `;
+}
+
+const { resolvedJsonResponse: jsonResponse } = require('./test-helpers');
+
+let panelCharacters;
+
+function loadTab() {
+    jest.resetModules();
+    panelCharacters = require('../gm-panel-characters.js');
+    panelCharacters.init();
+    return panelCharacters;
+}
+
+function flushPromises() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+beforeEach(() => {
+    global.fetch.mockReset();
+    window.location.reload.mockClear();
+    window.location.pathname = '/tarmar/gm/';
+    window.location.search = '';
+    window.location.href = undefined;
+});
+
+describe('currentSessionId', () => {
+    test('prefers the session in the URL over the one the page loaded with', () => {
+        setUpDom({ sessionId: 4 });
+        window.location.search = '?session=9';
+        loadTab();
+        expect(panelCharacters.currentSessionId()).toBe(9);
+    });
+
+    test('falls back to the config, then to null', () => {
+        setUpDom({ sessionId: 4 });
+        loadTab();
+        expect(panelCharacters.currentSessionId()).toBe(4);
+
+        setUpDom();
+        loadTab();
+        expect(panelCharacters.currentSessionId()).toBeNull();
+    });
+
+    test('ignores a non-numeric session parameter', () => {
+        setUpDom({ sessionId: 2 });
+        window.location.search = '?session=abc';
+        loadTab();
+        expect(panelCharacters.currentSessionId()).toBe(2);
+    });
+});
+
+describe('attach', () => {
+    test('submitting the picker posts the pick and navigates to the session', async () => {
+        setUpDom();
+        global.fetch.mockReturnValue(jsonResponse({ ok: true, session_id: 12, characters: [] }));
+        loadTab();
+
+        document.getElementById('gm-character-select').value = '7';
+        document.getElementById('gm-character-picker').dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+        );
+        await flushPromises();
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const [url, options] = global.fetch.mock.calls[0];
+        expect(url).toBe('/tarmar/gm/characters/attach/');
+        expect(options.headers['X-CSRFToken']).toBe('test-token');
+        expect(JSON.parse(options.body)).toEqual({ session_id: null, character_id: 7 });
+        expect(window.location.href).toBe('/tarmar/gm/?session=12');
+    });
+
+    test('an empty pick is reported in the tab and nothing is posted', () => {
+        setUpDom();
+        loadTab();
+        document.getElementById('gm-character-picker').dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+        );
+        expect(global.fetch).not.toHaveBeenCalled();
+        const error = document.getElementById('gm-panel-characters-error');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toBe('Pick a character first.');
+    });
+
+    test('a server error stays on screen and the page does not navigate', async () => {
+        setUpDom({ sessionId: 3 });
+        global.fetch.mockReturnValue(
+            jsonResponse({ error: 'Character is dead' }, { ok: false, status: 400, statusText: 'Bad Request' }),
+        );
+        loadTab();
+
+        expect(await panelCharacters.attachCharacter('7')).toBe(false);
+        const error = document.getElementById('gm-panel-characters-error');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toBe('Character is dead');
+        expect(window.location.href).toBeUndefined();
+    });
+
+    test('a failed response with no error text shows the status text', async () => {
+        setUpDom({ sessionId: 3 });
+        global.fetch.mockReturnValue(jsonResponse({}, { ok: false, status: 500, statusText: 'Server Error' }));
+        loadTab();
+        await panelCharacters.attachCharacter(7);
+        expect(document.getElementById('gm-panel-characters-error').textContent).toBe('Server Error');
+    });
+
+    test('a network failure is reported, not swallowed', async () => {
+        setUpDom({ sessionId: 3 });
+        global.fetch.mockRejectedValue(new Error('offline'));
+        loadTab();
+        expect(await panelCharacters.attachCharacter(7)).toBe(false);
+        expect(document.getElementById('gm-panel-characters-error').textContent).toBe('Request failed: offline');
+    });
+
+    test('the next action clears an earlier error', async () => {
+        setUpDom({ sessionId: 3 });
+        global.fetch
+            .mockReturnValueOnce(jsonResponse({ error: 'nope' }, { ok: false, status: 400 }))
+            .mockReturnValueOnce(jsonResponse({ ok: true, session_id: 3, characters: [] }));
+        loadTab();
+        await panelCharacters.attachCharacter(7);
+        expect(document.getElementById('gm-panel-characters-error').hidden).toBe(false);
+        await panelCharacters.attachCharacter(8);
+        const error = document.getElementById('gm-panel-characters-error');
+        expect(error.hidden).toBe(true);
+        expect(error.textContent).toBe('');
+    });
+});
+
+describe('detach', () => {
+    test('clicking a sheet\'s detach button posts and reloads', async () => {
+        setUpDom({ sessionId: 5 });
+        global.fetch.mockReturnValue(jsonResponse({ ok: true, session_id: 5, characters: [] }));
+        loadTab();
+
+        document.querySelector('.gm-sheet-detach').click();
+        await flushPromises();
+
+        const [url, options] = global.fetch.mock.calls[0];
+        expect(url).toBe('/tarmar/gm/characters/detach/');
+        expect(JSON.parse(options.body)).toEqual({ session_id: 5, character_id: 3 });
+        expect(window.location.reload).toHaveBeenCalled();
+    });
+
+    test('a click elsewhere in the sheets does nothing', () => {
+        setUpDom({ sessionId: 5 });
+        loadTab();
+        document.querySelector('.gm-sheet').click();
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    test('without a session there is nothing to detach from', async () => {
+        setUpDom();
+        loadTab();
+        expect(await panelCharacters.detachCharacter(3)).toBe(false);
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(document.getElementById('gm-panel-characters-error').textContent).toBe('No active session.');
+    });
+
+    test('a refused detach is reported and the page stays', async () => {
+        setUpDom({ sessionId: 5 });
+        global.fetch.mockReturnValue(
+            jsonResponse({ error: 'GM session not found' }, { ok: false, status: 404 }),
+        );
+        loadTab();
+        expect(await panelCharacters.detachCharacter(3)).toBe(false);
+        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(document.getElementById('gm-panel-characters-error').textContent).toBe('GM session not found');
+    });
+});
+
+describe('page without the tab markup', () => {
+    test('init tolerates a page with no picker, sheets or config', () => {
+        document.body.innerHTML = '';
+        expect(() => loadTab()).not.toThrow();
+        expect(panelCharacters.currentSessionId()).toBeNull();
+    });
+});
+
+describe('live refresh (issue #571)', () => {
+    function htmlResponse(body, ok = true) {
+        return Promise.resolve({ ok, statusText: ok ? 'OK' : 'Server Error', text: () => Promise.resolve(body) });
+    }
+
+    const FRAGMENT = `
+        <form id="gm-character-picker"><select id="gm-character-select"><option value="9">Wren</option></select></form>
+        <p id="gm-panel-characters-error" role="alert" hidden></p>
+        <div id="gm-sheets"><article class="gm-sheet gm-draft" id="gm-draft-ledger" data-character-id="41">Twain · needs Fatigue roll</article></div>`;
+
+    test('a procedure frame refetches the tab and swaps in what the server rendered', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValue(htmlResponse(FRAGMENT));
+        loadTab();
+
+        document.dispatchEvent(new CustomEvent('gm-stream-procedure', { detail: {} }));
+        await flushPromises();
+        await flushPromises();
+
+        expect(global.fetch).toHaveBeenCalledWith(
+            '/tarmar/gm/sessions/5/characters/', { headers: { Accept: 'text/html' } },
+        );
+        const section = document.getElementById('gm-panel-characters');
+        expect(section.querySelector('#gm-draft-ledger').textContent).toContain('needs Fatigue roll');
+    });
+
+    test('the done frame refetches it too, for the session now in the URL', async () => {
+        setUpDom({ live: true });
+        window.location.search = '?session=8';
+        global.fetch.mockReturnValue(htmlResponse(FRAGMENT));
+        loadTab();
+
+        document.dispatchEvent(new CustomEvent('gm-stream-done', { detail: {} }));
+        await flushPromises();
+
+        expect(global.fetch.mock.calls[0][0]).toBe('/tarmar/gm/sessions/8/characters/');
+    });
+
+    test('a board change in the Battle tab refetches it (#750, #751)', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValue(htmlResponse(FRAGMENT));
+        loadTab();
+
+        document.dispatchEvent(new CustomEvent('battle-applied', { detail: { status: 'finished' } }));
+        await flushPromises();
+        await flushPromises();
+
+        expect(global.fetch).toHaveBeenCalledWith(
+            '/tarmar/gm/sessions/5/characters/', { headers: { Accept: 'text/html' } },
+        );
+    });
+
+    test('controls in the swapped-in contents still work', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValueOnce(htmlResponse(FRAGMENT));
+        loadTab();
+        await panelCharacters.refreshPanel();
+
+        global.fetch.mockReturnValueOnce(jsonResponse({ ok: true, session_id: 5, characters: [] }));
+        document.getElementById('gm-character-select').value = '9';
+        document.getElementById('gm-character-picker').dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+        );
+        await flushPromises();
+
+        expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ session_id: 5, character_id: 9 });
+    });
+
+    test('refreshes asked for while one runs collapse into one more', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValue(htmlResponse(FRAGMENT));
+        loadTab();
+
+        const first = panelCharacters.refreshPanel();
+        panelCharacters.refreshPanel();
+        panelCharacters.refreshPanel();
+        await first;
+        await flushPromises();
+        await flushPromises();
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test('a failed refresh keeps the tab and says so', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValueOnce(htmlResponse('', false));
+        loadTab();
+
+        expect(await panelCharacters.refreshPanel()).toBe(false);
+
+        expect(document.querySelector('.gm-sheet-detach')).not.toBeNull();
+        const error = document.getElementById('gm-panel-characters-error');
+        expect(error.textContent).toContain('could not be refreshed');
+    });
+
+    test('a network failure is reported, not swallowed', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValueOnce(Promise.reject(new Error('offline')));
+        loadTab();
+
+        expect(await panelCharacters.refreshPanel()).toBe(false);
+        expect(document.getElementById('gm-panel-characters-error').textContent).toContain('offline');
+    });
+
+    test('without a session or the URL there is nothing to refresh', async () => {
+        setUpDom({ live: false, sessionId: 5 });
+        loadTab();
+
+        expect(await panelCharacters.refreshPanel()).toBe(false);
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+});
+
+const CHARACTERS_BODY =
+    '<p id="gm-panel-characters-error" role="alert" hidden></p><div id="gm-sheets"></div>';
+
+/** Let every queued microtask and timer callback run. */
+async function flush() {
+    for (let i = 0; i < 3; i += 1) {
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+}
+
+describe('the Campaign tab refreshes with the Characters tab (issue #579)', () => {
+    /**
+     * Where the party is and what state a thing is in change mid-turn exactly
+     * as a character does, so the tab that shows them refetches on the same
+     * frames. The box that was on a ledge and then fused to the rock is the
+     * reason any of this is a record.
+     */
+    test('a procedure frame refetches both tabs', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        loadTab();
+        global.fetch = jest.fn((url) =>
+            Promise.resolve({
+                ok: true,
+                text: () =>
+                    Promise.resolve(
+                        url.endsWith('/campaign/')
+                            ? '<p>where: the well beneath Farport</p>'
+                            : '<div id="gm-sheets"></div>',
+                    ),
+            }),
+        );
+
+        document.dispatchEvent(new Event('gm-stream-procedure'));
+        await flush();
+
+        const asked = global.fetch.mock.calls.map(([url]) => url);
+        expect(asked).toContain('/tarmar/gm/sessions/12/characters/');
+        expect(asked).toContain('/tarmar/gm/sessions/12/campaign/');
+        expect(document.getElementById('gm-panel-campaign').innerHTML).toContain(
+            'the well beneath Farport',
+        );
+    });
+
+    test('a page without the campaign tab refreshes the characters anyway', async () => {
+        setUpDom({ sessionId: 12, live: true });
+        loadTab();
+        global.fetch = jest.fn(() =>
+            Promise.resolve({ ok: true, text: () => Promise.resolve(CHARACTERS_BODY) }),
+        );
+
+        document.dispatchEvent(new Event('gm-stream-done'));
+        await flush();
+
+        const asked = global.fetch.mock.calls.map(([url]) => url);
+        expect(asked).toContain('/tarmar/gm/sessions/12/characters/');
+        expect(asked.filter((url) => url.endsWith('/campaign/'))).toEqual([]);
+    });
+
+    test('a failed campaign refresh leaves the tab and says which tab failed', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        loadTab();
+        global.fetch = jest.fn((url) =>
+            url.endsWith('/campaign/')
+                ? Promise.resolve({ ok: false, statusText: 'Bad Gateway' })
+                : Promise.resolve({ ok: true, text: () => Promise.resolve(CHARACTERS_BODY) }),
+        );
+
+        document.dispatchEvent(new Event('gm-stream-done'));
+        await flush();
+
+        expect(document.getElementById('gm-panel-campaign').innerHTML).toContain(
+            'where: nowhere',
+        );
+        const error = document.getElementById('gm-panel-campaign-error');
+        expect(error.textContent).toContain('campaign');
+        expect(error.hidden).toBe(false);
+    });
+});
+
+describe('Luck (issue #861)', () => {
+    function htmlResponse(body) {
+        return Promise.resolve({ ok: true, statusText: 'OK', text: () => Promise.resolve(body) });
+    }
+
+    function addLuckForm() {
+        document.getElementById('gm-sheets').insertAdjacentHTML('beforeend', `
+            <form class="gm-luck-form" data-luck-url="/tarmar/gm/sessions/5/luck/" data-character-id="3">
+                <input type="text" class="gm-luck-roll" value="the climb">
+                <button type="submit">Spend Luck</button>
+            </form>`);
+        return document.querySelector('.gm-luck-form');
+    }
+
+    test('a spend posts the character and the roll, then refetches the tab', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        global.fetch
+            .mockReturnValueOnce(jsonResponse({ ok: true, note: 'spent Luck' }))
+            .mockReturnValueOnce(htmlResponse('<p id="gm-panel-characters-error" hidden></p><p>Luck +2: 1 of 2 used this session</p>'));
+
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await flushPromises();
+        await flushPromises();
+        await flushPromises();
+
+        const [url, options] = global.fetch.mock.calls[0];
+        expect(url).toBe('/tarmar/gm/sessions/5/luck/');
+        expect(JSON.parse(options.body)).toEqual({ character_id: 3, roll: 'the climb' });
+        expect(global.fetch.mock.calls[1][0]).toBe('/tarmar/gm/sessions/5/characters/');
+        expect(document.getElementById('gm-panel-characters').textContent)
+            .toContain('1 of 2 used this session');
+    });
+
+    test('a second press while the first is in flight spends nothing', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        let answer;
+        global.fetch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+        const first = panelCharacters.spendLuck(form);
+        expect(form.querySelector('button').disabled).toBe(true);
+        expect(await panelCharacters.spendLuck(form)).toBe(false);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        global.fetch.mockReturnValueOnce(htmlResponse('<p>refreshed</p>'));
+        answer({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, note: 'spent' }) });
+        expect(await first).toBe(true);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test('a refusal stays in the tab and nothing is refetched', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        global.fetch.mockReturnValueOnce(jsonResponse(
+            { ok: false, error: 'Wren has spent all 2 of this session\'s Luck' },
+            { ok: false, statusText: 'Bad Request' },
+        ));
+
+        expect(await panelCharacters.spendLuck(form)).toBe(false);
+
+        const error = document.getElementById('gm-panel-characters-error');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toContain('spent all 2');
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+});

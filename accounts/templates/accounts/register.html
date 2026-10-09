@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<h1>Register</h1>
+
+{% include "accounts/partials/form_errors.html" %}
+
+<form method="post" id="register-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="id_username">Username *</label>
+        <input type="text" name="username" id="id_username" maxlength="25" required value="{{ form.username.value|default:'' }}">
+        {% include "_field_error.html" with field=form.username %}
+    </div>
+
+    {% comment %}The rule stated before the typing rather than only in the
+       refusal (issue #714). minlength is the browser's half of it, so the
+       form is not submitted only to come back.{% endcomment %}
+    <div class="field">
+        <label for="id_password1">Password *</label>
+        <input type="password" name="password1" id="id_password1" maxlength="128" minlength="8" required
+               aria-describedby="password-rule">
+        <span class="field-hint" id="password-rule">At least 8 characters, and not one of the commonest passwords.</span>
+        {% include "_field_error.html" with field=form.password1 %}
+    </div>
+
+    <div class="field">
+        <label for="id_password2">Confirm Password *</label>
+        <input type="password" name="password2" id="id_password2" maxlength="128" required>
+        {% include "_field_error.html" with field=form.password2 %}
+    </div>
+
+    <div class="field">
+        <label for="id_real_name">Real Name</label>
+        <input type="text" name="real_name" id="id_real_name" maxlength="100" value="{{ form.real_name.value|default:'' }}">
+    </div>
+
+    <div class="field">
+        <label for="id_email">Email</label>
+        <input type="email" name="email" id="id_email" maxlength="254" value="{{ form.email.value|default:'' }}">
+        {% include "_field_error.html" with field=form.email %}
+    </div>
+
+    <div class="field">
+        <label for="id_phone">Phone (SMS)</label>
+        <input type="tel" name="phone" id="id_phone" maxlength="20" value="{{ form.phone.value|default:'' }}">
+    </div>
+
+    <div class="field">
+        <label for="id_discord">Discord</label>
+        <input type="text" name="discord" id="id_discord" maxlength="50" value="{{ form.discord.value|default:'' }}">
+    </div>
+
+    <div class="field">
+        <label for="id_preferred_contact">Preferred Contact</label>
+        {% include "accounts/partials/contact_select.html" %}
+    </div>
+
+    <button type="submit">Register</button>
+</form>
+
+<div class="links">
+    Already have an account? <a href="{% url 'login' %}">Login</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'accounts/js/preferred_contact.js' %}"></script>
+<script>initPreferredContact();</script>
+{% endblock %}

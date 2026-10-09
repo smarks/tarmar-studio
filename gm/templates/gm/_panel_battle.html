@@ -1,0 +1,61 @@
+{% comment %}
+The Battle tab of the GM side panel (issue #345). Included by gm/chat.html
+inside <aside id="gm-panel">; gm-panel.js shows and hides it by the
+data-panel-container name, and gm-panel-battle.js drives the fight form.
+
+The board is the battle app's own arena: battle/_arena_advance.html,
+battle/_arena_restart.html and battle/_arena.html rendered from
+battle.views.arena_context for the
+session's battle (GMSession.battle), and driven by battle.js exactly as the
+battle page is -- advance, the player's turn menu, the roster, the log, the
+poll. battle.js finds the arena by id at load, so this tab carries the
+page's one arena; the battle-page class scopes battle.css's tokens to it.
+
+data-popout-url is where the pane's "open in its own window" control goes
+(issue #351): the battle's own page, which is the same arena this tab
+embeds. With no fight on the board there is nothing to open, and
+data-popout-empty is what the disabled control says instead.
+{% endcomment %}
+{% load battle_status %}
+{% load gm_play %}
+<section class="gm-panel-tab gm-panel-battle battle-page" id="gm-panel-battle" data-panel-container="battle" role="region" aria-labelledby="gm-panel-tab-battle"{% if panel_battle %} data-popout-url="{% url 'battle:detail' panel_battle.pk %}"{% else %} data-popout-empty="No fight on the board to open yet"{% endif %} hidden>
+    <form class="gm-panel-picker gm-fight-form" id="gm-fight-form" data-fight-url="{% url 'gm:fight' %}" data-verdict-url="{% url 'gm:fight_verdict' %}">
+        <label class="sr-only" for="gm-fight-foes">Foes to fight (optional)</label>
+        <input type="text" id="gm-fight-foes" placeholder="Foes, e.g. two gray wolves — or leave blank to ask the GM" autocomplete="off" {% if battle_live %}disabled{% endif %}>
+        <button type="submit" class="btn btn-sm" id="gm-fight-start" {% if battle_live %}disabled title="A fight is already under way"{% endif %}>Fight</button>
+    </form>
+    <p class="gm-panel-status" id="gm-panel-battle-status" role="status" hidden></p>
+    {% unarmed_notice_for active_session as unarmed %}
+    {# Issue #844: who would fight bare-handed, from state -- the attached characters before a fight, the figures during one, repainted from the board's responses by gm-panel-battle.js. It stays while it is true. #}
+    <p class="gm-panel-unarmed" id="gm-panel-unarmed" role="status"{% if not unarmed %} hidden{% endif %}>{{ unarmed }}</p>
+    <p class="gm-panel-error" id="gm-panel-battle-error" role="alert" hidden></p>
+
+    {% if panel_battle %}
+    <div class="gm-battle" id="gm-battle" data-battle-id="{{ panel_battle.pk }}">
+        <header class="gm-battle-header">
+            <h4 class="gm-battle-name"><a href="{% url 'battle:detail' panel_battle.pk %}" title="{{ panel_battle.name }} — open the full battle page">{{ panel_battle.name }}</a></h4>
+            <p class="battle-chips">
+                <span class="battle-chip">
+                    <span class="battle-chip-label">status</span><strong id="battle-status">{{ panel_battle.get_status_display }}</strong>{% battle_status_labels %}
+                </span>
+                <span class="battle-chip">
+                    <span class="battle-chip-label">turn</span><strong id="battle-turn">{{ panel_battle.turn_number }}</strong>
+                </span>
+            </p>
+        </header>
+        {% comment %}How the fight ended (issue #785), from the battle as it stands; the chat carries the same line as a notice. Filled in by gm-panel-battle.js when the fight ends while the page is open.{% endcomment %}
+        <p class="gm-battle-verdict" id="gm-battle-verdict" role="status"{% if not panel_verdict %} hidden{% endif %}>{{ panel_verdict|default:"" }}</p>
+        {% if can_control %}
+        <div class="battle-actions gm-battle-actions">
+            {% include "battle/_arena_advance.html" %}
+            {# The fight's foes are the Game Master's: so is its restart (#762). #}
+            {% if restart_offered %}{% include "battle/_arena_restart.html" %}{% endif %}
+        </div>
+        {% endif %}
+        {% include "battle/_counts_note.html" with battle=panel_battle %}
+        {% include "battle/_arena.html" %}
+    </div>
+    {% else %}
+    <p class="gm-sheet-empty" id="gm-battle-empty">No fight on the board. Attach your characters, then press Fight (or type /fight) when the story comes to blows — name the foes, or leave it to the GM.</p>
+    {% endif %}
+</section>

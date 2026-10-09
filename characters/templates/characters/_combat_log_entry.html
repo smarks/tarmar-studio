@@ -1,0 +1,10 @@
+{% comment %}One line of the Recent attacks log. A partial because a resolved attack
+adds a line without a reload, and the attack response sends it (issue #792).{% endcomment %}
+<li class="combat-log-entry">
+    <span class="combat-log-weapon">{{ entry.weapon }}</span>
+    <span class="combat-log-outcome {{ entry.outcome|slugify }}">{{ entry.outcome }}</span>
+    <span class="combat-log-roll">d20 {{ entry.die }} = {{ entry.total }} vs TN {{ entry.target_number }} ({{ entry.armour_tier }})</span>
+    <span class="combat-log-damage">{{ entry.damage }} damage</span>
+    {% if entry.fumble %}<span class="combat-log-fumble">{{ entry.fumble }}</span>{% endif %}
+    <span class="combat-log-by">{{ entry.by }}</span>
+</li>

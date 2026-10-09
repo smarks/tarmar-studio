@@ -1,0 +1,18 @@
+{% load local_time %}
+{% comment %}The Recent Changes table's rows, newest first. A partial because every
+change the sheet makes without a reload adds a line, and the change's response
+sends these back re-rendered (issue #792).{% endcomment %}
+{% for entry in recent_history %}
+<tr>
+    {% comment %}Was entry.ts: a raw ISO string in UTC with
+       microseconds, while every other date on this page read
+       "Sep 25, 2026, 11:36 AM" in the viewer's own zone
+       (issue #700). The local_time tag is the one helper the
+       rest of the app uses.{% endcomment %}
+    <td>{% if entry.when %}{% local_time entry.when %}{% else %}{{ entry.raw_timestamp }}{% endif %}</td>
+    <td>{{ entry.field }}</td>
+    <td>{{ entry.old_value }}</td>
+    <td>{{ entry.new_value }}</td>
+    <td>{{ entry.changed_by }}</td>
+</tr>
+{% endfor %}

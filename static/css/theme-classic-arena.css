@@ -1,0 +1,65 @@
+/* The classic arena's skin, layered over base.css.
+
+   Scope: presentation only. Nothing here changes what the app does -- a
+   battle's rules_profile decides that, and common/theme.py explains why the
+   two are kept apart. Everything is written under [data-theme="classic-arena"]
+   so the sheet is inert if it is ever served on the default host by mistake,
+   rather than quietly repainting it.
+
+   This sheet used to invert the page: a dark ground, a violet accent, a gold
+   highlight, carried over from melee's own board so the hostname would feel
+   continuous. It repainted the ground and the ink but only 21 of the
+   components standing on them, so everything base.css paints light kept its
+   light background and inherited the near-white ink -- twelve pairings below
+   WCAG AA, several at 1.05:1, which is white on white. The battle log and
+   every error and success notice were among them: the app reported failures
+   in text nobody could see (#306).
+
+   The fix is not more overrides. An override layer that inverts the ground
+   has to repaint every component base.css will ever add, and it silently
+   fails the day someone adds one. So the arena now wears Tarmar's white,
+   minimalist theme and carries its identity in type rather than in colour:
+   the wordmark, the tagline, the attribution, and a single accent note. What
+   is not here is inherited, which means a component added to base.css is
+   correct on this host the day it is written. */
+
+[data-theme="classic-arena"] {
+    /* The one note carried over from melee's board: the violet, taken dark
+       enough to read on a white ground instead of demanding a dark one.
+       9.57:1 on #fff -- the contrast audit in common/css_contrast.py holds it
+       there. */
+    --arena-accent: #443a86;
+}
+
+/* The wordmark is text here, not an image: Tarmar's mark must not ride under
+   another game's name (see common/theme.py). This treatment is what carries
+   the identity now that the palette does not, and it is what the Playwright
+   spec asserts to prove the sheet was applied rather than merely linked --
+   the old proof was the dark ground, which no longer exists. */
+[data-theme="classic-arena"] .logo-name {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+[data-theme="classic-arena"] .logo-tagline {
+    color: var(--colour-ink-muted);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    /* Sits beside the wordmark on a wide header and is the first thing to go
+       when there is no room -- the site's name is what must survive. */
+    white-space: nowrap;
+}
+
+/* The single place the accent shows: the menu's group headings. */
+[data-theme="classic-arena"] .menu-section {
+    color: var(--arena-accent);
+}
+
+/* The attribution is a standing credit, not a notice to dismiss: it reads as
+   fine print and stays on every page. */
+[data-theme="classic-arena"] .theme-attribution {
+    color: var(--colour-ink-muted);
+    font-size: 0.7rem;
+    max-width: 46rem;
+}

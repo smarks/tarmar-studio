@@ -1,0 +1,36 @@
+{% comment %}
+One beast's card: plate, name, provenance, the stat line, and the flavour
+paragraph (issue #338 item 6). The catalog grid and the encounter
+generator's result both showed this, hand-copied and character-for-character
+identical; it lives here now.
+
+`show_attacks` adds the attack list underneath — the catalog wants it, the
+encounter generator does not. The catalog's "generated variants" grid is a
+deliberately different, shorter card (a different meta line and a two-stat
+summary), so it stays where it is rather than being bent to fit this one.
+{% endcomment %}
+{% load bestiary_art %}
+<div class="beast-card">
+    <div class="beast-card-head">
+        {% beast_plate beast %}
+        <div>
+            <h3><a href="{{ beast.get_absolute_url }}">{{ beast.name }}</a></h3>
+            <div class="beast-meta">{{ beast.get_category_display }} &middot; TFT Bestiary p. {{ beast.source_page }}</div>
+        </div>
+    </div>
+    <div class="beast-stats">
+        STR {{ beast.strength }} &middot; DEX {{ beast.dexterity }} &middot; INT {{ beast.intelligence }} &middot;
+        WIS {{ beast.wisdom }} &middot; CON {{ beast.constitution }} &middot; CHA {{ beast.charisma }}<br>
+        Fatigue {{ beast.fatigue_pool }} &middot; Body {{ beast.body_pool }} &middot;
+        {{ beast.armour_tier }} ({{ beast.stops }} stops) &middot;
+        MA {{ beast.movement }} &middot; {{ beast.size_hexes }} hex{{ beast.size_hexes|pluralize:"es" }}
+    </div>
+    <p>{{ beast.description }}</p>
+    {% if show_attacks and beast.attacks %}
+    <ul class="beast-attacks">
+        {% for attack in beast.attacks %}
+        <li>{{ attack.name }}{% if attack.damage %} ({{ attack.damage }}){% endif %} — {{ attack.weapon_class }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>

@@ -1,0 +1,1141 @@
+/* Character sheet editor. Lifted verbatim from the extra_styles block of
+   characters/templates/characters/character_edit.html (issue #93). Loaded
+   through extra_head, which parses after base.css, matching the old order
+   in which these rules followed base.html's inline rules.
+
+   The sheet's rules used to be split: base.css declared .character-sheet,
+   .stats-section h2, .subtitle, .dice-log and the stats-table phone size,
+   and this sheet re-declared most of them (#338 item 10). They live only
+   here now, with whatever base.css contributed that this sheet did not
+   override folded in. The page's width is .character-edit-main below; the
+   bare `main` rule that used to lead this sheet never applied. */
+
+.character-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    margin-top: 1.5rem;
+}
+.stats-section {
+    background: var(--colour-surface-section);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+.stats-section h2 {
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    color: var(--colour-ink-heading);
+    border-bottom: 1px solid var(--colour-border-card);
+    padding-bottom: 0.5rem;
+}
+.editable-field {
+    display: inline-block;
+}
+.editable-field input {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    background: transparent;
+    font-size: inherit;
+    font-family: inherit;
+    transition: border-color 0.2s, background 0.2s;
+}
+.editable-field input:hover {
+    border-color: var(--colour-border-input);
+    background: var(--colour-surface);
+}
+/* The ground and border change stay; the `outline: none` that came with
+   them is gone (issue #737). base.css's sitewide input:focus-visible rule
+   paints the ring, and the border tint alone is the swap #701 rejected. */
+.editable-field input:focus {
+    border-color: var(--colour-ink);
+    background: var(--colour-surface);
+}
+.editable-field select {
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    background: var(--colour-surface);
+    font-size: inherit;
+    font-family: inherit;
+    cursor: pointer;
+}
+.editable-field select:focus {
+    border-color: var(--colour-ink);
+}
+.name-field {
+    margin-bottom: 0.25rem;
+}
+.name-field input {
+    font-size: 1.75rem;
+    font-weight: 500;
+    width: 100%;
+    max-width: 350px;
+    padding: 0.5rem;
+}
+.subtitle {
+    color: var(--colour-ink-muted);
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+}
+.inline-form {
+    display: inline;
+}
+.export-links {
+    margin-bottom: 1rem;
+}
+.export-links .button {
+    margin-right: 0.5rem;
+}
+.stats-table {
+    width: 100%;
+}
+.stats-table th,
+.stats-table td {
+    padding: 0.75rem 0.5rem;
+    text-align: center;
+}
+.stats-table input {
+    width: 3.5em;
+    text-align: center;
+    font-size: 1.1rem;
+}
+.physical-table th,
+.physical-table td {
+    padding: 0.75rem 0.5rem;
+}
+.physical-table th {
+    width: 120px;
+}
+.physical-table input {
+    width: 5em;
+}
+.derived-value {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+/* --colour-ink-faint lands at 4.36:1 on the sheet's tinted row ground, just
+   under AA; --colour-ink-muted clears it at 5.45:1 (issue #709). These cells
+   spell out how a derived attribute is worked out, which is the one thing a
+   reader is likely to want to check. */
+.formula {
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+    padding-left: 1rem;
+}
+.injury-table {
+    width: 100%;
+    font-size: 0.9rem;
+}
+.injury-table th,
+.injury-table td {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--colour-hairline);
+    text-align: left;
+    font-weight: normal;
+}
+.injury-table thead th {
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.injury-table thead th:not(:first-child),
+.injury-table td {
+    text-align: right;
+}
+.injury-table td {
+    width: 6em;
+    font-weight: 600;
+}
+/* Where the character's pools stand now (issue #751), above the table of
+   breakpoints they are read against. */
+.current-pools {
+    margin: 0 0 0.75rem;
+}
+.current-pools-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem 1rem;
+    margin: 0;
+}
+.current-pools-label {
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.current-pool-input {
+    width: 4.5em;
+}
+.current-pools-state {
+    font-weight: 600;
+}
+.current-pools-note {
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+    margin: 0.25rem 0 0;
+}
+/* On the injury panel's tinted ground, not the page's (issue #709). */
+.injury-note {
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+    margin: 0.5rem 0 0;
+}
+/* The dice log is also a .stats-section, whose padding and radius (above)
+   are what it shows; base.css's .dice-log padding and radius never won there,
+   so they were not carried over (#338 item 10). */
+.dice-log {
+    background: var(--colour-surface-muted);
+}
+.dice-log pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    color: var(--colour-ink-secondary);
+}
+.actions {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--colour-hairline);
+    gap: 1rem;
+}
+/* Skills section */
+.skills-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 2rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--colour-surface-tint);
+    border-radius: 4px;
+}
+.summary-item {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.summary-item .label {
+    color: var(--colour-ink-muted);
+}
+.summary-item .value {
+    font-weight: 600;
+}
+.summary-item .value.highlight {
+    color: var(--colour-sheet-highlight);
+}
+.editable-field.inline,
+.summary-item .editable-field {
+    display: inline-block;
+}
+/* A value only a Game Master may set, and why, beside it (issue #748). */
+.field-locked-reason {
+    display: block;
+}
+.summary-item .editable-field input {
+    width: 6em;
+    padding: 0.25rem 0.5rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    transition: border-color 0.2s, background 0.2s;
+}
+.summary-item .editable-field input:hover {
+    border-color: var(--colour-border-input);
+    background: var(--colour-surface);
+}
+.summary-item .editable-field input:focus {
+    border-color: var(--colour-ink);
+    background: var(--colour-surface);
+}
+.skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.skill-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem;
+    background: var(--colour-surface);
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-card);
+}
+.skill-row .skill-name {
+    flex: 1;
+    font-weight: 500;
+    cursor: text;
+    padding: 0.25rem 0.5rem;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+}
+.skill-row .skill-name:hover {
+    background-color: var(--colour-surface-tint);
+}
+/* The one `outline: none` in this sheet that stays (issue #737). A skill
+   name is a contenteditable <span role="textbox">, not an input, so
+   base.css's sitewide :focus-visible rule does not reach it -- and this rule
+   paints its own focus indicator instead: a 2px teal ring drawn as a
+   box-shadow, which WCAG 2.4.7 asks for and whose --colour-accent-teal
+   clears the 3:1 of 1.4.11 against the sheet's ground. Dropping the
+   suppression here would draw the browser's ring and the teal ring at once,
+   which is noise rather than accessibility. */
+.skill-row .skill-name:focus {
+    outline: none;
+    background-color: var(--colour-surface);
+    box-shadow: 0 0 0 2px var(--colour-accent-teal);
+}
+.skill-row .skill-level {
+    color: var(--colour-ink-muted);
+}
+.skill-row .skill-points {
+    color: var(--colour-ink-faint);
+    font-size: 0.85rem;
+}
+.skill-row .allocate-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+/* Inline help disclosure rendered by the help_for template tag. */
+details.help {
+    display: inline-block;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+    position: relative;
+}
+details.help > summary {
+    cursor: help;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    background: var(--colour-help-surface);
+    color: var(--colour-help-ink);
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--colour-border-cool);
+}
+details.help > summary::-webkit-details-marker { display: none; }
+details.help > summary:hover { background: var(--colour-help-surface-hover); }
+details.help[open] > summary { background: var(--colour-accent-teal); color: var(--colour-surface); border-color: var(--colour-accent-teal); }
+details.help .help-body {
+    position: absolute;
+    z-index: 10;
+    top: 1.4rem;
+    left: 0;
+    width: 260px;
+    padding: 0.6rem 0.75rem;
+    background: var(--colour-surface);
+    color: var(--colour-ink-strong);
+    border: 1px solid var(--colour-border-cool);
+    border-radius: 4px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    font-weight: 400;
+    white-space: normal;
+    text-transform: none;
+    text-align: left;
+}
+/* An empty state is copy the reader is meant to act on, and
+   --colour-ink-faint sits under AA on this panel's tinted ground
+   (issue #709). */
+.no-skills {
+    color: var(--colour-ink-muted);
+    font-style: italic;
+}
+.add-skill-control {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+.add-skill-control input {
+    flex: 1;
+    padding: 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-input);
+}
+.term-entry {
+    margin-bottom: 0.5rem;
+}
+.term-entry summary {
+    cursor: pointer;
+    padding: 0.5rem;
+    background: var(--colour-surface);
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-card);
+}
+.term-entry summary:hover {
+    background: var(--colour-surface-muted);
+}
+.term-details {
+    padding: 1rem;
+    margin-top: 0.5rem;
+    background: var(--colour-surface);
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-card);
+}
+.term-details ul {
+    margin: 0 0 1rem 0;
+    padding-left: 1.5rem;
+}
+.aging-warning {
+    color: var(--colour-sheet-negative);
+    font-weight: 500;
+}
+/* Prior-experience workbench (issue #217). A two-column grid replaces the
+   old floating aging-confirm/term-result/death panels: the left card shows
+   the next term's consequences before the roll (so the click needs no
+   confirmation) and the right column is the Experience History, moved up
+   from the bottom of the page so cause sits next to effect. Collapses to one
+   column, workbench first, below 900px. */
+.experience-workbench {
+    display: grid;
+    grid-template-columns: minmax(300px, 340px) 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.workbench-card,
+.death-card {
+    background: var(--colour-surface);
+    border: 1px solid var(--colour-border-card);
+    border-radius: 6px;
+    padding: 1.25rem;
+}
+.workbench-eyebrow {
+    margin: 0 0 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--colour-ink-muted);
+}
+.workbench-copy {
+    margin: 0 0 1rem;
+    color: var(--colour-ink-secondary);
+    font-size: 0.9rem;
+}
+.workbench-track {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+.workbench-track select {
+    flex: 1;
+    padding: 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-input);
+}
+.workbench-track {
+    flex-wrap: wrap;
+}
+.workbench-years-input {
+    width: 4.5rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-input);
+}
+.workbench-preview {
+    margin: 0 0 1rem;
+}
+.workbench-preview-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--colour-surface-tint);
+}
+.workbench-preview-row dt {
+    color: var(--colour-ink-muted);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+}
+.workbench-preview-row dd {
+    margin: 0;
+    text-align: right;
+    font-weight: 500;
+}
+.workbench-roll-btn {
+    width: 100%;
+}
+/* Death is a state, not an event: the workbench card's spot renders this
+   card instead, server-side when the page loads dead and via JS (from
+   #death-card-template) when a roll kills the character over AJAX. No
+   buttons, no reload. */
+.death-card {
+    background: var(--colour-sheet-negative-surface-faint);
+    border-color: var(--colour-sheet-negative-border);
+}
+.death-card h3 {
+    margin-top: 0;
+    color: var(--colour-sheet-negative);
+}
+.death-card .fatal-roll {
+    color: var(--colour-sheet-negative);
+}
+.death-card .death-note {
+    margin-bottom: 0;
+    color: var(--colour-ink-muted);
+}
+.experience-history-column h3 {
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    font-size: 1.1rem;
+    color: var(--colour-ink-heading);
+    border-bottom: 1px solid var(--colour-border-card);
+}
+/* An empty state is copy the reader is meant to act on, and
+   --colour-ink-faint sits under AA on this panel's tinted ground
+   (issue #709). */
+.no-history {
+    color: var(--colour-ink-muted);
+    font-style: italic;
+}
+@media (max-width: 900px) {
+    .experience-workbench {
+        grid-template-columns: 1fr;
+    }
+}
+/* Equipment section */
+.combat-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.combat-stat-card {
+    background: var(--colour-surface);
+    border: 1px solid var(--colour-border-card);
+    border-radius: 6px;
+    padding: 1rem;
+}
+.combat-stat-card h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+    text-transform: uppercase;
+}
+.combat-stat-card .value {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+.combat-stat-card .value.positive { color: var(--colour-sheet-positive); }
+.combat-stat-card .value.negative { color: var(--colour-sheet-negative); }
+.combat-stat-card .detail {
+    font-size: 0.85rem;
+    color: var(--colour-ink-faint);
+    margin-top: 0.25rem;
+}
+.encumbrance-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--colour-surface-tint);
+    border-radius: 4px;
+    flex-wrap: wrap;
+}
+.encumbrance-bar .weight-info {
+    font-weight: 500;
+}
+.encumbrance-bar .level-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+.encumbrance-bar .level-badge.unencumbered { background: var(--colour-load-unencumbered-surface); color: var(--colour-load-unencumbered-ink); }
+.encumbrance-bar .level-badge.light { background: var(--colour-load-light-surface); color: var(--colour-load-light-ink); }
+.encumbrance-bar .level-badge.medium { background: var(--colour-load-medium-surface); color: var(--colour-load-medium-ink); }
+.encumbrance-bar .level-badge.heavy { background: var(--colour-sheet-negative-border); color: var(--colour-load-heavy-ink); }
+.encumbrance-bar .level-badge.overloaded { background: var(--colour-sheet-negative-surface); color: var(--colour-load-overloaded-ink); font-weight: 700; }
+/* STR is not recorded yet, so the load has no level to price it against (issue #630). */
+.encumbrance-bar .level-badge.unknown { background: var(--colour-grounding-surface); color: var(--colour-ink-muted); }
+.encumbrance-bar .penalty {
+    color: var(--colour-sheet-negative);
+    font-weight: 500;
+}
+.gait-readout {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--colour-surface-tint);
+    border-radius: 4px;
+    flex-wrap: wrap;
+    font-size: 0.9rem;
+}
+.gait-readout .gait-readout-label {
+    font-weight: 500;
+    color: var(--colour-ink-muted);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+.gait-readout .gait {
+    font-weight: 500;
+}
+.gait-readout .gait-name {
+    color: var(--colour-ink-muted);
+}
+.gait-readout .gait.gait-na {
+    color: var(--colour-ink-faint);
+    text-decoration: line-through;
+}
+/* Unknown, not forbidden: no strike-through, since there is nothing to
+   strike out — the attributes the formulas need are not recorded (#630). */
+.gait-readout .gait.gait-unknown {
+    color: var(--colour-ink-faint);
+}
+.pack-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+.pack-toggle label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pack-toggle .pack-weight {
+    color: var(--colour-ink-muted);
+    font-size: 0.9rem;
+}
+.equipment-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+.history-table {
+    width: 100%;
+    font-size: 0.85rem;
+}
+.history-table th,
+.history-table td {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--colour-hairline);
+    text-align: left;
+    vertical-align: top;
+}
+.history-table td:nth-child(3),
+.history-table td:nth-child(4) {
+    word-break: break-word;
+    max-width: 18ch;
+}
+.equipment-controls input[type="search"] {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--colour-border-cool);
+    border-radius: 4px;
+}
+.equipment-controls select {
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--colour-border-cool);
+    border-radius: 4px;
+}
+.equipment-row .row-select {
+    margin-right: 0.4rem;
+}
+.equipment-row.is-hidden {
+    display: none;
+}
+.equipment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+.equipment-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--colour-surface);
+    border: 1px solid var(--colour-border-card);
+    border-radius: 4px;
+    flex-wrap: wrap;
+}
+.equipment-row.in-pack.pack-dropped {
+    opacity: 0.5;
+    background: var(--colour-surface-muted);
+}
+.equipment-row .item-name {
+    font-weight: 500;
+    min-width: 150px;
+}
+.equipment-row .item-weight {
+    color: var(--colour-ink-muted);
+    font-size: 0.9rem;
+}
+.equipment-row .item-quantity {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.equipment-row .item-quantity input {
+    width: 3em;
+    text-align: center;
+    padding: 0.25rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 3px;
+}
+.equipment-row .item-pack {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    color: var(--colour-ink-muted);
+}
+.equipment-row .item-notes {
+    flex: 1;
+    min-width: 100px;
+}
+.equipment-row .item-notes input {
+    width: 100%;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 0.85rem;
+}
+.equipment-row .item-notes input:hover,
+.equipment-row .item-notes input:focus {
+    border-color: var(--colour-border-input);
+}
+.equipment-row .item-mods {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+.equipment-row .mod-field {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.equipment-row .mod-field input {
+    width: 3em;
+    text-align: center;
+    padding: 0.2rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 3px;
+    font-size: 0.85rem;
+}
+.equipment-row .remove-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    background: var(--colour-sheet-negative-surface);
+    border: 1px solid var(--colour-sheet-negative-border);
+    color: var(--colour-sheet-negative);
+    border-radius: 3px;
+    cursor: pointer;
+}
+.equipment-row .remove-btn:hover {
+    background: var(--colour-sheet-negative-border);
+}
+.add-equipment-control {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.add-equipment-control select {
+    padding: 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--colour-border-input);
+    min-width: 120px;
+}
+.add-equipment-control .in-pack-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+/* An empty state is copy the reader is meant to act on, and
+   --colour-ink-faint sits under AA on this panel's tinted ground
+   (issue #709). */
+.no-equipment {
+    color: var(--colour-ink-muted);
+    font-style: italic;
+    padding: 1rem;
+}
+.equipment-row .item-equipped {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    color: var(--colour-sheet-positive);
+    font-weight: 500;
+}
+.equipment-row .item-equipped input:checked + label {
+    color: var(--colour-sheet-positive);
+}
+/* Inline panels (issue #190). These were overlay modals — fixed position, a
+   dimmed backdrop, aria-modal. They are now blocks in the page: the custom
+   item form expands where its button is, and the term/death panels appear in
+   the notice region above the sheet. Nothing behind them is blocked. */
+.inline-panel {
+    display: block;
+    margin: 1rem 0;
+    border: 1px solid var(--colour-accent-gold);
+    border-radius: 6px;
+    background: var(--colour-notice-confirm-surface);
+}
+.inline-panel .panel-content,
+.notice-panel .panel-content {
+    padding: 1.25rem;
+}
+.notice-panel {
+    display: block;
+    padding: 0;
+}
+.panel-content h3 {
+    margin-top: 0;
+}
+.panel-content h4 {
+    margin: 1rem 0 0.5rem;
+    color: var(--colour-ink-heading);
+}
+.panel-content ul {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+.panel-content .warning {
+    color: var(--colour-sheet-negative);
+}
+@media (max-width: 480px) {
+    .stats-table {
+        font-size: 0.875rem;
+    }
+    .name-field input {
+        font-size: 1.5rem;
+        max-width: 100%;
+    }
+    .stats-section {
+        padding: 1rem;
+    }
+    .stats-table input {
+        width: 3em;
+        font-size: 1rem;
+    }
+    .physical-table th {
+        width: auto;
+    }
+    .physical-table input {
+        width: 4em;
+    }
+    .formula {
+        display: block;
+        padding-left: 0;
+        margin-top: 0.25rem;
+    }
+    /* Any residual stat-table width scrolls within the table, not the page. */
+    .stats-table,
+    .physical-table,
+    .injury-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Help popovers flow inline on phones so they never push past the edge. */
+    details.help .help-body {
+        position: static;
+        width: auto;
+        margin-top: 0.3rem;
+        box-shadow: none;
+    }
+}
+
+/* Attack Resolution panel (issue #101). Same card/grid vocabulary as the
+   combat stats above, so the panel reads as part of the sheet rather than as
+   a bolted-on tool. */
+.attack-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem 1rem;
+    align-items: end;
+    margin-bottom: 1rem;
+}
+.attack-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.attack-field label {
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
+    text-transform: uppercase;
+}
+.attack-field .gm-supplied {
+    text-transform: none;
+    color: var(--colour-ink-faint);
+    font-style: italic;
+}
+.attack-field select,
+.attack-field input {
+    padding: 0.4rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 4px;
+}
+.attack-result {
+    background: var(--colour-surface);
+    border: 1px solid var(--colour-border-card);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+.attack-outcome {
+    margin: 0 0 0.75rem 0;
+    text-transform: capitalize;
+}
+.attack-outcome.hit, .attack-outcome.critical, .attack-outcome.severe-critical { color: var(--colour-sheet-positive); }
+.attack-outcome.miss, .attack-outcome.fumble { color: var(--colour-sheet-negative); }
+.attack-breakdown {
+    list-style: none;
+    margin: 0 0 0.75rem 0;
+    padding: 0;
+}
+.attack-breakdown li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--colour-surface-tint);
+}
+.attack-breakdown .attack-label {
+    color: var(--colour-ink-muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+}
+.attack-breakdown .attack-value { font-variant-numeric: tabular-nums; }
+.attack-dice-log {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--colour-ink-faint);
+    font-size: 0.85rem;
+}
+.combat-log-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.combat-log-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--colour-surface-tint);
+    font-size: 0.9rem;
+}
+.combat-log-weapon { font-weight: 600; }
+.combat-log-outcome { text-transform: capitalize; }
+.combat-log-roll, .combat-log-by { color: var(--colour-ink-faint); }
+.combat-log-fumble { color: var(--colour-sheet-negative); }
+.attack-footnote {
+    font-size: 0.85rem;
+    color: var(--colour-ink-faint);
+    margin: 0 0 1rem 0;
+}
+
+/* The workbench + history grid earns a wide column, like the battle page
+   (issue #217): the default main width forces the history's roll lines to
+   wrap mid-expression. */
+
+.workbench-note {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* The battle setup's round trip (#270): a persistent way back, above the
+   sheet, shown only when the page was reached from an in-progress setup. */
+.setup-return {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin: 0 0 1rem;
+}
+
+.setup-return-note {
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+/* Visibility control (issue #273): badge plus, for owner/DM, the autosaving
+   public toggle; for read-only viewers, a plain note about whose sheet it is. */
+.visibility-control {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.visibility-toggle {
+    cursor: pointer;
+}
+.visibility-note {
+    color: var(--colour-ink-muted);
+    font-size: 0.9rem;
+}
+
+/* The attack panel's parts toggle with the equipment (issue #339, item 24);
+   .attack-form sets its own display, so [hidden] has to say it again. The
+   literacy control is a .button, which sets its own display too, and hides
+   while it cannot be used: rolled by a player, or no check to roll (#741).
+   The Origin's locked note is a .formula, which the narrow layout displays
+   as a block. The sheet's other roll controls hide the same way when a field
+   update says they are no longer offered (#748). */
+#attack-form[hidden],
+#attack-no-weapons[hidden],
+#attack-gm-adjudicated[hidden],
+#roll-literacy-btn[hidden],
+.sheet-roll-btn[hidden],
+#origin-fixed-note[hidden],
+/* Rendered hidden rather than left out, so a change made without a reload
+   can show them (issues #764, #792, #801): the completion-gated attack and
+   skill-check blocks, the point controls, the logs, and the Game Master's
+   origin ruling. Several carry a class that sets its own display. */
+#attack-ready[hidden],
+#attack-incomplete[hidden],
+#skill-check[hidden],
+#spell-points-item[hidden],
+.learn-spell[hidden],
+#recent-changes[hidden],
+#dice-log[hidden],
+.no-combat-log[hidden],
+#origin-ruling-row[hidden] {
+    display: none;
+}
+
+/* Saved / error states for the equipment row fields and the skill rename
+   (issue #339, item 22) -- the same colours autosave's [data-field] states use. */
+.equipment-row .saving > input,
+.skill-row .skill-name.saving {
+    border-color: var(--colour-ink-disabled);
+    background: var(--colour-surface-muted);
+}
+.equipment-row .saved > input,
+.skill-row .skill-name.saved {
+    border-color: var(--colour-field-success);
+    background: var(--colour-field-success-surface);
+}
+.equipment-row .error > input,
+.skill-row .skill-name.error {
+    border-color: var(--colour-danger);
+    background: var(--colour-field-error-surface);
+}
+.equipment-row .saved > input[type="checkbox"] {
+    outline: 2px solid var(--colour-field-success);
+}
+.equipment-row .error > input[type="checkbox"] {
+    outline: 2px solid var(--colour-danger);
+}
+
+/* The sheet's section index (issue #710). Sticky, so it is reachable from
+   anywhere on a 4,000px page, and it wraps rather than scrolling sideways on a
+   phone. scroll-margin-top keeps a heading clear of the index once jumped to. */
+.sheet-index {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    padding: 0.5rem 0;
+    margin-bottom: 0.75rem;
+    background: var(--colour-surface);
+    border-bottom: 1px solid var(--colour-hairline);
+    font-size: 0.8rem;
+}
+
+.sheet-index a {
+    color: var(--colour-ink-muted);
+    text-decoration: none;
+}
+
+.sheet-index a:hover,
+.sheet-index a:focus-visible {
+    color: var(--colour-ink);
+    text-decoration: underline;
+}
+
+.stats-section {
+    scroll-margin-top: 3rem;
+}
+
+/* What a player's import dropped (issue #744): stays until dismissed. */
+.import-notice {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--colour-border-card);
+    background: var(--colour-surface-tint);
+    color: var(--colour-ink);
+}
+
+.import-notice .button {
+    flex: none;
+}
+
+/* Why a carried shield is not the one in use (review of #804): it stays in
+   the row while the two-handed weapon is in hand. */
+.item-held-note {
+    color: var(--colour-ink-muted);
+    font-size: 0.85rem;
+}
+
+/* The Game Masters' sessions that hold this character (issue #871):
+   gm/_sessions_holding.html, the owner's way to see and withdraw. */
+.sessions-holding {
+    margin: 0 0 1rem;
+}
+.sessions-holding h2 {
+    font-size: 1rem;
+    margin: 0 0 0.5rem;
+}
+.sessions-holding-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.sessions-holding-entry {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.5rem;
+}
+.sessions-holding-withdraw {
+    display: flex;
+    flex-direction: row;
+    margin: 0;
+}
+.sessions-holding-withdraw .button {
+    margin: 0;
+}
+
+/* The gear step creation lacked (issue #844): a character with no weapon. */
+.gear-step {
+    margin: 0 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    background: var(--colour-status-warning-surface);
+    color: var(--colour-status-warning-ink);
+}
+.gear-step a {
+    color: inherit;
+}

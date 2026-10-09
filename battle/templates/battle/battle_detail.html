@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+{% load static %}
+{% load sign_in %}
+{% load battle_status %}
+
+{% block title %}{{ battle.name }}{% endblock %}
+
+{% comment %}
+The page's own rules live in static/css/battle.css (issue #188) — the inline
+<style> block they used to sit in went with the redesign.
+
+Two shapes since issue #250: while the battle's status is "lobby" the page
+is the muster — seat cards, claim forms, ready flags, the DM's start — and
+once started it is the control desk (arena, roster, log) plus the turn
+panel, where a seated player is offered their combatant's action menu and
+everyone else sees who the battle waits on. Both shapes are state-driven:
+a reload reproduces exactly what polling painted.
+
+A wizard's turn adds a third step inside the turn panel (#250): the cast
+candidates collapse into one CAST SPELL option, and declaring it opens the
+spell stage in place — the caster's whole hand, the unavailable spells
+disabled with the server's reason, nothing pre-selected. The action cannot
+be taken until a spell is explicitly picked, or the player stands down back
+to the plain menu. Melee's gate, on this command bar.
+
+Each roster card carries the combatant's full attributes (#302), for a
+viewer allowed that combatant's numbers: the server decides who, per
+combatant, and the card simply has no disclosure to open when the answer
+is no. It is a <details> in the card, not a hovercard over the map —
+it opens on a click and stays open through the poll's re-renders, which
+is the house rule against transient UI applied to a panel a DM reads
+while the fight goes on.
+
+Spectators (#250) get the started shape with every control absent — no
+advance, no rename, no menus, a "Watching" chip in the command bar — and
+follow live through the same poll. The hiding is presentation only: each
+endpoint enforces the same rule server-side. A finished battle renders its
+whole event log from the database, so watching one is a complete replay.
+{% endcomment %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/battle.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="battle-main battle-page page-width-1240"{% endblock %}
+
+{% block content %}
+{% comment %}
+Why a post was refused (#339, item 2). Every lobby control is a plain form,
+and the endpoints used to answer a refusal with raw JSON, which replaced the
+whole page with a line of machine text. The reason renders here instead, as
+part of the page: it survives being read, and a reload shows the muster
+rather than the complaint. Same treatment as battle_setup.html's setup-error.
+{% endcomment %}
+{% if error %}
+<p class="setup-error" role="alert">{{ error }}</p>
+{% endif %}
+{% if battle.is_deleted %}
+{% comment %}
+A deleted battle still opens by link (#339, item 5) — the delete is a soft
+one and the event log is a replay somebody may have bookmarked. The page says
+so, and whoever runs it can put it back from here.
+{% endcomment %}
+<div class="battle-deleted-note" role="status">
+    <p>This battle is deleted. It is off every list, and its log is kept.</p>
+    {% if can_delete %}
+    <form method="post" action="{% url 'battle:restore' battle.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="battle-button battle-button-outline">
+            Restore this battle
+        </button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
+<div class="battle-command-bar">
+    <div class="battle-identity">
+        <h1>{{ battle.name }}</h1>
+        <p class="battle-chips">
+            <span class="battle-chip">
+                <span class="battle-chip-label">seed</span><strong>{{ battle.seed }}</strong>
+            </span>
+            <span class="battle-chip">
+                <span class="battle-chip-label">status</span><strong id="battle-status">{{ battle.get_status_display }}</strong>{% battle_status_labels %}
+            </span>
+            <span class="battle-chip">
+                <span class="battle-chip-label">turn</span><strong id="battle-turn">{{ battle.turn_number }}</strong>
+            </span>
+            {% comment %}
+            Which rules this fight runs under (#339, item 7). The lobby named
+            the profile and then the started page dropped it, so the one page
+            somebody watches for an hour never said whether they were looking
+            at Tarmar or classic Melee — a distinction that changes what every
+            number on the board means. A chip, beside seed and turn, on both
+            shapes of the page.
+            {% endcomment %}
+            <span class="battle-chip">
+                <span class="battle-chip-label">rules</span><strong id="battle-rules">{{ battle.get_rules_profile_display }}</strong>
+            </span>
+            {% if is_spectator %}
+            {# The spectator flow (#250): the header names the viewer's role, #}
+            {# and no control affordance renders anywhere below. #}
+            <span class="battle-chip battle-chip-watching">
+                <span class="battle-chip-label">you</span><strong>Watching</strong>
+            </span>
+            {% endif %}
+        </p>
+        {% include "battle/_counts_note.html" %}
+    </div>
+
+    {% if battle.status == "lobby" %}
+    <div class="battle-actions">
+        {% if can_control %}
+        <form method="post" action="{% url 'battle:start' battle.pk %}" class="battle-start-form">
+            {% csrf_token %}
+            <button type="submit" class="battle-button battle-button-primary">
+                Start the battle
+            </button>
+        </form>
+        {% endif %}
+        <div class="battle-actions-secondary">
+            <a href="{% url 'battle:list' %}" class="battle-button battle-button-quiet">All battles</a>
+            {% include "battle/_delete_battle.html" %}
+        </div>
+    </div>
+    {% else %}
+    <div class="battle-actions">
+        {% if can_control %}
+        {% include "battle/_arena_advance.html" %}
+
+        <div class="battle-actions-secondary">
+            {# A Games Master session's fight is the Game Master's to restart (#762). #}
+            {% if restart_offered %}{% include "battle/_arena_restart.html" %}{% endif %}
+
+            {% comment %}It goes to the battle list, so it says so (issue #339, item 30);
+               it used to read "New battle". The list is where a new one starts.{% endcomment %}
+            <a href="{% url 'battle:list' %}" class="battle-button battle-button-quiet">All battles</a>
+            {% include "battle/_delete_battle.html" %}
+        </div>
+        {% else %}
+        <div class="battle-actions-secondary">
+            <a href="{% url 'battle:list' %}" class="battle-button battle-button-quiet">All battles</a>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+{% if battle.status == "lobby" %}
+<div class="battle-panel battle-lobby-panel" id="battle-lobby"
+     data-state-url="{% url 'battle:state' battle.pk %}">
+    <h2>Muster</h2>
+    <p class="lobby-lede">
+        {% if can_control %}
+        The battle starts when you say so — or on its own once every seat is
+        claimed and ready, if auto-start is on. Unclaimed seats are removed
+        at the start.
+        {% elif my_seat %}
+        You hold a seat. Mark yourself ready; whoever runs this battle
+        starts it.
+        {% elif has_open_seat %}
+        Claim an open seat to fight in this battle with your own combatant.
+        {% else %}
+        Every seat is taken. You can watch the battle from here once it starts.
+        {% endif %}
+        {% if battle.auto_start %}
+        <span class="lobby-auto-note">Auto-start is on.</span>
+        {% endif %}
+        {% comment %}
+        The lobby never said who would be deciding once the fight began
+        (#339, item 8), so a player could claim a seat in a fully automatic
+        battle and only find out at the first turn that they had nothing to
+        do. The battle's default belongs in the lede, where the choice to
+        join is still being made; a combatant with a mode of its own says so
+        on its own card.
+        {% endcomment %}
+        <span class="lobby-control-note">
+            Unless a combatant says otherwise, this battle is
+            <strong>{{ battle.get_control_mode_display }}</strong>.
+        </span>
+    </p>
+    {% comment %}
+    Which rules are being joined (#251). A lobby is the one place a player
+    chooses what to bring, and under the classic profile what they bring is
+    rebuilt at the start — a weapon with no classic twin is swapped, a
+    caster becomes a classic wizard. Naming the profile here is the only
+    point at which that is still news they can act on; the crossing's own
+    losses are filed in the battle log once the roster settles.
+    {% endcomment %}
+    <p class="lobby-rules">
+        Fought under <strong>{{ battle.get_rules_profile_display }}</strong>
+        rules.
+        {% if is_classic %}
+        A combatant crosses into classic figures when the battle starts:
+        weapons come from the classic table and a caster enters as a classic
+        wizard. What that costs is recorded in the battle log.
+        {% endif %}
+    </p>
+    {% if blocking_seats %}
+    {% comment %}
+    A seat whose character died after it was claimed holds the start (#751
+    review): the ready of the last player still saves, and the lobby says
+    which seat is in the way rather than refusing them over someone else's.
+    {% endcomment %}
+    <p class="lobby-blocked" id="lobby-blocked">
+        The battle cannot start while
+        {% for seat in blocking_seats %}<strong>{{ seat.display_name }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
+        {{ blocking_seats|length|pluralize:"holds its,hold their" }} seat{{ blocking_seats|length|pluralize }}:
+        {{ blocking_seats|length|pluralize:"that character has,those characters have" }}
+        died since claiming. Release the seat{{ blocking_seats|length|pluralize }} to start.
+    </p>
+    {% endif %}
+
+    <div class="lobby-seats">
+        {% for seat in seats %}
+        <div class="lobby-seat
+                    {% if seat.kind == 'open' %} is-open{% endif %}
+                    {% if seat.is_you %} is-you{% endif %}"
+             data-combatant="{{ seat.combatant_id }}">
+            <strong class="lobby-seat-name">{{ seat.display_name }}</strong>
+            {% if seat.team %}
+            {# The seat's side (#275): claiming keeps it — the combatant a #}
+            {# player brings fights on the team the DM put the seat on. #}
+            <span class="lobby-seat-team">Team: {{ seat.team }}</span>
+            {% endif %}
+            {% comment %}
+            What sits here, and who decides for it (#339, item 8). The second
+            half used to be the words "the AI fights this one", hardcoded —
+            which was simply false in a manual battle, and false again for any
+            combatant carrying a mode of its own. It is `seat.control_line`
+            now: the one sentence battle.control composes, the same one the
+            DM's control desk and the started page's roster show.
+            {% endcomment %}
+            <div class="lobby-seat-status">
+                {% if seat.kind == "beast" %}
+                Beast
+                {% elif seat.kind == "open" %}
+                Waiting for a player
+                {% elif seat.is_open_seat %}
+                Played by {{ seat.player }}{% if seat.is_you %} (you){% endif %}
+                {% elif seat.is_saved_character %}
+                Saved character
+                {% else %}
+                Generated
+                {% endif %}
+            </div>
+            {% if seat.kind != "open" %}
+            <div class="lobby-seat-control">{{ seat.control_line }}</div>
+            {% endif %}
+            {% if seat.is_open_seat and seat.player %}
+            <span class="lobby-ready-chip {% if seat.is_ready %}is-ready{% endif %}">
+                {% if seat.is_ready %}Ready{% else %}Not ready{% endif %}
+            </span>
+            {% endif %}
+
+            {% comment %}A Game Master may take a seat too (issue #339, item 26):
+               claim_seat has always allowed it, and Spencer wants a GM able to
+               play alongside the table.{% endcomment %}
+            {% if seat.kind == "open" and not my_seat %}
+            <details class="seat-claim">
+                <summary class="battle-button battle-button-outline">Claim this seat</summary>
+                <div class="seat-claim-forms">
+                    {% if is_guest %}
+                    {# #305: the limit, where it bites, with the way out. #}
+                    <p class="seat-guest-limit" id="guest-limit-claim">
+                        {{ guest_notes.claim_character }}
+                        <a href="{% sign_in_url %}">Sign in</a>
+                        to bring your own.
+                    </p>
+                    {% elif my_characters %}
+                    <form method="post"
+                          action="{% url 'battle:seat-claim' battle.pk seat.combatant_id %}">
+                        {% csrf_token %}
+                        <label>
+                            Bring one of your characters
+                            <select name="character_id" required>
+                                {% for character in my_characters %}
+                                <option value="{{ character.pk }}">{{ character.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button type="submit" class="battle-button battle-button-primary">
+                            Join with this character
+                        </button>
+                        {% comment %}
+                        Seat-time snapshot (#252): the claim copies the
+                        character as it stands, so the honest affordance is
+                        to say so rather than offer an edit that would
+                        silently not count.
+                        {% endcomment %}
+                        <span class="seat-claim-hint">
+                            Seated as it stands right now — release the seat
+                            and claim again to bring later edits.
+                        </span>
+                    </form>
+                    <p class="seat-claim-or">or</p>
+                    {% endif %}
+                    <form method="post"
+                          action="{% url 'battle:seat-claim' battle.pk seat.combatant_id %}">
+                        {% csrf_token %}
+                        <label>
+                            Generate a fighter
+                            <select name="archetype" required>
+                                {% for archetype in archetypes %}
+                                <option value="{{ archetype }}">{{ archetype|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button type="submit" class="battle-button battle-button-primary">
+                            Join with a generated fighter
+                        </button>
+                    </form>
+                    {% comment %}
+                    The add-a-character round trip (#270), lobby side: the
+                    character editor comes back here with the muster as it
+                    was, and the new character in the claim menu.
+                    {% endcomment %}
+                    {% if not is_guest %}
+                    <p class="seat-claim-new">
+                        <a href="{% url 'characters:create' %}?next={{ request.get_full_path|urlencode }}">
+                            Create a new character
+                        </a>
+                        — this lobby will be waiting when you come back.
+                    </p>
+                    {% endif %}
+                </div>
+            </details>
+            {% endif %}
+
+            {% comment %}
+            Ready is the seat-holder's alone; releasing is theirs *or* a
+            DM's (#339, item 4). ``services.release_seat`` has always allowed
+            both, and a lobby the DM cannot unstick — a player claims a seat,
+            leaves, and nobody can start the battle — was the cost of the
+            template asking only ``seat.is_you``. The verb changes with who
+            is being asked, and a DM freeing somebody else's seat is asked
+            first, because the player loses the figure they brought.
+            {% endcomment %}
+            {% if seat.is_you or is_dm and seat.is_open_seat and seat.player %}
+            <div class="lobby-seat-actions">
+                {% if seat.is_you %}
+                <form method="post"
+                      action="{% url 'battle:seat-ready' battle.pk seat.combatant_id %}">
+                    {% csrf_token %}
+                    {% if seat.is_ready %}
+                    <button type="submit" class="battle-button battle-button-outline">
+                        Not ready after all
+                    </button>
+                    {% else %}
+                    <input type="hidden" name="ready" value="true">
+                    <button type="submit" class="battle-button battle-button-primary">
+                        I'm ready
+                    </button>
+                    {% endif %}
+                </form>
+                <form method="post"
+                      action="{% url 'battle:seat-release' battle.pk seat.combatant_id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="battle-button battle-button-quiet">
+                        Give up this seat
+                    </button>
+                </form>
+                {% else %}
+                <form method="post"
+                      action="{% url 'battle:seat-release' battle.pk seat.combatant_id %}"
+                      data-confirm="Release {{ seat.display_name }}? {{ seat.player }} loses the figure they brought and the seat opens again."
+                      data-confirm-label="Release the seat">
+                    {% csrf_token %}
+                    <button type="submit" class="battle-button battle-button-quiet">
+                        Release this seat
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{# The lobby's poll compares the seats it loaded with (battle.js initLobbyPage). #}
+{{ seats|json_script:"battle-seats" }}
+{% else %}
+
+{% include "battle/_arena.html" %}
+
+{% comment %}
+The control desk and the seated player's card sit below the arena (issue
+#695). Rendered first, they put the hex board at y=930 on a 1440x900 screen
+and y=1,945 on a 390px phone -- the first screen, and on a phone the first
+two and a half, were entirely administrative controls on a page whose
+subject is a fight.
+{% endcomment %}
+{% if commands_foes %}
+{% comment %}
+The control desk (#308). Offered to whoever commands the side nobody sits in:
+the battle's runner, or in a Games Master session's fight a Game Master only
+(#762); the player there gets their own seat's card below instead. Two levels, and the precedence between them is
+written on the page rather than left to be discovered: the battle's mode is
+a default every combatant inherits, and a combatant given a mode of its own
+overrides it. "Set every combatant to follow the battle" is the "all the
+same" action — it clears the overrides rather than stamping the mode on
+every row, so a uniform battle still follows its own default afterwards.
+
+Plain forms, no script: the panel renders from stored state, so the reload
+a post causes *is* the update. Nothing here appears or vanishes on a timer.
+{% endcomment %}
+<div class="battle-panel battle-control-panel" id="battle-control">
+    <h2>Who decides</h2>
+    <p class="control-lede">
+        This battle's default is
+        <strong class="control-default">{{ battle.get_control_mode_display }}</strong>.
+        Every combatant follows it unless it has a mode of its own.
+        {% if manual_count %}
+        <span class="control-count">{{ manual_count }} of {{ seats|length }} wait for a person.</span>
+        {% else %}
+        <span class="control-count">Nothing waits for a person — press Advance turn and watch.</span>
+        {% endif %}
+    </p>
+
+    <div class="control-battle-actions">
+        {% for value, label in control_modes %}
+        <form method="post" action="{% url 'battle:control' battle.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="control_mode" value="{{ value }}">
+            <button type="submit"
+                    class="battle-button {% if battle.control_mode == value %}battle-button-primary{% else %}battle-button-outline{% endif %}"
+                    {% if battle.control_mode == value %}disabled aria-current="true"{% endif %}>
+                {{ label }}
+            </button>
+        </form>
+        {% endfor %}
+        <form method="post" action="{% url 'battle:control' battle.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="control_mode" value="{{ battle.control_mode }}">
+            <input type="hidden" name="apply_to_all" value="true">
+            <button type="submit" class="battle-button battle-button-quiet"
+                    {% if not control_overrides %}disabled{% endif %}>
+                Set every combatant to follow the battle
+            </button>
+        </form>
+    </div>
+    <p class="control-overrides-note">
+        {% if control_overrides %}
+        {{ control_overrides }} combatant{{ control_overrides|pluralize }}
+        override{{ control_overrides|pluralize:"s," }} the battle's default.
+        {% else %}
+        No combatant overrides the battle's default.
+        {% endif %}
+    </p>
+
+    {% comment %}
+    Closed by default (issue #695). Eight combatants meant eight copies of
+    the same select-and-Set row, and the panel's own lede had just said
+    "Nothing waits for a person — press Advance turn and watch". A <details>
+    keeps every row one keystroke away and costs no script; the summary
+    counts what is inside so nothing is hidden silently.
+    {% endcomment %}
+    <details class="control-combatants-disclosure">
+        <summary>Who decides for each combatant ({{ seats|length }})</summary>
+    <ul class="control-combatants">
+        {% for seat in seats %}
+        <li class="control-combatant" data-combatant="{{ seat.combatant_id }}">
+            <span class="control-combatant-name">{{ seat.display_name }}</span>
+            <span class="control-combatant-line">{{ seat.control_line }}</span>
+            <form method="post"
+                  action="{% url 'battle:combatant-control' battle.pk seat.combatant_id %}"
+                  class="control-combatant-form">
+                {% csrf_token %}
+                <label class="control-combatant-label">
+                    <span class="sr-only">Who decides for {{ seat.display_name }}</span>
+                    <select name="control_mode">
+                        {% for value, label in combatant_modes %}
+                        <option value="{{ value }}"
+                                {% if seat.control_mode == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="battle-button battle-button-outline">
+                    Set
+                </button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    </details>
+</div>
+{% elif my_seat_summaries %}
+{% comment %}
+The seated player's half of the control desk (#339, item 3).
+
+``combatant_control`` has always accepted the seat's own holder — that is
+what "I have had enough, let the AI fight my figure" is made of, and what
+lets somebody step away from a battle without abandoning the seat and
+stalling everybody else. Only the DM's panel was ever rendered, so the
+right existed and the control did not.
+
+One row per combatant this viewer sits in -- a Games Master session's fight
+seats the whole party to its player (#762) -- posting to the same endpoint the
+desk does. Plain form, no script, like the desk: the
+panel is drawn from stored state, so the reload the post causes is the
+update.
+{% endcomment %}
+<div class="battle-panel battle-control-panel" id="battle-my-control">
+    <h2>Your figure{{ my_seat_summaries|length|pluralize }}</h2>
+    <p class="control-lede">
+        You decide for {% for seat in my_seat_summaries %}<strong>{{ seat.display_name }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        Hand one to the AI and the battle stops waiting on you for it; take it
+        back whenever you like. The seat stays yours either way.
+    </p>
+    <ul class="control-combatants">
+        {% for my_seat_summary in my_seat_summaries %}
+        <li class="control-combatant" data-combatant="{{ my_seat_summary.combatant_id }}">
+            <span class="control-combatant-name">{{ my_seat_summary.display_name }}</span>
+            <span class="control-combatant-line">{{ my_seat_summary.control_line }}</span>
+            <form method="post"
+                  action="{% url 'battle:combatant-control' battle.pk my_seat_summary.combatant_id %}"
+                  class="control-combatant-form">
+                {% csrf_token %}
+                <label class="control-combatant-label">
+                    <span class="sr-only">Who decides for {{ my_seat_summary.display_name }}</span>
+                    <select name="control_mode">
+                        {% for value, label in combatant_modes %}
+                        <option value="{{ value }}"
+                                {% if my_seat_summary.control_mode == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="battle-button battle-button-outline">
+                    Set
+                </button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/battle.js' %}"></script>
+{% endblock %}

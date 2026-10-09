@@ -1,0 +1,36 @@
+{% extends "error_base.html" %}
+
+{% block code %}429{% endblock %}
+
+{% block background %}#1b1a16{% endblock %}
+
+{% block extra_style %}
+        .code {
+            color: #8a7650;
+        }
+        .ways-on {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+{% endblock %}
+
+{% block content %}
+    {% comment %}The page a spent guessing budget answers with (issue #697).
+       It used to be a bare HttpResponse: one sentence of Times New Roman on
+       white, no header, no footer, no styling and no link, so a legitimate
+       visitor who mistyped a password a few times was dropped out of the
+       site with the Back button leading only to a form that would refuse
+       again. The wait is named because the window is a fixed 300 seconds and
+       there is no reason to make anyone guess at it, and the arena needs no
+       account at all, so it is offered as the way on.{% endcomment %}
+    <div class="code">429</div>
+    <h1>{{ headline }}</h1>
+    <p class="quote">{{ message }}</p>
+    <p class="attribution">Try again in about {{ wait_minutes }} minute{{ wait_minutes|pluralize }}.</p>
+    <div class="ways-on">
+        <a href="{% url 'battle:list' %}">The battles need no account</a>
+        <a href="{% url 'register' %}">Make an account</a>
+    </div>
+{% endblock %}

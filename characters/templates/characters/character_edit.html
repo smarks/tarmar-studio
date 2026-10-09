@@ -1,0 +1,967 @@
+{% extends "base.html" %}
+{% load static %}
+{% load character_fields %}
+{% load character_help %}
+{% load dice_display %}
+{% load gm_play %}
+{% load local_time %}
+
+{% block title %}{{ character.name }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/character-edit.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="character-edit-main page-width-1240"{% endblock %}
+
+{% block content %}
+{% if next_url %}
+{% comment %}
+The battle setup's round trip (#270): the way back to the in-progress
+muster, persistent at the top of the sheet. The setup's state lives on its
+server-side draft, so nothing done here can lose it.
+{% endcomment %}
+<p class="setup-return">
+    <a href="{{ next_url }}" class="button" id="setup-return-link">&larr; Back to the battle setup</a>
+    <span class="setup-return-note">The setup you left is saved and waiting.</span>
+</p>
+{% endif %}
+{# The character's name is this page's heading — an h1 like every other page's title, editable in place. #}
+{% if can_edit %}
+<h1 class="editable-field name-field" data-field="name">
+    {# The control carries the name via aria-label, else the h1 announces as an unlabelled textbox. #}
+    <input type="text" id="id_name" value="{{ character.name }}" maxlength="100" class="autosave" aria-label="Character name">
+</h1>
+{% else %}
+<h1 class="name-field">{{ character.name }}</h1>
+{% endif %}
+<p class="subtitle">Created {% local_time character.created_at "F d, Y" style="date" %}</p>
+<div id="sheet-completion">
+{% include "characters/_completion.html" %}
+</div>
+
+{# The way to play this character (issue #828): an empty slot where the Game Master's attach would refuse it. #}
+{% play_with_game_master character request.user %}
+<script src="{% static 'js/play-with-gm.js' %}" defer></script>
+{# The Game Masters' sessions that hold this character, and the way out of each (issue #871). #}
+{% sessions_holding character request.user %}
+{% if character.import_notice %}
+{% comment %}What a player's import dropped and why (issue #744). It stays until
+somebody who may edit the character dismisses it; nothing here goes away on a
+timer.{% endcomment %}
+<p class="import-notice" id="import-notice" role="status">
+    <span id="import-notice-text">{{ character.import_notice }}</span>
+    {% if can_edit %}
+    <button type="button" id="dismiss-import-notice-btn" class="button secondary">Dismiss</button>
+    {% endif %}
+</p>
+{% endif %}
+
+{% comment %}
+Visibility (issue #273). The badge is state-driven and always rendered; the
+toggle is an edit affordance, so it renders for the owner and DM/admin only
+and autosaves on change like every other control on this sheet
+(character-edit.js posts to characters:set_visibility, then updates the
+badge in place).
+{% endcomment %}
+<p class="visibility-control">
+    <span id="visibility-badge" class="status-badge {% if character.is_public %}visibility-public{% else %}visibility-private{% endif %}">{% if character.is_public %}Public{% else %}Private{% endif %}</span>
+    {% if can_edit %}
+    <label class="visibility-toggle">
+        <input type="checkbox" id="visibility-toggle"{% if character.is_public %} checked{% endif %}>
+        Public &mdash; any registered user can view this character
+    </label>
+    {% else %}
+    <span class="visibility-note">You are viewing {{ character.user.username }}&rsquo;s character. Only the owner and DMs can edit it.</span>
+    {% endif %}
+</p>
+
+{% if request.user.can_manage_users %}
+<p class="dm-actions">
+    {% if character.is_alive %}
+    <button type="button" id="mark-dead-btn" class="button danger">Mark Dead</button>
+    {% else %}
+    <button type="button" id="revive-btn" class="button">Revive</button>
+    {% endif %}
+</p>
+{% endif %}
+
+{% comment %}
+An index for a 4,203px page (issue #710, and the same low finding in #716).
+The sheet runs Core Attributes to Recent Changes in one column with no section
+navigation, nothing collapsible and no way back to the top. Plain anchors: no
+script, nothing that appears or vanishes, and it works before any JavaScript
+runs.
+{% endcomment %}
+<nav class="sheet-index" aria-label="Sections of this sheet">
+    <a href="#core-attributes">Attributes</a>
+    <a href="#physical-attributes">Physical</a>
+    <a href="#derived-attributes">Derived</a>
+    <a href="#injury-thresholds-section">Injuries</a>
+    <a href="#provenance">Provenance</a>
+    <a href="#location">Location</a>
+    <a href="#wealth">Wealth</a>
+    <a href="#skills">Skills</a>
+    <a href="#equipment">Equipment</a>
+    <a href="#attack-panel">Attack</a>
+    <a href="#dice-log">Dice log</a>
+    <a href="#recent-changes">Changes</a>
+</nav>
+<div class="character-sheet">
+    <div id="core-attributes" class="stats-section">
+        <h2>Core Attributes</h2>
+        <table class="stats-table">
+            <tr>
+                <th>STR{% help_for "strength" %}</th>
+                <th>DEX{% help_for "dexterity" %}</th>
+                <th>INT{% help_for "intelligence" %}</th>
+                <th>WIS{% help_for "wisdom" %}</th>
+                <th>CON{% help_for "constitution" %}</th>
+                <th>CHR{% help_for "charisma" %}</th>
+            </tr>
+            <tr>
+                <td>{% editable_attribute character "strength" can_edit %}</td>
+                <td>{% editable_attribute character "dexterity" can_edit %}</td>
+                <td>{% editable_attribute character "intelligence" can_edit %}</td>
+                <td>{% editable_attribute character "wisdom" can_edit %}</td>
+                <td>{% editable_attribute character "constitution" can_edit %}</td>
+                <td>{% editable_attribute character "charisma" can_edit %}</td>
+            </tr>
+        </table>
+        {% comment %}The sheet's rolls (issues #748, #749): a player rolls each of
+        these once and may not type them; a Game Master may roll again or type.
+        Each control renders when the server would take the roll.{% endcomment %}
+        {% if can_edit and point_buy_open %}
+        <p class="formula" id="point-buy-note">Type a missing score from 3 to 18: typed scores are a 65-point buy, so the six must total 65. Or roll the missing ones, 3d6 each. Each score locks once recorded.</p>
+        {% endif %}
+        {% if can_edit and sheet_rolls.attributes.available %}
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-attributes-btn" data-roll-kind="attributes" data-roll-url="{% url 'characters:roll' character.pk 'attributes' %}"{% if sheet_rolls.attributes.confirm %} data-confirm="{{ sheet_rolls.attributes.confirm }}"{% endif %}>Roll attributes (3d6 each)</button>
+        {% endif %}
+    </div>
+
+    <div id="physical-attributes" class="stats-section">
+        <h2>Physical Attributes</h2>
+        <table class="physical-table">
+            <tr>
+                <th>Appearance{% help_for "appearance" %}</th>
+                <td>
+                    {% editable_text character "appearance_roll" can_edit "Appearance" %}
+                    {% if can_edit and sheet_rolls.appearance.available %}
+                    <button type="button" class="button secondary sheet-roll-btn" id="roll-appearance-btn" data-roll-kind="appearance" data-roll-url="{% url 'characters:roll' character.pk 'appearance' %}"{% if sheet_rolls.appearance.confirm %} data-confirm="{{ sheet_rolls.appearance.confirm }}"{% endif %}>Roll appearance (1d6)</button>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th>Height</th>
+                <td>
+                    {% editable_text character "height_roll" can_edit "Height" %}
+                    <span id="height_display">({{ character.height_display|default:"—" }})</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Weight</th>
+                <td>
+                    {% editable_text character "weight_roll" can_edit "Weight" %}
+                    <span id="weight_display">(<span id="weight_lbs">{{ character.weight_lbs|default_if_none:"—" }}</span> lbs)</span>
+                </td>
+            </tr>
+            {% comment %}The character's people, the player's choice (#810). Rendered
+            only where the model carries the field (the sheetrules batch's
+            migration 0022), so the sheet holds with or without it.{% endcomment %}
+            {% if sheet_fields.people %}
+            <tr>
+                <th>People</th>
+                <td>{% editable_choice character "people" can_edit "People" %}</td>
+            </tr>
+            {% endif %}
+            {% comment %}Dragonborn (#810): the Game Master's secret, so the row renders
+            for a Game Master alone and is never exported.{% endcomment %}
+            {% if sheet_fields.is_dragonborn and is_game_master %}
+            <tr id="dragonborn-row">
+                <th>Dragonborn</th>
+                <td>
+                    {% if can_edit %}<div class="editable-field" data-field="is_dragonborn"><input type="checkbox" class="autosave" aria-label="Dragonborn"{% if character.is_dragonborn %} checked{% endif %}></div>{% else %}{{ character.is_dragonborn|yesno:"Yes,No" }}{% endif %}
+                    <span class="formula">The Game Master's secret: the player's sheet never shows it.</span>
+                </td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <div id="derived-attributes" class="stats-section">
+        <h2>Derived Attributes</h2>
+        <table>
+            <tr>
+                <th>Fatigue{% help_for "fatigue" %}</th>
+                <td><span class="derived-value" id="fatigue">{{ character.fatigue|default_if_none:"—" }}</span></td>
+                <td class="formula">CON + WIS + INT + max(DEX,STR) + roll</td>
+            </tr>
+            {% comment %}The Fatigue roll's own control (issue #636). It was the one
+            field in CHARACTER_FIELDS with no widget anywhere on the page: a character
+            saved from a Games Master session has no roll, the marks at the top say so,
+            and there was no way to record it short of a hand-built POST. A player gets
+            one roll and a Game Master may ask for another (issue #590), so the button
+            renders for an editor and the server decides.{% endcomment %}
+            <tr>
+                <th>Fatigue roll{% help_for "fatigue_roll" %}</th>
+                <td>
+                    <span class="derived-value" id="fatigue-roll">{{ character.fatigue_roll|default_if_none:"—" }}</span>
+                    {% if can_edit and can_roll_fatigue %}
+                    <button type="button" id="roll-fatigue-btn" class="button secondary">Roll Fatigue (2d6)</button>
+                    {% endif %}
+                </td>
+                <td class="formula">2d6, rolled once</td>
+            </tr>
+            <tr>
+                <th>Body{% help_for "body" %}</th>
+                <td><span class="derived-value" id="body">{{ character.body|default_if_none:"—" }}</span></td>
+                <td class="formula">2/3 of Fatigue, rounded up</td>
+            </tr>
+            <tr>
+                <th>Physical{% help_for "physical" %}</th>
+                <td><span class="derived-value" id="physical">{{ character.physical|default_if_none:"—" }}</span></td>
+                <td class="formula">(STR + DEX + CON) / 2, rounded up</td>
+            </tr>
+            <tr>
+                <th>Mental{% help_for "mental" %}</th>
+                <td><span class="derived-value" id="mental">{{ character.mental|default_if_none:"—" }}</span></td>
+                <td class="formula">(WIS + INT + CHA) / 2, rounded up</td>
+            </tr>
+        </table>
+    </div>
+
+    <div id="injury-thresholds-section" class="stats-section">
+        <h2>Injury Thresholds{% help_for "injury_thresholds" %}</h2>
+        {# Swapped wholesale by character-edit.js from the server's re-render, so the #}
+        {# table appears the moment a character becomes complete (issues #571, #639). #}
+        <div id="injury-thresholds">
+            {% include "characters/_injury_thresholds.html" with thresholds=character.injury_thresholds condition=character.condition %}
+        </div>
+    </div>
+
+    <div id="provenance" class="stats-section">
+        <h2>Provenance{% help_for "provenance_class" %}</h2>
+        <table class="physical-table">
+            <tr>
+                <th>Social Class</th>
+                <td>
+                    {% editable_choice character "provenance_class" can_edit "Social Class" %}
+                </td>
+            </tr>
+            <tr>
+                <th>Detail</th>
+                <td>
+                    {% editable_text character "provenance_detail" can_edit "Provenance Detail" %}
+                </td>
+            </tr>
+        </table>
+        {% if can_edit and sheet_rolls.provenance.available %}
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-provenance-btn" data-roll-kind="provenance" data-roll-url="{% url 'characters:roll' character.pk 'provenance' %}"{% if sheet_rolls.provenance.confirm %} data-confirm="{{ sheet_rolls.provenance.confirm }}"{% endif %}>Roll provenance (d100)</button>
+        {% endif %}
+    </div>
+
+    <div id="location" class="stats-section">
+        <h2>Location{% help_for "location" %}</h2>
+        <table class="physical-table">
+            <tr>
+                <th>Origin</th>
+                <td>
+                    {% editable_choice character "location" can_edit "Origin" disabled=origin_fixed %}
+                    {% comment %}An Origin nobody rolled or chose (issue #754): the model's Village, with no skill granted for it. Hidden, not left out, since choosing one records it.{% endcomment %}
+                    <span class="formula" id="origin-not-rolled"{% if character.location_recorded %} hidden{% endif %}>Not rolled or chosen yet</span>
+                    {% if can_edit %}
+                    <span class="formula" id="origin-fixed-note"{% if not origin_fixed %} hidden{% endif %}>{{ origin_fixed_reason }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% comment %}The literacy row (issues #740, #741). Its parts carry ids because
+            character-edit.js repaints them from the field-update response when the
+            Origin or INT changes, and from the roll's response: rendered once, the
+            row kept the old origin's check until a reload. The control renders for
+            an editor and is hidden rather than left out when it cannot be used now,
+            since changing the Origin can bring it back (a "Consult GM" origin has
+            no check to roll).{% endcomment %}
+            {% comment %}The Game Master's ruling on a "Consult GM" origin (#801): his to
+            set, shown to everyone, and only at "Consult GM". Hidden rather than
+            left out elsewhere, since changing the Origin brings it back.
+            Rendered only where the model carries the field (migration 0022).{% endcomment %}
+            {% if sheet_fields.origin_ruling %}
+            <tr id="origin-ruling-row"{% if character.location != "Consult GM" %} hidden{% endif %}>
+                <th>Game Master's ruling</th>
+                <td>{% editable_text character "origin_ruling" can_edit "Game Master's ruling on the origin" %}</td>
+            </tr>
+            {% endif %}
+            <tr id="literacy-row">
+                <th>Literacy check</th>
+                <td>
+                    <span id="literacy-check">{{ character.location_literacy_check }}</span>
+                    <span class="formula" id="literacy-result">{{ character.literacy_result }}</span>
+                    {% if can_edit %}
+                    <button type="button" id="roll-literacy-btn" class="button secondary"{% if not can_roll_literacy %} hidden{% endif %}>Roll literacy (3d6)</button>
+                    {% endif %}
+                    {% if may_rule_literacy %}
+                    {% comment %}The Game Master's ruling (issue #743): "Consult GM" has no check to roll, so he decides. Hidden, not left out, away from Consult GM, since changing the Origin can bring it back.{% endcomment %}
+                    <span id="literacy-ruling-control"{% if not can_rule_literacy %} hidden{% endif %}>
+                        <label for="literacy-ruling-select">Game Master's ruling</label>
+                        <select id="literacy-ruling-select">
+                            <option value=""{% if character.literacy_ruling is None %} selected{% endif %}>Undecided</option>
+                            <option value="literate"{% if character.literacy_ruling is True %} selected{% endif %}>Literate</option>
+                            <option value="illiterate"{% if character.literacy_ruling is False %} selected{% endif %}>Illiterate</option>
+                        </select>
+                    </span>
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+        {% if can_edit and sheet_rolls.origin.available %}
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-origin-btn" data-roll-kind="origin" data-roll-url="{% url 'characters:roll' character.pk 'origin' %}"{% if sheet_rolls.origin.confirm %} data-confirm="{{ sheet_rolls.origin.confirm }}"{% endif %}>Roll origin (d100)</button>
+        {% endif %}
+    </div>
+
+    <div id="wealth" class="stats-section">
+        <h2>Wealth{% help_for "wealth_level" %}</h2>
+        <table class="physical-table">
+            <tr>
+                <th>Level</th>
+                <td>
+                    {% editable_choice character "wealth_level" can_edit "Wealth Level" %}
+                </td>
+            </tr>
+            <tr>
+                <th>Starting Coin</th>
+                <td>
+                    {% editable_number character "starting_coin" can_edit "Starting Coin" empty="Consult GM" %}
+                    {% comment %}Rendered hidden for a Game Master while the wealth gives no coin, so a
+                    wealth change that makes the coin rollable can show it (#792 sweep).{% endcomment %}
+                    {% if can_edit and is_game_master or can_edit and sheet_rolls.starting_coin.available %}
+                    <button type="button" class="button secondary sheet-roll-btn" id="roll-starting-coin-btn" data-roll-kind="starting_coin" data-roll-url="{% url 'characters:roll' character.pk 'starting_coin' %}"{% if sheet_rolls.starting_coin.confirm %} data-confirm="{{ sheet_rolls.starting_coin.confirm }}"{% endif %}{% if not sheet_rolls.starting_coin.available %} hidden{% endif %}>Reroll coin</button>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th>Earned</th>
+                <td id="wealth-earned">{{ character.money_earned }} gp</td>
+            </tr>
+            <tr>
+                <th>Spent / granted</th>
+                <td id="coin-adjustment">{{ coin_adjustment }} gp</td>
+            </tr>
+            <tr>
+                {% comment %}The coin the character holds (issue #757): starting coin
+                   plus prior-experience earnings, less purchases (never refunded), plus
+                   Game Master grants. Buying from the catalog spends it.{% endcomment %}
+                <th>Purse</th>
+                <td><strong id="purse">{{ purse }}</strong></td>
+            </tr>
+        </table>
+        {% if can_edit and sheet_rolls.wealth.available %}
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-wealth-btn" data-roll-kind="wealth" data-roll-url="{% url 'characters:roll' character.pk 'wealth' %}"{% if sheet_rolls.wealth.confirm %} data-confirm="{{ sheet_rolls.wealth.confirm }}"{% endif %}>Roll wealth (d100)</button>
+        {% endif %}
+        {% if can_edit and is_game_master %}
+        <div class="coin-control" data-mechanics-form="coinUrl" data-reload="true">
+            <label>Give (+) or take (−) coin
+                <input type="number" name="amount" step="0.01" aria-label="Coin to give or take">
+            </label>
+            <label>Reason
+                <input type="text" name="reason" maxlength="100" aria-label="Reason for the coin">
+            </label>
+            <button type="button" class="button secondary mechanics-submit">Move coin (Game Master)</button>
+            <span class="mechanics-error" role="alert" hidden></span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Skills Section -->
+    <div id="skills" class="stats-section">
+        <h2>Skills & Experience{% help_for "experience_term" %}</h2>
+
+        <div class="skills-summary">
+            <div class="summary-item">
+                <span class="label">Level:</span>
+                <span class="value highlight" id="character-level">{{ character.level }}</span>
+            </div>
+            <div class="summary-item">
+                <span class="label">XP:{% help_for "total_xp" %}</span>
+                {% editable_number character "total_xp" can_edit "Total XP" %}
+            </div>
+            <div class="summary-item">
+                <span class="label">Age:</span>
+                <span class="value" id="character-age">{{ character.age }}</span>
+            </div>
+            <div class="summary-item">
+                <span class="label">Years:</span>
+                <span class="value" id="experience-years">{{ character.experience_years }}</span>
+            </div>
+            <div class="summary-item">
+                <span class="label">Earned:</span>
+                <span class="value" id="money-earned">{{ character.money_earned }} gp</span>
+            </div>
+            <div class="summary-item">
+                <span class="label">Unallocated:{% help_for "free_skill_points" %}</span>
+                <span class="value highlight" id="free-points">{{ character.free_skill_points }}</span>
+            </div>
+            {% comment %}Hidden, not left out, at no points: a run that earns the
+            first one shows it without a reload (issue #792).{% endcomment %}
+            <div class="summary-item" id="spell-points-item"{% if character.free_spell_points <= 0 %} hidden{% endif %}>
+                <span class="label">Spell Points:{% help_for "free_spell_points" %}</span>
+                <span class="value highlight" id="spell-points">{{ character.free_spell_points }}</span>
+            </div>
+            <div class="summary-item">
+                <span class="label">Allocated:</span>
+                <span class="value" id="allocated-points">{{ character.total_allocated_skill_points }}</span>
+            </div>
+        </div>
+
+        {% comment %}
+        The workbench replaces the old aging-confirm/result/death floating
+        panels with one persistent card (issue #217): the consequences of the
+        years about to be played are visible before the click, so the click
+        itself needs no confirmation, and a rolled run is just the newest,
+        expanded entry of the history beside it. Experience is bought a year
+        at a time (issue #221) -- one year is the default -- so the card's
+        year count drives the preview and the button label.
+        {% endcomment %}
+        <div class="experience-workbench">
+            <div id="workbench-card">
+                {% if not character.is_alive %}
+                {% include "characters/_death_card.html" with death_name=character.name death_cause=character.death_cause fatal_check=character.fatal_survival_check %}
+                {% elif can_edit %}
+                <div class="workbench-card">
+                    <p class="workbench-eyebrow" id="workbench-eyebrow">NEXT &mdash; YEAR {{ next_year_number }}</p>
+                    <p class="workbench-copy">Each year rolls its own skill and its own survival check. Roll one year, or a run of them &mdash; a run stops the moment a survival check fails.</p>
+                    <div class="workbench-track">
+                        <label for="track-select">Track:</label>
+                        <select id="track-select">
+                            {% for track_value, track_display in track_options %}
+                            <option value="{{ track_value }}"{% if track_value == "random" %} selected{% endif %}>{{ track_display }}</option>
+                            {% endfor %}
+                        </select>
+                        <label for="years-input">Years:</label>
+                        <input type="number" id="years-input" class="workbench-years-input" value="{{ default_run_years }}" min="1" max="{{ max_run_years }}" step="1">
+                    </div>
+                    <dl class="workbench-preview">
+                        <div class="workbench-preview-row">
+                            <dt>Age</dt>
+                            <dd id="workbench-age-preview">{{ character.age }} &rarr; {{ next_run_age }}</dd>
+                        </div>
+                        <div class="workbench-preview-row">
+                            <dt>Survival</dt>
+                            <dd id="workbench-survival-preview">{{ survival_dice }} + best attribute modifier (target varies by track)</dd>
+                        </div>
+                        <div class="workbench-preview-row">
+                            <dt>Aging</dt>
+                            <dd id="workbench-aging-preview">{% if next_aging_change_age %}{% for attr, penalty in next_aging_change_penalties.items %}{{ attr|upper|slice:":3" }} {{ penalty }}{% if not forloop.last %}, {% endif %}{% endfor %} at age {{ next_aging_change_age }}{% elif past_aging_horizon %}Continues to escalate past age {{ aging_preview_horizon_age }} (roughly -1 to STR/DEX/CON every four years, plus -1 to INT/WIS every eight).{% else %}No further aging before age {{ aging_preview_horizon_age }}{% endif %}</dd>
+                        </div>
+                    </dl>
+                    <p class="workbench-note">Triple ones always kill; triple sixes always survive.</p>
+                    <button id="roll-years-btn" class="button workbench-roll-btn">Roll {{ default_run_years }} year</button>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="experience-history-column stats-section" id="experience-history-section">
+                <h3>Experience History</h3>
+                <div id="experience-log">
+                    {% comment %}
+                    One entry per run of years (issue #221). The heading is
+                    built from the ages actually stored in the entry, so a
+                    legacy fixed 4-year term entry renders exactly as
+                    truthfully as a one-year run.
+                    {% endcomment %}
+                    {% for run in character.experience_log reversed %}
+                    {% include "characters/_term_entry.html" with run=run open=forloop.first %}
+                    {% empty %}
+                    <p class="no-history">No years yet. Roll the first year to build this character's past.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        {% comment %}
+        The JS mirror of the death card above (issue #217): filled with
+        cause/fatal roll and swapped in for #workbench-card's content when a
+        term roll kills the character over AJAX, so an in-place death and a
+        reload render the identical card.
+        {% endcomment %}
+        <template id="death-card-template">
+            {% include "characters/_death_card.html" with death_name="" death_cause="" fatal_check=None %}
+        </template>
+
+        <div class="skills-list" id="skills-list">
+            {% include "characters/_skills_list.html" %}
+        </div>
+
+        {% comment %}Rendered for a living character's editor and hidden at no free
+        points, rather than left out: a run that earns the first point has to be
+        able to show it (issue #792).{% endcomment %}
+        {% if can_edit and character.is_alive %}
+        {% comment %}A Game Master may grant a point past the free ones (#770): his
+        control shows at none.{% endcomment %}
+        <div class="add-skill-control"{% if character.free_skill_points <= 0 and not can_grant_skill_points %} style="display: none;"{% endif %}>
+            <input type="text" id="new-skill-name" placeholder="Enter new skill name..." list="skill-name-suggestions" autocomplete="off">
+            <datalist id="skill-name-suggestions">
+                {% for skill_name in skill_name_suggestions %}
+                <option value="{{ skill_name|title }}"></option>
+                {% endfor %}
+            </datalist>
+            <button id="add-skill-btn" class="button secondary">Allocate Point</button>
+        </div>
+        {% endif %}
+
+        {% if can_edit %}
+        {% comment %}The skill check (issue #756), the skills glossary's mechanic:
+           2d6 + the governing attribute's modifier + the skill level against a
+           difficulty the GM sets. The server rolls; the result stays until the
+           next roll replaces it, and every roll is in the history. Only a Game
+           Master sets the difficulty here; a player's roll records the total
+           for the Game Master at the table to compare.{% endcomment %}
+        {% comment %}Hidden, not left out, until the character is complete: the
+        response that completes it shows it (issue #764).{% endcomment %}
+        <div class="skill-check" id="skill-check" data-mechanics-form="skillCheckUrl" data-result="skill-check-result"{% if not character.is_complete %} hidden{% endif %}>
+            <h3>Skill check{% help_for "skill_check" %}</h3>
+            <label>Skill
+                <select name="skill" id="skill-check-skill" aria-label="Skill to check">
+                    {% include "characters/_skill_check_options.html" %}
+                </select>
+            </label>
+            {% if is_game_master %}
+            <label>Difficulty (Game Master)
+                <input type="number" name="difficulty" id="skill-check-difficulty" min="0" max="40" aria-label="Difficulty">
+            </label>
+            <label>Attribute (Game Master)
+                <select name="attribute" aria-label="Substitute attribute">
+                    <option value="">Governing attribute</option>
+                    {% for attribute in skill_check_attributes %}
+                    <option value="{{ attribute }}">{{ attribute|title }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>2d6 rolled at the table (Game Master)
+                <input type="number" name="total" min="2" max="12" aria-label="2d6 rolled at the table">
+            </label>
+            {% endif %}
+            <button type="button" class="button mechanics-submit" id="skill-check-btn">Roll check</button>
+            <span class="mechanics-error" role="alert" hidden></span>
+            <p class="skill-check-result" id="skill-check-result" hidden></p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Magic (issues #774, #755): the spells the character knows and the Mana
+         Pool the battle seats them with. -->
+    <div id="magic" class="stats-section">
+        <h2>Magic{% help_for "free_spell_points" %}</h2>
+        <p class="mana-pool">Mana: <strong id="mana-current">{{ current_mana }}</strong> of a Pool of <strong id="mana-pool">{{ character.free_spell_points }}</strong></p>
+        {% if known_spells %}
+        <table class="known-spells" id="known-spells">
+            <tr><th>Spell</th><th>School</th><th>Level (mana)</th><th>Roll</th><th>Mastery</th></tr>
+            {% for spell in known_spells %}
+            <tr class="known-spell" data-spell="{{ spell.key }}">
+                <td>{{ spell.name }}</td>
+                <td>{{ spell.school }}</td>
+                <td>{{ spell.spell_level }}</td>
+                <td>3d6 ≤ {{ spell.attribute }}</td>
+                <td>{{ spell.mastery_display }} ({{ spell.points }} pts)</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-spells" id="no-spells">No spells known.</p>
+        {% endif %}
+        {% if can_edit and character.is_alive %}
+        {% comment %}A player's control spends a free point: hidden, not left out, at
+        none, so a run that earns one shows it (issue #792).{% endcomment %}
+        <div class="learn-spell{% if not is_game_master %} needs-free-points{% endif %}" data-mechanics-form="learnSpellUrl" data-reload="true"{% if not is_game_master and character.free_skill_points <= 0 %} hidden{% endif %}>
+            <label>{% if is_game_master %}Teach (Game Master, spends no points){% else %}Put a skill point into{% endif %}
+                <select name="spell" id="learn-spell-select" aria-label="Spell to learn">
+                    {% for spell in learnable_spells %}
+                    <option value="{{ spell.key }}">{{ spell.name }} ({{ spell.school }} {{ spell.level }})</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="button" class="button secondary mechanics-submit" id="learn-spell-btn">Learn / raise</button>
+            <span class="mechanics-error" role="alert" hidden></span>
+        </div>
+        {% if is_game_master %}
+        <div class="grant-mana" data-mechanics-form="grantManaUrl" data-reload="true">
+            <label>Raise the Mana Pool's maximum (Game Master). Mana a fight spent is restored with the Game Master's pool setting, not here.
+                <input type="number" name="amount" min="-100" max="100" aria-label="Mana to grant">
+            </label>
+            <button type="button" class="button secondary mechanics-submit">Grant</button>
+            <span class="mechanics-error" role="alert" hidden></span>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+
+    <!-- Equipment Section -->
+    <div id="equipment" class="stats-section">
+        <h2>Equipment & Encumbrance{% help_for "encumbrance" %}</h2>
+
+        <!-- Combat Stats -->
+        <div class="combat-stats" id="combat-stats">
+            <div class="combat-stat-card">
+                <h4>Armor Stops{% help_for "armor_stops" %}</h4>
+                <div class="value" id="armor-stops">{{ character.armor_stops }}</div>
+                <div class="detail">Damage reduction</div>
+            </div>
+            <div class="combat-stat-card">
+                <h4>Armor DEX Penalty{% help_for "armor_dex_penalty" %}</h4>
+                <div class="value {% if character.armor_dex_penalty < 0 %}negative{% endif %}" id="armor-dex-penalty">{{ character.armor_dex_penalty }}</div>
+                <div class="detail">Applied to DEX checks</div>
+            </div>
+            <div class="combat-stat-card">
+                <h4>DEX Combat Mod{% help_for "dex_combat_mod" %}</h4>
+                {# "—" rather than a number for a character whose DEX nobody has recorded (issue #630). #}
+                <div class="value {% if character.dex_modifier > 0 %}positive{% elif character.dex_modifier < 0 %}negative{% endif %}" id="dex-combat-mod">{% if character.dex_modifier is None %}—{% else %}{{ character.dex_modifier|signed }}{% endif %}</div>
+                <div class="detail">Added to your attack d20</div>
+            </div>
+            <div class="combat-stat-card">
+                <h4>Dodge{% help_for "dodge_modifier" %}</h4>
+                <div class="value {% if character.dodge_modifier > 0 %}positive{% endif %}" id="dodge-modifier">{% if character.dodge_modifier is None %}—{% else %}+{{ character.dodge_modifier }}{% endif %}</div>
+                <div class="detail">Added to an attacker's Target Number</div>
+            </div>
+            <div class="combat-stat-card">
+                <h4>Weapon To-Hit{% help_for "weapon_to_hit" %}</h4>
+                <div class="value {% if character.weapon_to_hit_mod > 0 %}positive{% elif character.weapon_to_hit_mod < 0 %}negative{% endif %}" id="weapon-to-hit">{{ character.weapon_to_hit_mod|signed }}</div>
+                <div class="detail">Attack modifier</div>
+            </div>
+            <div class="combat-stat-card">
+                <h4>Weapon Damage</h4>
+                <div class="value {% if character.weapon_damage_mod > 0 %}positive{% elif character.weapon_damage_mod < 0 %}negative{% endif %}" id="weapon-damage">{{ character.weapon_damage_mod|signed }}</div>
+                <div class="detail">Damage modifier</div>
+            </div>
+            <div class="combat-stat-card">
+                <h4>Weapon Critical</h4>
+                <div class="value {% if character.weapon_critical_mod > 0 %}positive{% elif character.weapon_critical_mod < 0 %}negative{% endif %}" id="weapon-critical">{{ character.weapon_critical_mod|signed }}</div>
+                <div class="detail">Critical modifier</div>
+            </div>
+        </div>
+        {% comment %}Item modifiers (issue #752): the rules give equipment none, so they
+        are a Game Master's grant, and the battle board reads none of them (its
+        engine has no place for a weapon's). The tiles have no weapon in hand to
+        read the weapon in hand (#846). Said here, persistently, for everyone who can
+        see the tiles above.{% endcomment %}
+        <p class="formula" id="item-modifier-note">{{ item_modifier_reason }} The three weapon tiles above read the weapon in hand, and the Attack panel offers it first; the battle board reads no modifiers, only each item's own numbers. One weapon is in hand and one shield in use at a time: the one you ready, else the first carried outside the pack.</p>
+
+        <!-- Encumbrance Bar -->
+        <div class="encumbrance-bar" id="encumbrance-bar">
+            <span class="weight-info">
+                <span id="carried-weight">{{ character.carried_weight }}</span> / <span id="max-unencumbered">{{ character.effective_strength|default_if_none:"—" }}</span> lbs
+            </span>
+            {# What a load weighs on a character is priced against their STR, so an unrecorded STR leaves the level unknown (issue #630). #}
+            <span class="level-badge {{ character.encumbrance_level|default_if_none:"unknown" }}" id="encumbrance-level">{% if character.encumbrance_level is None %}—{% else %}{{ character.encumbrance_level|title }}{% endif %}</span>
+            {% if character.movement_penalty != 0 %}
+            <span class="penalty" id="movement-penalty">{{ character.movement_penalty }} movement</span>
+            {% else %}
+            <span class="penalty" id="movement-penalty" style="display: none;"></span>
+            {% endif %}
+            {% if character.movement_restriction_label %}
+            <span class="penalty" id="movement-restriction">{{ character.movement_restriction_label }}</span>
+            {% else %}
+            <span class="penalty" id="movement-restriction" style="display: none;"></span>
+            {% endif %}
+            <div class="pack-toggle">
+                {% if can_edit %}
+                <label>
+                    <input type="checkbox" id="pack-dropped" {% if character.pack_dropped %}checked{% endif %}>
+                    Pack Dropped
+                </label>
+                {% elif character.pack_dropped %}
+                <span>Pack Dropped</span>
+                {% endif %}
+                <span class="pack-weight">(<span id="pack-weight">{{ character.pack_weight }}</span> lbs)</span>
+            </div>
+        </div>
+
+        <!-- Movement Gaits -->
+        <div class="gait-readout" id="gait-readout">
+            <span class="gait-readout-label">Movement{% help_for "movement" %}</span>
+            {% comment %}An unrecorded CON/STR/DEX leaves every gait unknown rather than
+            zero hexes (issue #630): "—" here, distinct from the "n/a" a gait shows when
+            encumbrance or armour forbids it.{% endcomment %}
+            <span id="movement-modifier-wrap">(mod <span id="movement-modifier">{% if character.movement_modifier is None %}—{% else %}{{ character.movement_modifier|signed }}{% endif %}</span>)</span>
+            {% for gait in character.gait_readout %}
+            <span class="gait{% if character.movement_modifier is None %} gait-unknown{% elif gait.na %} gait-na{% endif %}" id="gait-{{ gait.key }}">
+                <span class="gait-name">{{ gait.label }}</span>
+                <span class="gait-value">{% if character.movement_modifier is None %}—{% elif gait.na %}n/a{% else %}{{ gait.distance }}{% endif %}</span>
+            </span>
+            {% endfor %}
+        </div>
+
+        <!-- Equipment Controls (filter / sort / bulk delete) -->
+        <div class="equipment-controls">
+            <input type="search" id="equipment-filter" placeholder="Filter by name..." aria-label="Filter equipment by name">
+            <select id="equipment-sort" aria-label="Sort equipment">
+                <option value="">Default (entry order)</option>
+                <option value="name">Name (A→Z)</option>
+                <option value="weight_asc">Weight (light→heavy)</option>
+                <option value="weight_desc">Weight (heavy→light)</option>
+                <option value="category">Category</option>
+            </select>
+            {% if can_edit %}
+            {% comment %} Full-strength red while nothing is selected and the list is
+               empty was the loudest control on a panel with nothing to act
+               on (issue #713). Quiet until it has something to delete. {% endcomment %}
+            <button type="button" id="equipment-bulk-delete" class="delete-btn-outline" disabled>
+                Delete Selected (<span id="equipment-bulk-count">0</span>)
+            </button>
+            {% endif %}
+        </div>
+
+        <!-- Equipment List -->
+        <div class="equipment-list" id="equipment-list">
+            {% if character.equipment %}
+            {% for item in character.equipment %}
+            <!-- Items rendered by JavaScript -->
+            {% endfor %}
+            {% else %}
+            <p class="no-equipment">No equipment. Add items from the catalog below.</p>
+            {% endif %}
+        </div>
+
+        <!-- Add Equipment -->
+        {% if can_edit %}
+        <div class="add-equipment-control">
+            <select id="equipment-category" aria-label="Equipment category">
+                <option value="">Category...</option>
+                {% for group, label in equipment_catalog_groups %}
+                <option value="{{ group }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select id="equipment-item" aria-label="Equipment item" disabled>
+                <option value="">Select item...</option>
+            </select>
+            <label class="in-pack-checkbox">
+                <input type="checkbox" id="add-in-pack">
+                In Pack
+            </label>
+            {% if is_game_master %}
+            <label class="in-pack-checkbox">
+                <input type="checkbox" id="add-free">
+                Give free (Game Master)
+            </label>
+            {% endif %}
+            <button id="add-equipment-btn" class="button" disabled>Add Item</button>
+            <span class="equipment-purse">Purse: <strong id="equipment-purse">{{ purse }}</strong> — catalog items are bought at their price</span>
+            <button id="add-custom-btn" class="button secondary">Add Custom...</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Attack Resolution (issue #101). Every number below the form is the
+         server's; attack-panel.js formats the response and computes nothing. -->
+    <div class="stats-section" id="attack-panel">
+        <h2>Attack Resolution{% help_for "attack_resolution" %}</h2>
+
+        {% if can_edit %}
+        {% comment %}A character whose attributes or Fatigue roll nobody has recorded
+           cannot swing at anything — every number the resolution needs comes from an
+           attribute that is not there, and the endpoint answers 409 the way the
+           exports do (issues #571, #630). The panel says so instead of offering a
+           form that cannot be used. Both halves are rendered and one is hidden, so
+           the response that completes the character swaps them (issue #764).{% endcomment %}
+        <p class="attack-incomplete" id="attack-incomplete"{% if character.is_complete %} hidden{% endif %}>
+            Attacks are resolved once this character is complete
+            (<span class="incomplete-marks-list">{% include "characters/_incomplete_marks.html" %}</span>).
+        </p>
+        <div id="attack-ready"{% if not character.is_complete %} hidden{% endif %}>
+        {% comment %}Rendered whenever the sheet is editable, hidden while there is
+           nothing to swing: an equipment change refreshes the weapon select and
+           shows or hides the form from the server's attack_weapons (issue #339,
+           item 24), so adding a weapon never needs a reload.{% endcomment %}
+        <div class="attack-form" id="attack-form"{% if not attack_weapons %} hidden{% endif %}>
+            <div class="attack-field">
+                <label for="attack-weapon">Weapon</label>
+                <select id="attack-weapon">
+                    {% for weapon in attack_weapons %}
+                    <option value="{{ weapon.index }}" data-item-id="{{ weapon.item_id }}"{% if weapon.in_hand %} selected{% endif %}>{{ weapon.name }} ({{ weapon.weapon_class }}, {{ weapon.damage }}){% if weapon.in_hand %} — in hand{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% comment %}No skill select: which skill applies to the weapon in hand is
+               the record's to say (issue #753), the same resolver the battle
+               board seats a fighter with. The breakdown names it.{% endcomment %}
+            <div class="attack-field">
+                <label for="attack-armour-tier">Defender armour <span class="gm-supplied">(GM supplies)</span></label>
+                <select id="attack-armour-tier">
+                    {% for tier in attack_armour_tiers %}
+                    <option value="{{ tier }}">{{ tier }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="attack-field">
+                <label for="attack-stops">Defender stops <span class="gm-supplied">(GM supplies)</span></label>
+                <input type="number" id="attack-stops" value="0" min="0" max="10">
+            </div>
+            <div class="attack-field">
+                <label for="attack-shield">Defender shield <span class="gm-supplied">(GM supplies)</span></label>
+                <select id="attack-shield">
+                    <option value="">None</option>
+                    {% for shield in attack_shields %}
+                    <option value="{{ shield.item_id }}">{{ shield.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="attack-field">
+                <label for="attack-dodge">Defender dodge <span class="gm-supplied">(GM supplies)</span></label>
+                <input type="number" id="attack-dodge" value="0" min="0" max="10">
+            </div>
+            <div class="attack-field">
+                <label for="attack-situational">Situational</label>
+                <input type="number" id="attack-situational" value="0" min="-20" max="20">
+            </div>
+            <button type="button" id="attack-resolve-btn" class="button">Resolve Attack</button>
+        </div>
+
+        <!-- Filled by attack-panel.js from the endpoint's response. Stays put
+             until the next roll replaces it — no auto-dismiss. -->
+        <div class="attack-result" id="attack-result" hidden>
+            <h3 id="attack-outcome"></h3>
+            <ul class="attack-breakdown" id="attack-breakdown"></ul>
+            <ol class="attack-dice-log" id="attack-dice-log"></ol>
+        </div>
+        <p class="no-weapons" id="attack-no-weapons"{% if attack_weapons %} hidden{% endif %}>No weapon here can be resolved. Add a catalog weapon above to attack with it.</p>
+        </div>
+        {% endif %}
+
+        {% comment %}
+        A few catalog weapons carry a class but no rollable damage ("varies",
+        "by STR", "1d6 fire", or none at all). They are omitted from the select
+        above rather than offered and then refused, and named here so a player
+        holding one is told why instead of hunting for it.
+        {% endcomment %}
+        <p class="attack-footnote" id="attack-gm-adjudicated"{% if not attack_gm_adjudicated_weapons %} hidden{% endif %}>Not listed: <span id="attack-gm-adjudicated-names">{% for name in attack_gm_adjudicated_weapons %}{{ name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span> — damage varies, GM adjudicates.</p>
+
+        <!-- Server-rendered combat log, newest first. This is the state-driven
+             half: the result above is this page's copy of the last response,
+             but the log below survives a reload because the endpoint persisted
+             it to character.combat_log. -->
+        <div class="combat-log" id="combat-log">
+            <h3>Recent attacks</h3>
+            {% comment %}The list is always rendered, the empty line hidden once there
+            is an entry: a resolved attack adds its line without a reload (issue
+            #792).{% endcomment %}
+            <ul class="combat-log-list" id="combat-log-list">
+                {% for entry in combat_log_entries %}
+                {% include "characters/_combat_log_entry.html" %}
+                {% endfor %}
+            </ul>
+            <p class="no-combat-log"{% if combat_log_entries %} hidden{% endif %}>No attacks resolved yet.</p>
+        </div>
+    </div>
+
+    <!-- Custom Item Modal -->
+    {# Issue #190: an inline panel that expands where the button is, not an overlay. #}
+    {% if can_edit %}
+    <div id="custom-item-panel" class="inline-panel" style="display: none;" role="group" aria-label="Add custom item">
+        <div class="panel-content">
+            <h3>Add Custom Item</h3>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <div>
+                    <label>Name: <input type="text" id="custom-name" maxlength="100" style="width: 100%;"></label>
+                </div>
+                <div>
+                    <label>Category:
+                        <select id="custom-category">
+                            {% for category, label in equipment_item_categories %}
+                            <option value="{{ category }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                </div>
+                <div style="display: flex; gap: 1rem;">
+                    <label>Weight (lbs): <input type="number" id="custom-weight" value="0" min="0" max="1000" step="0.1" style="width: 5em;"></label>
+                    <label>Cost (gp): <input type="number" id="custom-cost" value="0" min="0" step="0.1" style="width: 5em;"></label>
+                </div>
+                <div id="custom-weapon-fields" style="display: none;">
+                    <label>Damage: <input type="text" id="custom-damage" value="1d6" maxlength="20" style="width: 5em;"></label>
+                </div>
+                <div id="custom-armor-fields" style="display: none; gap: 1rem;">
+                    <label>Stops: <input type="number" id="custom-stops" value="0" min="0" max="10" style="width: 3em;"></label>
+                    <label>DEX Penalty: <input type="number" id="custom-dex-penalty" value="0" min="-10" max="0" style="width: 3em;"></label>
+                </div>
+                <div>
+                    <label><input type="checkbox" id="custom-in-pack"> In Pack</label>
+                </div>
+                <div>
+                    <label>Notes: <input type="text" id="custom-notes" maxlength="200" style="width: 100%;"></label>
+                </div>
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1rem;">
+                <button class="button secondary" id="custom-cancel-btn">Cancel</button>
+                <button class="button" id="custom-add-btn">Add Item</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% comment %}Rendered always and hidden while empty: a roll made without a
+    reload (Fatigue, literacy) writes the log, and its response carries the log
+    back (issue #792).{% endcomment %}
+    <div id="dice-log" class="stats-section dice-log"{% if not character.dice_log %} hidden{% endif %}>
+        <h2>Dice Roll Log</h2>
+        <pre id="dice-log-text">{{ character.dice_log }}</pre>
+    </div>
+
+    {% comment %}Rendered always and hidden while empty; every change the sheet makes
+    without a reload adds a line, and its response carries the rows back (issue
+    #792).{% endcomment %}
+    <div id="recent-changes" class="stats-section history-section"{% if not recent_history %} hidden{% endif %}>
+        <h2>Recent Changes</h2>
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Field</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>By</th>
+                </tr>
+            </thead>
+            <tbody id="recent-changes-rows">
+                {% include "characters/_recent_changes.html" %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{% url 'characters:list' %}" class="button secondary">Back to Characters</a>
+    {% if can_edit %}
+    <form method="post" action="{% url 'characters:delete' character.pk %}" class="inline-form" id="delete-character-form">
+        {% csrf_token %}
+        {% comment %} A destructive action drawn as a quiet outline rather than as the
+           equal of "Back to Characters" beside it (issue #713). {% endcomment %}
+        <button type="submit" class="delete-btn-outline">Delete Character</button>
+    </form>
+    {% endif %}
+</div>
+{% comment %}
+The submit-confirmation handler for the form above lives in
+static/js/character-edit.js with the rest of this page's JavaScript.
+{% endcomment %}
+{% endblock %}
+
+{% block extra_js %}
+{% comment %}
+Every value this page's JavaScript needs from Django, in one XSS-inert
+block. static/js/character-edit.js reads it on load; CharacterEditView
+builds the dict (issue #63).
+{% endcomment %}
+{{ character_edit_config|json_script:"character-edit-config" }}
+<script src="{% static 'js/autosave.js' %}"></script>
+<script src="{% static 'js/character-edit.js' %}"></script>
+{% comment %}
+The Attack Resolution panel gets its own block rather than extra keys on the
+one above (issue #101). That block's contract test asserts set-equality with
+the keys character-edit.js dereferences; folding another module's config into
+it would make that assertion mean something weaker. attack-panel.js needs two
+values, because every option it could otherwise have been handed is rendered
+as server-side <option> markup instead.
+{% endcomment %}
+{{ mechanics_config|json_script:"mechanics-config" }}
+<script src="{% static 'js/mechanics.js' %}"></script>
+{{ attack_panel_config|json_script:"attack-panel-config" }}
+<script src="{% static 'js/attack-panel.js' %}"></script>
+{% endblock %}

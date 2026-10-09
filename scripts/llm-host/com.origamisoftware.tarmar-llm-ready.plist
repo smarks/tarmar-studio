@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Tarmar Studio Games Master readiness (issue #386). Companion to
+	     com.origamisoftware.ollama: that agent starts the server, this one
+	     publishes this Mac's DHCP address to the deploy host as "tarmar-llm"
+	     and warms the Games Master model so the first request after a reboot
+	     does not time out. See README.md beside this file.
+
+	     launchd does not expand anything, so every path below is absolute and
+	     names the account that owns the agent. Change /Users/sam and the
+	     EnvironmentVariables block when installing on another machine. -->
+	<key>Label</key>
+	<string>com.origamisoftware.tarmar-llm-ready</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/sam/bin/tarmar-llm-ready.sh</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HOME</key>
+		<string>/Users/sam</string>
+		<!-- The script defaults to exactly these, so they are here to be
+		     changed rather than because they must be set. -->
+		<key>DEPLOY_HOST_SSH</key>
+		<string>sam@192.168.4.163</string>
+		<key>DEPLOY_HOST_CHECKOUT</key>
+		<string>/home/sam/dev/tarmar-studio</string>
+		<key>PUBLISHED_HOSTNAME</key>
+		<string>tarmar-llm</string>
+		<key>NETWORK_INTERFACE</key>
+		<string>en0</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- Re-check every 15 minutes. The script is a no-op when the address is
+	     already published and the model is already resident, so the recurring
+	     run costs one HTTP call and two short ssh round trips. -->
+	<key>StartInterval</key>
+	<integer>900</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/sam</string>
+	<key>StandardOutPath</key>
+	<string>/Users/sam/Library/Logs/ollama/tarmar-llm-ready.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/sam/Library/Logs/ollama/tarmar-llm-ready.log</string>
+</dict>
+</plist>

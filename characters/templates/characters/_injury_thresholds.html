@@ -1,0 +1,123 @@
+{% load character_help %}
+{% comment %}
+The Injury Thresholds readout, rendered from `thresholds`
+(``Character.injury_thresholds``).
+
+Its own partial (issue #639) because the page renders it and the update-field,
+Fatigue-roll and add-years responses re-render it: the breakpoints derive from
+the Fatigue and Body pools, which are unknown until the attributes and the
+Fatigue roll are recorded (issue #571), and a character can cross that line
+without a reload. The table used to render for such a character anyway, as
+eight empty cells and a sentence that stopped at "3d6 ≤" — Django resolves each
+cell off a None `thresholds` to the empty string rather than raising.
+
+It opens with where the character's own pools stand now, `condition`
+(``Character.condition``, issue #751): a fight on the board writes them as each
+turn commits, and a Game Master (`can_set_pools`) may set them here, saved when
+an input loses focus like every other field on the sheet. Spent Mana stays spent
+the same way (`character`, for a character with a Mana Pool).
+{% endcomment %}
+{% if not thresholds %}
+<p class="injury-unknown" id="injury-unknown">Recorded once the attributes and the Fatigue roll are in.</p>
+{% else %}
+<div class="current-pools" id="current-pools">
+    <p class="current-pools-line">
+        <span class="current-pools-label">Now</span>
+        {% if can_set_pools %}
+        <label class="current-pool">Fatigue
+            <input type="number" class="current-pool-input" id="current-fatigue" data-pool="fatigue"
+                   value="{{ condition.fatigue }}" max="{{ condition.fatigue_maximum }}" step="1"
+                   aria-label="Current Fatigue">
+            <span class="current-pool-maximum">/ {{ condition.fatigue_maximum }}</span>
+        </label>
+        <label class="current-pool">Body
+            <input type="number" class="current-pool-input" id="current-body" data-pool="body"
+                   value="{{ condition.body }}" max="{{ condition.body_maximum }}" step="1"
+                   aria-label="Current Body">
+            <span class="current-pool-maximum">/ {{ condition.body_maximum }}</span>
+        </label>
+        {% if character.free_spell_points %}
+        <label class="current-pool">Mana
+            <input type="number" class="current-pool-input" id="current-mana" data-pool="mana"
+                   value="{{ character.current_mana }}" min="0" max="{{ character.free_spell_points }}" step="1"
+                   aria-label="Current Mana">
+            <span class="current-pool-maximum">/ {{ character.free_spell_points }}</span>
+        </label>
+        {% endif %}
+        {% else %}
+        <span class="current-pool">Fatigue <strong id="current-fatigue">{{ condition.fatigue }}</strong> / {{ condition.fatigue_maximum }}</span>
+        <span class="current-pool">Body <strong id="current-body">{{ condition.body }}</strong> / {{ condition.body_maximum }}</span>
+        {% if character.free_spell_points %}
+        <span class="current-pool">Mana <strong id="current-mana">{{ character.current_mana }}</strong> / {{ character.free_spell_points }}</span>
+        {% endif %}
+        {% endif %}
+        <span class="current-pools-state" id="current-pools-state">{{ condition.state|capfirst }}</span>
+    </p>
+    {% if can_edit and condition.alive and condition.survival_save_penalty is not None %}
+    {# Off the board, the save the state above names (issue #839): the server rolls it into the dice log; a failure is death. A player rolls one for each state of the pools, and nobody while the board is rolling it; why not stays on the page (#839 review). #}
+    <p class="survival-save-line">
+        {% if survival_save_refusal %}
+        <span class="survival-save-refused" id="survival-save-refused">{{ survival_save_refusal }}.</span>
+        {% else %}
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-survival-save-btn"
+                data-roll-kind="survival_save" data-roll-url="{% url 'characters:roll_survival_save' character.pk %}"
+                data-confirm="Roll {{ character.name }}'s survival save? A failure is death, which only a Game Master can undo."
+                data-confirm-label="Roll the save">
+            Roll the survival save (3d6 &le; {{ condition.survival_save_target|add:condition.survival_save_penalty }})
+        </button>
+        {% endif %}
+    </p>
+    {% endif %}
+    <p class="current-pools-note">
+        {% if can_set_pools %}
+        A fight on the board records these as it goes. Set them here for healing,
+        rest, Mana restored or a wound taken off the board.
+        {% else %}
+        A fight on the board records these as it goes; healing, rest and
+        restoring Mana are the Game Master's to set.
+        {% endif %}
+    </p>
+</div>
+<table class="injury-table">
+    <thead>
+        <tr>
+            <th>As a pool falls</th>
+            <th>Fatigue</th>
+            <th>Body</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <th>&minus;1 to all rolls at or below</th>
+            <td id="injury-fatigue-minus_one_at">{{ thresholds.fatigue.minus_one_at|default:"—" }}</td>
+            <td id="injury-body-minus_one_at">{{ thresholds.body.minus_one_at|default:"—" }}</td>
+        </tr>
+        <tr>
+            <th>&minus;2 to all rolls from</th>
+            <td id="injury-fatigue-minus_two_at">{{ thresholds.fatigue.minus_two_at }}</td>
+            <td id="injury-body-minus_two_at">{{ thresholds.body.minus_two_at }}</td>
+        </tr>
+        <tr>
+            <th>Unconscious at</th>
+            <td id="injury-fatigue-unconscious_at">{{ thresholds.fatigue.unconscious_at }}</td>
+            <td id="injury-body-unconscious_at">{{ thresholds.body.unconscious_at }}</td>
+        </tr>
+        <tr>
+            <th>Survival save each turn at or below{% help_for "survival_save" %}</th>
+            <td id="injury-fatigue-survival_save_at">{{ thresholds.fatigue.survival_save_at }}</td>
+            <td id="injury-body-survival_save_at">{{ thresholds.body.survival_save_at }}</td>
+        </tr>
+        <tr>
+            <th>Saves penalized at or below</th>
+            <td id="injury-fatigue-penalized_save_at">{{ thresholds.fatigue.penalized_save_at }}</td>
+            <td id="injury-body-penalized_save_at">{{ thresholds.body.penalized_save_at }}</td>
+        </tr>
+    </tbody>
+</table>
+<p class="injury-note">
+    The &minus;2 band runs from 5 down to 1. Survival save is 3d6 &le;
+    <span id="injury-fatigue-survival_save_target">{{ thresholds.fatigue.survival_save_target }}</span>
+    (CON), penalized past the last row by how far past it you are.
+    Whichever pool is worse governs.
+</p>
+{% endif %}

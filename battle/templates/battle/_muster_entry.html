@@ -1,0 +1,55 @@
+{% comment %}
+One muster-roll entry (#270, teamed in #275). Context: ``row`` (a
+_muster_rows dict), plus the page's ``draft``, ``teams``, ``setup_url``,
+``counter`` (the printed position). When the draft has teams, each entry
+carries a move form — a select over the free pool and every team, submitted
+without JavaScript.
+{% endcomment %}
+<li class="muster-entry{% if row.stale %} is-stale{% endif %}">
+    <span class="muster-index">{{ counter }}</span>
+    <div class="muster-words">
+        <strong class="muster-name">{{ row.label }}</strong>
+        <span class="muster-note">{{ row.note }}</span>
+    </div>
+    <div class="muster-actions">
+        {% if teams %}
+        <form method="post" action="{% url 'battle:setup-entry-team' draft.pk %}"
+              class="muster-team-form">
+            {% csrf_token %}
+            <input type="hidden" name="index" value="{{ row.index }}">
+            <label class="sr-only" for="entry-team-{{ row.index }}">
+                Team for {{ row.label }}
+            </label>
+            <select name="team" id="entry-team-{{ row.index }}">
+                <option value="" {% if not row.team %}selected{% endif %}>
+                    Free-for-all
+                </option>
+                {% for team in teams %}
+                <option value="{{ team }}"
+                        {% if row.team == team %}selected{% endif %}>
+                    {{ team }}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="battle-button battle-button-quiet">
+                Move
+            </button>
+        </form>
+        {% endif %}
+        {% if row.edit_target %}
+        <a class="battle-button battle-button-quiet"
+           href="{% url 'characters:edit' row.edit_target %}?next={{ setup_url|urlencode }}">
+            Edit
+        </a>
+        {% endif %}
+        <form method="post" action="{% url 'battle:setup-remove' draft.pk %}"
+              data-confirm="Strike {{ row.label }} from the muster?"
+              data-confirm-label="Strike">
+            {% csrf_token %}
+            <input type="hidden" name="index" value="{{ row.index }}">
+            <button type="submit" class="battle-button muster-strike">
+                Strike
+            </button>
+        </form>
+    </div>
+</li>

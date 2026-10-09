@@ -1,0 +1,14 @@
+{% comment %}
+Whether this fight counts (issues #750, #751). A battle that writes to records
+puts each wound, each Mana spent and each death on the saved characters'
+records as the turn that dealt it commits. A Game Master chose that on the
+setup page, or it is a Games Master session's fight; either way the page says
+so for as long as the flag is on, so nobody plays a counted fight believing it
+is practice. Rendered from the battle row, never shown or hidden on a timer.
+{% endcomment %}
+{% if battle.writes_to_records %}
+<p class="battle-counts-note" id="battle-counts-note">
+    <strong>This battle counts:</strong> wounds, Mana spent and deaths go on the
+    characters' records.
+</p>
+{% endif %}

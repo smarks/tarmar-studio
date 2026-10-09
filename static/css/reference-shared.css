@@ -1,0 +1,64 @@
+/* Sidebar, search form and content column shared by the reference index and
+   the reference search page. These fourteen rules were byte-identical in the
+   two templates' inline blocks (issue #93); this is that text, unchanged.
+   Deliberately NOT loaded site-wide: static/css/chat.css defines its own
+   .sidebar, and only the two reference templates may see this one. */
+
+.sidebar {
+    min-width: 200px;
+    border-right: 1px solid var(--colour-hairline);
+    padding-right: 1.5rem;
+}
+.sidebar ul {
+    list-style: none;
+}
+.sidebar > ul > li {
+    margin-bottom: 0.5rem;
+}
+.sidebar a {
+    color: var(--colour-ink);
+    text-decoration: none;
+    display: block;
+    padding: 0.25rem 0;
+}
+.sidebar a:hover {
+    color: var(--colour-ink-muted);
+}
+.sidebar .children {
+    margin-left: 1rem;
+    font-size: 0.9rem;
+}
+.sidebar .children a {
+    color: var(--colour-ink-secondary);
+}
+.search-form {
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 0.5rem;
+}
+.search-form input[type="search"] {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--colour-border-input);
+    border-radius: 3px;
+    font-size: 0.9rem;
+}
+.search-form button {
+    padding: 0.4rem 0.8rem;
+    background: var(--colour-ink);
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.search-form button:hover {
+    background: var(--colour-ink-secondary);
+}
+.content {
+    flex: 1;
+    min-width: 0;
+}
+.content h1 {
+    margin-bottom: 1rem;
+}

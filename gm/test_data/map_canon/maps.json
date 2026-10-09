@@ -1,0 +1,20 @@
+{
+  "region": {
+    "slug": "the-isles",
+    "title": "The Isles",
+    "image": "test-canon/isles-map.png",
+    "gazetteer": "the-world/the-isles",
+    "charts": [
+      { "section": "Aster", "slug": "aster", "image": "test-canon/aster-chart.png" },
+      { "section": "Brightwater", "slug": "brightwater", "image": "test-canon/brightwater-chart.png" },
+      { "section": "Old Vey", "slug": "old-vey", "image": "test-canon/old-vey-chart.png" }
+    ]
+  },
+  "world": {
+    "slug": "world",
+    "title": "The World",
+    "image": "test-canon/world-map.png",
+    "place_names": ["Spine", "The Shards", "Shards", "Far Steppe", "Old Kingdom"]
+  },
+  "case_sensitive_place_names": ["Bell", "Strand", "Spine"]
+}

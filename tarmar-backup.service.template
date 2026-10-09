@@ -1,0 +1,18 @@
+# Tarmar Studio nightly database backup (issue #575)
+#
+# Rendered by deploy.sh from tarmar-backup.service.template and started by
+# tarmar-backup.timer; do not edit the copy under /etc/systemd/system by hand.
+# It runs the main checkout's `deploy.sh backup --verify`: the same pg_dump -Fc
+# a deploy takes before migrating, into var/backups/ with its own keep-last-10
+# set, and then a restore of that dump into a throwaway database with a table
+# read back out of it (issue #666). Before that, nothing had ever restored one.
+[Unit]
+Description=Tarmar Studio nightly database backup
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=sam
+Group=sam
+WorkingDirectory=__APP_DIR__
+ExecStart=/bin/bash __APP_DIR__/deploy.sh backup --verify

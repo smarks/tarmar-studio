@@ -1,0 +1,27 @@
+{% comment %}
+The Restart control of a started battle (issue #345 factored it out of
+battle_detail.html so the GM chat's Battle tab can offer it too; the page
+keeps it in the command bar's secondary cluster). battle.js wires it by id.
+
+Restart confirms inline, in place — the button becomes a confirm/cancel
+pair rather than opening a modal (house rule: state-driven UI, nothing
+transient).
+{% endcomment %}
+<div class="battle-restart-group" id="restart-group" data-confirming="false">
+    <button type="button" id="restart-battle"
+            class="battle-button battle-button-outline battle-restart-start"
+            data-url="{% url 'battle:restart' battle.pk %}"
+            {% if not can_restart %}disabled
+            title="This battle has no starting snapshot to restart from"{% else %}
+            title="Replay from turn 0 with the same roster and seed"{% endif %}>
+        Restart
+    </button>
+    <button type="button" id="restart-confirm"
+            class="battle-button battle-button-confirm battle-restart-confirm">
+        Restart and clear the log
+    </button>
+    <button type="button" id="restart-cancel"
+            class="battle-button battle-button-dismiss battle-restart-cancel">
+        Keep the log
+    </button>
+</div>

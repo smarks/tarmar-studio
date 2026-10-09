@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}GM review {{ review.pk }} — Tarmar Studio{% endblock %}
+
+{% comment %}
+One GM session sent to Claude for review (issue #402). Rendered from the
+stored review: reloading is how a waiting page learns the findings arrived,
+and nothing on it appears or goes away on a timer. The findings are
+model-written markdown, sanitised by the reference pages' renderer before
+they reach the template.
+{% endcomment %}
+
+{% block content %}
+<article class="gm-review" id="gm-review">
+    <header>
+        <p class="gm-review-all"><a href="{% url 'gm:reviews' %}" id="gm-review-all-link">All reviews</a></p>
+        <h1>GM review {{ review.pk }}</h1>
+        <p class="gm-review-meta">
+            Sent {{ review.created_at|date:"Y-m-d H:i" }}
+            {% if review.session_id %}
+            about <a href="{% url 'gm:chat' %}?session={{ review.session_id }}">session {{ review.session_id }}</a>
+            {% endif %}
+        </p>
+        <p class="gm-review-status gm-review-status-{{ review.status }}" id="gm-review-status">{{ review.get_status_display }}</p>
+    </header>
+
+    <section>
+        <h2>What you asked Claude to look at</h2>
+        {% if review.note %}
+        <p class="gm-review-note" id="gm-review-note">{{ review.note }}</p>
+        {% else %}
+        <p class="gm-review-note gm-review-empty" id="gm-review-note">No note: the whole session.</p>
+        {% endif %}
+    </section>
+
+    <section>
+        <h2>Findings</h2>
+        {% if review.status == "done" %}
+        <div class="gm-review-findings" id="gm-review-findings">{{ findings_html|safe }}</div>
+        <p class="gm-review-discuss">To talk it through, open a Claude session and say: <code>discuss GM review {{ review.pk }}</code></p>
+        {% elif review.status == "failed" %}
+        <p class="gm-review-failure" id="gm-review-failure">The review could not be done: {{ review.failure }}</p>
+        {% else %}
+        <p class="gm-review-waiting" id="gm-review-waiting">Not ready yet. Claude reviews sessions on the Mac Studio within a few minutes of their being sent; reload this page to see the findings.</p>
+        {% endif %}
+    </section>
+
+    {% if other_reviews %}
+    <section>
+        <h2>Other reviews of this session</h2>
+        <ul class="gm-review-others">
+            {% for other in other_reviews %}
+            <li><a href="{% url 'gm:review' other.pk %}">Review {{ other.pk }}</a> — {{ other.get_status_display }}, sent {{ other.created_at|date:"Y-m-d H:i" }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+</article>
+{% endblock %}

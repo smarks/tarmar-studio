@@ -1,0 +1,22 @@
+{% load dice_display %}
+{% comment %}
+The prior-experience workbench's death state (issue #217). This partial is
+included twice from character_edit.html: once directly, for a character who
+is already dead when the page renders, and once inside the hidden
+`#death-card-template` `<template>` that static/js/character-edit.js clones
+and fills in when a rolled year kills the character over AJAX. Sharing one
+partial keeps the markup single-sourced -- the JS-built card and a reload's
+server render are structurally identical, differing only in the text each
+one fills in.
+
+The `.fatal-roll` paragraph always renders, `hidden` when there is no fatal
+check, rather than being included or omitted by an `{% if %}`: the `<template>`
+usage passes `fatal_check=None` (nothing rolled yet), and the element still
+has to exist there for the JS clone to find and un-hide.
+{% endcomment %}
+<div class="death-card">
+    <h3>{{ death_name }} died</h3>
+    <p class="death-cause">{{ death_cause }}</p>
+    <p class="fatal-roll"{% if not fatal_check %} hidden{% endif %}>{% if fatal_check %}Fatal roll: {{ fatal_check|survival_roll }}{% endif %}</p>
+    <p class="death-note">A DM can resurrect this character.</p>
+</div>

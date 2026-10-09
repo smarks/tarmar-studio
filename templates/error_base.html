@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block code %}{% endblock %} — Tarmar Studio</title>
+    {% comment %}The page every error status shares (issue #339, item 14; #338, item 23).
+       Each status page supplies its code, background, words and any styles of
+       its own; the reset, layout and link styling live only here.{% endcomment %}
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: {% block background %}#1a1a2e{% endblock %};
+            color: #c8b88a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+            padding: 2rem;
+        }
+        .code {
+            font-size: 6rem;
+            font-weight: 200;
+            letter-spacing: 0.2em;
+            /* 2.01:1 before; the numeral is 96px text, so AA asks 3:1 (issue #709). */
+            color: #7676a4;
+            margin-bottom: 0.5rem;
+        }
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            margin-bottom: 1rem;
+            color: #e8d8a8;
+        }
+        .quote {
+            font-style: italic;
+            /* #888 is 4.81:1 on the 500 page's ground -- inside AA, but only
+               just; #949494 holds on every one of them (issue #709). */
+            color: #949494;
+            font-size: 1rem;
+            max-width: 440px;
+            line-height: 1.6;
+            margin-bottom: 0.5rem;
+        }
+        .attribution {
+            /* #555 measured 2.41:1 on the darkest of these grounds; #949494
+               clears AA on all four error pages (issue #709). */
+            color: #949494;
+            font-size: 0.8rem;
+            margin-bottom: 2rem;
+        }
+        a {
+            color: #c8b88a;
+            text-decoration: none;
+            border: 1px solid #333;
+            padding: 0.6rem 1.5rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            transition: border-color 0.2s, color 0.2s;
+        }
+        a:hover {
+            border-color: #c8b88a;
+            color: #fff;
+        }
+        {% block extra_style %}{% endblock %}
+    </style>
+</head>
+<body>
+    {% block content %}{% endblock %}
+</body>
+</html>

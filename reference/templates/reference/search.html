@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Search Reference - Tarmar Studio{% endblock %}
+{% block main_attrs %}class="reference-search-page page-width-1000"{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/reference-shared.css' %}">
+<link rel="stylesheet" href="{% static 'css/reference-search.css' %}">
+{% endblock %}
+
+{% block content %}
+<nav class="sidebar">
+    <form action="{% url 'reference:search' %}" method="get" class="search-form">
+        <input type="search" name="q" placeholder="Search..." value="{{ query|default:'' }}">
+        <button type="submit">Go</button>
+    </form>
+    <ul>
+        {% include "reference/_nav_items.html" with items=nav %}
+    </ul>
+</nav>
+<article class="content">
+    <h1>Search Results</h1>
+    {% if message %}
+    <p class="no-results">{{ message }}</p>
+    {% elif query %}
+    <p>{{ results|length }} result{{ results|length|pluralize }} for "{{ query }}"</p>
+    {% if results %}
+    <ul class="search-results">
+        {% for result in results %}
+        <li class="search-result">
+            <h2><a href="{% url 'reference:view' result.path %}">{{ result.title }}</a></h2>
+            <p class="snippet">{{ result.snippet }}</p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="no-results">No pages found matching your search.</p>
+    {% endif %}
+    {% else %}
+    <p class="no-results">Enter a search term to find reference content.</p>
+    {% endif %}
+</article>
+{% endblock %}

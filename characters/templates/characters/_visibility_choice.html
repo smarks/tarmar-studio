@@ -1,0 +1,19 @@
+{% comment %}
+The public/private choice on character creation (issue #273). Included inside
+BOTH creation forms (roll and point-buy) so whichever button submits carries
+it. `visibility` comes from the view context: "private" on a first visit, or
+whatever the rejected submission chose, echoed back like the point-buy
+numbers.
+{% endcomment %}
+<fieldset class="visibility-choice">
+    <legend>Who can see this character?</legend>
+    <p class="visibility-choice-note">This answer belongs to this method only &mdash; the other card asks again.</p>
+    <label>
+        <input type="radio" name="visibility" value="private"{% if visibility != "public" %} checked{% endif %}>
+        Private &mdash; only you and the DMs can see it
+    </label>
+    <label>
+        <input type="radio" name="visibility" value="public"{% if visibility == "public" %} checked{% endif %}>
+        Public &mdash; any registered user can view this character
+    </label>
+</fieldset>

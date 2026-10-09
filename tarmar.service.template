@@ -1,0 +1,60 @@
+# Tarmar Studio - __COLOUR__ environment (port __PORT__)
+#
+# Rendered by deploy.sh from tarmar.service.template; do not edit the copy
+# under /etc/systemd/system by hand. Each colour runs from its own release
+# checkout (a git worktree of the main checkout) so a deploy never changes
+# the files a live worker imports from -- see issue #328.
+[Unit]
+Description=Tarmar Studio (__COLOUR__)
+After=network.target
+
+[Service]
+Type=simple
+User=sam
+Group=sam
+WorkingDirectory=__RELEASE_DIR__
+EnvironmentFile=__APP_DIR__/.env
+# Both units are bound to 127.0.0.1 and reachable only through nginx,
+# which overwrites X-Real-IP/X-Forwarded-For (nginx/tarmar.conf), so the
+# forwarded client IP is trustworthy here and rate limits can be keyed
+# per visitor instead of sharing one bucket for the whole site. The app
+# additionally requires the socket peer to be in TRUSTED_PROXY_IPS
+# (loopback by default) before it believes either header.
+Environment="TRUST_PROXY_IP_HEADER=true"
+Environment="PATH=/home/sam/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# Worker model (issue #361). The GM's SSE endpoint holds one request open
+# from the first prefill token to the last generated one, which is minutes,
+# not milliseconds. Under the default *sync* worker that is fatal twice over:
+#
+#   1. A sync worker only heartbeats to the arbiter between requests, so the
+#      arbiter's --timeout (default 30 s) doubles as a hard cap on request
+#      duration. Any GM turn slower than that had its worker SIGKILLed
+#      mid-stream and the player saw a dead connection.
+#   2. A sync worker serves one request at a time, so three concurrent GM
+#      streams occupied all three workers and every other page on the site
+#      queued behind them.
+#
+# gthread fixes both. Its accept loop calls notify() once per pass and never
+# waits longer than 1 s (gunicorn 23.0.0, workers/gthread.py), so --timeout
+# becomes what its name suggests -- a liveness check on the worker itself,
+# unrelated to how long any one request runs. 60 s therefore still catches a
+# genuinely wedged worker quickly instead of being inflated to cover slow
+# streams. --threads 4 gives 3 x 4 = 12 concurrent requests, so a handful of
+# players can all have a GM turn in flight and short page views still get
+# served immediately. Long turns are bounded in the application instead, by
+# GM_STREAM_BUDGET_SECONDS, which ends them with a message the player can read.
+ExecStart=/home/sam/.local/bin/uv run gunicorn \
+    --worker-class gthread \
+    --workers 3 \
+    --threads 4 \
+    --timeout 60 \
+    --bind 127.0.0.1:__PORT__ \
+    --access-logfile - \
+    --error-logfile - \
+    tarmar_studio.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

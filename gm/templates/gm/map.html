@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Map — Tarmar Studio{% endblock %}
+
+{% comment %}
+The Map panel on its own page (issue #351) -- where the GM panel's Map pane
+pops out to. It is the same partial the pane holds, rendered full window
+from the same context helper (gm.views._map_panel_context) and driven by the
+same script, so there is one map surface in the codebase. map_standalone
+tells the partial to stand on its own: no panel wiring, not hidden.
+gm-panel-map.js opens on the chart ?map= names, which is how the pane hands
+over the map it was showing; ?session= keeps the page on the same session's
+remembered chart as the panel.
+{% endcomment %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/chat.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="chat-main page-width-none"{% endblock %}
+
+{% block content %}
+<div class="gm-map-page">
+    <header class="gm-map-page-header">
+        <h2>Map</h2>
+        <a class="btn btn-sm" href="{% url 'gm:chat' %}{% if active_session %}?session={{ active_session.pk }}{% endif %}">Back to the table</a>
+    </header>
+    {% include "gm/_panel_map.html" %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/gm-panel-map.js' %}"></script>
+{% endblock %}

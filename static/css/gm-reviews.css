@@ -1,0 +1,57 @@
+/* Claude's reviews list (issue #572). Table shape borrowed from the party
+   list so the two read as one family. */
+
+.gm-reviews-intro {
+    color: var(--colour-ink-muted);
+}
+
+.gm-reviews-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+
+.gm-reviews-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.gm-reviews-table th,
+.gm-reviews-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+
+.gm-reviews-note {
+    max-width: 40ch;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.gm-reviews-empty {
+    color: var(--colour-ink-muted);
+    font-style: italic;
+}
+
+.gm-review-status-failed {
+    color: var(--colour-danger);
+}
+
+.gm-reviews-watching {
+    color: var(--colour-ink-muted);
+    font-size: 0.9rem;
+}
+
+/* Why a review failed, on its row in the list (issue #606). A failed review
+   used to show only the word "Failed", so a reviewer that could not log in
+   looked the same as one the model had thought about and given up on. */
+.gm-reviews-failure {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.85em;
+    color: var(--colour-ink-muted);
+}

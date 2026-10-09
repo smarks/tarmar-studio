@@ -1,0 +1,303 @@
+/**
+ * The sheet repaints what a change moves, without a reload (issues #763,
+ * #764, #765, #766, #792, #797, #798, #804, #805, #846, #851).
+ *
+ * Each case makes one change on the sheet and asserts on the page it was
+ * made on: the server's response carries what changed and one painter in
+ * character-edit.js writes it. A reload used to be the only way to see it.
+ */
+
+const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const { readDjangoShell } = require('./django');
+
+/**
+ * Seed a character for the test user and return its id.
+ * @param {string} name
+ * @param {string} fields - Python keyword arguments, single-quoted strings
+ *   only (the script goes through `manage.py shell -c "..."`).
+ */
+function seedCharacter(name, fields) {
+    const output = readDjangoShell(`
+from django.contrib.auth import get_user_model
+from characters.models import Character
+from common.test_helpers import CHARACTER_DEFAULTS
+user = get_user_model().objects.get(username='${TEST_USER.username}')
+values = dict(CHARACTER_DEFAULTS, name='${name}')
+values.update(dict(${fields}))
+print('CHARACTER', Character.objects.create(user=user, **values).pk)
+`.trim().replace(/\n/g, '; '));
+    const match = output.match(/CHARACTER (\d+)/);
+    expect(match, `no character id in: ${output}`).not.toBeNull();
+    return match[1];
+}
+
+/** A name unique to this worker and moment. */
+function uniqueName(label, testInfo) {
+    return `${label} ${testInfo.workerIndex}${Date.now()}`;
+}
+
+/** Type a value into one autosaving cell and wait for the save. */
+async function saveCell(page, field, value) {
+    const input = page.locator(`[data-field="${field}"] input`);
+    await input.fill(String(value));
+    await input.blur();
+    await expect(page.locator(`[data-field="${field}"]`)).toHaveClass(/saved/);
+}
+
+test.describe('The sheet repaints without a reload', () => {
+    test('recording the last score completes the character: exports, attacks, movement (#763, #764)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Nearly', testInfo),
+            "strength=None, equipment=[{'item_id': 'dagger', 'quantity': 1}], history=[]");
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await expect(page.locator('#incomplete-marks')).toContainText('needs attributes');
+        await expect(page.locator('#attack-form')).toBeHidden();
+        await expect(page.locator('#skill-check')).toBeHidden();
+        await expect(page.locator('#max-unencumbered')).toHaveText('—');
+        await expect(page.locator('#recent-changes')).toBeHidden();
+
+        await saveCell(page, 'strength', 14);
+
+        await expect(page.getByRole('link', { name: 'Export PDF' })).toBeVisible();
+        await expect(page.locator('#incomplete-marks')).toHaveCount(0);
+        await expect(page.locator('#attack-incomplete')).toBeHidden();
+        await expect(page.locator('#attack-form')).toBeVisible();
+        await expect(page.locator('#skill-check')).toBeVisible();
+        await expect(page.locator('#max-unencumbered')).toHaveText('14');
+        await expect(page.locator('#encumbrance-level')).not.toHaveText('—');
+        await expect(page.locator('#movement-modifier')).not.toHaveText('—');
+        await expect(page.locator('#gait-walk .gait-value')).not.toHaveText('—');
+        await expect(page.locator('#recent-changes')).toBeVisible();
+        await expect(page.locator('#recent-changes-rows')).toContainText('strength');
+
+        // The attack the completion unlocked resolves, and its line joins
+        // Recent attacks on the same page (#792).
+        await expect(page.locator('.no-combat-log')).toBeVisible();
+        await page.locator('#attack-resolve-btn').click();
+        await expect(page.locator('#attack-result')).toBeVisible();
+        await expect(page.locator('.combat-log-entry').first()).toContainText('Dagger');
+        await expect(page.locator('.no-combat-log')).toBeHidden();
+    });
+
+    test('a lower STR moves the encumbrance badge on the spot (#763)', async ({ page }, testInfo) => {
+        // 35 lbs against STR 14 is Heavy; against STR 3, Overloaded.
+        const characterId = seedCharacter(uniqueName('Laden', testInfo),
+            "equipment=[{'item_id': 'tower_shield', 'quantity': 1}]");
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await expect(page.locator('#encumbrance-level')).toHaveText('Heavy');
+
+        await saveCell(page, 'strength', 3);
+
+        await expect(page.locator('#max-unencumbered')).toHaveText('3');
+        await expect(page.locator('#encumbrance-level')).toHaveText('Overloaded');
+    });
+
+    test('a renamed skill is offered by the skill check under its new name (#765)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Herbalist', testInfo), "skills={'herbalism': 3}");
+        // A Game Master renames: the sheetrules batch holds a player's rename
+        // to rules this repaint does not depend on (#768).
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await expect(page.locator('#skill-check-skill option[value="herbalism"]')).toHaveCount(1);
+
+        const name = page.locator('.skill-row .skill-name').first();
+        await name.fill('Herb Lore');
+        await name.blur();
+        await expect(name).toHaveClass(/saved/);
+
+        await expect(page.locator('#skill-check-skill option[value="herb lore"]')).toHaveCount(1);
+        await expect(page.locator('#skill-check-skill option[value="herbalism"]')).toHaveCount(0);
+        await page.locator('#skill-check-skill').selectOption('herb lore');
+        await page.locator('#skill-check-btn').click();
+        await expect(page.locator('#skill-check-result')).toContainText('herb lore');
+    });
+
+    test('an item added to an incomplete character lists at once with no error (#766)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Unfinished', testInfo),
+            'strength=None, dexterity=None, constitution=None, fatigue_roll=None');
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        await page.locator('#equipment-category').selectOption('gear');
+        await page.locator('#equipment-item').selectOption('backpack');
+        await page.locator('#add-equipment-btn').click();
+
+        await expect(page.locator('.equipment-row .item-name')).toContainText('Backpack');
+        await expect(page.locator('.notice')).toHaveCount(0);
+        await expect(page.locator('#encumbrance-level')).toHaveText('—');
+        await expect(page.locator('#movement-modifier')).toHaveText('—');
+    });
+
+    test('a failed catalog load says so, keeps the items listed, and retries (#797)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Offline', testInfo),
+            "equipment=[{'item_id': 'backpack', 'quantity': 1}]");
+        await loginAs(page, TEST_USER);
+        await page.route('**/characters/equipment/catalog/', (route) => route.abort());
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        const notice = page.locator('#equipment-catalog-error');
+        await expect(notice).toBeVisible();
+        await expect(page.locator('.equipment-row .item-name')).toContainText('backpack');
+
+        await page.unroute('**/characters/equipment/catalog/');
+        await page.locator('#equipment-catalog-retry').click();
+        await expect(notice).toBeHidden();
+        await expect(page.locator('.equipment-row .item-name')).toContainText('Backpack');
+    });
+
+    test('a refused new skill keeps the name the player typed (#798)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Keeper', testInfo), 'free_skill_points=1');
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await page.route('**/allocate-skill/', (route) => route.fulfill({
+            status: 400,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'No free skill points available' }),
+        }));
+
+        await page.locator('#new-skill-name').fill('Herbalism');
+        await page.locator('#add-skill-btn').click();
+        await expect(page.locator('.notice .notice-text').first()).toContainText('No free skill points');
+        await expect(page.locator('#new-skill-name')).toHaveValue('Herbalism');
+    });
+
+    test('the weapon in hand drives the tiles and the Attack panel, and one shield counts (#804, #846)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Armed', testInfo), `equipment=[
+            {'item_id': 'broadsword', 'quantity': 1, 'to_hit_mod': 2},
+            {'item_id': 'dagger', 'quantity': 1, 'to_hit_mod': 1},
+            {'item_id': 'small_shield', 'quantity': 1},
+            {'item_id': 'tower_shield', 'quantity': 1}]`.replace(/\n\s*/g, ' '));
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        // One weapon's modifier, not the sum; one shield's stops, not both.
+        await expect(page.locator('#weapon-to-hit')).toHaveText('+2');
+        await expect(page.locator('#armor-stops')).toHaveText('1');
+        await expect(page.locator('#attack-weapon option:checked')).toContainText('in hand');
+
+        const daggerRow = page.locator('.equipment-row[data-index="1"]');
+        await daggerRow.locator('input[name="held-weapons"]').check();
+        await expect(page.locator('#weapon-to-hit')).toHaveText('+1');
+        await expect(page.locator('#attack-weapon')).toHaveValue('1');
+
+        const towerRow = page.locator('.equipment-row[data-index="3"]');
+        await towerRow.locator('input[name="held-shield"]').check();
+        await expect(page.locator('#armor-stops')).toHaveText('3');
+
+        // Dropping the shield in use with the pack leaves no shield at all.
+        await page.locator('.equipment-row[data-index="3"] [data-field="in_pack"]').check();
+        await expect(page.locator('#armor-stops')).toHaveText('1');
+    });
+
+    test('a player buys nothing before the wealth roll (#851)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Unrolled Purse', testInfo), 'wealth_recorded=False');
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        await page.locator('#equipment-category').selectOption('weapons');
+        await page.locator('#equipment-item').selectOption('dagger');
+        await page.locator('#add-equipment-btn').click();
+
+        await expect(page.locator('.notice .notice-text').first()).toContainText('Roll wealth first');
+        await expect(page.locator('.equipment-row')).toHaveCount(0);
+    });
+
+    test('nonsense in Height is refused and the height stays as it was (#805)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Measured', testInfo), '');
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        const before = await page.locator('#height_display').textContent();
+
+        const input = page.locator('[data-field="height_roll"] input');
+        await input.fill('tall');
+        await input.blur();
+        await expect(page.locator('[data-field="height_roll"]')).toHaveClass(/error/);
+        await expect(page.locator('[data-field="height_roll"] .autosave-error')).toContainText('die faces 1 to 6');
+        await expect(page.locator('#height_display')).toHaveText(before);
+    });
+
+    test('an equipment edit keeps the weapon picked in the Attack panel (#846 review)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Picker', testInfo),
+            "equipment=[{'item_id': 'saber', 'quantity': 1}, {'item_id': 'dagger', 'quantity': 1}, {'item_id': 'torch', 'quantity': 1}]");
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        const select = page.locator('#attack-weapon');
+        await expect(select).toHaveValue('0');
+        await select.selectOption('1');
+
+        const notes = page.locator('.equipment-row[data-index="2"] [data-field="notes"]');
+        await notes.fill('lit');
+        await notes.blur();
+        await expect(page.locator('.equipment-row[data-index="2"] .item-notes')).toHaveClass(/saved/);
+        await expect(select).toHaveValue('1');
+
+        // Readying the dagger changes the hand, and the panel follows it.
+        await select.selectOption('0');
+        await page.locator('.equipment-row[data-index="1"] input[name="held-weapons"]').check();
+        await expect(select).toHaveValue('1');
+    });
+
+    test.describe('in a zone away from UTC', () => {
+        test.use({ timezoneId: 'America/New_York' });
+
+        test('Recent Changes rows added live read in the viewer\'s zone (#700 kept)', async ({ page }, testInfo) => {
+            const characterId = seedCharacter(uniqueName('Zoned', testInfo), 'history=[]');
+            await loginAs(page, TEST_ADMIN);
+            await page.goto(`/tarmar/characters/${characterId}/`);
+            await saveCell(page, 'charisma', 11);
+            const live = await page.locator('#recent-changes-rows time').first().textContent();
+            await page.reload();
+            await expect(page.locator('#recent-changes-rows time').first()).toHaveText(live);
+        });
+    });
+
+    test('renaming the character renames the breadcrumb and the title (#792)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Firstname', testInfo), '');
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        const renamed = uniqueName('Secondname', testInfo);
+
+        await page.locator('#id_name').fill(renamed);
+        await page.locator('#id_name').blur();
+        await expect(page.locator('[data-field="name"]')).toHaveClass(/saved/);
+
+        await expect(page.locator('.breadcrumb [aria-current="page"]')).toHaveText(renamed);
+        await expect(page).toHaveTitle(renamed);
+    });
+
+    test('packing worn armour takes it off, and it stops counting (#869)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Packed Mail', testInfo),
+            "equipment=[{'item_id': 'chainmail', 'quantity': 1, 'equipped': True}]");
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await expect(page.locator('#armor-stops')).toHaveText('3');
+
+        await page.locator('.equipment-row[data-index="0"] [data-field="in_pack"]').check();
+        await expect(page.locator('#armor-stops')).toHaveText('0');
+        await expect(page.locator('.equipment-row[data-index="0"] [data-field="equipped"]')).not.toBeChecked();
+
+        // Putting it back on takes it out of the pack again.
+        await page.locator('.equipment-row[data-index="0"] [data-field="equipped"]').check();
+        await expect(page.locator('#armor-stops')).toHaveText('3');
+        await expect(page.locator('.equipment-row[data-index="0"] [data-field="in_pack"]')).not.toBeChecked();
+    });
+
+    test('a player cannot start a skill no rule names (#862)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Brawler', testInfo), 'free_skill_points=1');
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        await page.locator('#new-skill-name').fill('Brawling');
+        await page.locator('#add-skill-btn').click();
+        await expect(page.locator('.notice .notice-text').first()).toContainText('skills glossary names');
+        await expect(page.locator('#free-points')).toHaveText('1');
+        await expect(page.locator('.skill-row[data-skill="brawling"]')).toHaveCount(0);
+
+        // A skill the glossary names is taken.
+        await page.locator('#new-skill-name').fill('Perception');
+        await page.locator('#add-skill-btn').click();
+        await expect(page.locator('.skill-row[data-skill="perception"]')).toHaveCount(1);
+        await expect(page.locator('#free-points')).toHaveText('0');
+    });
+});

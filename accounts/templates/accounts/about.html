@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}About{% endblock %}
+
+{% block extra_styles %}
+.about-content p {
+    margin-bottom: 1rem;
+    line-height: 1.6;
+}
+.about-content h2 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+}
+{% endblock %}
+
+{% block content %}
+<h1>About</h1>
+
+<div class="about-content">
+    <p>Tarmar Studio is an application for playing in the Tarmar Universe - a fantasy role playing game.</p>
+
+    <h2>What is Tarmar?</h2>
+    <p>Tarmar is a homebrew fantasy role-playing game designed to be easy to play but rich with details and possibilities. See the public rulebook for the rules or create a character.</p>
+
+    <h2>A Note on D&D</h2>
+    <p>Similar to original D&D (which always had a fair amount of homebrew baked in), you might hear me referring to Tarmar as "D&D." This will make sense to older players but may confuse—or even ruffle—players familiar with the current D&D system, which has evolved tremendously over the years.</p>
+
+    <p>These days it's easy to play D&D without any homebrew elements at all. This is not that game.</p>
+</div>
+{% endblock %}

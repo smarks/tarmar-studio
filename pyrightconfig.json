@@ -1,0 +1,29 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.13",
+  "include": [
+    "accounts",
+    "battle",
+    "bestiary",
+    "character_export",
+    "characters",
+    "cli",
+    "common",
+    "encounters",
+    "gm",
+    "parties",
+    "reference",
+    "ruins",
+    "tarmar_studio"
+  ],
+  "exclude": [
+    "**/migrations"
+  ],
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportAttributeAccessIssue": false,
+  "reportOperatorIssue": false
+}

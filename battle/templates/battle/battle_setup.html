@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+{% load static %}
+{% load sign_in %}
+
+{% block title %}{{ draft.name|default:"New battle" }}{% endblock %}
+
+{% comment %}
+The staged setup page (issues #270/#271): the muster replaces the dense
+inline creation form the list page used to carry. Three stages read down
+the page in the order a DM actually works — the terms, the muster, the
+march — and every change is stored on the server-side draft the moment it
+is made (form posts for the roster, autosave for the terms fields), so the
+round trip through the character editor ("New character", per-entry Edit)
+comes back to the setup exactly as it was left.
+
+State-driven throughout, per the house rules: no modals, no transient
+notices. Errors render into the page and stay; the Begin button's
+disablement explains itself in words underneath it (the melee app's
+"state-driven enablement with a reason" idiom).
+
+The terms inputs carry form="setup-start-form": they submit WITH the Begin
+press, so the server merges them into the draft before compiling — a name
+typed and immediately begun is never lost to an autosave race, and the
+whole flow works before any JavaScript runs.
+{% endcomment %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/battle.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="battle-page battle-setup-main page-width-1240"{% endblock %}
+
+{% block content %}
+<header class="setup-masthead">
+    <div class="setup-masthead-words">
+        <h1>{{ draft.name|default:"New battle" }}</h1>
+        <p class="setup-lede">
+            Set the terms, muster the roster, march. Everything on this page
+            is saved as you go — leave for the character editor and it will
+            be waiting when you come back.
+        </p>
+    </div>
+    <form method="post" action="{% url 'battle:setup-discard' draft.pk %}"
+          data-confirm="Discard {{ draft.name|default:'this draft' }}? The draft and its muster are thrown away for good."
+          data-confirm-label="Discard"
+          data-confirm-danger="true">
+        {% csrf_token %}
+        <button type="submit" class="battle-button battle-button-quiet">
+            Discard this draft
+        </button>
+    </form>
+</header>
+
+{% if error and not error_field %}
+<p class="setup-error" role="alert">{{ error }}</p>
+{% endif %}
+{% if notice %}
+<p class="setup-notice" role="status">{{ notice }}</p>
+{% endif %}
+
+<section class="setup-stage" aria-labelledby="stage-terms">
+    <h2 class="setup-stage-title" id="stage-terms">
+        <span class="setup-stage-numeral">I</span> The terms
+    </h2>
+    <div class="setup-terms">
+        {% comment %}
+        Each terms field wears two hats: class="autosave" inside a
+        data-field container feeds the shared autosave (the draft saves on
+        blur, so the round trip to the character editor loses nothing), and
+        form="setup-start-form" submits the same values with the Begin
+        press, where the server merges them before compiling.
+        {% endcomment %}
+        {% comment %}
+        Required, and said so (issues #702 and #714). "Begin the battle"
+        refused without a name while the field carried no asterisk, no hint
+        and no error mark, so the reader learned the rule only from a banner
+        at the top of a page whose empty box was 1,200px below it. The
+        `required` attribute is the first line: the form attribute puts this
+        input in setup-start-form, so the browser refuses the press and
+        focuses the box without a round trip at all. The server still checks
+        (start_draft), and when it refuses, the sentence is rendered here
+        rather than only at the top (issue #711).
+        {% endcomment %}
+        <label class="setup-field setup-field-name" data-field="name">
+            <span class="setup-field-label">
+                Battle name <span class="setup-field-required" title="Required">*</span>
+            </span>
+            <input type="text" name="name" form="setup-start-form"
+                   maxlength="100" value="{{ draft.name }}" required
+                   {% if error_field == "name" %}aria-invalid="true" aria-describedby="setup-name-error" autofocus{% endif %}
+                   class="autosave" autocomplete="off">
+            {% if error_field == "name" %}
+            <span class="setup-field-error" id="setup-name-error" role="alert">{{ error }}</span>
+            {% else %}
+            <span class="setup-field-hint">Needed before the battle can start.</span>
+            {% endif %}
+        </label>
+        <label class="setup-field" data-field="rules_profile">
+            <span class="setup-field-label">Rules profile</span>
+            <select name="rules_profile" form="setup-start-form" class="autosave">
+                {% for value, label in rules_profiles %}
+                <option value="{{ value }}"
+                        {% if draft.rules_profile == value %}selected{% endif %}>
+                    {{ label }}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        {% comment %}
+        Who decides, chosen before the fight rather than inferred from it
+        (#308). This is the battle's *default*: every combatant inherits it,
+        and any one of them can be given its own mode from the battle page
+        once the fight is on. Claiming a seat still means "I play this one",
+        whatever the default says.
+        {% endcomment %}
+        <label class="setup-field" data-field="control_mode">
+            <span class="setup-field-label">Who decides</span>
+            <select name="control_mode" form="setup-start-form" class="autosave">
+                {% for value, label in control_modes %}
+                <option value="{{ value }}"
+                        {% if draft.control_mode == value %}selected{% endif %}>
+                    {{ label }}
+                </option>
+                {% endfor %}
+            </select>
+            <span class="setup-field-hint">Automatic plays itself — you press Advance turn. Manual stops for each combatant's owner.</span>
+        </label>
+        {% if is_dm %}
+        {% comment %}
+        Whether this battle counts (issues #750, #751; coordinator's ruling,
+        Spencer may overrule): a Game Master's battle writes each wound, Mana
+        spent and death to the saved characters' records unless this is
+        turned off. A player's battle never does, so a player is not offered
+        the choice at all. Saved like every other term, and the battle page
+        says so whenever it is on.
+        {% endcomment %}
+        <label class="setup-field setup-counts" data-field="writes_to_records">
+            <input type="checkbox" name="writes_to_records" value="true"
+                   form="setup-start-form" class="autosave"
+                   {% if draft.writes_to_records %}checked{% endif %}>
+            <span class="setup-field-label">This battle counts: wounds and deaths go on records</span>
+            <span class="setup-field-hint">Off for a practice fight: nobody's sheet changes.</span>
+        </label>
+        {% endif %}
+        <label class="setup-field" data-field="seed">
+            <span class="setup-field-label">Seed</span>
+            <input type="number" name="seed" form="setup-start-form"
+                   min="0" max="{{ max_seed }}" placeholder="rolled for you"
+                   value="{{ draft.seed|default_if_none:'' }}"
+                   class="autosave setup-seed" inputmode="numeric">
+            <span class="setup-field-hint">Same seed, same battle — leave it blank to roll one.</span>
+        </label>
+    </div>
+    <p class="setup-save-note" id="setup-save-note" data-state="idle"
+       data-update-url="{% url 'battle:setup-update' draft.pk %}"
+       aria-live="polite">
+        Saved with the draft as you go.
+    </p>
+</section>
+
+<section class="setup-stage" aria-labelledby="stage-muster" id="muster">
+    <h2 class="setup-stage-title" id="stage-muster">
+        <span class="setup-stage-numeral">II</span> The muster
+    </h2>
+    <div class="setup-muster">
+        <div class="setup-sources">
+            <div class="setup-source">
+                <h3 class="setup-source-title">Fighters</h3>
+                <p class="setup-source-hint">
+                    Generated whole from the seed — name, gear, and skills
+                    rolled when the battle starts.
+                </p>
+                <div class="setup-fighter-grid">
+                    {% for archetype in archetypes %}
+                    <form method="post" action="{% url 'battle:setup-add' draft.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="kind" value="fighter">
+                        <input type="hidden" name="archetype" value="{{ archetype }}">
+                        <button type="submit"
+                                class="battle-button setup-add-button"
+                                {% if muster_full %}disabled{% endif %}>
+                            {{ archetype|title }}
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="setup-source">
+                <h3 class="setup-source-title">Saved characters</h3>
+                <p class="setup-source-hint">
+                    Seated as they stand when the battle starts — edit one
+                    first and the battle takes the edited version. The battle
+                    only ever plays a copy; nothing that happens in it touches
+                    the character sheet.
+                </p>
+                {% if is_guest %}
+                {% comment %}
+                The limit is said at the control it applies to, with the way
+                out, and it stays on the page (#305 / house UI rule). The
+                disabled control is deliberate: an empty list would read as
+                "nobody has made any", which is a different and untrue thing.
+                {% endcomment %}
+                <p class="setup-guest-limit" id="guest-limit-characters">
+                    {{ guest_notes.saved_characters }}
+                    <a href="{% sign_in_url %}">Sign in</a> to seat yours.
+                </p>
+                <button type="button" class="battle-button setup-add-button"
+                        aria-describedby="guest-limit-characters" disabled>
+                    Seat a saved character
+                </button>
+                {% elif seatable_characters %}
+                <label class="setup-character-filter-label">
+                    <span class="sr-only">Filter characters by name</span>
+                    <input type="search" id="character-filter"
+                           class="setup-character-filter"
+                           data-filter-list="setup-character-list"
+                           placeholder="Filter by name or player&hellip;">
+                </label>
+                <ul class="setup-character-list" id="setup-character-list">
+                    {% for character in seatable_characters %}
+                    <li class="setup-character"
+                        data-filter-text="{{ character.name|lower }} {{ character.user.username|lower }}">
+                        <div class="setup-character-words">
+                            <strong>{{ character.name }}</strong>
+                            <span class="setup-character-owner">
+                                {% if character.user == user %}yours{% else %}{{ character.user.username }}'s{% endif %}
+                                — ST {{ character.effective_strength }},
+                                DX {{ character.effective_dexterity }}
+                            </span>
+                        </div>
+                        <div class="setup-character-actions">
+                            <a class="battle-button battle-button-quiet setup-character-edit"
+                               href="{% url 'characters:edit' character.pk %}?next={{ setup_url|urlencode }}">
+                                Edit
+                            </a>
+                            <form method="post" action="{% url 'battle:setup-add' draft.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="kind" value="character">
+                                <input type="hidden" name="character_id" value="{{ character.pk }}">
+                                <button type="submit"
+                                        class="battle-button setup-add-button"
+                                        {% if muster_full %}disabled{% endif %}>
+                                    Seat
+                                </button>
+                            </form>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="setup-source-hint setup-character-none">
+                    No saved characters yet — make the first one and it will
+                    be listed here.
+                </p>
+                {% endif %}
+                {% if not is_guest %}
+                <a class="battle-button battle-button-outline setup-new-character"
+                   href="{% url 'characters:create' %}?next={{ setup_url|urlencode }}">
+                    New character
+                </a>
+                {% endif %}
+            </div>
+
+            <div class="setup-source">
+                <h3 class="setup-source-title">Parties</h3>
+                <p class="setup-source-hint">
+                    Import a party and it marches in as a team — its members
+                    seated together, teammates never targeting each other,
+                    victory going to the last team standing. Members you
+                    cannot see are skipped and counted.
+                </p>
+                {% if is_guest %}
+                <p class="setup-guest-limit" id="guest-limit-parties">
+                    {{ guest_notes.parties }}
+                    <a href="{% sign_in_url %}">Sign in</a> to import one.
+                </p>
+                <button type="button" class="battle-button setup-add-button"
+                        aria-describedby="guest-limit-parties" disabled>
+                    Import as a team
+                </button>
+                {% elif parties %}
+                <form method="post"
+                      action="{% url 'battle:setup-import-party' draft.pk %}"
+                      class="setup-party-form">
+                    {% csrf_token %}
+                    <label class="setup-field">
+                        <span class="setup-field-label">Party</span>
+                        <select name="party_id">
+                            {% for party in parties %}
+                            <option value="{{ party.pk }}">
+                                {{ party.name }} — {{ party.memberships.count }}
+                                member{{ party.memberships.count|pluralize }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit" class="battle-button setup-add-button"
+                            {% if muster_full %}disabled{% endif %}>
+                        Import as a team
+                    </button>
+                </form>
+                {% else %}
+                <p class="setup-source-hint setup-party-none">
+                    No parties formed yet — gather one on the parties page
+                    and it will be offered here.
+                </p>
+                {% endif %}
+                <form method="post"
+                      action="{% url 'battle:setup-team-add' draft.pk %}"
+                      class="setup-team-form">
+                    {% csrf_token %}
+                    <label class="setup-field">
+                        <span class="setup-field-label">Or name an empty team</span>
+                        {# team_name, not name: the battle-name terms input #}
+                        {# already owns name on this page. #}
+                        <input type="text" name="team_name" maxlength="45"
+                               placeholder="e.g. The Wolves" autocomplete="off">
+                    </label>
+                    <button type="submit" class="battle-button setup-add-button">
+                        New team
+                    </button>
+                </form>
+            </div>
+
+            <div class="setup-source">
+                <h3 class="setup-source-title">Beasts</h3>
+                <p class="setup-source-hint">
+                    From the bestiary — a chosen one, or a random draw with
+                    the filters you set.
+                </p>
+                <form method="post" action="{% url 'battle:setup-add' draft.pk %}"
+                      class="setup-beast-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="kind" value="beast">
+                    <label class="setup-field">
+                        <span class="setup-field-label">Catalog beast</span>
+                        {% comment %}
+                        Grouped by the category the bestiary already stores
+                        (issue #706). This was one flat list of 239 options
+                        beginning "2-foot Myrmecoleon", with the CATEGORY and
+                        DIFFICULTY selects beside it looking as though they
+                        narrowed it -- they only ever applied to the random
+                        draw. An <optgroup> is what a browser's own dropdown
+                        knows how to jump around, and it needs no script.
+                        {% endcomment %}
+                        <select name="slug">
+                            {% for group in catalog_beast_groups %}
+                            <optgroup label="{{ group.label }}">
+                                {% for beast in group.beasts %}
+                                <option value="{{ beast.slug }}">
+                                    {{ beast.name }} (ST {{ beast.strength }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit" class="battle-button setup-add-button"
+                            {% if muster_full %}disabled{% endif %}>
+                        Add this beast
+                    </button>
+                </form>
+                <form method="post" action="{% url 'battle:setup-add' draft.pk %}"
+                      class="setup-beast-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="kind" value="random_beast">
+                    <label class="setup-field">
+                        <span class="setup-field-label">Random category</span>
+                        <select name="category">
+                            <option value="">Any category</option>
+                            {% for key, label in beast_categories %}
+                            <option value="{{ key }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="setup-field">
+                        <span class="setup-field-label">Random difficulty</span>
+                        <select name="difficulty">
+                            <option value="">Any difficulty</option>
+                            {% for band in difficulty_bands %}
+                            <option value="{{ band }}">{{ band|title }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit" class="battle-button setup-add-button"
+                            {% if muster_full %}disabled{% endif %}>
+                        Add a random beast
+                    </button>
+                </form>
+            </div>
+
+            <div class="setup-source">
+                <h3 class="setup-source-title">Open seats</h3>
+                <p class="setup-source-hint">
+                    Any open seat makes this a lobby: players claim seats and
+                    bring or generate their own combatants before the fight.
+                </p>
+                <form method="post" action="{% url 'battle:setup-add' draft.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="kind" value="open_seat">
+                    <button type="submit" class="battle-button setup-add-button"
+                            {% if muster_full %}disabled{% endif %}>
+                        Add an open seat
+                    </button>
+                </form>
+                <label class="setup-auto-start" data-field="auto_start">
+                    <input type="checkbox" name="auto_start" value="true"
+                           form="setup-start-form" class="autosave"
+                           {% if draft.auto_start %}checked{% endif %}>
+                    Start on its own once every seat is claimed and ready
+                </label>
+            </div>
+        </div>
+
+        <div class="setup-ledger">
+            <div class="setup-ledger-head">
+                <h3 class="setup-source-title">Muster roll</h3>
+                <p class="setup-capacity">
+                    <span class="setup-capacity-count">{{ muster_total }}</span>
+                    of {{ max_combatants }} places filled
+                </p>
+                <div class="setup-capacity-bar"
+                     role="img"
+                     aria-label="{{ muster_total }} of {{ max_combatants }} places filled">
+                    <span style="width: {% widthratio muster_total max_combatants 100 %}%"></span>
+                </div>
+            </div>
+            {% if muster_rows or teams %}
+            {% if teams %}
+            {% comment %}
+            Teamed muster (#275): one section per team in ledger order,
+            each with its header and disband control, then the free pool.
+            Entry numbering follows roster order via row.index.
+            {% endcomment %}
+            {% for group in muster_groups %}
+            <section class="muster-team" data-team="{{ group.team }}">
+                <header class="muster-team-head">
+                    <h4 class="muster-team-name">{{ group.team }}</h4>
+                    <form method="post"
+                          action="{% url 'battle:setup-team-remove' draft.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="team_name" value="{{ group.team }}">
+                        <button type="submit"
+                                class="battle-button battle-button-quiet muster-team-disband">
+                            Disband
+                        </button>
+                    </form>
+                </header>
+                {% if group.rows %}
+                <ol class="muster-roll">
+                    {% for row in group.rows %}
+                    {% include "battle/_muster_entry.html" with counter=row.index|add:1 %}
+                    {% endfor %}
+                </ol>
+                {% else %}
+                <p class="muster-team-empty">
+                    Nobody on this team yet — move entries here, or add more
+                    from the left.
+                </p>
+                {% endif %}
+            </section>
+            {% endfor %}
+            <section class="muster-team muster-team-free">
+                <header class="muster-team-head">
+                    <h4 class="muster-team-name">Free-for-all</h4>
+                </header>
+                {% if free_rows %}
+                <ol class="muster-roll">
+                    {% for row in free_rows %}
+                    {% include "battle/_muster_entry.html" with counter=row.index|add:1 %}
+                    {% endfor %}
+                </ol>
+                {% else %}
+                <p class="muster-team-empty">
+                    Nobody fights alone — every entry stands on a team.
+                </p>
+                {% endif %}
+            </section>
+            {% else %}
+            <ol class="muster-roll">
+                {% for row in muster_rows %}
+                {% include "battle/_muster_entry.html" with counter=forloop.counter %}
+                {% endfor %}
+            </ol>
+            {% endif %}
+            {% else %}
+            <p class="muster-empty">
+                Nobody is mustered yet. Enlist fighters, saved characters,
+                beasts, or open seats from the left — each appears here as a
+                line on the roll.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<section class="setup-stage setup-march" aria-labelledby="stage-march">
+    <h2 class="setup-stage-title" id="stage-march">
+        <span class="setup-stage-numeral">III</span> The march
+    </h2>
+    <form method="post" action="{% url 'battle:setup-start' draft.pk %}"
+          id="setup-start-form" class="setup-start-form">
+        {% csrf_token %}
+        <button type="submit"
+                class="battle-button battle-button-primary setup-begin"
+                {% if blockers %}disabled{% endif %}>
+            Begin the battle
+        </button>
+    </form>
+    {% if blockers %}
+    <ul class="setup-blockers">
+        {% for blocker in blockers %}
+        <li>{{ blocker }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="setup-march-note">
+        {% if has_open_seats %}
+        The muster holds open seats, so this opens as a lobby — the fight
+        begins once the seats are settled.
+        {% else %}
+        No open seats on the roll, so the battle begins at once.
+        {% endif %}
+    </p>
+    {% endif %}
+</section>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/autosave.js' %}"></script>
+<script src="{% static 'js/roster-filter.js' %}"></script>
+<script src="{% static 'js/battle-setup.js' %}"></script>
+{% endblock %}

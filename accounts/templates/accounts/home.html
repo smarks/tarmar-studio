@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% load static %}
+{% load gm_play %}
+{% load local_time %}
+
+{% block title %}Tarmar Studio{% endblock %}
+{% block main_attrs %}class="home-page page-width-none"{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/home.css' %}">
+{% endblock %}
+
+{% block content %}
+{% if table %}
+{% comment %}
+What belongs to the signed-in player (issue #827): their characters, their
+latest Game Master sessions and their battles, read from the database on every
+visit. Signed out, none of this renders and the page is the front page it was.
+{% endcomment %}
+<section class="your-table" id="your-table" aria-labelledby="your-table-heading">
+    <h1 id="your-table-heading">Your table</h1>
+    <div class="your-table-parts">
+        <section class="your-table-part" aria-labelledby="your-characters-heading">
+            <h2 id="your-characters-heading">Characters</h2>
+            {% if table.characters %}
+            <ul class="your-table-list">
+                {% for character in table.characters %}
+                <li class="your-table-character">
+                    <span class="your-table-name">
+                        <a href="{% url 'characters:edit' character.pk %}">{{ character.name }}</a>
+                        <span class="status-badge {{ character.status_css_class }}">{{ character.status }}</span>
+                    </span>
+                    {% play_with_game_master character request.user choose_session=False %}
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="your-table-more">
+                <a href="{% url 'characters:list' %}">All {{ table.character_count }} character{{ table.character_count|pluralize }}</a>
+                <a href="{% url 'characters:create' %}">Create another</a>
+            </p>
+            {% else %}
+            <p class="your-table-empty">You have no characters yet. Everything starts with one.</p>
+            <a href="{% url 'characters:create' %}" class="button" id="your-table-first-character">Create your first character</a>
+            {% endif %}
+        </section>
+        <section class="your-table-part" aria-labelledby="your-sessions-heading">
+            <h2 id="your-sessions-heading">Game Master sessions</h2>
+            {% if table.sessions %}
+            <ul class="your-table-list">
+                {% for session in table.sessions %}
+                <li>
+                    <a href="{% url 'gm:chat' %}?session={{ session.pk }}">{{ session.name }}</a>
+                    <span class="your-table-when">{% local_time session.updated_at "M j, Y" style="date" %}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="your-table-more"><a href="{% url 'gm:chat' %}">Every session</a></p>
+            {% else %}
+            <p class="your-table-empty">No Game Master sessions yet. <a href="{% url 'gm:chat' %}">Sit down with the Game Master</a>.</p>
+            {% endif %}
+        </section>
+        <section class="your-table-part" aria-labelledby="your-battles-heading">
+            <h2 id="your-battles-heading">Battles</h2>
+            {% if table.battles %}
+            <ul class="your-table-list">
+                {% for battle in table.battles %}
+                <li>
+                    <a href="{% url 'battle:detail' battle.pk %}">{{ battle.name }}</a>
+                    <span class="your-table-when">{{ battle.get_status_display }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="your-table-more"><a href="{% url 'battle:list' %}">Every battle</a></p>
+            {% else %}
+            <p class="your-table-empty">No battles yet. <a href="{% url 'battle:list' %}">Find or start one</a>.</p>
+            {% endif %}
+        </section>
+    </div>
+</section>
+{% endif %}
+<a href="{% url 'reference:view' 'introduction' %}"><img src="{% static 'accounts/tarmar01.jpeg' %}" alt="Tarmar" class="hero-image" width="1050" height="700"></a>
+<nav class="home-nav">
+    <a href="{% url 'reference:view' 'introduction' %}">Introduction</a>
+    <a href="{% url 'reference:view' 'the-world-of-tarmar' %}">The World</a>
+    <a href="{% url 'characters:list' %}">Characters</a>
+    <a href="{% url 'reference:index' %}">Reference</a>
+    {# Battles is a player-facing page since #250/#305 (issue #339, item 1). #}
+    <a href="{% url 'battle:list' %}">Battles</a>
+    <a href="{% url 'gm:chat' %}">Play</a>
+    <a href="{{ feedback_url }}" target="_blank" rel="noopener" title="Found a problem or have an idea? Leave it as a GitHub issue.">Leave a comment</a>
+</nav>
+<section class="get-started">
+    <p class="tagline">Tarmar is a D&D homebrew fantasy role-playing game designed to be easy to play but rich with details and possibilities</p>
+    <ol>
+        <li>Read the <a href="{% url 'reference:view' 'introduction' %}">Introduction</a> to get a feel for the world.</li>
+        <li>Explore <a href="{% url 'reference:view' 'the-world-of-tarmar' %}">The World of Tarmar</a> &mdash; its lands, powers, and mysteries.</li>
+        <li><a href="{% url 'characters:create' %}">Create a character</a> to call your own.</li>
+        <li>Learn the <a href="{% url 'reference:view' 'public-rules/combat' %}">Combat</a> and <a href="{% url 'reference:view' 'public-rules/magic' %}">Magic</a> basics.</li>
+        <li><a href="{% url 'gm:chat' %}">Play</a> &mdash; sit down with the Game Master.</li>
+    </ol>
+    <p class="more"><a href="{% url 'reference:view' 'get-started' %}">Full guide &rarr; Get Started</a></p>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+{% if table %}<script src="{% static 'js/play-with-gm.js' %}"></script>{% endif %}
+{% endblock %}

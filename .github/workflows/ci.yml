@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch or pull request supersedes the run in
+# progress: there is one runner, and a stale run only delays the current one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # One run of the suite, against the generic default canon the repository
+    # ships (issue #921). The Tarmar canon left for the private
+    # smarks/tarmar-canon, and CI holds no credentials for it: with
+    # TARMAR_CANON_DIR unset and no canon in the checkout, reference.paths
+    # resolves reference/default_canon, which is the configuration of every
+    # public checkout. The Tarmar canon is proven by `./run gate` with
+    # TARMAR_CANON_DIR set (DEPLOY.md). Issue #920 ran this job twice, once
+    # with the checkout's own canon; with none left in the checkout that entry
+    # only repeated this one.
+    name: test (default canon)
+    # The self-hosted runner on the Mac Studio (issue #576). GitHub does not
+    # bill self-hosted minutes, which is what let CI come back after it was
+    # disabled for billing. The runner persists between jobs, so the uv cache,
+    # ~/.npm and the Playwright browser in ~/Library/Caches/ms-playwright are
+    # reused rather than restored from actions/cache.
+    runs-on: [self-hosted, tarmar]
+    timeout-minutes: 60
+    env:
+      # Clear of the main checkout's :8000 and the :82xx ports worktrees use by
+      # hand, so a CI run never reuses or collides with a dev server someone is
+      # working against. The fake Ollama sits at +1000.
+      E2E_PORT: "8290"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Sync Python dependencies
+        run: uv sync --locked --group cli
+
+      - name: Install npm dependencies
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: No model change without a migration
+        run: DEBUG=true uv run python manage.py makemigrations --check --dry-run
+
+      # build/ holds only the player-facing guides, built from public pages,
+      # so they check the same under any canon (issue #921). The Game Master's
+      # guides live in the canon's own repository.
+      - name: Guides are current
+        run: uv run python scripts/build_guides.py --check
+
+      # ./run puts /opt/homebrew/lib on DYLD_FALLBACK_LIBRARY_PATH for
+      # weasyprint; setting it in a step's env does not survive macOS SIP
+      # stripping DYLD_* when the step's /bin/bash starts. The threshold is
+      # fixed and changed by hand, never ratcheted here.
+      - name: Pytest
+        run: ./run test -q --cov-fail-under=98
+
+      - name: Jest
+        run: npm test -- --coverage
+
+      # The browser is not installed here. `playwright install` hangs
+      # extracting under Node 26 on this Mac, and the persistent runner already
+      # holds the build @playwright/test needs. After a Playwright upgrade this
+      # step fails with "Executable doesn't exist"; install the new browser on
+      # the Mac by hand. --check judges coverage against package.json's
+      # jsCoverageThreshold and never rewrites it.
+      - name: Playwright with JS coverage
+        run: uv run python scripts/update_js_coverage_threshold.py --check
+
+  notify:
+    needs: [test]
+    if: always()
+    runs-on: [self-hosted, tarmar]
+    steps:
+      - name: Email on failure or green-after-red
+        uses: smarks/base_repo_template/.github/actions/notify@main
+        with:
+          job-status: ${{ needs.test.result }}
+          mail-password: ${{ secrets.MAIL_PASSWORD }}

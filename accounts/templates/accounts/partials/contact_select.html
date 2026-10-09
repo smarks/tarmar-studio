@@ -1,0 +1,22 @@
+{% load account_tags %}{% comment %}
+The preferred-contact select register and profile both show (#338 item 25).
+accounts/js/preferred_contact.js enables it once a contact method is filled in.
+
+    {% include "accounts/partials/contact_select.html" %}
+    {% include "accounts/partials/contact_select.html" with selected=profile_user.preferred_contact autosave=True %}
+
+selected marks the stored choice; leave it out and no option is marked.
+autosave adds the class autosave.js listens for.
+
+The hint below says why the control is greyed out. It used to sit there
+disabled with nothing explaining it, so the reader had no way to learn that
+filling in a second contact method was what would wake it (#716, low finding).
+It is rendered from the template rather than written by the script, so it is
+there before any JavaScript runs and stays there afterwards.
+{% endcomment %}<select name="preferred_contact" id="id_preferred_contact" disabled aria-describedby="preferred-contact-rule"{% if autosave %} class="autosave"{% endif %}>
+            {% contact_choices_with_empty as choices %}
+            {% for value, label in choices %}
+            <option value="{{ value }}"{% if selected is not None and selected == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+<span class="field-hint" id="preferred-contact-rule">Pick this once you have filled in an email, a phone number or a Discord name above.</span>

@@ -1,0 +1,24 @@
+{% comment %}
+The Advance button of a started battle, for whoever runs it (issue #345
+factored it out of battle_detail.html so the GM chat's Battle tab can offer
+the same one). battle.js wires it by id wherever it sits.
+
+The button says what pressing it would do, from stored state (#308). In a
+mixed battle it is not a plain "go": it runs the automatic combatants and
+stops at each manual one, so between presses it has to name whose move the
+battle is sitting on. The server computes both label and enabled-ness
+(views.advance_control) so a reload says exactly what the page said before
+it.
+{% endcomment %}
+<button type="button" id="advance-turn"
+        class="battle-button battle-button-primary"
+        data-url="{% url 'battle:advance' battle.pk %}"
+        {% if not advance.enabled %}disabled{% endif %}>
+    {{ advance.label }}
+</button>
+{% comment %}
+Issue #842: the records moved under an unfinished fight. The notice is state,
+rendered on every load until the pools are taken from the records, and
+battle.js fills the same slot from an advance the server refused (409).
+{% endcomment %}
+<div id="battle-stale-slot">{% if advance.stale %}{% include "battle/_stale_pools.html" %}{% endif %}</div>

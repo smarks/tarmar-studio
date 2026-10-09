@@ -1,0 +1,54 @@
+{% comment %}
+The Map tab of the GM side panel (issue #343). Included by gm/chat.html inside
+<aside id="gm-panel">; gm-panel.js shows and hides it by the
+data-panel-container name, and gm-panel-map.js drives it: the picker switches
+maps by hand, the "follow the story" box lets the GM's replies switch them
+(the stream's done frame carries `map` when a reply names a charted place),
+and the viewport pans and zooms the image with a CSS transform. Every map the
+picker offers comes from gm.maps.MAP_AREAS, so the picker, the detector and
+the images cannot disagree. #gm-map-config is what the script needs from the
+view: the session id and the map the story last named.
+
+The same partial is the whole of the standalone map page (gm/map.html,
+issue #351), which the pane's "open in its own window" control opens:
+map_standalone drops the tab wiring so the section stands on its own, and
+gm-panel-map.js keeps data-popout-url pointed at the chart on show.
+{% endcomment %}
+<section class="gm-panel-tab gm-panel-map" id="gm-panel-map" data-panel-container="map"{% if map_standalone %} data-map-standalone="true"{% else %} role="region" aria-labelledby="gm-panel-tab-map" data-popout-url="{% url 'gm:map' %}" hidden{% endif %}>
+    <div class="gm-panel-picker">
+        <label class="sr-only" for="gm-map-select">Map to show</label>
+        <select id="gm-map-select"{% if map_default_slug %} data-default-slug="{{ map_default_slug }}"{% endif %}>
+            {% for area in map_areas %}
+            <option value="{{ area.slug }}" data-title="{{ area.title }}" data-image-url="{{ area.image_url }}">{{ area.title }}</option>
+            {% endfor %}
+        </select>
+        <label class="gm-map-follow-label" for="gm-map-follow">
+            <input type="checkbox" id="gm-map-follow" checked> Follow the story
+        </label>
+    </div>
+
+    <div class="gm-map-controls" role="group" aria-label="Zoom">
+        <button type="button" class="btn btn-sm" id="gm-map-zoom-out" aria-label="Zoom out">&minus;</button>
+        <button type="button" class="btn btn-sm" id="gm-map-zoom-in" aria-label="Zoom in">+</button>
+        <button type="button" class="btn btn-sm" id="gm-map-reset">Reset</button>
+        <span class="gm-map-zoom-level" id="gm-map-zoom-level">100%</span>
+    </div>
+
+    <div class="gm-map-viewport" id="gm-map-viewport">
+        <img class="gm-map-image" id="gm-map-image" src="" alt="" draggable="false">
+    </div>
+
+    <p class="gm-map-caption" id="gm-map-caption">
+        <span class="gm-map-caption-title" id="gm-map-caption-title"></span>
+        <span class="gm-map-caption-place" id="gm-map-caption-place" hidden></span>
+    </p>
+
+    {% comment %}
+    Where the party is, when the gazetteer never named the place (issue #579):
+    no chart shows it, so the tab says so rather than leaving the last chart up
+    as though the party were still standing on it.
+    {% endcomment %}
+    <p class="gm-map-unmapped" id="gm-map-unmapped" hidden></p>
+
+    {{ map_config|json_script:"gm-map-config" }}
+</section>

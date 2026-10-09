@@ -1,0 +1,11 @@
+{% comment %}
+A notice rendered by the server, in the markup static/js/notify.js builds for
+one raised in the page (#338 item 9). Include it rather than writing the div:
+
+    {% include "_notice.html" with message=generate_error %}
+    {% include "_notice.html" with message=done_text kind="success" %}
+
+kind defaults to "error", which is announced as an alert; any other kind is a
+status. A notice the server renders is part of the page state, so it has no
+timer; see notify.js for dismissible ones raised by script.
+{% endcomment %}<div class="notice notice-{{ kind|default:'error' }}" role="{% if kind and kind != 'error' %}status{% else %}alert{% endif %}">{{ message }}</div>

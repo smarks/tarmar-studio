@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load static %}
+{% load local_time %}
+
+{% block title %}Deleted Characters{% endblock %}
+
+{% block main_attrs %}class="page-width-900"{% endblock %}
+
+{% block extra_styles %}
+.deleted-info {
+    color: #666;
+    font-size: 0.85rem;
+}
+{% endblock %}
+
+{% block content %}
+<h1>Deleted Characters</h1>
+
+{% if characters %}
+<table class="character-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Owner</th>
+            <th>Deleted</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    {% comment %}Restore removes the row in place rather than reloading; the
+       button is wired by character-management.js, the same as the character
+       list's (issue #338 item 18).{% endcomment %}
+    <tbody data-character-row-actions="no-reload">
+        {% for character in characters %}
+        <tr data-id="{{ character.pk }}">
+            <td>{{ character.name }}</td>
+            <td>{{ character.user.username }}</td>
+            <td class="deleted-info">{% local_time character.deleted_at "M d, Y H:i" %}</td>
+            <td>
+                <button class="button restore-btn" data-id="{{ character.pk }}" data-restore-url="{% url 'characters:restore' character.pk %}">Restore</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% include "_pagination.html" with pagination_label="Deleted character pages" %}
+{% else %}
+<p>No deleted characters.</p>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/character-management.js' %}"></script>
+{% endblock %}

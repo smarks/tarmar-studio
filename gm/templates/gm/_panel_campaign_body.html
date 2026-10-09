@@ -1,0 +1,197 @@
+{% comment %}
+The contents of the Campaign tab (issue #579), inside its <section> in
+gm/_panel_campaign.html. gm-panel-characters.js swaps this in from
+gm:campaign_panel while a turn runs, alongside the Characters tab, so the
+section itself -- and whether it is shown -- stays put.
+
+Everything here is read from the records the plan actions write, the same
+rows the model is handed in its state block, so the pane and the GM cannot
+disagree about where the party is or what state a thing is in. That was the
+whole complaint: an iron box that was resting on a ledge, then chained, then
+fused to the rock, with nothing in between that changed it.
+
+A Game Master may also set these records by hand (issues #789, #790): add,
+correct, retire, resolve or remove. The controls are rendered for his account
+only (can_edit_records) and the endpoints check the account again; a player
+reads the same lists without them. gm-records.js posts the forms. Each record
+the Game Master set himself says so (hand_mark), and each row carries its
+number, which is how the model and the Game Master name it to each other.
+{% endcomment %}
+    <p class="gm-panel-error" id="gm-panel-campaign-error" role="alert" hidden></p>
+{% if not campaign_session %}
+    <p class="gm-panel-empty">Open a session to see its campaign.</p>
+{% else %}
+    {% url 'gm:rulings' campaign_session.pk as rulings_url %}
+    {% url 'gm:entities' campaign_session.pk as entities_url %}
+    {% url 'gm:threads' campaign_session.pk as threads_url %}
+    <dl class="gm-campaign-where">
+        <dt>Where</dt>
+        <dd>{{ campaign_state.where|default:"not recorded" }}</dd>
+        <dt>When</dt>
+        <dd>{{ campaign_state.when|default:"not recorded" }}</dd>
+    </dl>
+
+    {% if campaign_rulings or can_edit_records %}
+    {% comment %}The house rules the Game Master has ruled for this table (issue #600), the same rows the model is handed as facts; with the table's other records since #789.{% endcomment %}
+    <section class="gm-campaign-group gm-rulings" id="gm-table-rulings" aria-labelledby="gm-table-rulings-heading">
+        <h3 id="gm-table-rulings-heading">Table rulings</h3>
+        {% if campaign_rulings %}
+        <ul class="gm-campaign-list">
+            {% for ruling in campaign_rulings %}
+            <li data-ruling-id="{{ ruling.pk }}">
+                <span class="gm-campaign-name"><strong>{{ ruling.topic }}</strong>: {{ ruling.text }}</span>
+                <span class="gm-campaign-detail">ruling {{ ruling.pk }}</span>
+                {% if ruling.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ ruling.hand_mark }}</span>{% endif %}
+                {% if can_edit_records %}
+                <details class="gm-hand-edit">
+                    <summary>Correct</summary>
+                    <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="edit">
+                        <input type="hidden" name="ruling_id" value="{{ ruling.pk }}">
+                        <label>Topic <input type="text" name="topic" value="{{ ruling.topic }}" maxlength="60" required></label>
+                        <label>Rule <textarea name="text" rows="2" maxlength="400" required>{{ ruling.text }}</textarea></label>
+                        <button type="submit" class="btn btn-sm">Save the ruling</button>
+                    </form>
+                </details>
+                <button type="button" class="btn btn-sm gm-hand-action" data-url="{{ rulings_url }}" data-change="retire" data-ruling-id="{{ ruling.pk }}">Retire</button>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="gm-panel-empty">No rulings at this table yet.</p>
+        {% endif %}
+    </section>
+    {% if can_edit_records %}
+    <details class="gm-hand-edit gm-hand-add" id="gm-add-ruling">
+        <summary>Add a ruling</summary>
+        <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="add">
+            <label>Topic <input type="text" name="topic" maxlength="60" required placeholder="critical hits"></label>
+            <label>Rule <textarea name="text" rows="2" maxlength="400" required placeholder="a natural 20 just crits"></textarea></label>
+            <button type="submit" class="btn btn-sm">Record the ruling</button>
+        </form>
+    </details>
+    {% endif %}
+    {% endif %}
+
+    <section class="gm-campaign-group" aria-labelledby="gm-campaign-supplies">
+        <h3 id="gm-campaign-supplies">Carried between them</h3>
+        {% if campaign_supplies %}
+        <ul class="gm-campaign-list">
+            {% for item in campaign_supplies %}
+            <li>
+                <span class="gm-campaign-name">{{ item.name }}</span>
+                {% if item.amount %}<span class="gm-campaign-detail">{{ item.amount }}</span>{% endif %}
+                {% if item.note %}<span class="gm-campaign-detail">{{ item.note }}</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="gm-panel-empty">Nothing recorded yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="gm-campaign-group" id="gm-campaign-people-group" aria-labelledby="gm-campaign-people">
+        <h3 id="gm-campaign-people">People met</h3>
+        {% if campaign_people %}
+        <ul class="gm-campaign-list">
+            {% for person in campaign_people %}
+            <li data-entity-id="{{ person.pk }}">
+                <span class="gm-campaign-name">{{ person.name }}</span>
+                {% if person.where %}<span class="gm-campaign-detail">at {{ person.where }}</span>{% endif %}
+                {% if person.wants %}<span class="gm-campaign-detail">wants {{ person.wants }}</span>{% endif %}
+                {% if person.condition %}<span class="gm-campaign-detail">{{ person.condition }}</span>{% endif %}
+                {% if person.notes %}<span class="gm-campaign-detail">{{ person.notes }}</span>{% endif %}
+                {% if person.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ person.hand_mark }}</span>{% endif %}
+                {% if can_edit_records %}{% include "gm/_hand_entity_form.html" with entity=person kind="person" %}{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="gm-panel-empty">Nobody recorded yet.</p>
+        {% endif %}
+        {% if can_edit_records %}{% include "gm/_hand_entity_form.html" with entity=None kind="person" %}{% endif %}
+    </section>
+
+    <section class="gm-campaign-group" id="gm-campaign-things-group" aria-labelledby="gm-campaign-things">
+        <h3 id="gm-campaign-things">Things in play</h3>
+        {% if campaign_things %}
+        <ul class="gm-campaign-list">
+            {% for thing in campaign_things %}
+            <li data-entity-id="{{ thing.pk }}">
+                <span class="gm-campaign-name">{{ thing.name }}</span>
+                {% if thing.where %}<span class="gm-campaign-detail">at {{ thing.where }}</span>{% endif %}
+                {% if thing.condition %}<span class="gm-campaign-detail">{{ thing.condition }}</span>{% endif %}
+                {% if thing.notes %}<span class="gm-campaign-detail">{{ thing.notes }}</span>{% endif %}
+                {% if thing.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ thing.hand_mark }}</span>{% endif %}
+                {% if can_edit_records %}{% include "gm/_hand_entity_form.html" with entity=thing kind="thing" %}{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="gm-panel-empty">Nothing recorded yet.</p>
+        {% endif %}
+        {% if can_edit_records %}{% include "gm/_hand_entity_form.html" with entity=None kind="thing" %}{% endif %}
+    </section>
+
+    <section class="gm-campaign-group" id="gm-campaign-threads-group" aria-labelledby="gm-campaign-threads">
+        <h3 id="gm-campaign-threads">Still open</h3>
+        {% if campaign_threads %}
+        <ul class="gm-campaign-list">
+            {% for thread in campaign_threads %}
+            <li data-thread-id="{{ thread.pk }}">
+                {# Its number, which the chips say and the model names it by (issue #790). #}
+                <span class="gm-campaign-detail gm-thread-number">thread {{ thread.pk }}</span>
+                <span class="gm-campaign-name">{{ thread.text }}</span>
+                {% if thread.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ thread.hand_mark }}</span>{% endif %}
+                {% if can_edit_records %}
+                <details class="gm-hand-edit">
+                    <summary>Correct</summary>
+                    <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="edit">
+                        <input type="hidden" name="thread_id" value="{{ thread.pk }}">
+                        <label>Thread <textarea name="text" rows="2" maxlength="300" required>{{ thread.text }}</textarea></label>
+                        <button type="submit" class="btn btn-sm">Save the thread</button>
+                    </form>
+                </details>
+                <details class="gm-hand-edit">
+                    <summary>Resolve</summary>
+                    <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="resolve">
+                        <input type="hidden" name="thread_id" value="{{ thread.pk }}">
+                        <label>How it ended <input type="text" name="resolution" maxlength="300"></label>
+                        <button type="submit" class="btn btn-sm">Close the thread</button>
+                    </form>
+                </details>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="gm-panel-empty">Nothing left hanging.</p>
+        {% endif %}
+        {% if can_edit_records %}
+        <details class="gm-hand-edit gm-hand-add" id="gm-open-thread">
+            <summary>Open a thread</summary>
+            <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="open">
+                <label>Thread <textarea name="text" rows="2" maxlength="300" required></textarea></label>
+                <button type="submit" class="btn btn-sm">Open the thread</button>
+            </form>
+        </details>
+        {% endif %}
+        {% if campaign_resolved %}
+        <details class="gm-campaign-resolved">
+            <summary>{{ campaign_resolved|length }} resolved</summary>
+            <ul class="gm-campaign-list">
+                {% for thread in campaign_resolved %}
+                <li data-thread-id="{{ thread.pk }}">
+                    <span class="gm-campaign-detail gm-thread-number">thread {{ thread.pk }}</span>
+                    <span class="gm-campaign-name">{{ thread.text }}</span>
+                    {% if thread.resolution %}<span class="gm-campaign-detail">{{ thread.resolution }}</span>{% endif %}
+                    {% if thread.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ thread.hand_mark }}</span>{% endif %}
+                    {% if can_edit_records %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ threads_url }}" data-change="reopen" data-thread-id="{{ thread.pk }}">Reopen</button>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% endif %}
+    </section>
+    <p class="gm-panel-status" id="gm-panel-campaign-status" role="status" hidden></p>
+{% endif %}

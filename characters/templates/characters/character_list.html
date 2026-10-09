@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% load static %}
+{% load local_time %}
+
+{% block title %}Characters{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/character-list.css' %}">
+{% endblock %}
+
+{# A manager's list carries the Owner column, so it takes the wider page (#338 item 24). #}
+{% block main_attrs %}class="{% if is_manager %}page-width-1000{% else %}page-width-800{% endif %}"{% endblock %}
+
+{% block content %}
+<h1>Characters</h1>
+
+{% comment %}
+No script lives in this template (issue #338 item 19): static/js/character-list.js
+wires the import form, the filters and the bulk bar, and character-management.js
+the row buttons. What they need from the server rides on data attributes, each
+URL rendered by {% url %}; a placeholder pk of 0 stands in where the real id is
+only known in the browser.
+{% endcomment %}
+<p>
+    <a href="{% url 'characters:create' %}" class="button">Create New Character</a>
+    <button type="button" class="button" id="import-character-toggle">Import Character</button>
+</p>
+
+<form id="import-character-form" method="post" enctype="multipart/form-data" action="{% url 'characters:import' %}" class="import-form" data-edit-url-template="{% url 'characters:edit' 0 %}">
+    {% csrf_token %}
+    <label for="import-file">Upload a Tarmar character JSON export:</label>
+    <input id="import-file" type="file" name="file" accept="application/json,.json" required>
+    <button type="submit" class="button">Import</button>
+    <span id="import-error" class="import-error" hidden></span>
+</form>
+
+<div class="filter-bar">
+    <label>
+        <input type="checkbox" id="show-deleted"{% if show_deleted %} checked{% endif %}>
+        Show deleted
+    </label>
+    {% if is_manager %}
+    {% comment %}The deleted-characters page was reachable only by typing its
+       address (issue #339, item 16).{% endcomment %}
+    <a href="{% url 'characters:deleted' %}" class="filter-link">Deleted characters</a>
+    <label for="user-filter">Filter by user:</label>
+    <select id="user-filter">
+        <option value="">All Users</option>
+        {% for u in all_users %}
+        <option value="{{ u.pk }}"{% if filter_user_id == u.pk|stringformat:"s" %} selected{% endif %}>{{ u.username }}</option>
+        {% endfor %}
+    </select>
+    {% endif %}
+</div>
+
+{% if characters %}
+<div class="bulk-actions" id="bulk-actions" data-bulk-delete-url="{% url 'characters:bulk_delete' %}" data-restore-url-template="{% url 'characters:restore' 0 %}">
+    <span class="selected-count"><span id="selected-count">0</span> selected</span>
+    <button class="button delete-btn" id="delete-selected-btn" disabled>Delete Selected</button>
+    <button class="button restore-btn" id="restore-selected-btn" disabled>Restore Selected</button>
+</div>
+
+<div class="table-wrap">
+<table class="character-table table-stack">
+    <thead>
+        <tr>
+            <th><input type="checkbox" id="select-all" aria-label="Select all characters" title="Select all"></th>
+            <th>Name</th>
+            <th>Owner</th>
+            <th>STR</th>
+            <th>DEX</th>
+            <th>INT</th>
+            <th>WIS</th>
+            <th>CON</th>
+            <th>CHR</th>
+            <th>Created</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody data-character-row-actions>
+        {% for character in characters %}
+        <tr data-id="{{ character.pk }}" class="{% if character.is_deleted %}deleted-row{% endif %}">
+            <td class="cell-checkbox">{% if is_manager or character.user_id == request.user.id %}<input type="checkbox" class="character-checkbox" aria-label="Select {{ character.name }}" value="{{ character.pk }}" data-deleted="{{ character.is_deleted|yesno:'true,false' }}">{% endif %}</td>
+            {% if character.is_deleted %}
+            {% comment %}Soft-deleted characters 404 on the edit page (CharacterEditView's
+               get_queryset excludes them, matching every mutation endpoint --
+               see characters/views.py), so linking the name here dead-ends.
+               Plain text; Restore (below, for the owner or a manager) is the way back in.{% endcomment %}
+            <td class="cell-name" data-label="Name">{{ character.name }}</td>
+            {% else %}
+            <td class="cell-name" data-label="Name"><a href="{% url 'characters:edit' character.pk %}">{{ character.name }}</a>{% if not character.is_complete %} {% include "characters/_incomplete_marks.html" %}{% endif %}</td>
+            {% endif %}
+            <td data-label="Owner">{{ character.user.username }}</td>
+            <td data-label="STR">{{ character.strength|default_if_none:"—" }}</td>
+            <td data-label="DEX">{{ character.dexterity|default_if_none:"—" }}</td>
+            <td data-label="INT">{{ character.intelligence|default_if_none:"—" }}</td>
+            <td data-label="WIS">{{ character.wisdom|default_if_none:"—" }}</td>
+            <td data-label="CON">{{ character.constitution|default_if_none:"—" }}</td>
+            <td data-label="CHR">{{ character.charisma|default_if_none:"—" }}</td>
+            <td data-label="Created">{% local_time character.created_at "M d, Y" style="date" %}</td>
+            <td data-label="Status"><span class="status-badge {{ character.status_css_class }}">{{ character.status }}</span> <span class="status-badge {% if character.is_public %}visibility-public{% else %}visibility-private{% endif %}">{{ character.is_public|yesno:"Public,Private" }}</span></td>
+            <td class="cell-actions">
+                {% if character.is_deleted %}
+                {% if is_manager or character.user_id == request.user.id %}
+                <button class="button action-btn restore-btn" data-id="{{ character.pk }}" data-restore-url="{% url 'characters:restore' character.pk %}">Restore</button>
+                {% endif %}
+                {% else %}
+                {% comment %}
+                Three export formats behind one disclosure, and Delete drawn
+                quietly (issue #713). The row used to stack PDF, MD, JSON and
+                Delete as four buttons of near-identical size -- three of them
+                dark-filled, the fourth red -- so the row stood 170px tall and
+                the destructive action was one of four equals, while the thing
+                a reader almost always wants, the character, was a plain link
+                in another column. <details> needs no script and nothing here
+                appears or vanishes on its own.
+                {% endcomment %}
+                {% if character.is_complete %}
+                <details class="row-exports">
+                    <summary>Export</summary>
+                    <div class="row-exports-list">
+                        <a href="{% url 'character_export:export_pdf' character.pk %}" title="Export PDF">PDF</a>
+                        <a href="{% url 'character_export:export_markdown' character.pk %}" title="Export Markdown">Markdown</a>
+                        <a href="{% url 'character_export:export_json' character.pk %}" title="Export JSON (round-trips via Import)">JSON</a>
+                    </div>
+                </details>
+                {% endif %}
+                {% if is_manager or character.user_id == request.user.id %}
+                <button class="action-btn delete-btn delete-btn-quiet" data-id="{{ character.pk }}" data-delete-url="{% url 'characters:delete' character.pk %}" data-name="{{ character.name }}">Delete</button>
+                {% endif %}
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% include "_pagination.html" with pagination_label="Character list pages" qs=preserved_query %}
+{% else %}
+<p>{% if is_manager %}No characters found.{% else %}You haven't created any characters yet.{% endif %}</p>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/character-management.js' %}"></script>
+<script src="{% static 'js/character-list.js' %}"></script>
+{% endblock %}
