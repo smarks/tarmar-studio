@@ -83,6 +83,5 @@ these threads together for you (GM access required):
 - [Hooks for New Characters](/tarmar/reference/dm-rules/gm-tools/low-experience-hooks/)
   is the full set of first-adventure hooks, sized for level 1–2 characters,
   each anchored to a place above where one exists.
-- The regional pages under
-  [Maja & Solberg](/tarmar/reference/dm-rules/the-world/maja-solberg/)
+- The regional pages under [The World](/tarmar/reference/dm-rules/the-world/)
   carry the deeper lore behind each starting thread.

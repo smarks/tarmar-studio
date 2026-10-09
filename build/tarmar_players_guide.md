@@ -181,8 +181,7 @@ these threads together for you (GM access required):
 - Hooks for New Characters
   is the full set of first-adventure hooks, sized for level 1–2 characters,
   each anchored to a place above where one exists.
-- The regional pages under
-  Maja & Solberg
+- The regional pages under The World
   carry the deeper lore behind each starting thread.
 
 ---
