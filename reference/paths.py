@@ -23,9 +23,9 @@ is imported only on the path that raises it, so a correct configuration loads
 no Django module at all (``gm.tests`` holds ``gm.engine``'s import chain to
 that).
 
-A canon directory holds the ``dm-rules/`` pages plus three JSON files and
-the Games Master's world digest, all read once at import (issues #918 and
-#919; ``reference.apps`` has ``runserver`` watch them):
+A canon directory holds the ``dm-rules/`` pages plus four JSON files and
+the Games Master's world digest, all read once per process (issues #918,
+#919 and #960; ``reference.apps`` has ``runserver`` watch them):
 
 - ``canon.json`` (optional): ``{"name": "tarmar" | "default"}``, which canon
   this is, as :data:`CANON_NAME` reports it. Without the file a directory is
@@ -43,6 +43,13 @@ the Games Master's world digest, all read once at import (issues #918 and
   (strings ``slug``, ``title``, ``image`` and a list of strings
   ``place_names``), and an optional list of strings
   ``case_sensitive_place_names``. Read by ``gm.maps``.
+- ``magic-rules.json`` (required to seat a battle): the casting success
+  tiers, Push and Channel numbers the engine's ``MagicRules`` takes, with
+  ``casting_success_tiers`` (a list), ``push`` and ``channel`` (objects or
+  ``null``) and an optional ``rulings`` list recording readings the pages
+  left open. Every other field is named exactly as the engine dataclass
+  field it fills. Read by ``battle.magic_rules``, whose docstring gives the
+  full schema.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's
   system prompt, used verbatim less its trailing newlines. Without it
   ``gm.engine`` uses a one-paragraph built-in fallback and logs a warning.
@@ -113,10 +120,15 @@ CANON_LABELS: dict[str, str] = {
     DEFAULT_CANON_NAME: "default canon",
 }
 
-# The JSON files a canon directory carries beside its pages (see above).
+# Three of the JSON files a canon directory carries beside its pages (see
+# above).
 CANON_MANIFEST_FILE_NAME = "canon.json"
 CANON_NAV_FILE_NAME = "nav.json"
 CANON_MAPS_FILE_NAME = "maps.json"
+# The canon JSON files the reference search index fingerprints
+# (``reference.search_index``): an edit to one rebuilds the index.
+# ``magic-rules.json`` is not among them, since no page or nav entry
+# depends on it.
 CANON_JSON_FILE_NAMES: tuple[str, ...] = (
     CANON_MANIFEST_FILE_NAME,
     CANON_NAV_FILE_NAME,
@@ -300,6 +312,13 @@ WORLD_PROMPT_FILE = DM_RULES_DIR / CANON_PROMPT_DIR_NAME / "world.md"
 # canon without one gets the default canon's, which keeps to the public rules.
 MAGIC_PROMPT_FILE = DM_RULES_DIR / CANON_PROMPT_DIR_NAME / "magic.md"
 DEFAULT_MAGIC_PROMPT_FILE = DEFAULT_CANON_DIR / CANON_PROMPT_DIR_NAME / "magic.md"
+
+# The magic rules battles are seated with (issue #960): the casting success
+# tiers, Push and Channel, read into the engine's ``MagicRules`` by
+# ``battle.magic_rules``. Every canon carries one; the default canon's holds
+# invented numbers.
+CANON_MAGIC_RULES_FILE_NAME = "magic-rules.json"
+MAGIC_RULES_FILE = DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME
 
 # The rest of what a canon directory may hold beside its pages (issue #921):
 # the author's documents, the guides generated from the canon, the Tarmar-only

@@ -1,0 +1,42 @@
+{
+  "casting_success_tiers": [
+    {
+      "key": "lucky_cast",
+      "label": "Lucky cast",
+      "natural_totals": [3],
+      "effect_bonus": 1,
+      "mana_refund": 0
+    }
+  ],
+  "push": {
+    "control_dice": "3d6",
+    "control_attribute": "INT",
+    "penalty_per_mana": 1,
+    "base_cost_counts_as_invested": true,
+    "failure_bands": [
+      {
+        "key": "slip",
+        "label": "Slip",
+        "is_runaway": false,
+        "lowest_margin": 1,
+        "highest_margin": 4,
+        "spell_takes_effect": true,
+        "push_bonus_applies": false
+      },
+      {
+        "key": "surge",
+        "label": "Surge",
+        "is_runaway": true,
+        "lowest_margin": 5,
+        "highest_margin": null,
+        "spell_takes_effect": false,
+        "push_bonus_applies": false
+      }
+    ],
+    "automatic_runaway_totals": [18],
+    "max_push_mana": 3,
+    "effect_bonus_per_mana_by_kind": { "damage": 1 },
+    "spell_effect_bonus_per_mana": {}
+  },
+  "channel": null
+}
