@@ -20,19 +20,22 @@ def _safe_filename(name: str, suffix: str) -> str:
     return f"{safe_name}{suffix}"
 
 
-def _safe_url_fetcher(url, *args, **kwargs):
-    """URL fetcher for WeasyPrint that refuses non-HTTP(S) schemes.
+#: The only schemes a PDF export may fetch. The character sheet is
+#: self-contained, so a crafted resource reference must not read local files
+#: (``file://``) or reach other schemes (SSRF/LFI).
+PDF_ALLOWED_PROTOCOLS = frozenset({"http", "https"})
 
-    The character sheet is self-contained, so a crafted resource reference must
-    not be able to read local files (``file://``) or reach internal services
-    (SSRF/LFI). http(s) URLs pass through to WeasyPrint's default fetcher.
+
+def _safe_url_fetcher():
+    """WeasyPrint's own URL fetcher, limited to http(s).
+
+    WeasyPrint 70 takes a :class:`weasyprint.urls.URLFetcher`, not a function,
+    and the fetcher refuses any other scheme itself (issue #1003). Imported
+    lazily so test collection does not require pango and glib.
     """
-    if not url.startswith(("http://", "https://")):
-        raise ValueError(f"Blocked non-HTTP resource in export: {url}")
-    # Lazy import so test collection / the file:// branch don't require weasyprint.
-    from weasyprint import default_url_fetcher
+    from weasyprint.urls import URLFetcher
 
-    return default_url_fetcher(url, *args, **kwargs)
+    return URLFetcher(allowed_protocols=PDF_ALLOWED_PROTOCOLS)
 
 
 def _visible_character_or_404(request, character_id) -> Character:
@@ -128,7 +131,7 @@ def export_pdf(request, character_id):
     # does not require pango/glib to be installed.
     from weasyprint import HTML
 
-    pdf_bytes = HTML(string=html_content, url_fetcher=_safe_url_fetcher).write_pdf()
+    pdf_bytes = HTML(string=html_content, url_fetcher=_safe_url_fetcher()).write_pdf()
     filename = _safe_filename(character.name, ".pdf")
 
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
