@@ -7,5 +7,6 @@ class BattleConfig(AppConfig):
 
     def ready(self):
         # Registers the user_logged_in receiver that adopts a guest's
-        # battles into the account they sign into (issue #305).
-        from . import adoption  # noqa: F401
+        # battles into the account they sign into (issue #305), and the
+        # system check that loads the canon's magic rules (issue #960).
+        from . import adoption, checks  # noqa: F401

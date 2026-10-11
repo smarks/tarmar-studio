@@ -13,6 +13,8 @@ from battle.generation import (
     pick_weapon,
     spell_loadout,
 )
+from battle.services import snapshot_combatant
+from battle.spells import get_spell
 from characters.constants import CHARACTER_NAME_PATTERN
 from characters.equipment import (
     ENCUMBRANCE_ORDER,
@@ -20,6 +22,8 @@ from characters.equipment import (
     get_item,
 )
 from common.test_helpers import BaseTestCase
+
+from .magic_fixtures import rules_with_channel, seated_rules
 
 
 class GenerateNameTest(BaseTestCase):
@@ -104,6 +108,32 @@ class SpellLoadoutTest(BaseTestCase):
 
     def test_non_casters_get_nothing(self):
         self.assertEqual(spell_loadout("archer", 0), ((), 0))
+
+    def test_every_generated_caster_can_cast_each_of_its_spells(self):
+        """Issue #960: a generated spell is at a mastery equal to its level.
+
+        Under a Channel of one per recorded spell level, a spell recorded at
+        mastery 1 would allow only level-1 spells; at its own level each fits.
+        Coordinator's ruling, marked for Spencer.
+        """
+        cycles = {"wizard": 3, "fighter-mage": 2}
+        rules = rules_with_channel(multiplier=1)
+        channel = rules.channel
+        assert channel is not None
+        with seated_rules(rules):
+            for archetype, variants in cycles.items():
+                for variant in range(variants):
+                    generated = generate_character(
+                        None, "Casters", variant, archetypes=(archetype,)
+                    )
+                    seated = snapshot_combatant(generated, 1, (0, 0), 0)
+                    for key in generated.spells:
+                        spell = get_spell(key)
+                        with self.subTest(archetype=archetype, spell=key):
+                            self.assertGreaterEqual(
+                                channel.channel_for(seated, spell),
+                                spell.level,
+                            )
 
 
 class GenerateCharacterTest(BaseTestCase):

@@ -466,6 +466,7 @@ def _base_fields(candidate: Candidate) -> dict:
         "rationale": candidate.rationale,
         "target_id": candidate.target_id,
         "spell_key": candidate.spell_key,
+        "push_mana": candidate.push_mana,
         "destination": candidate.destination,
     }
 

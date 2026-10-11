@@ -128,9 +128,12 @@ def spell_mastery(character: Character, spells: tuple[str, ...]) -> dict[str, in
 
     ``public-rules/magic/spell-mastery.md``: level 2 casts with no gestures,
     level 3 with no incantation either, which is what a grappled caster needs
-    to renew (2+) or cast (3+) a spell (tarmar-engine 0.9.5, #821). A seated
-    spell the record holds no points in (a generated guest's, never saved) is
-    left out, and the engine reads it at level 1, "Can cast the spell".
+    to renew (2+) or cast (3+) a spell (tarmar-engine 0.9.5, #821). The seat
+    also carries these levels as the spells' skill levels, which a canon's
+    Channel may derive from (#960). A seated spell the record holds no points
+    in is left out, and the engine reads the two maps differently there: its
+    mastery at level 1, "Can cast the spell", and its skill level at 0, so a
+    Channel derived from the spell's level allows it no mana.
 
     Args:
         character: The character being seated.

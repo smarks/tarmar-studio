@@ -35,6 +35,7 @@ from characters.weapon_skill import weapon_skill_name
 from common.rolling import Roller
 
 from .models import SEED_RANGE
+from .spells import get_spell
 
 # The archetype cycle. A battle of N draws these round-robin, with per-index
 # variation inside each archetype (weapon pick and skill budget rotate), so
@@ -474,9 +475,15 @@ def generate_character(
         character.free_spell_points = mana
     if spells:
         # Written to the record too (issue #774), so a generated caster the
-        # player keeps knows its spells at mastery 1 on the sheet and the
-        # next time it is seated.
-        character.spells = {key: points_for_level(1) for key in spells}
+        # player keeps knows its spells on the sheet and the next time it is
+        # seated. Each at a mastery equal to the spell's own level, so a
+        # Channel that derives from the spell's level allows its cost
+        # (issue #960). Coordinator's ruling, marked for Spencer: the
+        # generator makes stronger figures, and a saved player character is
+        # held to the canon as written.
+        character.spells = {
+            key: points_for_level(get_spell(key).level) for key in spells
+        }
     if user is not None:
         character.save()
     return GeneratedCombatant(

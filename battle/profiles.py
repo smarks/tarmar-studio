@@ -36,16 +36,22 @@ built per battle rather than being a module-level singleton.
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from django.db.models import Max
 from hexarena.dice import Dice
+from tarmar_engine.policy import Decision
+from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 
 from common.rolling import Roller
 
 from . import agreement, policy, viewmodel
 from .engine.engine import run_turn as run_tarmar_turn
 from .engine.state import BattleState
+from .magic_rules import magic_rules
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
 
 #: A classic figure's ``uid`` is its ``BattleCombatant`` row's pk as a string.
@@ -205,7 +211,9 @@ class TarmarProfile(BattleProfile):
         # every turn so a change takes effect on the next one (#867).
         agreement.fill(state, agreement.Agreement.of(self.battle))
         events: list[dict] = []
-        run_tarmar_turn(state, roller, events.append, decide)
+        run_tarmar_turn(
+            state, roller, events.append, decide, profile=tarmar_engine_profile()
+        )
         return events
 
     def mint_event(self, state: BattleState, **fields) -> dict:
@@ -536,10 +544,31 @@ def view_of(battle, *, detail_ids: frozenset[int] = frozenset()) -> dict:
     return profile.view(profile.load(battle.state_json), detail_ids=detail_ids)
 
 
-def decider(battle):
-    """This battle's AI: the profile's own policy, in one Decision shape."""
+def tarmar_engine_profile() -> EngineTarmarProfile:
+    """The engine's Tarmar profile, carrying the loaded canon's magic rules.
+
+    The one place a Tarmar turn's engine profile is built (issue #960): the
+    casting success tiers, Push and Channel run on the numbers
+    :func:`battle.magic_rules.magic_rules` reads from the canon, and on
+    nothing a player or a Game Master sends.
+
+    Raises:
+        battle.magic_rules.MagicRulesError: The canon's file is missing or
+            malformed (the system check reports the same at startup).
+    """
+    return EngineTarmarProfile(magic=magic_rules())
+
+
+def decider(battle) -> Callable[[Any, Any], Decision]:
+    """This battle's AI: the profile's own policy, in one Decision shape.
+
+    A Tarmar menu is built with the same magic rules the turn runs on
+    (:func:`tarmar_engine_profile`): the engine refuses a cast past the caster's
+    Channel, so a menu built without them could offer one it will not run,
+    and only with them does a cast gain the pushed variants a player may pick.
+    """
     if battle.rules_profile == CLASSIC_PROFILE:
         from tarmar_engine.classic import policy as classic_policy
 
         return classic_policy.choose_option
-    return policy.choose_option
+    return functools.partial(policy.choose_option, magic=tarmar_engine_profile().magic)

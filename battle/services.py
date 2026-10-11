@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, replace
 from typing import Concatenate
 
 from django.db import transaction
+from tarmar_engine.magic import ChannelRules, ChannelUnclassifiedSpell
+from tarmar_engine.spells import Spell
 from tarmar_engine.weapons import missile_rate_from_note
 
 from bestiary.generation import DIFFICULTY_BANDS, pick_base
@@ -34,6 +36,7 @@ from characters.models import (
     characters_visible_to,
 )
 from characters.services import FightReport, record_entry_into_play
+from characters.skills import glossary_skill_level
 from characters.weapon_skill import resolve_weapon_skill
 
 from . import agreement, control, policy, profiles, turn_menu
@@ -53,8 +56,15 @@ from .generation import (
     generate_character,
     stat_roller_for_slot,
 )
+from .magic_rules import magic_rules
 from .models import SEED_RANGE, Battle, BattleCombatant, BattleDraft, BattleEvent
-from .persistence import CLASSIC_PROFILE, PROFILE_CHOICES, TARMAR_PROFILE, dump_state
+from .persistence import (
+    CLASSIC_PROFILE,
+    PROFILE_CHOICES,
+    TARMAR_PROFILE,
+    dump_state,
+    tarmar_state,
+)
 from .signals import battle_ended
 from .spells import get_spell
 
@@ -331,6 +341,37 @@ def _shield_bonus(character: Character, weapon: WeaponState | None = None) -> in
     return get_shield_bonus((character.equipment or [])[index].get("item_id", ""))
 
 
+def _channel_skill_levels(character: Character) -> dict[str, int]:
+    """The general skills the canon's Channel rules read, at the record's levels.
+
+    A canon's ``channel.derivations`` may name, as a kind of magic's
+    ``source_skill``, the general skill whose level that kind's Channel
+    derives from (issue #960). Each one named is read off the record by its
+    glossary name; the system check (``battle.checks``) holds a canon to
+    names the glossary has. A skill held at no level carries no key, and the
+    engine reads a missing skill at level 0. Only the record sets the level:
+    the sheet's rules govern it, and nothing at the table writes it.
+
+    Args:
+        character: The character being seated.
+
+    Returns:
+        ``{skill key: level}`` for the Channel skills the character holds;
+        empty when the canon bounds no casting by Channel.
+    """
+    channel = magic_rules().channel
+    if channel is None:
+        return {}
+    levels: dict[str, int] = {}
+    for derivation in channel.derivations.values():
+        if derivation.source_skill is None:
+            continue
+        level = glossary_skill_level(character.skills, derivation.source_skill)
+        if level:
+            levels[derivation.source_skill] = level
+    return levels
+
+
 def snapshot_character(
     character: Character,
     combatant_id: int,
@@ -380,6 +421,12 @@ def snapshot_character(
         raise ValueError(
             f"{character.name} is not complete: {', '.join(character.missing_parts)}"
         )
+    # A spell's mastery is the character's skill level in it, on the ladder
+    # every skill climbs (spell-mastery.md), so the grapple rules' mastery and
+    # Channel's spell level are one reading of the record (issue #960). A
+    # seated spell the record holds no points in is in neither map, and the
+    # engine reads the two differently: mastery 1, Channel's level 0.
+    seated_spell_levels = spell_mastery(character, spells)
     return CombatantState(
         combatant_id=combatant_id,
         name=display_name,
@@ -417,7 +464,9 @@ def snapshot_character(
         # ruling; Spencer may overrule): a caster arrives with what is left.
         mana=min(mana, current_mana(character)),
         spells=list(spells),
-        spell_mastery=spell_mastery(character, spells),
+        spell_mastery=seated_spell_levels,
+        spell_skill_levels=dict(seated_spell_levels),
+        skill_levels=_channel_skill_levels(character),
     )
 
 
@@ -1549,7 +1598,7 @@ def _start_locked(battle: Battle) -> Battle:
         entry["q"], entry["r"] = position
         entry["facing"] = hexes.direction_towards(position, (0, 0))
         entries.append(entry)
-    state = BattleState.from_dict({"arena_radius": arena_radius, "combatants": entries})
+    state = tarmar_state({"arena_radius": arena_radius, "combatants": entries})
     playable = _playable_state(battle, state)
     battle.status = Battle.STATUS_SETUP
     battle.state_json = dump_state(playable)
@@ -2065,14 +2114,35 @@ def same_target(one, other) -> bool:
     return str(one) == str(other)
 
 
+def names_option(option: dict, recorded: dict) -> bool:
+    """Does a recorded choice name this menu option?
+
+    The one comparison both sides of a player's choice make: the submission
+    against the stored pending menu, and the recorded choice against the
+    replayed one. An option is its letter, its target, its spell and the
+    mana it pushes into that spell (issue #960), so a pushed cast is a
+    different option from the plain cast of the same spell, and a player may
+    record only a push the engine offered for it. A missing ``push_mana`` is
+    0, the plain cast, as a menu or a choice stored before Push reads.
+
+    Args:
+        option: A menu option's fields, as :meth:`~tarmar_engine.policy.
+            Candidate.to_payload` writes them.
+        recorded: The choice: ``letter``, ``target_id``, ``spell_key`` and
+            ``push_mana``.
+    """
+    return (
+        option.get("letter") == recorded.get("letter")
+        and same_target(option.get("target_id"), recorded.get("target_id"))
+        and (option.get("spell_key") or "") == (recorded.get("spell_key") or "")
+        and (option.get("push_mana") or 0) == (recorded.get("push_mana") or 0)
+    )
+
+
 def _match_candidate(candidates: list, recorded: dict):
     """The replayed candidate a recorded player choice names, or None."""
     for candidate in candidates:
-        if (
-            candidate.letter == recorded.get("letter")
-            and same_target(candidate.target_id, recorded.get("target_id"))
-            and candidate.spell_key == (recorded.get("spell_key") or "")
-        ):
+        if names_option(candidate.to_payload(), recorded):
             return candidate
     return None
 
@@ -2932,6 +3002,32 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
     return battle, events
 
 
+def _channel_refusal(channel: ChannelRules, actor: CombatantState, spell: Spell) -> str:
+    """Why the menu withholds a cast of ``spell`` for its Channel, or ``""``.
+
+    The engine's own test (``tarmar_engine.policy._within_channel``): the
+    spell's cost past the caster's Channel for it, or a spell the Channel
+    rules give no kind of magic. Both are read from the engine's
+    :meth:`~tarmar_engine.magic.ChannelRules.channel_for`; only the words are
+    the cast stage's.
+
+    Args:
+        channel: The canon's Channel rules.
+        actor: The caster.
+        spell: The spell offered.
+
+    Returns:
+        The reason in the player's words, or ``""`` when the Channel allows it.
+    """
+    try:
+        limit = channel.channel_for(actor, spell)
+    except ChannelUnclassifiedSpell:
+        return "the rules give it no kind of magic, so no Channel for it"
+    if spell.level > limit:
+        return f"costs {spell.level} mana, past a Channel of {limit} for it"
+    return ""
+
+
 def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     """One Tarmar caster's magical situation, in the cast stage's own shape.
 
@@ -2955,8 +3051,11 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
 
     The castability rules restate ``policy._cast_candidates``' filters —
     the engine drops the casts it will not offer, this says out loud why
-    each was dropped. ``battle.tests.test_cast_flow`` pins the two sets
-    equal so the explanation can never contradict the menu.
+    each was dropped — and then the menu's Channel filter (issue #960),
+    through :func:`_channel_refusal`, on the same magic rules the menu is
+    built with. ``battle.tests.test_cast_flow`` pins the two sets equal,
+    against a menu built with those rules, so the explanation can never
+    contradict the menu.
     """
     try:
         actor = state.by_id(combatant_id)
@@ -2968,6 +3067,7 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     # ``policy._cast_candidates`` chooses it — a spell with nobody to aim at
     # is not offered, so the row has to say so rather than claim castable.
     enemy = policy.nearest_enemy(state, actor)
+    channel = magic_rules().channel
     rows = []
     for key in actor.spells:
         spell = get_spell(key)
@@ -2979,6 +3079,9 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
             castable, reason = False, "already up — renews itself"
         elif aimed and enemy is None:
             castable, reason = False, "nothing in reach to aim at"
+        elif channel is not None:
+            reason = _channel_refusal(channel, actor, spell)
+            castable = not reason
         attribute = actor.intelligence if spell.attribute == "INT" else actor.wisdom
         chance = policy.three_d6_at_most(attribute)
         aim = ", then a DEX roll to land it" if spell.targeted else ""
@@ -3043,6 +3146,7 @@ def record_player_action(
     letter: str,
     target_id: int | None = None,
     spell_key: str = "",
+    push_mana: int = 0,
     destination: tuple[int, int] | None = None,
     as_ai: bool = False,
 ) -> tuple[Battle, list[BattleEvent]]:
@@ -3062,8 +3166,13 @@ def record_player_action(
     stored copy is display-only). Only the seated player may choose for
     their combatant; a DM may instead pass ``as_ai=True`` to let the AI's
     top-scored candidate stand for an absent player (the ``letter``/
-    ``target_id``/``spell_key`` arguments are ignored then, but the binding
-    is not: an AI hand-off is a choice for one named figure too).
+    ``target_id``/``spell_key``/``push_mana`` arguments are ignored then, but
+    the binding is not: an AI hand-off is a choice for one named figure too).
+
+    ``push_mana`` is the extra mana a cast pushes into its spell (issue
+    #960). A player may record only a push the engine offered on the menu for
+    that cast; any other amount is not on the menu, and refused as an option
+    that is not.
 
     ``destination`` is the hex the player picked for an option that places
     the figure (#819, #866). It must be one of that option's
@@ -3123,6 +3232,7 @@ def record_player_action(
             letter = top["letter"]
             target_id = top.get("target_id")
             spell_key = top.get("spell_key") or ""
+            push_mana = top.get("push_mana") or 0
             # The AI's own hex, if it named one. On tarmar-engine 0.9.10 the AI
             # names none (house ruling ai_destinations), so this is None and
             # the option makes its own move; kept so a hand-off carries the
@@ -3135,14 +3245,13 @@ def record_player_action(
                 "letter": letter,
                 "target_id": target_id,
                 "spell_key": spell_key or "",
+                "push_mana": push_mana,
             }
             matched = next(
                 (
                     candidate
                     for candidate in candidates
-                    if candidate.get("letter") == recorded["letter"]
-                    and same_target(candidate.get("target_id"), recorded["target_id"])
-                    and (candidate.get("spell_key") or "") == recorded["spell_key"]
+                    if names_option(candidate, recorded)
                 ),
                 None,
             )
@@ -3161,6 +3270,7 @@ def record_player_action(
             "letter": letter,
             "target_id": target_id,
             "spell_key": spell_key or "",
+            "push_mana": push_mana,
             "destination": list(destination) if destination is not None else None,
         }
         battle.turn_inputs_json = inputs
