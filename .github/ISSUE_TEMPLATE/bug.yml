@@ -1,5 +1,6 @@
-# The same forms live in smarks/tarmar-studio (public, where players file)
-# and smarks/tarmar-studio-private (where sessions file). Change both.
+# Every Tarmar repository carries these same forms (tarmar-studio-private,
+# tarmar-studio, tarmar-canon, tarmar-engine, tarmar-rules); change them all
+# together. Players file in the public tarmar-studio.
 name: Bug
 description: Something in Tarmar Studio is broken or wrong.
 labels: [bug]

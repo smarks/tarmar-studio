@@ -222,6 +222,12 @@ queue rather than run.
 ./run gate --no-push       # record locally only (a deploy host will not see it)
 ```
 
+**To deploy, run `./run ship`** after merging: it gates the head of `main`
+against the canon's head in a temporary worktree, follows the Deploy run the
+gate starts, and removes what it made. `docs/repositories.md` lists every
+repository a deployment depends on and how a change in each reaches
+production.
+
 **The gate starts the deploy.** When the recorded commit is still the head of
 `main` on GitHub and the first pass ran the Tarmar canon, `./run gate` starts
 the Deploy workflow once the record is pushed (`gh workflow run deploy.yml
@@ -316,11 +322,17 @@ Run as `sam` (the script uses `sudo` for the root-owned pieces, as `deploy.sh` d
 
 ### Deploy
 
+From the Mac, after merging:
+
 ```bash
-./deploy.sh
+./run ship
 ```
 
-This will:
+That gates the head of `main` and starts the Deploy workflow, which runs
+`./deploy.sh --expect <sha>` on this host. Running `./deploy.sh` here by hand
+still works, but collides on the deploy lock with any Deploy run in progress.
+
+`deploy.sh` will:
 1. Refuse the commit outright if `refs/notes/gate` holds no passing record for it (unless `--force`)
 2. Pull latest code into the main checkout, then re-run itself from the pulled copy (bash reads the script before the pull replaces it)
 3. Check out origin/main into the inactive colour's release checkout

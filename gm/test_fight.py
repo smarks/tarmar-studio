@@ -44,6 +44,9 @@ from .battle_report import (
 from .character_schema import SCHEMA_IN_PROMPT_PREAMBLE
 from .engine import MODE_AIDE, MODE_PLAY
 from .fight import (
+    _COUNT_PREFIX,
+    _COUNT_SUFFIX,
+    _FOE_SEPARATOR,
     FOE_SCHEMA,
     FOE_TEAM,
     PARTY_TEAM,
@@ -115,6 +118,36 @@ class FoeTextTest(SimpleTestCase):
     def test_nothing_named_is_an_error(self):
         with self.assertRaises(FightError):
             parse_foe_text("  , ; . ")
+
+    def test_runs_of_whitespace_count_as_one_space(self):
+        # Collapsed before parsing (#989): names read the same however spaced.
+        requests = parse_foe_text("two   gray\twolves ,   a  dire wolf\n and rat  x3")
+        self.assertEqual(
+            [(request.name, request.count) for request in requests],
+            [("gray wolves", 2), ("dire wolf", 1), ("rat", 3)],
+        )
+        long_gap = parse_foe_text("a" + " " * 3998 + "b")
+        self.assertEqual(
+            [(request.name, request.count) for request in long_gap], [("b", 1)]
+        )
+
+    def test_the_patterns_stay_fast_on_crafted_input(self):
+        # CodeQL's py/polynomial-redos inputs (#989), far past the 4,000-
+        # character cap, so a pattern that backtracks takes seconds rather
+        # than milliseconds. Timed on the patterns themselves, so collapsing
+        # whitespace first cannot hide a slow one.
+        crafted = [
+            " " * 50_000,
+            "a" + " " * 50_000,
+            "a " + "  " * 25_000,
+            "a" + " " * 50_000 + "b",
+        ]
+        for text in crafted:
+            started = time.perf_counter()
+            _FOE_SEPARATOR.split(text)
+            _COUNT_PREFIX.match(text)
+            _COUNT_SUFFIX.match(text)
+            self.assertLess(time.perf_counter() - started, 1.0, repr(text[:4]))
 
 
 class FoeResolutionTest(BaseTestCase):

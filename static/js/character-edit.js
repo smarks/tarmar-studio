@@ -1439,7 +1439,8 @@ async function renderEquipmentList(equipment) {
             const readOnlyBits = [
                 `<span class="item-name">${escapeHtml(name)}${isCustom ? ' <em>(custom)</em>' : ''}</span>`,
                 `<span class="item-weight">${weight.toFixed(1)} lbs</span>`,
-                `<span class="item-quantity">Qty: ${item.quantity || 1}</span>`,
+                // A number, never the stored text: this goes into innerHTML (#989).
+                `<span class="item-quantity">Qty: ${Number(item.quantity) || 1}</span>`,
                 item.in_pack ? '<span class="item-pack">In pack</span>' : '',
                 item.notes ? `<span class="item-notes">${escapeHtml(item.notes)}</span>` : '',
             ].filter(Boolean).join('\n                    ');
@@ -1465,15 +1466,15 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Hit:</label>
-                            <input type="number" value="${item.to_hit_mod || 0}" data-field="to_hit_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.to_hit_mod) || 0}" data-field="to_hit_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                         <div class="mod-field">
                             <label>Dmg:</label>
-                            <input type="number" value="${item.damage_mod || 0}" data-field="damage_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.damage_mod) || 0}" data-field="damage_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                         <div class="mod-field">
                             <label>Crit:</label>
-                            <input type="number" value="${item.critical_mod || 0}" data-field="critical_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.critical_mod) || 0}" data-field="critical_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                     </div>
                 `;
@@ -1487,11 +1488,11 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Stops:</label>
-                            <input type="number" value="${item.stops_mod || 0}" data-field="stops_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.stops_mod) || 0}" data-field="stops_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                         <div class="mod-field">
                             <label>DEX:</label>
-                            <input type="number" value="${item.dex_mod || 0}" data-field="dex_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.dex_mod) || 0}" data-field="dex_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                     </div>
                 `;
@@ -1500,11 +1501,11 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Stops:</label>
-                            <input type="number" value="${item.stops_mod || 0}" data-field="stops_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.stops_mod) || 0}" data-field="stops_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                         <div class="mod-field">
                             <label>DEX:</label>
-                            <input type="number" value="${item.dex_mod || 0}" data-field="dex_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${Number(item.dex_mod) || 0}" data-field="dex_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
                         </div>
                     </div>
                 `;
@@ -1517,7 +1518,7 @@ async function renderEquipmentList(equipment) {
                     <span class="item-weight">${weight.toFixed(1)} lbs</span>
                     <div class="item-quantity">
                         <label>Qty:</label>
-                        <input type="number" value="${item.quantity || 1}" min="1" max="${NUMBER_LIMITS.equipment_quantity}" data-field="quantity">
+                        <input type="number" value="${Number(item.quantity) || 1}" min="1" max="${NUMBER_LIMITS.equipment_quantity}" data-field="quantity">
                     </div>
                     <div class="item-pack">
                         <input type="checkbox" ${item.in_pack ? 'checked' : ''} data-field="in_pack">
@@ -1568,7 +1569,7 @@ function heldControl(category, index) {
         : '';
     return `
                     <div class="item-held">
-                        <input type="radio" name="held-${category}" ${held ? 'checked' : ''} data-field="equipped" aria-label="${label}">
+                        <input type="radio" name="held-${category === 'weapons' ? 'weapons' : 'shield'}" ${held ? 'checked' : ''} data-field="equipped" aria-label="${label}">
                         <label>${label}</label>
                         ${idle}
                     </div>`;

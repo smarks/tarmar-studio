@@ -192,11 +192,14 @@ FOE_REQUEST_PREAMBLE = (
     "party is about to fight, and nothing that is not hostile to them. "
 )
 
+# Each pattern has one way to match any text, so none can backtrack
+# polynomially over a run of spaces (CodeQL py/polynomial-redos, #989): the
+# name after a count starts on a non-space, the name before "x3" ends on one.
 _COUNT_PREFIX = re.compile(
-    r"^(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(.+)$",
+    r"^(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(\S.*)$",
     re.IGNORECASE,
 )
-_COUNT_SUFFIX = re.compile(r"^(.+?)\s*[x×]\s*(\d+)$", re.IGNORECASE)
+_COUNT_SUFFIX = re.compile(r"^(.*\S)\s*[x×]\s*(\d+)$", re.IGNORECASE)
 _NUMBER_WORDS = {
     "a": 1,
     "an": 1,
@@ -211,7 +214,8 @@ _NUMBER_WORDS = {
     "nine": 9,
     "ten": 10,
 }
-_FOE_SEPARATOR = re.compile(r"\s*,\s*|\s+and\s+|\s*;\s*", re.IGNORECASE)
+# The spaces around a separator stay with the parts, which are stripped.
+_FOE_SEPARATOR = re.compile(r"[,;]|(?<=\s)and(?=\s)", re.IGNORECASE)
 
 
 class FightError(ValueError):
@@ -302,7 +306,9 @@ def parse_foe_text(text: str) -> list[FoeRequest]:
         FightError: when nothing usable was named.
     """
     requests: list[FoeRequest] = []
-    for raw_part in _FOE_SEPARATOR.split(text.strip()):
+    # One space for every run of whitespace: names read the same however
+    # they were spaced, and the patterns see no long runs at all (#989).
+    for raw_part in _FOE_SEPARATOR.split(" ".join(text.split())):
         part = raw_part.strip()
         if not part:
             continue

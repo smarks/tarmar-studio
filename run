@@ -3,6 +3,7 @@
 
 import os
 import platform
+import signal
 import subprocess
 import sys
 
@@ -36,6 +37,10 @@ COMMANDS = {
     # passed for deploy.sh to check (issue #576). pytest, Jest and Playwright
     # run twice: as the checkout stands, and against the default canon (#920).
     "gate": ["python", "scripts/gate.py"],
+    # Deploy the head of main in one command: fetch, gate it in a temporary
+    # worktree against the canon's head, watch the Deploy the gate starts,
+    # and remove everything it made (scripts/ship.py).
+    "ship": ["python", "scripts/ship.py"],
     "migrate": ["python", "manage.py", "migrate"],
     "simulate": ["python", "manage.py", "simulate"],
     "update-cov": ["python", "scripts/update_coverage_threshold.py"],
@@ -49,6 +54,19 @@ NPM_COMMANDS = {
     "coverage:e2e": ["npm", "run", "coverage:e2e"],
     "test:all": None,  # Special handling
 }
+
+
+def run_to_the_end(command: list[str], env: dict[str, str]) -> int:
+    """Run ``command`` and wait for it, through Ctrl-C.
+
+    Ctrl-C reaches the child, which handles it; the wrapper waits for the
+    child to finish instead of handing the prompt back while the child is
+    still cleaning up (./run ship removes its worktrees on the way out). The
+    child is started before SIGINT is ignored here, so it keeps the default.
+    """
+    process = subprocess.Popen(command, env=env)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    return process.wait()
 
 
 def main():
@@ -79,15 +97,15 @@ def main():
     # Handle NPM commands
     if command_name in NPM_COMMANDS:
         cmd = NPM_COMMANDS[command_name]
-        result = subprocess.run([*cmd, *extra_args], env=env)
+        returncode = run_to_the_end([*cmd, *extra_args], env)
     else:
         # Handle uv commands
         cmd = COMMANDS[command_name]
-        result = subprocess.run(["uv", "run", *cmd, *extra_args], env=env)
+        returncode = run_to_the_end(["uv", "run", *cmd, *extra_args], env)
 
     # Exit with the child's status. Without this every command reported success,
     # so CI's `./run check` step stayed green through failing pre-commit hooks.
-    sys.exit(result.returncode)
+    sys.exit(returncode)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ On macOS, also `brew install glib pango` so weasyprint can render PDFs.
 ./run format      # Format code with ruff
 ./run check       # Run all pre-commit checks
 ./run gate        # Every suite a deploy depends on; records the commit, then deploys it if it is main's head
+./run ship        # Deploy the head of main, completely: gate it in a temporary worktree, watch Deploy, clean up
 ./run migrate     # Run database migrations
 ./run update-cov  # Update coverage threshold
 ```

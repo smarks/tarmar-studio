@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Read the code; read the previous run's result (the notify step asks gh).
+# Nothing more: CodeQL actions/missing-workflow-permissions (#989).
+permissions:
+  contents: read
+  actions: read
+
 # A newer push to the same branch or pull request supersedes the run in
 # progress: a stale run only spends minutes, or holds up the one self-hosted
 # runner, that the current run needs.

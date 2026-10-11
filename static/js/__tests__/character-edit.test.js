@@ -426,6 +426,49 @@ describe('page load', () => {
         expect(rows[1].querySelector('[data-field="notes"]').value).toBe('coiled');
     });
 
+    test('stored numbers that are not numbers render as numbers, never as HTML (#989)', async () => {
+        const hostile = '"><img src=x onerror="window.pwned=1">';
+        const numbers = {
+            quantity: hostile, to_hit_mod: hostile, damage_mod: hostile,
+            critical_mod: hostile, stops_mod: hostile, dex_mod: hostile,
+        };
+        // A weapon, an armour and a shield: between them every number input.
+        await loadPage({
+            initialEquipment: [
+                { item_id: 'dagger', ...numbers },
+                { item_id: 'leather', ...numbers },
+                { item_id: 'buckler', ...numbers },
+            ],
+        });
+
+        const list = document.querySelector('#equipment-list');
+        expect(list.querySelector('img')).toBeNull();
+        expect(list.textContent).not.toContain('min=');
+        expect(window.pwned).toBeUndefined();
+        const quantities = list.querySelectorAll('[data-field="quantity"]');
+        expect(quantities).toHaveLength(3);
+        quantities.forEach((input) => expect(input.value).toBe('1'));
+        // Hit, Dmg and Crit on the dagger; Stops and DEX on the armour and the shield.
+        const modifiers = list.querySelectorAll(
+            '[data-field="to_hit_mod"], [data-field="damage_mod"], [data-field="critical_mod"],'
+            + ' [data-field="stops_mod"], [data-field="dex_mod"]'
+        );
+        expect(modifiers).toHaveLength(7);
+        modifiers.forEach((input) => expect(input.value).toBe('0'));
+    });
+
+    test('a read-only sheet shows a stored quantity that is not a number as 1 (#989)', async () => {
+        await loadPage({
+            canEdit: false,
+            initialEquipment: [{ item_id: 'rope', quantity: '<img src=x onerror="window.pwned=1">' }],
+        });
+
+        const quantity = document.querySelector('#equipment-list .item-quantity');
+        expect(quantity.querySelector('img')).toBeNull();
+        expect(quantity.textContent.trim()).toBe('Qty: 1');
+        expect(window.pwned).toBeUndefined();
+    });
+
     test('fetches the catalog exactly once for the initial render', async () => {
         await loadPage({ initialEquipment: [{ item_id: 'rope' }] });
         const catalogCalls = fetch.mock.calls.filter(
