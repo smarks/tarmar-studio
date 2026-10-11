@@ -167,6 +167,25 @@ Party.objects.create(name=${JSON.stringify(`${PREFIX} Party`)}, owner=player)
             .toHaveText('No sessions match “no such session”.');
     });
 
+    test('at phone width a Game Master\'s command bar wraps: both review controls stay on screen (#981)', async ({ adminPage }) => {
+        await adminPage.setViewportSize({ width: 375, height: 812 });
+        await adminPage.goto('/tarmar/gm/');
+        // Only a Game Master has these two, the last controls in the bar.
+        for (const selector of ['#gm-review-button', '#gm-reviews-link']) {
+            const control = adminPage.locator(selector);
+            await expect(control).toBeVisible();
+            const box = await control.boundingBox();
+            expect(box, `${selector} is laid out`).not.toBeNull();
+            expect(box.x).toBeGreaterThanOrEqual(0);
+            expect(box.x + box.width).toBeLessThanOrEqual(375);
+        }
+        const scroll = await adminPage.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+        }));
+        expect(scroll.scrollWidth).toBe(scroll.clientWidth);
+    });
+
     test('a search that matches nothing says so in the picker', async ({ page }) => {
         await loginAs(page, PLAYER);
         await page.goto('/tarmar/gm/');
