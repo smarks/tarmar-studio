@@ -44,6 +44,9 @@ from .battle_report import (
 from .character_schema import SCHEMA_IN_PROMPT_PREAMBLE
 from .engine import MODE_AIDE, MODE_PLAY
 from .fight import (
+    _COUNT_PREFIX,
+    _COUNT_SUFFIX,
+    _FOE_SEPARATOR,
     FOE_SCHEMA,
     FOE_TEAM,
     PARTY_TEAM,
@@ -151,6 +154,31 @@ class FoeTextTest(SimpleTestCase):
                     [(request.name, request.count) for request in requests],
                     expected,
                 )
+
+    def test_the_patterns_stay_fast_on_crafted_input(self):
+        # The test above checks what the patterns match; this one checks how
+        # long they take. Each input is ten times the one above and goes to
+        # the patterns directly, so a pattern that backtracks again takes
+        # seconds here rather than a millisecond (CodeQL py/polynomial-redos).
+        spaces = " " * 50_000
+        crafted = {
+            "only spaces": spaces,
+            "spaces after a word": f"a{spaces}",
+            "spaces between words": f"rat{spaces}b",
+            # The newline stops ".", so a pattern ending in ".+$" must fail.
+            "spaces before a newline": f"a{spaces}b\nc",
+        }
+        patterns = {
+            "separator": _FOE_SEPARATOR.split,
+            "count prefix": _COUNT_PREFIX.match,
+            "count suffix": _COUNT_SUFFIX.match,
+        }
+        for input_label, text in crafted.items():
+            for pattern_label, apply_pattern in patterns.items():
+                with self.subTest(input=input_label, pattern=pattern_label):
+                    started = time.perf_counter()
+                    apply_pattern(text)
+                    self.assertLess(time.perf_counter() - started, 1.0)
 
 
 class FoeResolutionTest(BaseTestCase):
