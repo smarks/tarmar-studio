@@ -124,28 +124,30 @@ class SkillPointArithmeticTests(TestCase):
     def test_spending_a_point_moves_it_from_free_to_the_skill(self):
         draft, note = changed(
             built_draft(free_skill_points=3),
-            lambda character: services.apply_skill_points(character, "sword", 2),
+            lambda character: services.apply_skill_points(character, "broadsword", 2),
         )
         self.assertEqual(draft["free_skill_points"], 1)
-        self.assertEqual(draft["skills"]["sword"], 2)
-        self.assertIn("sword", note)
+        self.assertEqual(draft["skills"]["broadsword"], 2)
+        self.assertIn("broadsword", note)
 
     def test_spending_more_than_are_free_is_refused_not_silently_capped(self):
         with self.assertRaisesMessage(CharacterChangeError, "Only 1 free skill point"):
             changed(
                 built_draft(free_skill_points=1),
-                lambda character: services.apply_skill_points(character, "sword", 3),
+                lambda character: services.apply_skill_points(
+                    character, "broadsword", 3
+                ),
             )
 
     def test_skill_level_is_priced_by_the_triangular_ladder(self):
         draft, _ = changed(
             built_draft(free_skill_points=6),
-            lambda character: services.apply_skill_points(character, "sword", 6),
+            lambda character: services.apply_skill_points(character, "broadsword", 6),
         )
         (skill,) = DraftLedger.from_draft(draft).skills
         # 6 points is exactly level 3 on the triangular ladder (1+2+3).
         self.assertEqual(
-            (skill.name, skill.level_display, skill.points), ("sword", "III", 6)
+            (skill.name, skill.level_display, skill.points), ("broadsword", "III", 6)
         )
 
     def test_arcane_is_priced_at_double_like_everywhere_else(self):
@@ -192,7 +194,8 @@ class SkillPointArithmeticTests(TestCase):
         self.assertEqual(calculate_skill_points_from_xp(8400), 5)
         earned = draft["free_skill_points"]
         draft, _ = changed(
-            draft, lambda character: services.apply_skill_points(character, "sword", 1)
+            draft,
+            lambda character: services.apply_skill_points(character, "broadsword", 1),
         )
         ledger = DraftLedger.from_draft(draft)
         self.assertEqual(ledger.experience_years, 7)
@@ -241,7 +244,22 @@ class SkillPointArithmeticTests(TestCase):
             lambda character: services.apply_equipment(character, "Vane's key", 1),
         )
 
-        self.assertEqual(draft["equipment"], [{"name": "Vane's key", "quantity": 1}])
+        # Stored as the sheet stores a custom item (#927).
+        self.assertEqual(
+            draft["equipment"],
+            [
+                {
+                    "item_id": "custom",
+                    "name": "Vane's key",
+                    "category": "gear",
+                    "weight": 0.0,
+                    "cost": 0.0,
+                    "quantity": 1,
+                    "in_pack": False,
+                    "notes": "",
+                }
+            ],
+        )
         self.assertIn("Vane's key", note)
 
     def test_the_ledger_names_a_catalog_item_rather_than_calling_it_unknown(self):
@@ -300,7 +318,7 @@ class SkillPointArithmeticTests(TestCase):
 
     def test_a_nonsense_quantity_or_point_count_is_refused(self):
         for change in (
-            lambda character: services.apply_skill_points(character, "sword", 0),
+            lambda character: services.apply_skill_points(character, "broadsword", 0),
             lambda character: services.apply_equipment(character, "Rope", 0),
         ):
             with self.assertRaises(CharacterChangeError):
@@ -346,7 +364,8 @@ class LedgerPanelTests(BaseTestCase):
                 ),
             )
         draft, _ = changed(
-            draft, lambda character: services.apply_skill_points(character, "sword", 1)
+            draft,
+            lambda character: services.apply_skill_points(character, "broadsword", 1),
         )
         session = session_with_character(self.user, draft, name="S")
         remaining = DraftLedger.from_draft(draft).skill_points.remaining

@@ -28,16 +28,10 @@
 {% endif %}
 
 <form method="get" action="{% url 'hooks:generate' %}" class="generator-form" id="hook-form">
-    <label>Party
-        <select name="party">
-            <option value="">No party — pick a level</option>
-            {% for party in parties %}
-            <option value="{{ party.pk }}" {% if form_party == party.pk|stringformat:"s" %}selected{% endif %}>
-                {{ party.name }}{% if party.summary %} ({{ party.summary.count }} member{{ party.summary.count|pluralize }}, avg level {{ party.summary.average_level|floatformat:1 }}){% else %} (no members){% endif %}
-            </option>
-            {% endfor %}
-        </select>
-    </label>
+    <div class="generator-field">
+        <span class="generator-field-label" id="hook-party-label">Party</span>
+        {% include "_picker.html" with picker=party_picker %}
+    </div>
     <label>Level (if no party)
         <select name="level">
             {% for level in levels %}
@@ -99,4 +93,8 @@
     </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/picker.js' %}"></script>
 {% endblock %}

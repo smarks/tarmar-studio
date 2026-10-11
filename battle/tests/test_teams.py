@@ -182,6 +182,17 @@ class ImportPartyTest(BaseTestCase):
         with self.assertRaises(ValueError):
             import_party_into_draft(draft, self.dm, 999999)
 
+    def test_a_disbanded_party_is_refused_with_the_reason(self):
+        """Issue #971: the import looked the party up with no is_deleted
+        filter, so a disbanded party marched in as a team."""
+        draft = BattleDraft.objects.create(created_by=self.dm)
+        Party.objects.filter(pk=self.party.pk).update(is_deleted=True)
+        with self.assertRaisesRegex(ValueError, "The Grey Company was disbanded"):
+            import_party_into_draft(draft, self.dm, self.party.pk)
+        draft.refresh_from_db()
+        self.assertEqual(draft.teams_json, [])
+        self.assertEqual(draft.roster_json, [])
+
     def test_import_refuses_to_overflow_the_muster(self):
         draft = BattleDraft.objects.create(created_by=self.dm)
         for _ in range(MAX_COMBATANTS - 1):
@@ -269,7 +280,8 @@ class TeamsCompileTest(BaseTestCase):
             fighter_teams=("Red", "Red", ""),
         )
         sides = [entry["side"] for entry in battle.state_json["figures"]]
-        self.assertEqual(sides[:2], ["Red", "Red"])
+        # A team's side carries a prefix no row id can (#930).
+        self.assertEqual(sides[:2], ["team:Red", "team:Red"])
         # The teamless figure keeps the free-for-all spelling: side == uid.
         self.assertEqual(sides[2], battle.state_json["figures"][2]["uid"])
         profile = for_battle(battle)
@@ -562,3 +574,145 @@ class LobbyTeamDisplayTest(BaseTestCase):
         )
         response = self.client.get(reverse("battle:detail", args=[battle.pk]))
         self.assertContains(response, "Team: The Wolves")
+
+
+def rename_team(battle: Battle, old: str, new: str) -> Battle:
+    """Rename a started battle's team on its rows and in its saved state.
+
+    Team names are chosen before row ids exist, so a test that needs a team
+    named after a row id (#930) renames it once the ids are known. Both of
+    the state's spellings are rewritten: a Tarmar combatant's ``team`` and a
+    classic figure's side.
+    """
+    from battle.classic_adaptation import classic_side
+
+    battle.combatants.filter(team=old).update(team=new)
+    state = dict(battle.state_json)
+    for combatant in state.get("combatants", []):
+        if combatant.get("team") == old:
+            combatant["team"] = new
+    for figure in state.get("figures", []):
+        if figure["side"] == classic_side(old, 0):
+            figure["side"] = classic_side(new, 0)
+    battle.state_json = state
+    battle.save(update_fields=["state_json"])
+    return battle
+
+
+class TeamNamedLikeRowTest(BaseTestCase):
+    """#930 end to end: a team named like a row id is that team and no other.
+
+    Before #930 a classic team's side was its bare name, the same string as
+    the teamless figure in that row, so the two fought as allies and either
+    one's win printed the same line; and the last-team-standing check keyed
+    a teamless survivor as ``"solo:<row>"``, which a team could be named.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.dm = self.create_dm()
+
+    def finish(self, battle: Battle) -> tuple[Battle, list[str]]:
+        for _turn in range(300):
+            if battle.status in (Battle.STATUS_FINISHED, Battle.STATUS_STALEMATE):
+                break
+            battle, _events = advance_turn(battle.pk)
+        self.assertEqual(battle.status, Battle.STATUS_FINISHED)
+        messages = list(
+            battle.events.order_by("turn", "sequence").values_list("message", flat=True)
+        )
+        return battle, messages
+
+    def classic_battle(self, seed: int) -> Battle:
+        return create_battle(
+            self.dm,
+            name="Row-named team",
+            count=3,
+            seed=seed,
+            rules_profile=CLASSIC_PROFILE,
+            fighter_teams=("Red", "Red", ""),
+        )
+
+    def test_a_team_named_like_a_teamless_row_fights_that_row(self):
+        battle = self.classic_battle(seed=5)
+        loner = battle.combatants.get(team="")
+        team = str(loner.pk)
+        battle = rename_team(battle, "Red", team)
+        members = list(battle.combatants.filter(team=team))
+
+        from tarmar_engine.classic.state import GameState
+
+        profile = for_battle(battle)
+        state = profile.load(battle.state_json)
+        assert isinstance(state, GameState)
+        by_uid = {figure.uid: figure for figure in state.figures}
+        lone_figure = by_uid[str(loner.pk)]
+        self.assertEqual(
+            {figure.uid for figure in state.enemies_of(lone_figure)},
+            {str(member.pk) for member in members},
+        )
+        self.assertEqual(profile.actor_team(lone_figure), "")
+
+        battle, messages = self.finish(battle)
+        verdict = battle.events.filter(phase=6).order_by("-sequence").first()
+        assert verdict is not None
+        wins = [
+            message for message in messages if "hold" in message and "🏆" in message
+        ]
+        # Seed 5 is a team win with both members standing: the line that
+        # used to be shared with the loner's win must credit the team.
+        self.assertEqual(verdict.payload["winner_team"], team)
+        self.assertEqual(
+            sorted(verdict.payload["winners"]), sorted(member.pk for member in members)
+        )
+        self.assertEqual(wins, [f"🏆 The {team} hold the field — victory!"])
+        self.assertNotIn(
+            f"🏆 {loner.display_name} holds the field — victory!", messages
+        )
+        # The loner is never printed under the team's name, and every
+        # member always is.
+        self.assertFalse(
+            any(f"{loner.display_name} ({team})" in line for line in messages)
+        )
+        for member in members:
+            self.assertTrue(
+                any(f"{member.display_name} ({team})" in line for line in messages)
+            )
+
+    def test_a_team_named_like_its_own_members_row_is_still_a_team(self):
+        battle = self.classic_battle(seed=5)
+        member = battle.combatants.filter(team="Red").order_by("pk").first()
+        assert member is not None
+        team = str(member.pk)
+        battle = rename_team(battle, "Red", team)
+
+        profile = for_battle(battle)
+        state = profile.load(battle.state_json)
+        figure = next(one for one in state.figures if one.uid == team)
+        self.assertEqual(profile.actor_team(figure), team)
+        view = profile.view(state)
+        self.assertEqual(
+            {entry["combatant_id"]: entry["team"] for entry in view["combatants"]},
+            {combatant.pk: combatant.team for combatant in battle.combatants.all()},
+        )
+
+        battle, messages = self.finish(battle)
+        self.assertTrue(
+            any(f"{member.display_name} ({team})" in line for line in messages)
+        )
+        self.assertNotIn(
+            f"🏆 {member.display_name} holds the field — victory!", messages
+        )
+
+    def test_a_tarmar_team_named_like_the_solo_key_is_not_the_loner(self):
+        battle = create_battle(
+            self.dm, name="Solo", count=3, seed=11, fighter_teams=("Red", "Red", "")
+        )
+        loner = battle.combatants.get(team="")
+        battle = rename_team(battle, "Red", f"solo:{loner.pk}")
+        battle, events = advance_turn(battle.pk)
+        # Three fighters on the rim cannot all be downed but one in a turn;
+        # before #930 the team and the loner keyed as one side and the
+        # battle ended at once as the team's win.
+        self.assertNotEqual(battle.status, Battle.STATUS_FINISHED)
+        self.assertFalse(any(event.payload.get("winner_team") for event in events))

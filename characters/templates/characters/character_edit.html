@@ -30,7 +30,7 @@ server-side draft, so nothing done here can lose it.
 {% if can_edit %}
 <h1 class="editable-field name-field" data-field="name">
     {# The control carries the name via aria-label, else the h1 announces as an unlabelled textbox. #}
-    <input type="text" id="id_name" value="{{ character.name }}" maxlength="100" class="autosave" aria-label="Character name">
+    <input type="text" id="id_name" value="{{ character.name }}" maxlength="{{ text_limits.name }}" class="autosave" aria-label="Character name">
 </h1>
 {% else %}
 <h1 class="name-field">{{ character.name }}</h1>
@@ -42,6 +42,8 @@ server-side draft, so nothing done here can lose it.
 
 {# The way to play this character (issue #828): an empty slot where the Game Master's attach would refuse it. #}
 {% play_with_game_master character request.user %}
+{# The session choice is a searchable picker (#973). #}
+<script src="{% static 'js/picker.js' %}" defer></script>
 <script src="{% static 'js/play-with-gm.js' %}" defer></script>
 {# The Game Masters' sessions that hold this character, and the way out of each (issue #871). #}
 {% sessions_holding character request.user %}
@@ -77,12 +79,12 @@ badge in place).
 </p>
 
 {% if request.user.can_manage_users %}
+{% comment %}Both render, one hidden by whether the character lives: a run of
+years that kills the character in place shows Revive without a reload
+(issue #903).{% endcomment %}
 <p class="dm-actions">
-    {% if character.is_alive %}
-    <button type="button" id="mark-dead-btn" class="button danger">Mark Dead</button>
-    {% else %}
-    <button type="button" id="revive-btn" class="button">Revive</button>
-    {% endif %}
+    <button type="button" id="mark-dead-btn" class="button danger" data-alive-only{% if not character.is_alive %} hidden{% endif %}>Mark Dead</button>
+    <button type="button" id="revive-btn" class="button" data-dead-only{% if character.is_alive %} hidden{% endif %}>Revive</button>
 </p>
 {% endif %}
 
@@ -156,6 +158,11 @@ runs.
                 <td>
                     {% editable_text character "height_roll" can_edit "Height" %}
                     <span id="height_display">({{ character.height_display|default:"—" }})</span>
+                    {% comment %}A blank height, a player's once (#941); rendered hidden
+                    when not offered, so a cell cleared or typed repaints it.{% endcomment %}
+                    {% if can_edit %}
+                    <button type="button" class="button secondary sheet-roll-btn" id="roll-height-btn" data-roll-kind="height" data-roll-url="{% url 'characters:roll' character.pk 'height' %}"{% if sheet_rolls.height.confirm %} data-confirm="{{ sheet_rolls.height.confirm }}"{% endif %}{% if not sheet_rolls.height.available %} hidden{% endif %}>Roll height (demon d6)</button>
+                    {% endif %}
                 </td>
             </tr>
             <tr>
@@ -163,6 +170,9 @@ runs.
                 <td>
                     {% editable_text character "weight_roll" can_edit "Weight" %}
                     <span id="weight_display">(<span id="weight_lbs">{{ character.weight_lbs|default_if_none:"—" }}</span> lbs)</span>
+                    {% if can_edit %}
+                    <button type="button" class="button secondary sheet-roll-btn" id="roll-weight-btn" data-roll-kind="weight" data-roll-url="{% url 'characters:roll' character.pk 'weight' %}"{% if sheet_rolls.weight.confirm %} data-confirm="{{ sheet_rolls.weight.confirm }}"{% endif %}{% if not sheet_rolls.weight.available %} hidden{% endif %}>Roll weight (1d6)</button>
+                    {% endif %}
                 </td>
             </tr>
             {% comment %}The character's people, the player's choice (#810). Rendered
@@ -269,7 +279,8 @@ runs.
                     {% editable_choice character "location" can_edit "Origin" disabled=origin_fixed %}
                     {% comment %}An Origin nobody rolled or chose (issue #754): the model's Village, with no skill granted for it. Hidden, not left out, since choosing one records it.{% endcomment %}
                     <span class="formula" id="origin-not-rolled"{% if character.location_recorded %} hidden{% endif %}>Not rolled or chosen yet</span>
-                    {% if can_edit %}
+                    {% comment %}The literacy lock's note (#741) goes with the select; a rolled Origin (#970) is text with its own reason instead.{% endcomment %}
+                    {% if can_edit and origin_settable %}
                     <span class="formula" id="origin-fixed-note"{% if not origin_fixed %} hidden{% endif %}>{{ origin_fixed_reason }}</span>
                     {% endif %}
                 </td>
@@ -363,7 +374,7 @@ runs.
                 <input type="number" name="amount" step="0.01" aria-label="Coin to give or take">
             </label>
             <label>Reason
-                <input type="text" name="reason" maxlength="100" aria-label="Reason for the coin">
+                <input type="text" name="reason" maxlength="{{ text_limits.coin_reason }}" aria-label="Reason for the coin">
             </label>
             <button type="button" class="button secondary mechanics-submit">Move coin (Game Master)</button>
             <span class="mechanics-error" role="alert" hidden></span>
@@ -498,11 +509,9 @@ runs.
         {% comment %}A Game Master may grant a point past the free ones (#770): his
         control shows at none.{% endcomment %}
         <div class="add-skill-control"{% if character.free_skill_points <= 0 and not can_grant_skill_points %} style="display: none;"{% endif %}>
-            <input type="text" id="new-skill-name" placeholder="Enter new skill name..." list="skill-name-suggestions" autocomplete="off">
+            <input type="text" id="new-skill-name" maxlength="{{ text_limits.skill_name }}" placeholder="Enter new skill name..." list="skill-name-suggestions" autocomplete="off">
             <datalist id="skill-name-suggestions">
-                {% for skill_name in skill_name_suggestions %}
-                <option value="{{ skill_name|title }}"></option>
-                {% endfor %}
+                {% include "characters/_skill_name_suggestions.html" %}
             </datalist>
             <button id="add-skill-btn" class="button secondary">Allocate Point</button>
         </div>
@@ -526,7 +535,7 @@ runs.
             </label>
             {% if is_game_master %}
             <label>Difficulty (Game Master)
-                <input type="number" name="difficulty" id="skill-check-difficulty" min="0" max="40" aria-label="Difficulty">
+                <input type="number" name="difficulty" id="skill-check-difficulty" min="0" max="{{ number_limits.check_difficulty }}" aria-label="Difficulty">
             </label>
             <label>Attribute (Game Master)
                 <select name="attribute" aria-label="Substitute attribute">
@@ -537,7 +546,7 @@ runs.
                 </select>
             </label>
             <label>2d6 rolled at the table (Game Master)
-                <input type="number" name="total" min="2" max="12" aria-label="2d6 rolled at the table">
+                <input type="number" name="total" min="{{ number_limits.check_total_minimum }}" max="{{ number_limits.check_total_maximum }}" aria-label="2d6 rolled at the table">
             </label>
             {% endif %}
             <button type="button" class="button mechanics-submit" id="skill-check-btn">Roll check</button>
@@ -568,7 +577,11 @@ runs.
         {% else %}
         <p class="no-spells" id="no-spells">No spells known.</p>
         {% endif %}
-        {% if can_edit and character.is_alive %}
+        {% if can_edit %}
+        {% comment %}Rendered for a dead character too, hidden: a run of years that
+        kills the character in place hides it from the saved record (issue #903),
+        as a reload would.{% endcomment %}
+        <div class="magic-controls" id="magic-controls" data-alive-only{% if not character.is_alive %} hidden{% endif %}>
         {% comment %}A player's control spends a free point: hidden, not left out, at
         none, so a run that earns one shows it (issue #792).{% endcomment %}
         <div class="learn-spell{% if not is_game_master %} needs-free-points{% endif %}" data-mechanics-form="learnSpellUrl" data-reload="true"{% if not is_game_master and character.free_skill_points <= 0 %} hidden{% endif %}>
@@ -585,12 +598,13 @@ runs.
         {% if is_game_master %}
         <div class="grant-mana" data-mechanics-form="grantManaUrl" data-reload="true">
             <label>Raise the Mana Pool's maximum (Game Master). Mana a fight spent is restored with the Game Master's pool setting, not here.
-                <input type="number" name="amount" min="-100" max="100" aria-label="Mana to grant">
+                <input type="number" name="amount" min="-{{ number_limits.mana_grant }}" max="{{ number_limits.mana_grant }}" aria-label="Mana to grant">
             </label>
             <button type="button" class="button secondary mechanics-submit">Grant</button>
             <span class="mechanics-error" role="alert" hidden></span>
         </div>
         {% endif %}
+        </div>
         {% endif %}
     </div>
 
@@ -792,7 +806,7 @@ runs.
             </div>
             <div class="attack-field">
                 <label for="attack-stops">Defender stops <span class="gm-supplied">(GM supplies)</span></label>
-                <input type="number" id="attack-stops" value="0" min="0" max="10">
+                <input type="number" id="attack-stops" value="0" min="0" max="{{ number_limits.armor_stops }}">
             </div>
             <div class="attack-field">
                 <label for="attack-shield">Defender shield <span class="gm-supplied">(GM supplies)</span></label>
@@ -805,11 +819,11 @@ runs.
             </div>
             <div class="attack-field">
                 <label for="attack-dodge">Defender dodge <span class="gm-supplied">(GM supplies)</span></label>
-                <input type="number" id="attack-dodge" value="0" min="0" max="10">
+                <input type="number" id="attack-dodge" value="0" min="0" max="{{ number_limits.defender_dodge }}">
             </div>
             <div class="attack-field">
                 <label for="attack-situational">Situational</label>
-                <input type="number" id="attack-situational" value="0" min="-20" max="20">
+                <input type="number" id="attack-situational" value="0" min="-{{ number_limits.situational }}" max="{{ number_limits.situational }}">
             </div>
             <button type="button" id="attack-resolve-btn" class="button">Resolve Attack</button>
         </div>
@@ -859,7 +873,7 @@ runs.
             <h3>Add Custom Item</h3>
             <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                 <div>
-                    <label>Name: <input type="text" id="custom-name" maxlength="100" style="width: 100%;"></label>
+                    <label>Name: <input type="text" id="custom-name" maxlength="{{ text_limits.item_name }}" style="width: 100%;"></label>
                 </div>
                 <div>
                     <label>Category:
@@ -871,21 +885,21 @@ runs.
                     </label>
                 </div>
                 <div style="display: flex; gap: 1rem;">
-                    <label>Weight (lbs): <input type="number" id="custom-weight" value="0" min="0" max="1000" step="0.1" style="width: 5em;"></label>
+                    <label>Weight (lbs): <input type="number" id="custom-weight" value="0" min="0" max="{{ number_limits.equipment_weight }}" step="0.1" style="width: 5em;"></label>
                     <label>Cost (gp): <input type="number" id="custom-cost" value="0" min="0" step="0.1" style="width: 5em;"></label>
                 </div>
                 <div id="custom-weapon-fields" style="display: none;">
-                    <label>Damage: <input type="text" id="custom-damage" value="1d6" maxlength="20" style="width: 5em;"></label>
+                    <label>Damage: <input type="text" id="custom-damage" value="1d6" maxlength="{{ text_limits.item_damage }}" style="width: 5em;"></label>
                 </div>
                 <div id="custom-armor-fields" style="display: none; gap: 1rem;">
-                    <label>Stops: <input type="number" id="custom-stops" value="0" min="0" max="10" style="width: 3em;"></label>
-                    <label>DEX Penalty: <input type="number" id="custom-dex-penalty" value="0" min="-10" max="0" style="width: 3em;"></label>
+                    <label>Stops: <input type="number" id="custom-stops" value="0" min="0" max="{{ number_limits.armor_stops }}" style="width: 3em;"></label>
+                    <label>DEX Penalty: <input type="number" id="custom-dex-penalty" value="0" min="-{{ number_limits.armor_dex_penalty }}" max="0" style="width: 3em;"></label>
                 </div>
                 <div>
                     <label><input type="checkbox" id="custom-in-pack"> In Pack</label>
                 </div>
                 <div>
-                    <label>Notes: <input type="text" id="custom-notes" maxlength="200" style="width: 100%;"></label>
+                    <label>Notes: <input type="text" id="custom-notes" maxlength="{{ text_limits.item_notes }}" style="width: 100%;"></label>
                 </div>
             </div>
             <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1rem;">

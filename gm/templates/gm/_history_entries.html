@@ -1,0 +1,52 @@
+{% comment %}The chat's conversation, a page of turns at a time (issue #972): the
+page renders the latest page, and gm:history_page renders each page above it
+with this same partial, which gm-history.js puts in place of the control that
+asked. The control is rendered from the page's own state, while turns remain
+above it, and stays until it is used; a failure to load stays beside it until
+the next attempt (no transient UI).{% endcomment %}
+{% if history_page.start %}
+<div class="gm-history-earlier" data-earlier>
+    <p class="gm-history-earlier-note">{{ history_page.start }} earlier turn{{ history_page.start|pluralize }} not shown.</p>
+    <button type="button" class="btn btn-sm" data-earlier-url="{% url 'gm:history_page' active_session.pk %}?before={{ history_page.start }}">Show earlier turns</button>
+    <p class="gm-panel-error" data-earlier-error role="alert" hidden></p>
+</div>
+{% endif %}
+{% for msg in history_page.entries %}
+{% comment %}A die the GM asked the server to roll (issue #363) comes
+back as the same chip the live turn showed, built server-side so the
+page never formats or recomputes a roll.{% endcomment %}
+{% if msg.kind == 'dice' %}
+<div class="message assistant">
+    <div class="dice-roll">{{ msg.content }}</div>
+</div>
+{% elif msg.kind == 'fold_recap' %}
+{% comment %}Where a long session was folded (issue #791): the entries above
+are what the model now reads as this recap. A Game Master may correct
+it; the server checks the account too.{% endcomment %}
+<section class="message gm-fold-recap" id="gm-fold-recap" aria-labelledby="gm-fold-recap-heading">
+    <h3 class="message-role" id="gm-fold-recap-heading">Recap so far</h3>
+    <p class="gm-fold-note">The {{ msg.covers }} message{{ msg.covers|pluralize }} above {{ msg.covers|pluralize:"is,are" }} now read by the Game Master as this recap, not word for word.</p>
+    <div class="message-content" id="gm-fold-recap-text">{{ msg.content }}</div>
+    <p class="gm-panel-status" id="gm-fold-recap-status" role="status"{% if not msg.set_by %} hidden{% endif %}>{{ msg.set_by|default:"" }}</p>
+    {% if is_game_master %}
+    <details class="gm-hand-edit">
+        <summary>Correct the recap</summary>
+        <form class="gm-hand-form" id="gm-fold-recap-form" data-url="{% url 'gm:recap' active_session.pk %}" data-change="edit">
+            <label class="sr-only" for="gm-fold-recap-input">Recap</label>
+            <textarea id="gm-fold-recap-input" name="text" rows="5" maxlength="{{ gm_text_limits.fold_recap }}" required>{{ msg.content }}</textarea>
+            <button type="submit" class="btn btn-sm">Save the recap</button>
+        </form>
+        <p class="gm-panel-error" id="gm-fold-recap-error" role="alert" hidden></p>
+    </details>
+    {% endif %}
+</section>
+{% else %}
+{% comment %}A kind on a visible entry marks a notice (issue #344: the
+/character save report) -- shown as text, never markdown.{% endcomment %}
+<div class="message {{ msg.role }}{% if msg.kind %} notice{% endif %}"{% if msg.kind == 'fight_verdict' %} data-battle-verdict="{{ msg.battle_id }}:{{ msg.battle_ending }}"{% endif %}>
+    {% comment %}A notice is the app speaking, not the Game Master (issue #339, item 11; #785).{% endcomment %}
+    <div class="message-role">{% if msg.role == 'user' %}You{% elif msg.kind %}Notice{% else %}GM{% endif %}</div>
+    <div class="message-content" {% if msg.role == 'assistant' and not msg.kind %}data-markdown{% endif %}>{{ msg.content }}</div>
+</div>
+{% endif %}
+{% endfor %}

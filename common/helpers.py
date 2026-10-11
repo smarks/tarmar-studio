@@ -15,6 +15,7 @@ import json
 from typing import Any
 
 from django.conf import settings
+from django.db import models
 from django.http import HttpRequest, JsonResponse
 from django.utils.http import url_has_allowed_host_and_scheme
 from origami_common.helpers import (
@@ -47,6 +48,29 @@ UNKNOWN_CLIENT_IP = "unknown"
 #: The largest value a SQLite INTEGER column holds. A larger Python int in a
 #: query's ``IN`` list raises ``OverflowError`` from the driver (issue #767).
 MAX_DATABASE_INTEGER = 2**63 - 1
+
+
+def column_length(model: type[models.Model], field_name: str) -> int:
+    """The ``max_length`` of ``model``'s ``field_name`` text column.
+
+    The one way a limit is read off a column (issues #928, #938), so a page's
+    ``maxlength``, an endpoint's refusal and a cut to fit all take the
+    column's own number rather than a copy of it.
+
+    Args:
+        model: The model the column is on.
+        field_name: A ``CharField``'s name.
+
+    Returns:
+        The column's length.
+
+    Raises:
+        TypeError: The field has no ``max_length``.
+    """
+    max_length = model._meta.get_field(field_name).max_length
+    if not isinstance(max_length, int):
+        raise TypeError(f"{model.__name__}.{field_name} has no max_length")
+    return max_length
 
 
 def parse_json_text(text: bytes | str) -> object:

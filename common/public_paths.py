@@ -26,6 +26,10 @@ passphrase**, so the gate is no longer an invite code for new accounts.
 Everything an account unlocks stays gated regardless, and the login
 throttle (``accounts.views.LoginView``) and gate throttle
 (``common.middleware.GateRateLimitMiddleware``) are unaffected.
+
+Password reset is public for the same reason sign-in is, and it carries its
+own per-address limit (``accounts.views.PasswordResetView``) because it is the
+one public page that sends mail.
 """
 
 from __future__ import annotations
@@ -44,6 +48,15 @@ PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     LOGIN_PATH,
     "/tarmar/accounts/logout/",
     "/tarmar/accounts/register/",
+    # Password reset, every step of it (issue #929). The sign-in page links
+    # here, so it has to be as reachable as sign-in itself; and the link the
+    # email carries is opened in whatever browser the mail client picks,
+    # usually one that has never seen the gate, which answers a correct
+    # passphrase by redirecting to "/" -- the token in the link would be lost.
+    # The email-address confirmation link (issue #931) is opened the same way,
+    # so it lives under this prefix too (password_reset/address/...), rather
+    # than adding an exemption of its own.
+    "/tarmar/accounts/password_reset/",
 )
 
 #: Paths served without the gate on an exact match only.

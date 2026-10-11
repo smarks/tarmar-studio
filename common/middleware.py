@@ -4,7 +4,8 @@ from collections.abc import Callable
 
 from django.conf import settings
 from django.contrib.auth import get_user
-from django.http import HttpRequest, HttpResponse
+from django.core.exceptions import MiddlewareNotUsed
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import render
 from django.utils.functional import SimpleLazyObject
 from speak_friend.middleware import PassphraseMiddleware
@@ -19,6 +20,7 @@ from common.rate_limit import (
     current_count,
     too_many_attempts,
 )
+from common.rolling import pinned_dice
 
 #: The session flag speak_friend sets once a visitor has answered the gate.
 #: Spelled once here, and read by PublicPathPassphraseMiddleware below and by
@@ -68,6 +70,49 @@ class RenderedMethodNotAllowedMiddleware:
         if allowed:
             rendered["Allow"] = allowed
         return rendered
+
+
+#: The request header a browser test sets to pin one request's dice (#959).
+PINNED_DICE_HEADER = "X-E2E-Dice-Seed"
+
+
+class PinnedDiceMiddleware:
+    """Roll a request's dice from the seed its ``X-E2E-Dice-Seed`` header names.
+
+    The browser tests' stand-in for ``patch(roll_survival_dice)`` (issue
+    #959): a spec that clicks a roll button cannot patch the server, so it
+    names a seed on that one request and asserts the faces the seed gives.
+    The pin is per request, not per process, because four Playwright workers
+    share one dev server and a process-wide seed would hand each of them
+    whatever was left of one interleaved stream.
+
+    Test-only, three times over. ``settings.py`` installs it only when
+    ``E2E_DICE_SEEDING`` is on and refuses to load with that switch when
+    ``DEBUG`` is off; and should it be installed some other way, it removes
+    itself at startup unless both are true. A request without the header is
+    untouched; a header that is not a whole number is refused with a 400, so
+    a spec that misspells its seed fails instead of rolling real dice. The
+    pin ends when the view returns, so a streamed body's dice are not pinned.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        if not (settings.DEBUG and getattr(settings, "E2E_DICE_SEEDING", False)):
+            raise MiddlewareNotUsed("dice seeding is for DEBUG browser tests only")
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        named_seed = request.headers.get(PINNED_DICE_HEADER)
+        if named_seed is None:
+            return self.get_response(request)
+        try:
+            seed = int(named_seed)
+        except ValueError:
+            return HttpResponseBadRequest(
+                f"{PINNED_DICE_HEADER} must be a whole number, not {named_seed!r}",
+                content_type="text/plain",
+            )
+        with pinned_dice(seed):
+            return self.get_response(request)
 
 
 class TrustedProxyClientIPMiddleware:

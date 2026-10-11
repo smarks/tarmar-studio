@@ -25,7 +25,7 @@
  * its own rows in every list it reads (the review's finding 4).
  */
 
-const { test, expect, loginAs, submitPassphrase } = require('./fixtures');
+const { test, expect, loginAs, submitPassphrase, chooseToAttach } = require('./fixtures');
 const { readDjangoShell, runDjangoShell } = require('./django');
 
 const WORKER = Number(process.env.TEST_PARALLEL_INDEX || 0);
@@ -84,15 +84,26 @@ ${variable}.save()`;
 /**
  * Attach characters from the picker (each attach reloads on the session),
  * then put `/fight <foes>` on the board.
+ *
+ * Each attach waits for its own reload, then for the sheet the reloaded page
+ * renders from the record (#942). A URL wait cannot tell them apart: from the
+ * second attach on, the page is already at `?session=N`, so `waitForURL`
+ * returned at once and `/fight` went in while the attach was still posting,
+ * either before the second character joined or into a page the reload threw
+ * away.
  * @param {import('@playwright/test').Page} page
  * @param {string[]} names
  * @param {string} foes
  */
 async function attachAndFight(page, names, foes) {
     for (const name of names) {
-        await page.selectOption('#gm-character-select', { label: name });
-        await page.click('#gm-character-attach');
-        await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
+        await chooseToAttach(page, name);
+        await Promise.all([
+            page.waitForEvent('load'),
+            page.click('#gm-character-attach'),
+        ]);
+        await expect(page).toHaveURL(/\/tarmar\/gm\/\?session=\d+$/);
+        await expect(page.locator('.gm-sheet-name', { hasText: name })).toHaveCount(1);
     }
     await page.fill('#user-input', `/fight ${foes}`);
     await page.press('#user-input', 'Enter');
@@ -262,7 +273,7 @@ dain.save()`);
         run.seed(`wren = create_character(player, name=name('Lucky Wren'), skills={'luck': 1}, equipment=${DAGGER})`);
         await loginAs(page, run.player);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: wrenName });
+        await chooseToAttach(page, wrenName);
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         await page.click('#gm-panel-tab-characters');
@@ -296,7 +307,7 @@ tam = create_character(player, name=name('Bare Tam'), equipment=[])`);
         await expect(page.locator('#gear-step')).toHaveCount(0);
 
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: tamName });
+        await chooseToAttach(page, tamName);
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         await page.click('#gm-panel-tab-battle');

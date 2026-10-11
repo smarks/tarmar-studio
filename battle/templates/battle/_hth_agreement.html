@@ -1,0 +1,71 @@
+{% comment %}
+A Game Master's "HTH by agreement" ruling (issue #867). Spencer, 2026-10-09:
+"a Game Master marks a battle, or a pair, as 'HTH by agreement'; players
+alone still need the engine's entry condition."
+
+Rendered from the battle's record (``Battle.hth_agreement_json``), the one
+source of truth, so the reload a post causes is the whole update and nothing
+here appears or vanishes on a timer. Every viewer reads the line; only a Game
+Master running this fight (``runs_the_seats``) gets the forms, and the
+endpoint refuses anyone else. Included by the battle page and by the GM
+chat's Battle tab; each form names the page it came from (``next``), so a
+post from the chat lands back in the chat, re-rendered from the record.
+{% endcomment %}
+<div class="battle-panel battle-agreement-panel" id="battle-hth-agreement">
+    <h2>Hand-to-hand by agreement</h2>
+    <p class="agreement-line">
+        {% if hth_agreement.line %}{{ hth_agreement.line }}{% else %}No pair is marked: a figure enters hand-to-hand only by one of the rules' ways in.{% endif %}
+    </p>
+    {% if hth_agreement.can_rule %}
+    <form method="post" action="{% url 'battle:hth-agreement' battle.pk %}" class="agreement-battle-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <input type="hidden" name="scope" value="battle">
+        {% if hth_agreement.whole_battle %}
+        <input type="hidden" name="agreed" value="">
+        <button type="submit" class="battle-button battle-button-outline">Lift the ruling for the whole battle</button>
+        {% else %}
+        <input type="hidden" name="agreed" value="true">
+        <button type="submit" class="battle-button battle-button-outline">Mark the whole battle</button>
+        {% endif %}
+    </form>
+    {% if hth_agreement.pairs %}
+    <ul class="agreement-pairs">
+        {% for pair in hth_agreement.pairs %}
+        <li class="agreement-pair">
+            <span class="agreement-pair-names">{{ pair.names }}</span>
+            <form method="post" action="{% url 'battle:hth-agreement' battle.pk %}" class="agreement-pair-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <input type="hidden" name="scope" value="pair">
+                <input type="hidden" name="first" value="{{ pair.first }}">
+                <input type="hidden" name="second" value="{{ pair.second }}">
+                <input type="hidden" name="agreed" value="">
+                <button type="submit" class="battle-button battle-button-quiet">Lift</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    <form method="post" action="{% url 'battle:hth-agreement' battle.pk %}" class="agreement-add-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <input type="hidden" name="scope" value="pair">
+        <input type="hidden" name="agreed" value="true">
+        <label>
+            <span class="sr-only">First of the pair</span>
+            <select name="first">
+                {% for combatant in hth_agreement.combatants %}<option value="{{ combatant.id }}">{{ combatant.name }}</option>{% endfor %}
+            </select>
+        </label>
+        <span>and</span>
+        <label>
+            <span class="sr-only">Second of the pair</span>
+            <select name="second">
+                {% for combatant in hth_agreement.combatants %}<option value="{{ combatant.id }}"{% if forloop.counter == 2 %} selected{% endif %}>{{ combatant.name }}</option>{% endfor %}
+            </select>
+        </label>
+        <button type="submit" class="battle-button battle-button-outline">Mark this pair</button>
+    </form>
+    {% endif %}
+</div>

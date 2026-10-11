@@ -73,6 +73,26 @@ class AllocationNamesTest(BaseTestCase):
         self.character.refresh_from_db()
         self.assertIn("brawling", self.character.skills)
 
+    def test_a_game_masters_override_is_named_in_the_history(self):
+        """The override is recorded, not silent (issue #902)."""
+        self.logout()
+        self.login_as(self.game_master)
+        self.assertEqual(self.allocate("Brawling").status_code, 200)
+        self.character.refresh_from_db()
+        self.assertIn(
+            f"brawling {services.GAME_MASTER_STARTED_SKILL_NOTE}",
+            self.character.history[-1]["new"],
+        )
+
+    def test_a_game_master_starting_a_glossary_skill_records_no_override(self):
+        self.logout()
+        self.login_as(self.game_master)
+        self.assertEqual(self.allocate("Perception").status_code, 200)
+        self.character.refresh_from_db()
+        self.assertNotIn(
+            services.GAME_MASTER_STARTED_SKILL_NOTE, self.character.history[-1]["new"]
+        )
+
 
 class AllocationRefusalTest(BaseTestCase):
     """The rule itself, as the sheet asks it."""

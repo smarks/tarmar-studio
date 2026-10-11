@@ -82,6 +82,8 @@
             {% menu_link 'about' 'About' page='about' %}
             {% menu_link 'characters:list' 'Characters' page='characters' %}
             {% menu_link 'parties:list' 'Parties' page='parties' %}
+            {# The player's journal (issues #924, #952); it is theirs, so it needs an account. #}
+            {% if user.is_authenticated %}{% menu_link 'journal' 'Journal' page='journal' %}{% endif %}
             {% comment %}
             Battles is main-menu furniture, not an admin tool (issue #339,
             item 1). Since #250/#305 a player or a guest may open a battle,
@@ -117,8 +119,9 @@
     </main>
     <footer>
         <div class="footer-content">
-            {% if git_sha %}<span>Version: <a href="{{ repo_url }}/commit/{{ git_sha }}" target="_blank" rel="noopener">{{ git_sha_short }}</a></span>{% endif %}
+            {% if git_sha %}<span>Version: {% if version_commit_url %}<a href="{{ version_commit_url }}" target="_blank" rel="noopener">{{ git_sha_short }}</a>{% else %}{{ git_sha_short }}{% endif %}</span>{% endif %}
             {% if git_date %}<span>Updated: {{ git_date }}</span>{% endif %}
+            <span><a href="{{ repository_url }}" target="_blank" rel="noopener">Source code</a></span>
             <span><a href="https://origamisoftware.com" target="_blank" rel="noopener">Origami Software</a></span>
             {% if theme.attribution %}<span class="theme-attribution">{{ theme.attribution }}</span>{% endif %}
         </div>

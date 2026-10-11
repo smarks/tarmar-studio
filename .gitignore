@@ -30,6 +30,10 @@ staticfiles/
 # Environment
 .env
 .env.local
+# The restore check's connection, and the dated copies of .env taken on the
+# host before an edit: all hold credentials (issue #913).
+.env.restore-check
+.env.bak-*
 
 # OS
 .DS_Store

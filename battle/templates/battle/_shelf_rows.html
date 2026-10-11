@@ -1,0 +1,32 @@
+{% comment %}The setup shelf's rows (issue #864): one page of the characters this viewer may seat, rendered by common.pickers for the page and for each search. data-filter-text lets picker.js narrow the rows on screen while the server is asked.{% endcomment %}
+<ul class="setup-character-list" id="setup-character-list">
+    {% for character in picker.rows %}
+    <li class="setup-character"
+        data-filter-text="{{ character.name|lower }} {{ character.user.username|lower }}">
+        <div class="setup-character-words">
+            <strong>{{ character.name }}</strong>
+            <span class="setup-character-owner">
+                {% if character.user == user %}yours{% else %}{{ character.user.username }}'s{% endif %}
+                — ST {{ character.effective_strength }},
+                DX {{ character.effective_dexterity }}
+            </span>
+        </div>
+        <div class="setup-character-actions">
+            <a class="battle-button battle-button-quiet setup-character-edit"
+               href="{% url 'characters:edit' character.pk %}?next={{ setup_url|urlencode }}">
+                Edit
+            </a>
+            <form method="post" action="{% url 'battle:setup-add' draft.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="kind" value="character">
+                <input type="hidden" name="character_id" value="{{ character.pk }}">
+                <button type="submit"
+                        class="battle-button setup-add-button"
+                        {% if muster_full %}disabled{% endif %}>
+                    Seat
+                </button>
+            </form>
+        </div>
+    </li>
+    {% endfor %}
+</ul>

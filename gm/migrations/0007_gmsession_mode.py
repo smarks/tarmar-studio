@@ -33,8 +33,10 @@ def open_every_session_in_play(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("gm", "0006_gmsession_character_draft"),
-        # The backfill filters on the user model's role flags.
-        ("accounts", "0001_initial"),
+        # The backfill filters on the user model's role flags, which
+        # accounts 0002 adds (issue #974: depending on 0001 alone let a
+        # targeted migrate run this before the flags existed).
+        ("accounts", "0002_user_is_dm_user_is_player_user_is_role_admin"),
     ]
 
     operations = [

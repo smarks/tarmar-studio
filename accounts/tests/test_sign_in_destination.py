@@ -9,7 +9,8 @@ sign-in had worked, nothing saying a second secret existed, and no way back.
 
 These tests hold the three parts of the answer: an explicit ``next`` still
 wins, a gateless visitor lands on a public page, and a visitor who has already
-answered the passphrase keeps the ordinary front door.
+answered the passphrase keeps the ordinary landing -- the player's journal
+since issue #952.
 """
 
 from django.test import TestCase
@@ -51,14 +52,14 @@ class SignInDestinationTest(TestCase):
 
         self.assertEqual(response["Location"], "/tarmar/battles/1/")
 
-    def test_a_visitor_who_has_passed_the_gate_keeps_the_front_door(self) -> None:
+    def test_a_visitor_who_has_passed_the_gate_lands_on_the_journal(self) -> None:
         session = self.client.session
         session[GATE_SESSION_FLAG] = True
         session.save()
 
         response = self._sign_in()
 
-        self.assertEqual(response["Location"], "/")
+        self.assertEqual(response["Location"], "/tarmar/journal/")
 
     def test_registering_also_lands_somewhere_public(self) -> None:
         """Registration is public for the arena's sake; its landing was not."""

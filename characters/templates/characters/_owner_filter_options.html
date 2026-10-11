@@ -1,0 +1,6 @@
+{% comment %}The character list's owner filter (issue #973): "All Users", the account the list is filtered by (pinned, whatever page it is on), then one page of active accounts, newest first. character-list.js reloads the list with the choice; it listens on the document, since a search replaces this select.{% endcomment %}
+<select id="user-filter">
+    <option value="">All Users</option>
+    {% for u in picker.pinned %}{% include "characters/_owner_filter_option.html" %}{% endfor %}
+    {% for u in picker.rows %}{% include "characters/_owner_filter_option.html" %}{% endfor %}
+</select>

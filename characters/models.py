@@ -9,8 +9,9 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.functional import cached_property
+from django.utils.text import capfirst
 
-from common.helpers import whole_number
+from common.helpers import column_length, whole_number
 
 from .constants import (
     ATTRIBUTE_BONUS_FIELDS,
@@ -22,8 +23,13 @@ from .constants import (
     LITERACY_ROLL_MINIMUM,
     MAX_ATTRIBUTE_VALUE,
     MAX_CHARACTER_NAME_LENGTH,
+    MAX_DEATH_CAUSE_LENGTH,
+    MAX_SKILL_NAME_LENGTH,
+    MINOR_INJURY_ROLL_PENALTY,
     SEVERE_INJURY_BAND_TOP,
+    SEVERE_INJURY_ROLL_PENALTY,
     STARTING_AGE,
+    too_long,
 )
 from .dice import (
     calculate_final_weight_lbs,
@@ -131,6 +137,12 @@ def validate_skills_size(value):
         raise ValidationError(
             f"Too many skills ({len(value)}); max is {MAX_SKILL_ENTRIES}."
         )
+    # The sheet and the chat refuse a longer name (issue #928), so a record
+    # holding one could not be one this site wrote.
+    for skill_name in value:
+        refusal = too_long("Skill name", str(skill_name), MAX_SKILL_NAME_LENGTH)
+        if refusal:
+            raise ValidationError(refusal)
 
 
 def validate_spells(value):
@@ -264,10 +276,10 @@ class PoolReading:
         if self.current <= 0:
             return 0
         if self.current <= self.thresholds["minus_two_at"]:
-            return -2
+            return SEVERE_INJURY_ROLL_PENALTY
         minus_one_at = self.thresholds["minus_one_at"]
         if minus_one_at is not None and self.current <= minus_one_at:
-            return -1
+            return MINOR_INJURY_ROLL_PENALTY
         return 0
 
     @property
@@ -473,7 +485,7 @@ class Character(models.Model):
         related_name="characters",
         db_index=True,
     )
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=MAX_CHARACTER_NAME_LENGTH)
 
     # Core attributes (3-18 from 3d6, validated 1-30 for aging). Null until
     # recorded: a character built in a Games Master session is a row from its
@@ -565,7 +577,7 @@ class Character(models.Model):
     # (services.apply_origin_skill), so a point the player bought in the same
     # skill is never taken as the grant, and none is made twice.
     origin_skill = models.CharField(
-        max_length=50, blank=True, default="", db_default=""
+        max_length=MAX_SKILL_NAME_LENGTH, blank=True, default="", db_default=""
     )
     # The 3d6 rolled for the literacy check, null until rolled (issue #741).
     # Only the dice are stored: whether they pass is read against the check the
@@ -695,7 +707,12 @@ class Character(models.Model):
 
     # Experience tracking
     total_xp = models.PositiveIntegerField(default=0)
-    age = models.PositiveSmallIntegerField(default=STARTING_AGE)
+    # Every character starts at STARTING_AGE and ages only forward, so none is
+    # younger (issue #958). The floor is on the column so the import, the
+    # chat's extraction and the admin share it with CHARACTER_INT_FIELD_MIN.
+    age = models.PositiveSmallIntegerField(
+        default=STARTING_AGE, validators=[MinValueValidator(STARTING_AGE)]
+    )
     # One per prior-experience run recorded in the log. Runs used to be fixed
     # 4-year terms, which is why the field is named this way; since issue #221
     # a run is however many years the player asked for, so the sheet counts
@@ -715,7 +732,9 @@ class Character(models.Model):
 
     # Character status
     is_alive = models.BooleanField(default=True)
-    death_cause = models.CharField(max_length=200, blank=True, default="")
+    death_cause = models.CharField(
+        max_length=MAX_DEATH_CAUSE_LENGTH, blank=True, default=""
+    )
 
     # Wounds carried between fights (issue #751): how far each pool sits
     # below its maximum. Stored as the loss rather than as a current value so
@@ -931,18 +950,6 @@ class Character(models.Model):
         if self.user_id == user.id and not self.is_played:
             self.is_played = True
 
-    def save_equipment(self, equipment, *, user) -> None:
-        """Persist a new equipment list: assign, mark played, and save.
-
-        Bundles the three-line write every equipment-mutating endpoint
-        repeated (issue #91). Callers still do their own audit logging
-        (``_log_equipment_change``) since that's request-shaped, not
-        something a model method should reach for.
-        """
-        self.equipment = equipment
-        self.mark_played_by(user)
-        self.save()
-
     def record_field_change(
         self, field: str, old_value, new_value, username: str
     ) -> None:
@@ -1004,10 +1011,9 @@ class Character(models.Model):
             value = str(value).strip()
             if not value:
                 raise ValidationError("Name cannot be empty")
-            if len(value) > MAX_CHARACTER_NAME_LENGTH:
-                raise ValidationError(
-                    f"Name must be {MAX_CHARACTER_NAME_LENGTH} characters or fewer"
-                )
+            refusal = too_long("Name", value, MAX_CHARACTER_NAME_LENGTH)
+            if refusal:
+                raise ValidationError(refusal)
             if not CHARACTER_NAME_PATTERN.match(value):
                 raise ValidationError(
                     "Name may contain letters, numbers, spaces, "
@@ -1024,9 +1030,12 @@ class Character(models.Model):
             raise ValidationError(f"{field} must be yes or no")
 
         if field in CHARACTER_STRING_MAX_LENGTHS:
-            max_len = CHARACTER_STRING_MAX_LENGTHS[field]
-            if len(str(value)) > max_len:
-                raise ValidationError(f"{field} must be {max_len} characters or fewer")
+            # Named as a person reads it ("Appearance roll"), in the words
+            # every other limit uses (issue #928).
+            label = capfirst(str(cls._meta.get_field(field).verbose_name))
+            refusal = too_long(label, str(value), CHARACTER_STRING_MAX_LENGTHS[field])
+            if refusal:
+                raise ValidationError(refusal)
 
         if field in CHARACTER_CHOICE_FIELDS:
             valid_values = CHARACTER_CHOICE_FIELDS[field]
@@ -1061,9 +1070,10 @@ class Character(models.Model):
                 raise ValidationError("Invalid number") from None
             min_value = CHARACTER_INT_FIELD_MIN[field]
             if value < min_value:
-                # Every field here but fatigue_roll has a floor of 0 or 1, and
-                # "positive" says that plainly; the Fatigue roll's floor is the
-                # lowest 2d6 can produce, which needs naming (issue #653).
+                # Every field here but fatigue_roll and age has a floor of 0
+                # or 1, and "positive" says that plainly; the Fatigue roll's
+                # floor is the lowest 2d6 can produce (issue #653) and the
+                # age's is STARTING_AGE (issue #958), which need naming.
                 raise ValidationError(
                     "Value must be positive"
                     if min_value <= 1
@@ -2282,6 +2292,16 @@ CHARACTER_INT_FIELD_MAX = {
     "fatigue_damage": MAX_SMALLINT_FIELD_VALUE,
     "body_damage": MAX_SMALLINT_FIELD_VALUE,
     "mana_spent": MAX_SMALLINT_FIELD_VALUE,
+    # The counts the rules derive (issue #940): written by a run of years, an
+    # XP change or a Game Master's grant, never by the single-field editor.
+    # Bounded here for an import, like the wounds above, so the import holds
+    # them to their columns on SQLite as it does on Postgres.
+    "age": MAX_SMALLINT_FIELD_VALUE,
+    "experience_terms": MAX_SMALLINT_FIELD_VALUE,
+    "free_skill_points": MAX_SMALLINT_FIELD_VALUE,
+    "free_spell_points": MAX_SMALLINT_FIELD_VALUE,
+    "skill_points_owed": MAX_INT_FIELD_VALUE,
+    "money_earned": MAX_INT_FIELD_VALUE,
 }
 CHARACTER_INT_FIELDS = set(CHARACTER_INT_FIELD_MAX)
 # Integer fields whose empty value means something: a Rich character's coin is
@@ -2291,9 +2311,11 @@ CHARACTER_NULLABLE_INT_FIELDS = {"starting_coin"}
 # Minimum values for CHARACTER_INT_FIELDS, keyed per-field like
 # CHARACTER_INT_FIELD_MAX above -- not every field's floor is the same. The
 # six core attributes carry an explicit MinValueValidator(1) in
-# ATTRIBUTE_VALIDATORS above: 0 STR isn't a valid character. Every other int
-# field here is a plain Positive(Small)IntegerField with no such validator,
-# so 0 is genuinely storable and must round-trip. This used to be a flat
+# ATTRIBUTE_VALIDATORS above: 0 STR isn't a valid character. The Fatigue roll
+# floors at the lowest 2d6 (#653) and the age at STARTING_AGE (#958), each
+# from its own validator. Every other int field here is a plain
+# Positive(Small)IntegerField with no such validator, so 0 is genuinely
+# storable and must round-trip. This used to be a flat
 # "everything but starting_coin needs >=1" rule, which rejected a
 # freshly-created character's total_xp=0 on its own export->import round trip
 # (#164) even though 0 is the field's default.
@@ -2311,19 +2333,31 @@ CHARACTER_INT_FIELD_MIN = {
     "fatigue_damage": 0,
     "body_damage": 0,
     "mana_spent": 0,
+    "age": STARTING_AGE,
+    "experience_terms": 0,
+    "free_skill_points": 0,
+    "free_spell_points": 0,
+    "skill_points_owed": 0,
+    "money_earned": 0,
 }
-# Max lengths for string fields (matching model constraints)
-CHARACTER_STRING_MAX_LENGTHS = {
-    "name": 100,
-    "appearance_roll": 50,
-    "height_roll": 50,
-    "weight_roll": 50,
-    "provenance_class": 20,
-    "provenance_detail": 50,
-    "location": 20,
-    "wealth_level": 20,
-    "origin_ruling": 200,
-    "people": 20,
+
+
+# Max lengths for string fields, read off the model's own columns so the
+# edit endpoint and the import cannot drift from them (issue #928).
+CHARACTER_STRING_MAX_LENGTHS: dict[str, int] = {
+    field_name: column_length(Character, field_name)
+    for field_name in (
+        "name",
+        "appearance_roll",
+        "height_roll",
+        "weight_roll",
+        "provenance_class",
+        "provenance_detail",
+        "location",
+        "wealth_level",
+        "origin_ruling",
+        "people",
+    )
 }
 # Fields restricted to the model's declared choices. Values pulled from the
 # model itself (rather than duplicated here) so the two can't drift.

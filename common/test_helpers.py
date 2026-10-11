@@ -7,7 +7,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from unittest import skip
+from unittest.mock import patch
 
+import httpx
 from django.test import Client, TestCase
 
 from accounts.models import User
@@ -296,31 +298,59 @@ def write_fake_corpus(root: Path) -> None:
     )
 
 
+# How long the stand-in below holds a response open for the client to hang
+# up before it gives up and closes the connection itself. Only a hang-up that
+# failed ever reaches it, and giving up is not recorded as a hang-up, so the
+# test that hit it fails rather than hangs (issue #955).
+STAND_IN_HOLD_SECONDS = 10.0
+
+# Timeouts for a call to the stand-in. The read outlasts the hold, so a held
+# response ends by a hang-up or by the stand-in giving up, never by a read
+# timeout racing either one (issue #955).
+STAND_IN_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0)
+
+
 class StallingOllama:
-    """A local stand-in for Ollama whose stream stalls after its first tokens.
+    """A local stand-in for Ollama that holds its response open for a hang-up.
 
     Issue #887: httpx's read timeout counts from each read, so only a real
-    socket shows whether a stalled stream is cut off at a deadline. The
-    server answers ``/api/chat`` with ``tokens`` (one NDJSON line each), then
-    either finishes (``stall_seconds`` of 0) or sends nothing for
-    ``stall_seconds`` while watching for the client to hang up, and records
-    when it did.
+    socket shows whether a stalled stream is cut off. The server answers
+    ``/api/chat`` in up to three stages:
 
-    Use as a context manager; ``base_url`` is where it listens, and
-    ``real_stream`` must be the unpatched ``httpx.stream`` (the suite's
-    conftest replaces it for every test, so a test module captures it at
-    import).
+    - with ``prefill``, nothing at all, headers included, until the client
+      hangs up. Like Ollama, it sends its headers only with the first token
+      (issue #935), and a non-streaming answer's only once it is written
+      (issue #936).
+    - the headers and ``tokens``, one NDJSON line each.
+    - with ``stall``, nothing more until the client hangs up; without it,
+      the end of the response.
+
+    No stage waits on the clock (issue #955). A held response ends only when
+    the client hangs up (or after :data:`STAND_IN_HOLD_SECONDS`, when it gives
+    up), so what a test sees never depends on how quickly a loaded machine
+    reaches a point in time. Its events say where it has got to.
+
+    Use as a context manager; ``base_url`` is where it listens. The suite's
+    conftest replaces ``ollama_client.open_stream`` for every test, so a test
+    that talks to this server patches back the real one, captured at import.
+
+    Attributes:
+        requested: Set once a request has been read: the prefill has begun.
+        responding: Set once the headers and tokens have gone out.
+        hang_ups: The hold each hang-up came in, ``"prefill"`` or ``"stall"``.
+        finished: Set once a response has gone out in full.
+        closed: Set once a connection's handler is done, so what it recorded
+            is final.
     """
 
     def __init__(
-        self,
-        tokens: Sequence[str],
-        *,
-        stall_seconds: float,
-        first_token_after: float = 0.0,
+        self, tokens: Sequence[str], *, stall: bool = True, prefill: bool = False
     ):
-        self.hung_up_at: list[float] = []
+        self.requested = threading.Event()
+        self.responding = threading.Event()
+        self.hang_ups: list[str] = []
         self.finished = threading.Event()
+        self.closed = threading.Event()
         self.dropping = threading.Event()
         stand_in = self
 
@@ -330,31 +360,25 @@ class StallingOllama:
             def log_message(self, *_args: object) -> None:
                 """Keep the test output quiet."""
 
+            def handle(self) -> None:
+                try:
+                    super().handle()
+                finally:
+                    stand_in.closed.set()
+
             def _send_line(self, payload: dict) -> None:
                 line = (json.dumps(payload) + "\n").encode()
                 self.wfile.write(f"{len(line):x}\r\n".encode() + line + b"\r\n")
                 self.wfile.flush()
 
-            def do_POST(self) -> None:
-                self.rfile.read(int(self.headers["Content-Length"]))
-                self.send_response(200)
-                self.send_header("Content-Type", "application/x-ndjson")
-                self.send_header("Transfer-Encoding", "chunked")
-                self.end_headers()
-                time.sleep(first_token_after)
-                for token in tokens:
-                    self._send_line({"message": {"content": token}, "done": False})
-                if not stall_seconds:
-                    self._send_line({"message": {"content": ""}, "done": True})
-                    self.wfile.write(b"0\r\n\r\n")
-                    stand_in.finished.set()
-                    return
+            def _hold(self, stage: str) -> None:
+                """Send nothing until the client hangs up; record it in ``stage``."""
+                self.close_connection = True
                 self.connection.settimeout(0.02)
-                until = time.monotonic() + stall_seconds
+                until = time.monotonic() + STAND_IN_HOLD_SECONDS
                 while time.monotonic() < until:
                     if stand_in.dropping.is_set():
                         # Hang up mid-response, as a failing server would.
-                        self.close_connection = True
                         return
                     try:
                         if self.connection.recv(1) == b"":
@@ -364,9 +388,29 @@ class StallingOllama:
                     except OSError:
                         break
                 else:
-                    stand_in.finished.set()
+                    # No hang-up came: give up, and record nothing.
                     return
-                stand_in.hung_up_at.append(time.monotonic())
+                stand_in.hang_ups.append(stage)
+
+            def do_POST(self) -> None:
+                self.rfile.read(int(self.headers["Content-Length"]))
+                stand_in.requested.set()
+                if prefill:
+                    self._hold("prefill")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                for token in tokens:
+                    self._send_line({"message": {"content": token}, "done": False})
+                stand_in.responding.set()
+                if stall:
+                    self._hold("stall")
+                    return
+                self._send_line({"message": {"content": ""}, "done": True})
+                self.wfile.write(b"0\r\n\r\n")
+                stand_in.finished.set()
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -383,3 +427,109 @@ class StallingOllama:
     def __exit__(self, *_exc_info: object) -> None:
         self._server.shutdown()
         self._server.server_close()
+
+
+# How long a helper thread waits for its event before giving up, and how
+# long a test waits for that thread to end.
+ACT_ONCE_SET_SECONDS = 5.0
+
+
+def act_once_set(
+    event: threading.Event, action: Callable[[], None]
+) -> threading.Thread:
+    """Run ``action`` on a thread of its own once ``event`` is set.
+
+    The thread gives up after :data:`ACT_ONCE_SET_SECONDS` without acting, so
+    a test whose event never comes fails rather than leaves it waiting.
+
+    Args:
+        event: What the thread waits for, such as a stand-in's ``responding``.
+        action: What it then does, such as hanging a call up.
+
+    Returns:
+        The started thread, for the test to join.
+    """
+
+    def act() -> None:
+        if event.wait(ACT_ONCE_SET_SECONDS):
+            action()
+
+    thread = threading.Thread(target=act)
+    thread.start()
+    return thread
+
+
+class _HandFiredTimer:
+    """What :class:`HandFiredDeadlines` arms in place of a ``threading.Timer``.
+
+    Attributes:
+        interval: The time left the timer was armed with.
+        due: The ``time.monotonic()`` it was armed to fire at: the call's
+            ``stop_at``, give or take the moment between the two readings.
+    """
+
+    def __init__(self, interval: float, function: Callable[[], None]) -> None:
+        self.interval = interval
+        self.due = time.monotonic() + interval
+        self.function = function
+        self.daemon = False
+        self.started = False
+        self.cancelled = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+class HandFiredDeadlines:
+    """A call's ``stop_at`` passes when the test says so, not when the clock does.
+
+    The Ollama client arms a ``threading.Timer`` for a call's ``stop_at``.
+    A real one fires whenever a loaded machine gets round to it, so a test
+    that also waits on the stand-in above to reach a stage is a race between
+    the two; it lost under full-suite load (issue #955). Inside this context
+    ``threading.Timer`` is replaced, for the whole process, by a timer that
+    records what it was armed with and fires only on :meth:`pass_deadline`.
+    Nothing but the client arms a ``Timer`` in the code these tests run.
+
+    Give the call a ``stop_at`` well beyond the test's own length, so the
+    read timeout the client holds to the time left cannot end the call first.
+
+    Attributes:
+        timers: Every timer armed, in order.
+    """
+
+    def __init__(self) -> None:
+        self.timers: list[_HandFiredTimer] = []
+        self._helpers: list[threading.Thread] = []
+        self._patch = patch("threading.Timer", self._arm)
+
+    def _arm(self, interval: float, function: Callable[[], None]) -> _HandFiredTimer:
+        timer = _HandFiredTimer(interval, function)
+        self.timers.append(timer)
+        return timer
+
+    def pass_deadline(self) -> None:
+        """Fire every timer started and not cancelled, as the clock would."""
+        for timer in self.timers:
+            if timer.started and not timer.cancelled:
+                timer.function()
+
+    def pass_deadline_once(self, event: threading.Event) -> None:
+        """Pass the deadline from another thread once ``event`` is set.
+
+        The thread is joined when the context ends, so a test that failed
+        leaves nothing behind.
+        """
+        self._helpers.append(act_once_set(event, self.pass_deadline))
+
+    def __enter__(self) -> "HandFiredDeadlines":
+        self._patch.start()
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self._patch.stop()
+        for helper in self._helpers:
+            helper.join(ACT_ONCE_SET_SECONDS)

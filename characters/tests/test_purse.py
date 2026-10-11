@@ -12,6 +12,9 @@ from characters import services
 from characters.models import Character
 from characters.purse import (
     CONSULT_GM,
+    CUSTOM_COMBAT_ITEM_REFUSAL,
+    CUSTOM_ITEM_MORE_REFUSAL,
+    CUSTOM_ITEM_PRICE_REFUSAL,
     PurseError,
     charge_for_catalog_item,
     format_purse,
@@ -171,6 +174,74 @@ class PurchaseEndpointTest(BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.character.refresh_from_db()
         self.assertEqual(self.character.purse, Decimal(100))
+        # The gift is recorded in the purse history (review of #927).
+        self.assertEqual(
+            (self.character.history[-1]["field"], self.character.history[-1]["new"]),
+            ("purse", "1 × Dragonhide given by a Game Master"),
+        )
+
+    def test_more_of_an_item_carried_at_no_cost_is_a_game_masters_to_give(self):
+        """Review of #927: the sheet's raise of a cost-0 or old-shape item."""
+        for carried in (
+            {"item_id": "custom", "name": "Keepsake", "cost": 0, "quantity": 1},
+            {"name": "Keepsake", "quantity": 1},
+        ):
+            with self.subTest(carried=carried):
+                self.character.equipment = [carried]
+                self.character.save()
+
+                raised = self.post("equipment_update", {"index": 0, "quantity": 4})
+
+                self.assertEqual(raised.status_code, 400)
+                self.assertEqual(raised.json()["error"], CUSTOM_ITEM_MORE_REFUSAL)
+                self.character.refresh_from_db()
+                self.assertEqual(self.character.equipment, [carried])
+                self.assertEqual(self.character.purse, Decimal(100))
+        self.logout()
+        self.login_as(self.create_dm())
+        given = self.post("equipment_update", {"index": 0, "quantity": 4})
+        self.assertEqual(given.status_code, 200, given.content)
+
+    def test_more_of_a_game_masters_combat_item_is_his_to_give(self):
+        """#927: the quantity raise is held to the add's rule, as the chat is.
+
+        A player raising the quantity of a custom sword the Game Master gave
+        at no cost made more of it for nothing, numbers and all.
+        """
+        self.logout()
+        self.login_as(self.create_dm())
+        given = self.post(
+            "equipment_add",
+            {"is_custom": True, "name": "Starblade", "category": "weapons"},
+        )
+        self.assertEqual(given.status_code, 200, given.content)
+        self.logout()
+        self.login_as(self.owner)
+
+        raised = self.post("equipment_update", {"index": 0, "quantity": 3})
+
+        self.assertEqual(raised.status_code, 400)
+        self.assertIn("Game Master", raised.json()["error"])
+        with self.assertRaisesMessage(
+            services.CharacterChangeError, CUSTOM_COMBAT_ITEM_REFUSAL
+        ):
+            services.add_equipment(
+                self.character.pk,
+                "Starblade",
+                2,
+                actor=self.owner,
+                purchase=True,
+                price=Decimal(1),
+            )
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.equipment[0]["quantity"], 1)
+        self.assertEqual(self.character.purse, Decimal(100))
+        self.logout()
+        self.login_as(self.create_dm("dm2"))
+        self.assertEqual(
+            self.post("equipment_update", {"index": 0, "quantity": 3}).status_code,
+            200,
+        )
 
     def test_the_games_masters_chat_grant_is_free(self):
         """``services.add_equipment`` from a Game Master's session is a gift."""
@@ -189,12 +260,24 @@ class PurchaseEndpointTest(BaseTestCase):
             services.add_equipment(
                 self.character.pk, "Chainmail", 1, actor=self.owner, purchase=True
             )
-        # Something the catalog does not sell has no price and no numbers.
+        # Something the catalog does not sell is bought at its stated price,
+        # as the sheet buys it, and refused with none stated (#927).
+        with self.assertRaisesMessage(
+            services.CharacterChangeError, CUSTOM_ITEM_PRICE_REFUSAL
+        ):
+            services.add_equipment(
+                self.character.pk, "Vane's key", 1, actor=self.owner, purchase=True
+            )
         services.add_equipment(
-            self.character.pk, "Vane's key", 1, actor=self.owner, purchase=True
+            self.character.pk,
+            "Vane's key",
+            1,
+            actor=self.owner,
+            purchase=True,
+            price=Decimal(5),
         )
         self.character.refresh_from_db()
-        self.assertEqual(self.character.purse, Decimal(20))
+        self.assertEqual(self.character.purse, Decimal(15))
         self.assertEqual(len(self.character.equipment), 2)
 
     def test_the_sheet_shows_the_running_purse(self):

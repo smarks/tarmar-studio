@@ -4,6 +4,7 @@ from .views.characters import (
     CharacterEditView,
     CharacterListView,
     DeletedCharactersView,
+    OwnerFilterPickerView,
     bulk_delete_characters,
     character_create,
     character_dismiss_import_notice,
@@ -47,6 +48,8 @@ app_name = "characters"
 
 urlpatterns = [
     path("", CharacterListView.as_view(), name="list"),
+    # The list's owner filter, searched a page at a time (#973).
+    path("owners/", OwnerFilterPickerView.as_view(), name="owner_picker"),
     path("create/", character_create, name="create"),
     path("import/", character_import, name="import"),
     path("bulk-delete/", bulk_delete_characters, name="bulk_delete"),

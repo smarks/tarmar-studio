@@ -1,0 +1,10 @@
+{% load local_time %}<li class="session-item {% if active_session and active_session.pk == s.pk %}active{% endif %}"
+    data-id="{{ s.pk }}">
+    <a href="?session={{ s.pk }}">
+        <span class="session-name">{{ s.name }}</span>
+        <span class="session-meta">{% local_time s.created_at "M d, Y" style="date" %} &middot; <span class="session-count">{{ s.message_count }} msg{{ s.message_count|pluralize }}</span></span>
+    </a>
+    <button type="button" class="session-delete-btn"
+            aria-label="Delete session {{ s.name }}, started {{ s.created_at|date:'M d, Y' }}" title="Delete session"
+            onclick="deleteSession({{ s.pk }}, '{{ s.name|escapejs }}', '{{ s.created_at|date:'M d, Y'|escapejs }}')">&times;</button>
+</li>

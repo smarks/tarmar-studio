@@ -15,7 +15,8 @@ usage passes `fatal_check=None` (nothing rolled yet), and the element still
 has to exist there for the JS clone to find and un-hide.
 {% endcomment %}
 <div class="death-card">
-    <h3>{{ death_name }} died</h3>
+    {# The name is painted from the saved record on a rename (issue #903). #}
+    <h3><span data-name-chrome>{{ death_name }}</span> died</h3>
     <p class="death-cause">{{ death_cause }}</p>
     <p class="fatal-roll"{% if not fatal_check %} hidden{% endif %}>{% if fatal_check %}Fatal roll: {{ fatal_check|survival_roll }}{% endif %}</p>
     <p class="death-note">A DM can resurrect this character.</p>

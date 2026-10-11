@@ -12,7 +12,7 @@
  * repeat so no other copy of this spec's do either (issue #889).
  */
 
-const { test, expect, loginAs } = require('./fixtures');
+const { test, expect, loginAs, chooseToAttach } = require('./fixtures');
 const { runDjangoShell } = require('./django');
 const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 
@@ -69,7 +69,7 @@ create_character(master, name=${JSON.stringify(KTHAL)})
         await expect(select.locator('optgroup[label="Your characters"] option')).toHaveText([KTHAL]);
         await expect(select.locator(`optgroup[label="${PLAYER.username}"] option`)).toHaveText([WREN]);
 
-        await page.selectOption('#gm-character-select', { label: WREN });
+        await chooseToAttach(page, WREN);
         await page.click('#gm-character-attach');
 
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);

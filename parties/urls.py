@@ -6,6 +6,7 @@ from .views import (
     PartyEditView,
     PartyListView,
     party_add_member,
+    party_addable_picker,
     party_disband,
     party_remove_member,
     party_restore,
@@ -20,6 +21,8 @@ urlpatterns = [
     path("<int:pk>/", PartyDetailView.as_view(), name="detail"),
     path("<int:pk>/edit/", PartyEditView.as_view(), name="edit"),
     path("<int:pk>/add-member/", party_add_member, name="add_member"),
+    # The Add Members picker's search (#864).
+    path("<int:pk>/addable/", party_addable_picker, name="addable_picker"),
     path("<int:pk>/remove-member/", party_remove_member, name="remove_member"),
     path("<int:pk>/update-field/", party_update_field, name="update_field"),
     path("<int:pk>/disband/", party_disband, name="disband"),

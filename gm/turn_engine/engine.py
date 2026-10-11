@@ -29,7 +29,8 @@ happen, and the SSE view relays them.
 import hashlib
 import logging
 import time
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -76,6 +77,20 @@ class TurnBudgetExceeded(Exception):
     """The turn outran its time budget; whatever already ran stands."""
 
 
+@contextmanager
+def _cut_off_is_out_of_time() -> Iterator[None]:
+    """Turn a model call cut off at the turn's deadline into the budget running out.
+
+    A port raises ``TimeoutError`` when the deadline it was given passes
+    (:meth:`ModelPort.stream`), whether at the call or mid-stream, and the
+    only deadline the engine gives is the turn's (issue #904).
+    """
+    try:
+        yield
+    except TimeoutError as out_of_time:
+        raise TurnBudgetExceeded from out_of_time
+
+
 @dataclass(frozen=True)
 class ActionResult:
     """What one action did, as the narration and the page need it.
@@ -99,6 +114,10 @@ class ActionResult:
 
 class Executor(Protocol):
     """Runs a plan's actions against the records."""
+
+    def begin(self, actions: Sequence[PlannedAction]) -> None:
+        """Read the plan about to run, before its first action runs."""
+        ...
 
     def label(self, action: PlannedAction) -> str:
         """What the page is told while ``action`` runs."""
@@ -193,11 +212,6 @@ def _roster_keys(lines: Sequence[RosterLine]) -> tuple[set[int], dict[str, int]]
     return {line.character_id for line in lines}, held_names
 
 
-def _injured_ids(lines: Sequence[RosterLine]) -> set[int]:
-    """The listed characters whose rolls the injury table touches (#886)."""
-    return {line.character_id for line in lines if line.injured}
-
-
 class TurnEngine:
     """Runs one turn through its states.
 
@@ -252,6 +266,11 @@ class TurnEngine:
     def elapsed(self) -> float:
         """Seconds since the turn began."""
         return time.monotonic() - self.started_at
+
+    @property
+    def deadline(self) -> float:
+        """The ``time.monotonic()`` at which the turn's budget runs out."""
+        return self.started_at + self.budget_seconds
 
     def _check_budget(self) -> None:
         if self.elapsed() > self.budget_seconds:
@@ -315,30 +334,38 @@ class TurnEngine:
         # Only the narrated call reaches the player, and only it can leak a
         # plan into prose (issue #603).
         leak = PlanLeakFilter() if stream_tokens else None
-        tokens = KeepAliveTokens(self.model.stream(messages), self.keepalive_seconds)
-        try:
-            for token in tokens:
-                self._check_budget()
-                if token is None:
-                    yield TurnEvent(
-                        events.WAITING,
-                        {"status": status, "elapsed": int(self.elapsed())},
-                        persist=False,
-                    )
-                    continue
-                raw_parts.append(token)
-                visible = thinking.feed(token)
-                if visible is None:
-                    continue
-                if leak is not None:
-                    visible = leak.feed(visible)
+        # The call ends at the turn's deadline even while a read waits on a
+        # stream that stalled, and whatever ends the turn early hangs it up
+        # when ``tokens`` is closed, so it does not hold the model past the
+        # turn once its response has begun (issue #904).
+        with _cut_off_is_out_of_time():
+            tokens = KeepAliveTokens(
+                self.model.stream(messages, stop_at=self.deadline),
+                self.keepalive_seconds,
+            )
+            try:
+                for token in tokens:
+                    self._check_budget()
+                    if token is None:
+                        yield TurnEvent(
+                            events.WAITING,
+                            {"status": status, "elapsed": int(self.elapsed())},
+                            persist=False,
+                        )
+                        continue
+                    raw_parts.append(token)
+                    visible = thinking.feed(token)
                     if visible is None:
                         continue
-                shown_parts.append(visible)
-                if stream_tokens:
-                    yield TurnEvent(events.TOKEN, {"token": visible}, persist=False)
-        finally:
-            tokens.close()
+                    if leak is not None:
+                        visible = leak.feed(visible)
+                        if visible is None:
+                            continue
+                    shown_parts.append(visible)
+                    if stream_tokens:
+                        yield TurnEvent(events.TOKEN, {"token": visible}, persist=False)
+            finally:
+                tokens.close()
         if leak is not None:
             held = leak.close()
             if held:
@@ -381,7 +408,6 @@ class TurnEngine:
             settled=settled,
             thread_ids=thread_ids,
             held_names=held_names,
-            injured_ids=_injured_ids(lines),
         )
         if not reading.ok:
             yield self._emit(
@@ -404,7 +430,6 @@ class TurnEngine:
                 settled=settled,
                 thread_ids=thread_ids,
                 held_names=held_names,
-                injured_ids=_injured_ids(lines),
             )
             if not reading.ok:
                 yield self._emit(
@@ -426,6 +451,7 @@ class TurnEngine:
         self, actions: Sequence[PlannedAction], outcome: TurnOutcome
     ) -> Generator[TurnEvent]:
         yield self._enter(TurnState.EXECUTING, actions=len(actions))
+        self.executor.begin(actions)
         for action in actions:
             self._check_budget()
             yield self._status(self.executor.label(action))
@@ -524,7 +550,6 @@ class TurnEngine:
             settled=self.executor.settled(),
             thread_ids=thread_ids,
             held_names=held_names,
-            injured_ids=_injured_ids(lines),
         )
         if not reading.ok or not reading.actions:
             logger.info("GM narration carried a plan that did not read; dropped")

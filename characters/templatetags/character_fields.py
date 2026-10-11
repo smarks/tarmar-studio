@@ -31,6 +31,7 @@ from characters.models import (
     CHARACTER_INT_FIELD_MIN,
     Character,
 )
+from common.helpers import column_length
 
 register = template.Library()
 
@@ -197,6 +198,6 @@ def editable_text(context, character, field, can_edit, label=""):
         "field": field,
         "value": getattr(character, field),
         **cell_state(context, character, field, can_edit),
-        "max_length": character._meta.get_field(field).max_length,
+        "max_length": column_length(type(character), field),
         "label": accessible_name(character, field, label),
     }

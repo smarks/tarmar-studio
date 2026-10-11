@@ -18,11 +18,17 @@ from django.utils import timezone
 from common.test_helpers import BaseTestCase
 
 from . import views
-from .models import GMSession, GMTurnRecord
+from .models import PLACEHOLDER_SESSION_NAME, GMSession, GMTurnRecord
 from .retrieval import INTERRUPTED_KIND, PROCEDURE_KIND
 from .testing import gm_replies
 from .tests import FakeMonotonicClock, SlowFakeStream
-from .turn_record import STALE_RUNNING_TURN_ERROR, TurnRecorder, claim_turn
+from .turn_record import (
+    RUNNING_TURN_GRACE_SECONDS,
+    STALE_RUNNING_TURN_ERROR,
+    TurnRecorder,
+    claim_turn,
+    expire_stale_running_turns,
+)
 
 STREAM_URL = "/tarmar/gm/stream/"
 # A plan whose one action changes a character, so the turn has a chip to keep.
@@ -211,6 +217,36 @@ class TurnSurvivesDisconnectTest(BaseTestCase):
         session.refresh_from_db()
         self.assertEqual(self._spoken(session), ["Hello", "Welcome back."])
 
+    @override_settings(GM_RECAP_BUDGET_SECONDS=100, GM_STREAM_BUDGET_SECONDS=200)
+    def test_a_turn_still_writing_its_recap_is_not_taken_for_dead(self):
+        """Issue #936: a continued session's first turn spends both budgets.
+
+        Its recap runs before its own clock starts, so a turn is taken to have
+        died only once both, and the grace, have passed.
+        """
+        session = GMSession.objects.create(user=self.user, name="Keep", mode="play")
+        limit = 100 + 200 + RUNNING_TURN_GRACE_SECONDS
+
+        def running_since(seconds: float) -> GMTurnRecord:
+            return GMTurnRecord.objects.create(
+                session=session,
+                user=self.user,
+                outcome=GMTurnRecord.OUTCOME_RUNNING,
+                mode="play",
+                user_message="Still here",
+                started_at=timezone.now() - timedelta(seconds=seconds),
+            )
+
+        alive = running_since(limit - 30)
+        dead = running_since(limit + 30)
+
+        expire_stale_running_turns()
+
+        alive.refresh_from_db()
+        dead.refresh_from_db()
+        self.assertEqual(alive.outcome, GMTurnRecord.OUTCOME_RUNNING)
+        self.assertEqual(dead.outcome, GMTurnRecord.OUTCOME_ERROR)
+
     def test_a_turn_can_only_be_asked_after_by_its_owner(self):
         stranger = self.create_user(username="stranger")
         record = GMTurnRecord.objects.create(
@@ -388,6 +424,12 @@ class ReloadAsTheTurnLandsTest(BaseTestCase):
     so one that did both between those two reads left the page with the
     history from before the save and no running turn to wait for: the turn's
     dice chips and reply never appeared until another reload.
+
+    Issue #910: #880's fix moved the history read after the question, but the
+    session row -- its history among it -- was still fetched before asking.
+    A turn that landed between that fetch and the question left the page
+    with the session as it was before the save, still named "New Session",
+    and nothing to wait for.
     """
 
     # The running-turn helper of the class above, not its tests.
@@ -443,3 +485,39 @@ class ReloadAsTheTurnLandsTest(BaseTestCase):
 
         self.assertIsNone(page.context["chat_config"]["runningTurn"])
         self.assertContains(page, REPLY)
+
+    def test_a_turn_that_lands_as_the_page_asks_is_in_the_history(self):
+        """The page fetched the session, then the turn landed, then it asked.
+
+        Issue #910: the row was read before the question, so the page showed
+        the session from before the save and had no running turn to wait for.
+        """
+        session = GMSession.objects.create(
+            user=self.user, name=PLACEHOLDER_SESSION_NAME
+        )
+        record = self.running_turn(session.pk)
+        real_running_turn_for = views.running_turn_for
+
+        def the_turn_lands_first(user, session_id: int) -> GMTurnRecord | None:
+            # What the stream does at the end: save the exchange, named after
+            # its opening line, then finish the record.
+            landed = GMSession.objects.get(pk=session_id)
+            landed.history = [
+                {"role": "user", "content": "I open the iron box"},
+                {"role": "assistant", "content": REPLY},
+            ]
+            landed.name = "I open the iron box"
+            landed.save()
+            GMTurnRecord.objects.filter(pk=record.pk).update(
+                outcome=GMTurnRecord.OUTCOME_OK
+            )
+            return real_running_turn_for(user, session_id)
+
+        with patch.object(views, "running_turn_for", the_turn_lands_first):
+            page = self.client.get(f"/tarmar/gm/?session={session.pk}")
+
+        # Nothing is running when the page asks, so the session it shows must
+        # be the saved one: the reply, under the name the save gave it.
+        self.assertIsNone(page.context["chat_config"]["runningTurn"])
+        self.assertContains(page, REPLY)
+        self.assertEqual(page.context["active_session"].name, "I open the iron box")

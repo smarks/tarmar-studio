@@ -157,7 +157,7 @@ Markdown tree; slugs map 1:1 to `reference/nav.py`.
 - `scripts/ci-runner/` — the self-hosted GitHub Actions runner on the Mac Studio (#576): `install-runner.sh` (run once with sudo; creates the `tarmarci` account, installs the runner and its LaunchDaemon), `protect-main.sh` (requires the CI check on `main`), the daemon plist, and a README. Held together with `ci.yml` by `scripts/test_ci_runner.py`.
 - `e2e/` — Playwright suite: `global-setup.js` (seeds users + characters), `global-teardown.js`, `fixtures.js` (gate/login helpers, coverage wrap), `coverage.js` (V8→Istanbul), specs (`auth`, `character-list`, `character-edit`).
 - Config: `pyproject.toml` (deps, ruff, pytest `--cov-fail-under=98`, a fixed gate), `pyrightconfig.json`, `jest.config.js`/`jest.setup.js`, `playwright.config.js`, `package.json` (`jsCoverageThreshold`), `uv.lock`, `package-lock.json`, `.pre-commit-config.yaml` (ruff + ruff-format + pyright + makemigrations check + guides check; none rewrites a tracked file. pytest, Jest and Playwright run in CI).
-- `.github/workflows/ci.yml` — runs `./run check`. The blue-green deploy workflow (`deploy.yml`) stays on the private repository and is not part of this one.
+- `.github/workflows/ci.yml` — runs `./run check`; `deploy.yml` — blue-green deploy over SSH, started by `./run gate` once it records a pass for the head of main.
 
 ## Docs & meta
 - `README.md` — overview, prereqs, quick start. `AGENTS.md` — agent workflow (GitHub Issues, push-to-finish checklist). `CLAUDE.md` — Claude setup + `./run` commands. `.env.example` — env template. `.gitignore`.

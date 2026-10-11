@@ -10,6 +10,7 @@ from common.mixins import ActivePageMixin
 from reference.paths import page_markdown_file
 from reference.rendering import render_reference_markdown
 from reference.tables import annotate_tables
+from ruins.table_rolls import table_page_slug_for_reference_path
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +116,23 @@ class ReferenceView(BreadcrumbMixin, ActivePageMixin, TemplateView):
 
         context["current_title"] = title_map.get(path, "Reference")
         context["current_path"] = path
+        context["table_roller_url"] = (
+            _table_roller_url(path) if md_file.exists() else None
+        )
 
         return context
+
+
+def _table_roller_url(path: str) -> str | None:
+    """The table roller for a GM-tools page, when it has one (issue #809).
+
+    Only reached for a page the reader may see, and every page with a roller
+    sits under dm-rules/, so the Roll control shows to Game Masters alone.
+    """
+    slug = table_page_slug_for_reference_path(path)
+    if slug is None:
+        return None
+    return reverse("table_rolls:roll", args=[slug])
 
 
 def _extract_snippet(content, query, context_chars=100):

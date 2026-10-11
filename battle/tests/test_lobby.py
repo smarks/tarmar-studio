@@ -464,7 +464,15 @@ class RemotePlayerTurnTest(BaseTestCase):
         decision = battle.events.filter(
             event_type="decision", actor=seat.display_name
         ).get()
-        self.assertEqual(decision.payload["candidates"], first_menu)
+        # The log lists exactly the options offered. The menu also carries
+        # each placing option's legal hexes for the picker (#819, #866),
+        # which the log leaves out: the hex chosen is on its "chosen".
+        offered = [
+            {key: value for key, value in entry.items() if key != "destinations"}
+            for entry in first_menu
+        ]
+        self.assertTrue(any("destinations" in entry for entry in first_menu))
+        self.assertEqual(decision.payload["candidates"], offered)
 
     def test_choice_off_the_menu_is_refused(self):
         battle, _seat = started_battle_with_player(self)

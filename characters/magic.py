@@ -23,15 +23,16 @@ from dataclasses import dataclass
 
 from tarmar_engine.spells import SPELLS, Spell
 
-from .models import Character
+from .models import CHARACTER_INT_FIELD_MAX, Character
 from .services import CharacterChangeError
 from .skills import MAX_SKILL_POINTS, format_skill_level, get_skill_level
 
 #: The largest mana a Game Master grants in one step.
 MAX_MANA_GRANT = 100
 
-#: Mana is stored in a PositiveSmallIntegerField.
-MAX_MANA_POOL = 32767
+#: The largest Mana Pool the record holds: its column's, the bound the import
+#: holds a file to as well (issue #940).
+MAX_MANA_POOL = CHARACTER_INT_FIELD_MAX["free_spell_points"]
 
 
 @dataclass(frozen=True)
@@ -206,8 +207,14 @@ def grant_mana(character: Character, amount: int, *, is_game_master: bool) -> st
     only with the Spell Points the Magic track grants ... A Game Master may
     grant mana." A player is refused; skill points never convert to mana.
 
+    The Pool is never lowered below the mana already spent from it (issue
+    #940): the record would hold Mana below 0, which the pools setting
+    (``services.apply_current_pools``) refuses. A Game Master restores the
+    spent mana first.
+
     Raises:
-        CharacterChangeError: A player asked, or the amount is out of range.
+        CharacterChangeError: A player asked, the amount is out of range, or
+            it would lower the Pool below the mana spent.
     """
     if not is_game_master:
         raise CharacterChangeError("Only a Game Master can grant mana")
@@ -220,6 +227,11 @@ def grant_mana(character: Character, amount: int, *, is_game_master: bool) -> st
     if not 0 <= after <= MAX_MANA_POOL:
         raise CharacterChangeError(
             f"The Mana Pool holds {before}; it cannot go to {after}"
+        )
+    if amount < 0 and after < character.mana_spent:
+        raise CharacterChangeError(
+            f"The Mana Pool holds {before} with {character.mana_spent} spent; it "
+            f"cannot go to {after}, below the mana spent"
         )
     character.free_spell_points = after
     return f"Mana Pool {before} → {after} (Game Master grant)"

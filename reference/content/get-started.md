@@ -1,6 +1,6 @@
 # Get Started
 
-*Version 2026-09-04 23:07 EDT, merged to main in commit [bd9e50d3db5178942723366873f0c17f259fd4bc](https://github.com/smarks/tarmar-studio/commit/bd9e50d3db5178942723366873f0c17f259fd4bc) via [PR #284](https://github.com/smarks/tarmar-studio/pull/284).*
+*Version 2026-09-04 23:07 EDT, merged to main as bd9e50d via PR #284.*
 
 New to Tarmar? Here is the short path from "curious" to "playing." Take the steps in order, or jump to whatever pulls at you.
 

@@ -14,7 +14,7 @@ from django.db import IntegrityError
 
 from battle import profiles
 from battle.access import Actor
-from battle.classic_adaptation import classic_state
+from battle.classic_adaptation import classic_side, classic_state
 from battle.models import Battle, BattleCombatant, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
 from battle.services import advance_turn, create_battle, rename_combatant
@@ -50,6 +50,8 @@ def classic_wizard_battle(dm, *, seed: int = 11) -> Battle:
             battle=battle, display_name=figure.name
         )
         figure.uid = str(combatant.pk)
+        # Teamless, so its side is its uid, spelled as a real crossing would.
+        figure.side = classic_side("", combatant.pk)
     battle.state_json = dump_state(state)
     battle.initial_state_json = dump_state(state)
     battle.save()
@@ -62,6 +64,9 @@ def classic_battle(dm, *, seed: int = 11) -> Battle:
     The app knows a combatant by its ``BattleCombatant`` pk and the engine by
     a string ``uid``; ``profiles.CLASSIC_UID_IS_ROW_PK`` is this app's
     contract that they are the same value, so a battle built here honours it.
+    The fixture's sides ("red", "blue") become the rows' teams, spelled as
+    ``classic_side`` spells a team's side (#930), since ``classic_team``
+    reads no other spelling (#944).
     """
     battle = Battle.objects.create(
         name="Classic", seed=seed, created_by=dm, rules_profile=CLASSIC_PROFILE
@@ -69,9 +74,10 @@ def classic_battle(dm, *, seed: int = 11) -> Battle:
     game = classic_game()
     for figure in game.figures:
         combatant = BattleCombatant.objects.create(
-            battle=battle, display_name=figure.name
+            battle=battle, display_name=figure.name, team=figure.side
         )
         figure.uid = str(combatant.pk)
+        figure.side = classic_side(combatant.team, combatant.pk)
     battle.state_json = dump_state(game)
     battle.initial_state_json = dump_state(game)
     battle.save()

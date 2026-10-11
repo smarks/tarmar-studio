@@ -324,25 +324,25 @@ test.describe('a keyboard user can see where the focus is', () => {
     });
 });
 
-test.describe('the way from signing in to the table (issues #786, #827, #828)', () => {
-    test('the signed-in home, its table and its Play buttons pass at every width', async ({ page }, testInfo) => {
+test.describe('the way from signing in to the journal (issues #786, #827, #828, #924, #952)', () => {
+    test('the journal page and its Play buttons pass at every width', async ({ page }, testInfo) => {
         test.setTimeout(120000);
         await loginAs(page, TEST_USER);
         await createNamedCharacter(page, `Axe Home ${testInfo.workerIndex}${Date.now()}`);
 
         for (const viewport of VIEWPORTS) {
             await page.setViewportSize({ width: viewport.width, height: viewport.height });
-            await page.goto('/tarmar/');
-            await expect(page.locator('#your-table .play-with-gm').first()).toBeVisible();
+            await page.goto('/tarmar/journal/');
+            await expect(page.locator('#journal .play-with-gm').first()).toBeVisible();
             const found = await violations(page);
             expect(found, `${viewport.name}:\n${describe(found)}`).toEqual([]);
         }
     });
 
-    test('the empty table passes too', async ({ page }) => {
+    test('the empty journal passes too', async ({ page }) => {
         await loginAs(page, TEST_WATCHER);
-        await page.goto('/tarmar/');
-        await expect(page.locator('#your-table-first-character')).toBeVisible();
+        await page.goto('/tarmar/journal/');
+        await expect(page.locator('#journal-first-character')).toBeVisible();
 
         const found = await violations(page);
 

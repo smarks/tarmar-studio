@@ -284,6 +284,36 @@ describe('live refresh (issue #571)', () => {
         expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ session_id: 5, character_id: 9 });
     });
 
+    test('a search typed in the attach picker is asked again after a refresh (#864)', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        const pickerMarkup = (value) => `
+            <form id="gm-character-picker">
+                <div data-picker data-picker-url="/tarmar/gm/characters/attachable/?session=5">
+                    <input data-picker-search value="${value}">
+                    <div data-picker-body><select id="gm-character-select"></select></div>
+                </div>
+            </form>`;
+        document.getElementById('gm-panel-characters').insertAdjacentHTML(
+            'afterbegin', pickerMarkup('wren'),
+        );
+        window.picker = require('../picker.js');
+        global.fetch
+            .mockReturnValueOnce(htmlResponse(pickerMarkup('')))
+            .mockReturnValueOnce(htmlResponse('<select id="gm-character-select"><option value="9">Wren</option></select>'));
+        loadTab();
+
+        await panelCharacters.refreshPanel();
+        await flushPromises();
+
+        const asked = new URL(global.fetch.mock.calls[1][0]);
+        expect(asked.pathname).toBe('/tarmar/gm/characters/attachable/');
+        expect(asked.searchParams.get('q')).toBe('wren');
+        expect(asked.searchParams.get('session')).toBe('5');
+        expect(document.querySelector('[data-picker-search]').value).toBe('wren');
+        expect(document.getElementById('gm-character-select').textContent).toContain('Wren');
+        delete window.picker;
+    });
+
     test('refreshes asked for while one runs collapse into one more', async () => {
         setUpDom({ sessionId: 5, live: true });
         global.fetch.mockReturnValue(htmlResponse(FRAGMENT));

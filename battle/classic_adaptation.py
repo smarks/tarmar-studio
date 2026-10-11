@@ -53,6 +53,8 @@ Tarmar-only battle never pulls it in.
 
 from __future__ import annotations
 
+import copy
+import re
 from dataclasses import dataclass
 
 from . import policy
@@ -87,9 +89,152 @@ MIN_CLASSIC_ATTRIBUTE = 1
 #: initiative is per-character adjDX order, not per-side, so sides govern
 #: only who counts as an enemy). A free-for-all figure's side is its uid,
 #: so ``enemies_of`` reads "everyone else"; a TEAMED combatant (#275)
-#: crosses with its team name as its side, so classic's own side semantics
-#: carry the no-friendly-fire rule.
+#: crosses with its team as its side (spelled by :func:`classic_side`), so
+#: classic's own side semantics carry the no-friendly-fire rule.
 SIDE_IS_UID = True
+
+#: What a teamed figure's classic side starts with (#930). A uid is a
+#: ``BattleCombatant`` row pk (``CLASSIC_UID_IS_ROW_PK``), all digits, so a
+#: side that starts with this can never equal one. Without it a team named
+#: "7" crossed with side "7", the same side as the teamless figure in row 7:
+#: the engine read the two as allies and :func:`classic_team` read a row-7
+#: member of team "7" as teamless. The team's name is everything after the
+#: prefix, so no team name, digits included, is refused or renamed.
+TEAM_SIDE_PREFIX = "team:"
+
+#: What a log line calls a nameless teamless figure's side, by its 1-based
+#: place in the roster (#909). The roster's order is fixed for the battle,
+#: so the label is too, where a row id would mean nothing to a reader.
+NAMELESS_SIDE_LABEL = "Side {position}"
+
+
+def classic_side(team: str, combatant_id: int) -> str:
+    """The classic side a studio combatant crosses with (#930).
+
+    The one place a side is spelled; :func:`classic_team` is the one place
+    it is read back.
+
+    Args:
+        team: The combatant's team name, or ``""`` for none.
+        combatant_id: The combatant's ``BattleCombatant`` row pk, which is
+            also the figure's uid.
+
+    Returns:
+        :data:`TEAM_SIDE_PREFIX` and the team's name for a teamed combatant;
+        else the combatant's own uid (:data:`SIDE_IS_UID`).
+    """
+    if team:
+        return f"{TEAM_SIDE_PREFIX}{team}"
+    return str(combatant_id) if SIDE_IS_UID else "arena"
+
+
+def classic_team(figure) -> str:
+    """The team a classic figure fights for, or ``""`` when it has none.
+
+    The one decoding of a side spelled by :func:`classic_side`: the prefixed
+    form names a team, and a side equal to the figure's own uid names none.
+    Battles saved before #930 spelled a team's side as its bare name; the
+    data migration ``battle.0017_classic_team_sides_prefixed`` (#944)
+    rewrote every stored one, so no other spelling is read.
+
+    Args:
+        figure: A classic figure, with ``side`` and ``uid``.
+
+    Returns:
+        The team's own name, never the side key; ``""`` for a teamless figure.
+
+    Raises:
+        ValueError: For a side :func:`classic_side` cannot have spelled, which
+            would otherwise be guessed at and could change who fights whom.
+    """
+    side = figure.side
+    if side.startswith(TEAM_SIDE_PREFIX):
+        return side[len(TEAM_SIDE_PREFIX) :]
+    if side == figure.uid:
+        return ""
+    raise ValueError(
+        f"classic figure {figure.uid!r} has side {side!r}, which is neither "
+        f"{TEAM_SIDE_PREFIX!r} and a team's name nor its own uid"
+    )
+
+
+def side_label(figure, roster_position: int) -> str:
+    """What a reader calls the side ``figure`` fights on (#909).
+
+    The team's name when the side has one; else the figure's own name, since
+    a teamless figure is a side of one; else :data:`NAMELESS_SIDE_LABEL` by
+    its 1-based ``roster_position``.
+    """
+    team = classic_team(figure)
+    if team:
+        return team
+    return figure.name.strip() or NAMELESS_SIDE_LABEL.format(position=roster_position)
+
+
+def name_sides_in_lines(lines: list[str], figures: list) -> list[str]:
+    """The classic runner's log lines, with every side named for a reader.
+
+    The classic narrative names a figure ``"Name (side)"`` and a win
+    ``"🏆 The <side> hold the field — victory!"``, printing the side key as
+    it stands. Neither key is a reader's word. A teamless figure's side is
+    its uid, a ``BattleCombatant`` row pk (``CLASSIC_UID_IS_ROW_PK``), so
+    unchanged the log would read "Yaria Hawkridge (743)" and "The 743 hold
+    the field" (#909): it is named by :func:`side_label` instead, and its
+    win reads "🏆 Yaria Hawkridge holds the field — victory!". A teamed
+    figure's side carries :data:`TEAM_SIDE_PREFIX` (#930), so its token is
+    rewritten to the team's name: "Ada (team:Red)" reads "Ada (Red)" and
+    "The team:Red hold the field" reads "The Red hold the field". Because
+    the two kinds of key never collide, neither do their lines: team "7"'s
+    win and the teamless row-7 figure's win are different engine lines and
+    stay different here.
+
+    The tokens to replace come from the engine's own formatters, so a change
+    to how the engine prints a figure or a win is followed here rather than
+    silently missed. They are replaced in one pass, longest first: a
+    disambiguated name such as "Thorn (2)" holds the token of a figure named
+    "Thorn" whose row happens to be 2, and must not be read as it. Every
+    figure's token is in that pass, so "Thorn (2) (team:Red)" is matched
+    whole before the teamless "Thorn (2)" can match inside it.
+
+    Args:
+        lines: Log lines as the classic runner wrote them.
+        figures: The battle's classic figures, in roster order.
+
+    Returns:
+        The lines, relabelled, in the same order.
+    """
+    # The engine's private figure formatter, used on purpose: it is the one
+    # definition of the "Name (side)" token, so matching its output cannot
+    # drift from what the engine printed (smarks/tarmar-engine#25 would let
+    # the caller hand the engine these labels instead).
+    from tarmar_engine.classic.narrative import _name, narrate_victory
+
+    labels: dict[str, str] = {}
+    victories: dict[str, str] = {}
+    for roster_position, figure in enumerate(figures, start=1):
+        team = classic_team(figure)
+        if team:
+            # The same formatter, handed the team's name where the side key
+            # stood, so a teamed figure reads exactly as it did before #930.
+            as_named = copy.copy(figure)
+            as_named.side = team
+            labels[_name(figure)] = _name(as_named)
+            victories[narrate_victory(figure.side)] = narrate_victory(team)
+            continue
+        label = side_label(figure, roster_position)
+        labels[_name(figure)] = label
+        victories[narrate_victory(figure.side)] = (
+            f"🏆 {label} holds the field — victory!"
+        )
+    if not labels:
+        return list(lines)
+    token = re.compile(
+        "|".join(re.escape(found) for found in sorted(labels, key=len, reverse=True))
+    )
+    return [
+        victories.get(line) or token.sub(lambda match: labels[match.group(0)], line)
+        for line in lines
+    ]
 
 
 @dataclass(frozen=True)
@@ -259,8 +404,7 @@ def classic_figure(snapshot: CombatantState, *, position, facing: int):
         "name": snapshot.name,
         "strength": strength,
         "dexterity": max(MIN_CLASSIC_ATTRIBUTE, snapshot.dexterity),
-        "side": snapshot.team
-        or (str(snapshot.combatant_id) if SIDE_IS_UID else "arena"),
+        "side": classic_side(snapshot.team, snapshot.combatant_id),
         "intelligence": max(MIN_CLASSIC_ATTRIBUTE, snapshot.intelligence),
         "armor": classic_armor(snapshot.armour_tier, snapshot.stops),
         "weapons": carried,

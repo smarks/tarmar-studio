@@ -1007,7 +1007,11 @@ details.help .help-body {
 /* Rendered hidden rather than left out, so a change made without a reload
    can show them (issues #764, #792, #801): the completion-gated attack and
    skill-check blocks, the point controls, the logs, and the Game Master's
-   origin ruling. Several carry a class that sets its own display. */
+   origin ruling. Several carry a class that sets its own display. The
+   alive-only and dead-only controls (Mark Dead is a .button) hide by the
+   record's is_alive the same way (#903). */
+[data-alive-only][hidden],
+[data-dead-only][hidden],
 #attack-ready[hidden],
 #attack-incomplete[hidden],
 #skill-check[hidden],

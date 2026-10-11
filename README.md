@@ -1,7 +1,5 @@
 # Tarmar Studio
 
-> **About this repository.** This is the public Tarmar Studio repository, seeded on 2026-10-09 from a clean snapshot of the private development repository (history is deliberately not carried over). The Tarmar canon is private: it is loaded through `TARMAR_CANON_DIR` (see `DEPLOY.md`), and without it the app runs the default canon in `reference/default_canon`. The CI workflow (`.github/workflows/ci.yml`) needs a self-hosted runner, so it will not run on GitHub-hosted runners; the deploy workflow stays on the private repository, while the operational files (`DEPLOY.md`, `deploy.sh`, `nginx/`, `scripts/llm-host/`, `scripts/ci-runner/`) are kept as reference for running your own host.
-
 Unified platform for the Tarmar tabletop RPG — character management, AI Game Master, and rules reference.
 
 Runs as a Django web app, plus an offline CLI Game Master powered by a local LLM via Ollama.
@@ -41,7 +39,8 @@ The `./run` wrapper and `scripts/update_coverage_threshold.py` inject `/opt/home
 ./run lint        # Lint and auto-fix with ruff
 ./run format      # Format code with ruff
 ./run check       # Run all pre-commit checks
-./run gate        # Every suite a deploy depends on, recording the commit
+./run gate        # Every suite a deploy depends on; records the commit, then deploys it if it is main's head
+./run ship        # Deploy the head of main, completely: gate it in a temporary worktree, watch Deploy, clean up
 ./run migrate     # Run database migrations
 ```
 
@@ -52,7 +51,10 @@ time against the default canon (`TARMAR_CANON_DIR` set to
 `reference/default_canon`), and on a green run in both modes records the commit it
 ran on as a git note under `refs/notes/gate`, pushed to origin. `deploy.sh`
 fetches that ref and refuses a commit with no record unless given `--force`
-(issue #576). See DEPLOY.md.
+(issue #576). When the recorded commit is the head of `main` and the first pass
+ran the Tarmar canon, the gate then starts the Deploy workflow, which no
+longer starts on a merge (`--no-deploy` records without deploying). See
+DEPLOY.md.
 
 The dev server uses SQLite and sets `DEBUG=true` automatically.
 
@@ -183,9 +185,18 @@ tarmar play      # GM session — needs the GM model pulled in Ollama (default q
 | `ALLOWED_HOSTS` | localhost | Comma-separated host list |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
 | `GM_MODEL` | `qwen3:32b` | Ollama model the GM (web and CLI) talks to |
-| `GM_NUM_CTX` | `32768` | GM context window sent as `options.num_ctx` |
+| `GM_NUM_CTX` | `65536` | GM context window sent as `options.num_ctx`; the system prompt may take a quarter of it (`SYSTEM_PROMPT_CONTEXT_SHARE`, issue #907) |
 | `GM_TEMPERATURE` | `0.8` | GM sampling temperature sent as `options.temperature` |
 | `RULES_DIR` | `<BASE_DIR>/reference/content/public-rules` | Rules markdown the GM loads into its prompt |
+| `E2E_DICE_SEEDING` | off | Browser tests only: honour an `X-E2E-Dice-Seed` request header that pins that request's dice (issue #959); refused unless `DEBUG` is on |
+
+Playwright reuses a dev server already listening on the default port, 8000,
+and only there: with `E2E_PORT` set it starts its own servers and refuses a
+port something already holds, so one worktree's run never tests another's
+code (issue #966). A server started by hand with `./run dev` lacks
+`E2E_DICE_SEEDING` (and the fake Ollama's `OLLAMA_BASE_URL`), so it ignores
+the dice-seed header and the specs that assert an exact pinned roll fail
+loudly against it; stop it and let Playwright start its own.
 
 ## Dependency Groups
 

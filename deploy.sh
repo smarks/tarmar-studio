@@ -1,9 +1,13 @@
 #!/bin/bash
 # Blue-Green Deployment Script for Tarmar Studio (Tarmar)
 #
-# Usage: ./deploy.sh [--force | rollback | status | backup]
+# Usage: ./deploy.sh [--force | --expect <sha> | rollback | status | backup]
 #   --force:  Deploy even if no changes detected, and even if the commit has
 #             no passing gate record
+#   --expect <sha>:
+#             The commit the caller vouched for (./run gate starts Deploy with
+#             this). If main has since moved to a commit with no gate record,
+#             stand down and exit 0: that commit's own gate run deploys it
 #   rollback: Switch back to the standby colour, if its code knows every
 #             migration already applied
 #   status:   Show which colour is live and what each runs
@@ -72,6 +76,10 @@ UNIT_TEMPLATE="tarmar.service.template"
 # links to them rather than growing its own copy.
 SHARED_DIRS="staticfiles logs var"
 ENV_FILE="$APP_DIR/.env"
+# The nightly restore check's own connection (issue #913), kept out of .env so
+# the units, which load .env, never see a role that can create databases.
+# Only verify_latest_backup reads it.
+RESTORE_CHECK_ENV_FILE="$APP_DIR/.env.restore-check"
 # The Tarmar canon (issue #921): the private repository whose root is the
 # canon directory, cloned beside the main checkout (so /home/sam/dev/tarmar-canon
 # on datahorde, which authenticates to GitHub as smarks over ssh). Both are
@@ -160,6 +168,32 @@ Run './run gate' again with TARMAR_CANON_DIR set to a clone of smarks/tarmar-can
 or deploy it anyway with: ./deploy.sh --force"
     fi
     GATE_CANON_COMMIT=$(echo "$record" | sed -n 's/^canon-commit: *//p')
+}
+
+# Whether $1 has a passing gate record that ran the Tarmar canon: what
+# require_gate_record demands, asked without failing.
+has_passing_tarmar_record() {
+    local record
+    fetch_gate_notes
+    record=$(git notes --ref="$GATE_NOTES_REF" show "$1" 2>/dev/null) || return 1
+    [ "$(echo "$record" | sed -n 's/^canon: *//p')" = "tarmar" ]
+}
+
+# When ./run gate started this deploy for $1 and main has since moved to $2
+# (a merge while the run waited for its turn), deploy $2 only if it has its
+# own record; otherwise there is nothing for this run to do, and exiting 0
+# keeps a merge from showing as a failed deploy. The commit's own gate run
+# starts its deploy (Spencer, 2026-10-10).
+stand_down_if_main_moved() {
+    local expected=$1 remote=$2
+    [ -z "$expected" ] && return 0
+    [ "$remote" = "$expected" ] && return 0
+    if has_passing_tarmar_record "$remote"; then
+        log "main moved past ${expected} to ${remote}, which has its own gate record; deploying ${remote}"
+        return 0
+    fi
+    log "main moved past ${expected} to ${remote}, which has no Tarmar-canon gate record yet; its own gate run deploys it. Nothing to do."
+    exit 0
 }
 
 # Bring the canon checkout up to date with origin's main (issue #921): clone it
@@ -405,6 +439,14 @@ scratch_database_url() {
     printf '%s/%s%s\n' "${base%/*}" "$name" "$query"
 }
 
+# Drop the restore check's scratch database. Run from verify_latest_backup's
+# EXIT trap as well as at its end, so a failure to drop is a warning: the check
+# has already decided whether the backup restores.
+drop_scratch_database() {
+    dropdb --maintenance-db="$RESTORE_CHECK_DATABASE_URL" --if-exists "$1" \
+        || warn "could not drop the scratch database $1"
+}
+
 # Restore the newest dump into a throwaway database and read a table back out
 # of it (issue #666). Until this existed, nothing had ever restored a backup
 # or checked that it could be: the nightly timer had run since #575 and its
@@ -412,26 +454,51 @@ scratch_database_url() {
 # server, or written to a disk that filled, would have been discovered
 # unrestorable at the one moment that is too late. The nightly run does this
 # after taking its dump (`deploy.sh backup --verify`).
+#
+# It runs as its own role, from RESTORE_CHECK_DATABASE_URL in
+# .env.restore-check, not as the app's role in DATABASE_URL (issue #913).
+# Restoring needs a database to restore into, so that role holds CREATEDB and
+# the app's role does not need it. The restore-check role owns the scratch
+# databases it makes and nothing else. Its URL lives in a file of its own,
+# read here and nowhere else, because the units load .env: kept there, the
+# running app could have read it and created databases with it. pg_dump,
+# above, still reads as the app's role. DEPLOY.md says how to create both.
+#
+# createdb and dropdb take a database *name*, not a connection string: handed
+# a URL, they connect over the local socket as the unix user, which is how
+# every nightly check failed with `role "sam" does not exist`. They reach the
+# server through --maintenance-db, which does accept a URL; pg_restore and psql
+# take the scratch URL directly.
+#
+# Once the scratch database exists, an EXIT trap drops it, so a failed restore,
+# a failed count or a SIGTERM from systemd mid-restore cannot leave one behind.
 verify_latest_backup() {
     local newest scratch_name scratch_url migration_count
-    [ -n "${DATABASE_URL:-}" ] || error "DATABASE_URL is not set; cannot verify a backup"
+    [ -f "$RESTORE_CHECK_ENV_FILE" ] \
+        || error "$RESTORE_CHECK_ENV_FILE is missing; cannot verify a backup (create the restore-check role as DEPLOY.md describes)"
+    # The file is the one source: a value inherited from the environment must
+    # not stand in for a line the file lacks.
+    unset RESTORE_CHECK_DATABASE_URL
+    load_env_file "$RESTORE_CHECK_ENV_FILE"
+    [ -n "${RESTORE_CHECK_DATABASE_URL:-}" ] \
+        || error "RESTORE_CHECK_DATABASE_URL is not set in $RESTORE_CHECK_ENV_FILE; cannot verify a backup (see DEPLOY.md)"
     newest=$(ls -1t "$BACKUP_DIR"/*.dump 2>/dev/null | head -n 1)
     [ -n "$newest" ] || error "no backup to verify in $BACKUP_DIR"
     scratch_name="tarmar_restore_check_$$"
-    scratch_url=$(scratch_database_url "$DATABASE_URL" "$scratch_name")
+    scratch_url=$(scratch_database_url "$RESTORE_CHECK_DATABASE_URL" "$scratch_name")
 
     log "Restoring $newest into $scratch_name to check it can be restored..."
-    createdb "$scratch_url" || error "could not create the scratch database $scratch_name"
-    if ! pg_restore --no-owner --no-privileges --dbname="$scratch_url" "$newest"; then
-        dropdb "$scratch_url" || warn "could not drop the scratch database $scratch_name"
-        error "restoring $newest failed: the newest backup cannot be restored"
-    fi
+    createdb --maintenance-db="$RESTORE_CHECK_DATABASE_URL" "$scratch_name" \
+        || error "could not create the scratch database $scratch_name as the role in RESTORE_CHECK_DATABASE_URL (it needs CREATEDB; see DEPLOY.md)"
+    # scratch_name is a fixed prefix and a PID, so it is safe inside the string.
+    trap "drop_scratch_database $scratch_name" EXIT
+    pg_restore --no-owner --no-privileges --dbname="$scratch_url" "$newest" \
+        || error "restoring $newest failed: the newest backup cannot be restored"
     migration_count=$(psql --tuples-only --no-align --dbname="$scratch_url" \
-        --command="SELECT count(*) FROM django_migrations") || {
-        dropdb "$scratch_url" || warn "could not drop the scratch database $scratch_name"
-        error "restored $newest but could not read django_migrations back from it"
-    }
-    dropdb "$scratch_url" || warn "could not drop the scratch database $scratch_name"
+        --command="SELECT count(*) FROM django_migrations") \
+        || error "restored $newest but could not read django_migrations back from it"
+    trap - EXIT
+    drop_scratch_database "$scratch_name"
 
     case "$migration_count" in
         ""|*[!0-9]*) error "restored $newest but django_migrations answered '$migration_count'" ;;
@@ -614,9 +681,38 @@ EOF_UPSTREAM
 }
 
 # Main deployment logic
+# Warm Ollama's prompt cache for the GM system prompt (issue #330). A deploy
+# may change the prompt text, and until one conversation has run past the MLX
+# runner's restore point every fresh GM session pays a ~30 s prefill. Same
+# non-fatal shape as build_gm_index: Ollama lives on another host and may be
+# down; the GM still works, its first turn is just slow.
+#
+# warm_gm also states the GM prompt against its share of GM_NUM_CTX (issue
+# #907). A prompt over that ceiling is not a warm-up failure and the command
+# exits 0, so its "OVER the ceiling" line is raised to a deploy warning here
+# rather than left in the middle of the warm-up output.
+warm_gm_prompt_cache() {
+    local output_file
+    local warm_status
+    output_file=$(mktemp)
+    uv run python manage.py warm_gm 2>&1 | tee "$output_file"
+    warm_status=${PIPESTATUS[0]}
+    if [ "$warm_status" -ne 0 ]; then
+        warn "WARNING: GM warm-up failed; first GM turn will be slow"
+    fi
+    if grep -q "OVER the ceiling" "$output_file"; then
+        warn "WARNING: GM system prompt is OVER its share of GM_NUM_CTX (issue #907): $(grep "OVER the ceiling" "$output_file" | head -n 1)"
+    fi
+    rm -f "$output_file"
+}
+
 main() {
-    local force=false
-    [ "$1" = "--force" ] && force=true
+    local force=false expected=""
+    if [ "${1:-}" = "--force" ]; then
+        force=true
+    elif [ "${1:-}" = "--expect" ]; then
+        expected="${2:?--expect needs the commit the gate recorded}"
+    fi
 
     # Check for changes
     log "Fetching from origin..."
@@ -624,6 +720,8 @@ main() {
 
     LOCAL=$(git rev-parse HEAD)
     REMOTE=$(git rev-parse origin/main)
+
+    stand_down_if_main_moved "$expected" "$REMOTE"
 
     # Before anything is pulled or built: has anyone run the suites on this
     # commit (issue #576)?
@@ -747,15 +845,9 @@ main() {
         recover_from_failed_switch "$inactive" "$active"
     fi
 
-    # Warm Ollama's prompt cache for the GM system prompt (issue #330). A deploy
-    # may change the prompt text, and until one conversation has run past the
-    # MLX runner's restore point every fresh GM session pays a ~30 s prefill.
-    # Same non-fatal shape as build_gm_index: Ollama lives on another host and
-    # may be down; the GM still works, its first turn is just slow.
+    # Warm Ollama's prompt cache for the GM system prompt (issue #330).
     log "Warming GM prompt cache..."
-    if ! uv run python manage.py warm_gm; then
-        warn "WARNING: GM warm-up failed; first GM turn will be slow"
-    fi
+    warm_gm_prompt_cache
 
     # The canon this deploy put live, for the next one to compare against.
     echo "$CANON_HEAD" > "$CANON_STATE_FILE"

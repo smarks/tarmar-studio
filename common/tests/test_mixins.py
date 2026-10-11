@@ -5,10 +5,15 @@ from django.test import SimpleTestCase
 from origami_auth.mixins import AdminOrDMRequiredMixin
 from origami_common.mixins import ActivePageMixin
 
-from bestiary.views import BeastDetailView, CatalogView, GenerateBeastView
+from bestiary.views import (
+    BeastDetailView,
+    CatalogView,
+    DeleteGeneratedBeastView,
+    GenerateBeastView,
+)
 from common.mixins import DMToolsAccessMixin
 from encounters.views import EncounterGeneratorView
-from ruins.views import GenerateHookView, GenerateRuinView
+from ruins.views import GenerateHookView, GenerateRuinView, RollTablePageView
 
 
 class DMToolsAccessMixinTest(SimpleTestCase):
@@ -22,9 +27,11 @@ class DMToolsAccessMixinTest(SimpleTestCase):
             CatalogView: "bestiary",
             BeastDetailView: "bestiary",
             GenerateBeastView: "bestiary",
+            DeleteGeneratedBeastView: "bestiary",
             EncounterGeneratorView: "encounters",
             GenerateRuinView: "ruins",
             GenerateHookView: "hooks",
+            RollTablePageView: "table_rolls",
         }
         for view_class, active_page in expected_pages.items():
             with self.subTest(view=view_class.__name__):

@@ -3,14 +3,9 @@
 import subprocess
 from functools import lru_cache
 
-from common.helpers import request_theme
+from django.conf import settings
 
-# The project's GitHub repository; the footer links the running commit under it.
-REPO_URL = "https://github.com/smarks/tarmar-studio"
-# Where the home page sends players to leave a comment. A separate public
-# repository's issues, because the code repository is private and its issues
-# page is a 404 to anyone who is not a collaborator.
-FEEDBACK_URL = "https://github.com/smarks/tarmar-feedback/issues"
+from common.helpers import request_theme
 
 
 @lru_cache(maxsize=1)
@@ -46,8 +41,37 @@ def git_info(request) -> dict[str, str]:
 
 
 def project_links(request) -> dict[str, str]:
-    """Add the project's GitHub addresses to template context."""
-    return {"repo_url": REPO_URL, "feedback_url": FEEDBACK_URL}
+    """Add the project's GitHub addresses to template context.
+
+    ``repository_url`` is the public repository's root, shown to everyone.
+    ``version_commit_url`` is the running commit in the private repository
+    (issue #914), and is set only for a Game Master or admin: anyone else
+    gets GitHub's 404 there, and the public repository does not hold the
+    deployed commit. It is empty when the checkout has no commit to name.
+
+    Args:
+        request: The current request; its user decides ``version_commit_url``.
+
+    Returns:
+        The template variables ``repository_url``, ``version_commit_url`` and
+        ``feedback_url``.
+    """
+    commit_sha = _get_git_info()["sha"]
+    # ``getattr`` on the request too: the passphrase gate renders this footer
+    # before the authentication middleware has set ``request.user``.
+    request_user = getattr(request, "user", None)
+    may_open_private_repository = bool(getattr(request_user, "can_manage_users", False))
+    version_commit_url = ""
+    if commit_sha and may_open_private_repository:
+        version_commit_url = f"{settings.REPOSITORY_PRIVATE_URL}/commit/{commit_sha}"
+    return {
+        "repository_url": settings.REPOSITORY_PUBLIC_URL,
+        "version_commit_url": version_commit_url,
+        # "Leave a comment" opens the public repository's issue forms (bug,
+        # feature request, general comment); the code repository is private
+        # and its issues are a 404 to players.
+        "feedback_url": f"{settings.REPOSITORY_PUBLIC_URL}/issues/new/choose",
+    }
 
 
 def theme(request) -> dict[str, object]:

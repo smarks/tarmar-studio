@@ -12,6 +12,7 @@ from django.http import JsonResponse
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
+from accounts.models import User
 from common.decorators import rate_limit
 from common.helpers import (
     _json_error,
@@ -20,6 +21,7 @@ from common.helpers import (
 )
 
 from .. import services
+from ..models import Character
 from ..skills import (
     ALL_TRACKS,
     DEFAULT_RUN_YEARS,
@@ -88,15 +90,19 @@ def _with_survival_text(run_result):
     return {**run_result, "years": years}
 
 
-def _build_add_years_response(character, run_result, *, is_game_master: bool):
+def _build_add_years_response(
+    character: Character, run_result: dict, *, viewer: User
+) -> JsonResponse:
     """Build the JSON response describing the character after an added run.
 
     Args:
         character: The saved character.
         run_result: The simulator's result for the run.
-        is_game_master: Whether the viewer may set current pools, which the
-            re-rendered injury readout offers (issue #751).
+        viewer: Who rolled it. A Game Master may set current pools, which the
+            re-rendered injury readout offers (issue #751), and the "Play with
+            the Game Master" slot offers the viewer's own sessions (#903).
     """
+    is_game_master = viewer.can_manage_users
     skills_display = {
         skill_name: {
             "points": points,
@@ -161,12 +167,15 @@ def _build_add_years_response(character, run_result, *, is_game_master: bool):
             },
             # STR also sets carrying capacity, so aging can shift encumbrance,
             # movement, and the armor/weapon combat mods that ride on it.
-            # Same shape _get_equipment_response returns for the equipment
-            # endpoints -- updateEquipmentDisplay() already knows how to
-            # render it (issue #163).
+            # The movement and equipment figures _get_equipment_response
+            # builds; the equipment endpoints send the same payload plus the
+            # sheet repaint, which this response carries once at the top
+            # level (issues #163, #933). updateEquipmentDisplay() renders it.
             "movement": _get_equipment_response(character),
-            # Points earned, skills held, the history line (issue #792).
-            **sheet_repaint(character),
+            # Points earned, skills held, the history line (issue #792). The
+            # only copy in the response: the movement payload carries none,
+            # so the slot and its session queries render once (issue #933).
+            **sheet_repaint(character, viewer),
         }
     )
 
@@ -193,14 +202,10 @@ def character_add_experience_years(request, pk):
         with services.changing(
             pk, actor=request.user, authorize=may_edit(request)
         ) as change:
-            # Deliberate policy: only progression (adding experience years)
-            # is blocked once a character is dead -- a dead character can't
-            # earn more years of life. Everything else stays editable (see
-            # character_update_field, equipment, skills): GMs and players
-            # routinely fix up a sheet after a death, and there's no reason
-            # to lock that out the way soft-delete does.
-            if not change.character.is_alive:
-                raise services.CharacterChangeError("Character is deceased")
+            # A dead character was refused by services.changing before this
+            # runs, as on every sheet write (issue #932): the record takes no
+            # change the rules govern until a Game Master brings the
+            # character back. Only the name stays editable.
             # The simulator, the XP thresholds and apply_experience_run, the
             # same rules the Games Master plays years by (issues #221, #571).
             # A player adds years before play only; a Game Master may after
@@ -213,9 +218,7 @@ def character_add_experience_years(request, pk):
             )
             change.note("experience", "", note)
         return _build_add_years_response(
-            change.character,
-            run_result,
-            is_game_master=request.user.can_manage_users,
+            change.character, run_result, viewer=request.user
         )
 
     return answer_change(run)
@@ -244,15 +247,15 @@ def character_allocate_skill_point(request, pk):
             character = change.character
             # A player spends the points earned; a Game Master may grant one
             # past them, as the chat's spend_skill_points lets him (#770). A
-            # player starts only a skill the glossary names (#862); a Game
-            # Master may name any.
+            # player starts only a skill the glossary names (#862, #902); a
+            # Game Master may name any. apply_skill_points decides both from
+            # the authority, as it does for the chat.
             target = services.allocation_target(character.skills, skill)
             note, _granted = services.apply_skill_points(
                 character,
                 skill,
                 1,
                 is_game_master=request.user.can_manage_users,
-                glossary_only=not request.user.can_manage_users,
             )
             change.note("skills", "", note)
         skill_written = target
@@ -287,7 +290,7 @@ def character_allocate_skill_point(request, pk):
                 "free_skill_points": character.free_skill_points,
                 "total_allocated_points": character.total_allocated_skill_points,
                 # A new skill joins the skill check's options (issue #765).
-                **sheet_repaint(character),
+                **sheet_repaint(character, request.user),
             }
         )
 
@@ -344,7 +347,7 @@ def character_rename_skill(request, pk):
                 "level": get_skill_level(points, new_skill),
                 "display": format_skill_level(points, new_skill),
                 # The skill check offered the old name until a reload (#765).
-                **sheet_repaint(change.character),
+                **sheet_repaint(change.character, request.user),
                 # The whole list: a Village choice may join a skill already
                 # held, which leaves one row where there were two (#768).
                 "skills_html": render_skills_list(

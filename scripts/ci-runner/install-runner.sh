@@ -12,7 +12,9 @@
 # machine's own account can reach production. The installer checks the two
 # ways a job could still get at that account's files and refuses if either is
 # open: a readable home directory, and a local Postgres that trusts every
-# local connection.
+# local connection. The home has to be chmod 700 before the installer starts:
+# macOS makes every local account, tarmarci included, a member of staff,
+# whatever its primary group (issue #946).
 #
 # Idempotent: every step checks what is already there and skips it. Rerun it
 # after a reboot that lost the daemon, or after a runner upgrade. A rerun
@@ -30,7 +32,6 @@ set -euo pipefail
 RUNNER_VERSION="2.337.0"
 RUNNER_SHA256="5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2"
 
-REPOSITORY="smarks/tarmar-studio"
 RUNNER_USER="tarmarci"
 RUNNER_GROUP="tarmarci"
 RUNNER_FULL_NAME="Tarmar CI"
@@ -54,6 +55,9 @@ TARBALL_NAME="actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
 TARBALL_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${TARBALL_NAME}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# REPOSITORY and require_private_repository (issue #961).
+# shellcheck source=repository.sh
+source "${SCRIPT_DIR}/repository.sh"
 PLIST_SOURCE="${SCRIPT_DIR}/${SERVICE_LABEL}.plist"
 
 DRY_RUN=false
@@ -65,7 +69,7 @@ for argument in "$@"; do
         --fresh) FRESH=true ;;
         --allow-trusted-postgres) ALLOW_TRUSTED_POSTGRES=true ;;
         -h|--help)
-            sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -78,6 +82,12 @@ if [ "$FRESH" = true ] && [ "$DRY_RUN" = false ]; then
     echo "--fresh only makes sense with --dry-run" >&2
     exit 2
 fi
+
+# sudo -u keeps the working directory, and the runner account cannot enter a
+# directory under a chmod 700 home: a command run as it from there starts
+# with "getcwd: cannot access parent directories", which is not the state a
+# CI job starts in (issue #947). Every path below is absolute.
+cd /
 
 log() { printf '[ci-runner] %s\n' "$*"; }
 fail() { printf '[ci-runner] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -120,6 +130,15 @@ gh_as_invoker() {
     sudo -u "$INVOKING_USER" -H "$GH_BIN" "$@"
 }
 
+# Before anything is created: a runner on a public repository runs any
+# fork's pull request on this Mac.
+if [ "$DRY_RUN" = false ]; then
+    require_private_repository gh_as_invoker
+    log "${REPOSITORY} is private"
+else
+    log "would check that ${REPOSITORY} is private"
+fi
+
 # A directory chain owned by the runner user at every level. `install -d`
 # with -o/-g applies them to the last component only and leaves the parents
 # root-owned, so each level is created on its own.
@@ -136,6 +155,35 @@ owned_dir() {
 }
 
 # ------------------------------------------ 0. what a job must not reach
+# The developer's home, before the runner account exists. A primary group of
+# its own does not keep tarmarci out of staff: macOS makes every local
+# account a member of staff through localaccounts, whatever its primary
+# group, and creates a home drwxr-x--- with group staff. So the home itself
+# has to shut everyone else out (issue #946). The account check in step 1
+# tries it as the runner would; this one says what to do before anything is
+# created.
+HOME_MODE_MESSAGE="${INVOKING_HOME} must be drwx------ before the runner account exists. Run
+    chmod 700 ${INVOKING_HOME}
+and run this again. macOS puts every local account in staff, the runner's
+included, and staff can read into a drwxr-x--- home. chmod 700 also ends
+guest access to ~/Public, the folder macOS file sharing offers by default."
+home_mode="$(stat -f '%Lp' "$INVOKING_HOME" 2>/dev/null || true)"
+if [ -z "$home_mode" ] || ! [[ "$home_mode" =~ ^[0-7]+$ ]]; then
+    if [ "$DRY_RUN" = true ]; then
+        log "would check that ${INVOKING_HOME} is drwx------ (chmod 700)"
+    else
+        fail "could not read the mode of ${INVOKING_HOME}"
+    fi
+elif [ $((8#$home_mode & 8#077)) -ne 0 ]; then
+    if [ "$DRY_RUN" = true ]; then
+        log "would refuse: ${HOME_MODE_MESSAGE}"
+    else
+        fail "$HOME_MODE_MESSAGE"
+    fi
+else
+    log "${INVOKING_HOME} is drwx------"
+fi
+
 # Local Postgres that trusts every local connection lets any account on this
 # Mac connect as the developer, who is its superuser, and run commands as
 # them. That undoes the whole point of a separate runner account, so the
@@ -161,6 +209,27 @@ fi
 # What a job could do, tried as the job would: connect to local Postgres as
 # the developer without a password, over TCP and over the socket. Any path
 # and any pg_hba.conf, not only the one named above.
+#
+# -w (--no-password) on each attempt: a job knows no password, and without it
+# psql asks for one on the terminal (/dev/tty, which no redirection stops)
+# once pg_hba.conf wants scram-sha-256. A developer who answered that prompt
+# turned the check into a connection with a password, and the refusal below
+# into a false claim (issue #947). Each attempt's own error is printed, so a
+# refusal says why Postgres refused, or what connected.
+postgres_attempt_connects() {
+    local psql_binary="$1"
+    local over="$2"
+    shift 2
+    local error_output
+    if error_output="$(sudo -u "$RUNNER_USER" env PGPASSWORD= PGCONNECT_TIMEOUT=3 \
+        "$psql_binary" -w "$@" -U "$INVOKING_USER" -d postgres -Atc 'select 1' 2>&1 >/dev/null)"; then
+        log "${RUNNER_USER} connected to Postgres as ${INVOKING_USER} over ${over}, with no password"
+        return 0
+    fi
+    log "Postgres refused ${RUNNER_USER} as ${INVOKING_USER} over ${over}: ${error_output:-no message}"
+    return 1
+}
+
 postgres_refuses_the_runner() {
     local psql_binary
     psql_binary="$(command -v psql 2>/dev/null || ls /opt/homebrew/opt/postgresql@*/bin/psql 2>/dev/null | head -1 || true)"
@@ -169,20 +238,20 @@ postgres_refuses_the_runner() {
         return 0
     fi
     local connected=false
-    if sudo -u "$RUNNER_USER" env PGPASSWORD= PGCONNECT_TIMEOUT=3 "$psql_binary" \
-        -h 127.0.0.1 -U "$INVOKING_USER" -d postgres -Atc 'select 1' >/dev/null 2>&1; then
+    if postgres_attempt_connects "$psql_binary" "TCP" -h 127.0.0.1; then
         connected=true
     fi
-    if sudo -u "$RUNNER_USER" env PGPASSWORD= PGCONNECT_TIMEOUT=3 "$psql_binary" \
-        -U "$INVOKING_USER" -d postgres -Atc 'select 1' >/dev/null 2>&1; then
+    if postgres_attempt_connects "$psql_binary" "the unix socket"; then
         connected=true
     fi
     [ "$connected" = false ]
 }
 
 # ---------------------------------------------------------------- 1. the user
-# Its own group, so membership in staff does not open /Users/<developer>,
-# which macOS creates as drwxr-x--- and staff can read into.
+# Its own primary group, so files the runner creates are not group staff. It
+# does not keep the account out of staff: macOS adds every local account to
+# staff through localaccounts, so the home check in step 0 is what keeps the
+# developer's home shut (issue #946).
 if present dscl . -read "/Groups/${RUNNER_GROUP}" >/dev/null 2>&1; then
     log "group ${RUNNER_GROUP} exists"
 else
@@ -220,12 +289,13 @@ owned_dir "$RUNNER_HOME"
 owned_dir "$LOG_DIR"
 owned_dir "${RUNNER_HOME}/Library/Caches"
 
-# The check that the isolation holds: the runner account must not be able to
-# read into the developer's home. If it can, the group above did not take.
+# The check that the isolation holds, tried as the runner: its account must
+# not be able to read into the developer's home. Step 0 checked the mode; an
+# ACL can still open a 700 home, and this is what a job would meet.
 if [ "$DRY_RUN" = false ]; then
     # Read or traverse: a 711 home fails `test -r` and still opens by path.
     if sudo -u "$RUNNER_USER" test -r "$INVOKING_HOME" || sudo -u "$RUNNER_USER" test -x "$INVOKING_HOME"; then
-        fail "${RUNNER_USER} can read into ${INVOKING_HOME}; make it drwx------ (chmod 700) or fix the group, then rerun"
+        fail "${RUNNER_USER} can read into ${INVOKING_HOME} although it is drwx------; an ACL may open it (ls -le ${INVOKING_HOME}). Remove it, then rerun"
     fi
     log "${RUNNER_USER} cannot read into ${INVOKING_HOME}"
     if postgres_refuses_the_runner; then

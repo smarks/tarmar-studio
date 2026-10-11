@@ -12,6 +12,8 @@
  *
  * The sheet half: the Origin's skill follows an Origin change with no reload,
  * and an Origin nobody rolled is marked and offered its roll (issue #858).
+ * A rolled Origin is fixed for a player (Spencer's ruling on #970): their
+ * sheet shows it as text with the reason; a Game Master's shows the select.
  */
 
 const {
@@ -54,10 +56,25 @@ async function paneBackground(draft) {
     return { background, wealth };
 }
 
+/** The reason a player's sheet prints beside a rolled Origin (#970). */
+const ROLLED_ORIGIN_FIXED = 'The Origin was rolled, and a roll is final; only a Game Master can change it.';
+
+/**
+ * The Origin the sheet shows: the select's value for a Game Master, the text
+ * for a player, whose rolled Origin is fixed (#970) and says why.
+ */
+async function sheetOrigin(page) {
+    const select = page.locator('[data-field="location"] select');
+    if (await select.count()) return select.inputValue();
+    await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
+    const cell = page.locator('#location .physical-table td').first();
+    return (await cell.innerText()).match(/^(City|Village|Rural|Consult GM)/)[1];
+}
+
 /** The character's sheet: its Origin, dice log and skills. */
 async function openSheet(page, draft) {
     await page.goto(await draft.locator('.gm-sheet-name a').getAttribute('href'));
-    const origin = await page.locator('[data-field="location"] select').inputValue();
+    const origin = await sheetOrigin(page);
     return { origin, diceLog: page.locator('#dice-log'), skills: page.locator('#skills-list') };
 }
 
@@ -90,6 +107,30 @@ test.describe('GM chat — a character built in chat rolls its background', () =
         await expect(sheet.diceLog).toContainText('Wealth: d100=');
         await expectOriginSkill(sheet.skills, sheet.origin);
         await expect(page.locator('#origin-not-rolled')).toBeHidden();
+    });
+
+    test('an Origin the player states is recorded as a choice, not rolled (#970)', async ({ page }, testInfo) => {
+        const name = `Ysolde${testInfo.workerIndex}${Date.now()}`;
+        await loginAs(page, TEST_USER);
+        await page.goto('/tarmar/gm/');
+        await page.click('#gm-panel-tab-characters');
+        await send(page, `Roll up ${name}. She grew up in a village.`);
+        const draft = page.locator('#gm-panel-characters .gm-draft', { hasText: name });
+        await expect(draft).toHaveCount(1, { timeout: 30000 });
+        await expect(page.locator('.message.assistant').last()).toContainText('nothing stirs', { timeout: 30000 });
+        const { background } = await paneBackground(draft);
+        await expect(background).toContainText('Village');
+
+        await page.goto(await draft.locator('.gm-sheet-name a').getAttribute('href'));
+        // Chosen, not rolled: no Origin roll in the log, and the select stays
+        // the player's until literacy is rolled.
+        await expect(page.locator('#dice-log')).not.toContainText('Location: d100=');
+        await expect(page.locator('#dice-log')).toContainText('Provenance: d100=');
+        const select = page.locator('[data-field="location"] select');
+        await expect(select).toHaveValue('Village');
+        await expect(select).toBeEnabled();
+        await expect(page.locator('[data-locked-field="location"]')).toHaveCount(0);
+        await expectOriginSkill(page.locator('#skills-list'), 'Village');
     });
 
     test("a player's second roll is refused and the background stands", async ({ page }, testInfo) => {
@@ -138,12 +179,16 @@ test.describe('Character sheet — the Origin and its skill (issue #754)', () =>
         await loginAs(page, TEST_USER);
         await createCharacter(page);
         const id = Number(page.url().match(/\/characters\/(\d+)\//)[1]);
-        // A City character holding the City's point, before literacy is rolled.
+        // A City character holding the City's point, before literacy is
+        // rolled, whose player chose the Origin: no roll in the dice log. This
+        // used to keep creation's roll and choose over it, which a rolled
+        // Origin no longer allows a player (#970).
         runDjangoShell(
             'from characters.models import Character; '
             + `Character.objects.filter(pk=${id}).update(location="City", `
             + 'skills={"street smarts": 1}, origin_skill="street smarts", '
-            + 'literacy_roll=None, literacy_rolled=False, literacy_ruling=None)'
+            + 'literacy_roll=None, literacy_rolled=False, literacy_ruling=None, '
+            + 'dice_log="")'
         );
         await page.reload();
         let reloaded = false;
@@ -178,7 +223,11 @@ test.describe('Character sheet — the Origin and its skill (issue #754)', () =>
         await expect(page.locator('#roll-origin-btn')).toHaveCount(0);
         await expect(page.locator('#origin-not-rolled')).toBeHidden();
         await expect(page.locator('#dice-log')).toContainText('Location: d100=');
-        const origin = await page.locator('[data-field="location"] select').inputValue();
+        // The roll is final for the player (#970): the cell is text with the
+        // reason. This read the value from a select, which let the player
+        // choose over the roll.
+        await expect(page.locator('[data-field="location"] select')).toHaveCount(0);
+        const origin = await sheetOrigin(page);
         await expectOriginSkill(page.locator('#skills-list'), origin);
     });
 });

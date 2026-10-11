@@ -85,32 +85,8 @@
 
 {% if can_manage %}
 <h2>Add Members</h2>
-{% if addable_characters %}
-<label class="party-filter-label">
-    <span class="sr-only">Filter characters by name</span>
-    <input type="search" id="party-character-filter" class="party-filter"
-           data-filter-list="party-addable-list"
-           placeholder="Filter by name or player&hellip;">
-</label>
-<ul class="party-addable" id="party-addable-list">
-    {% for character in addable_characters %}
-    <li class="party-addable-row"
-        data-filter-text="{{ character.name|lower }} {{ character.user.username|lower }}">
-        <div class="party-member-words">
-            <strong>{{ character.name }}</strong>
-            <span class="party-member-detail">
-                {% if character.user == user %}yours{% else %}{{ character.user.username }}'s{% endif %}
-                — level {{ character.level }}
-            </span>
-        </div>
-        <form method="post" action="{% url 'parties:add_member' party.pk %}" class="party-member-action">
-            {% csrf_token %}
-            <input type="hidden" name="character_id" value="{{ character.pk }}">
-            <button type="submit" class="button">Add</button>
-        </form>
-    </li>
-    {% endfor %}
-</ul>
+{% if addable_picker.total %}
+{% include "_picker.html" with picker=addable_picker %}
 {% else %}
 <p class="party-none">Every character you can seat is already in this party.</p>
 {% endif %}
@@ -129,4 +105,5 @@
 
 {% block extra_js %}
 <script src="{% static 'js/roster-filter.js' %}"></script>
+<script src="{% static 'js/picker.js' %}"></script>
 {% endblock %}

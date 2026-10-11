@@ -253,7 +253,11 @@ class SessionCharacter(models.Model):
         on_delete=models.CASCADE,
         related_name="session_characters",
     )
-    label = models.CharField(max_length=100, blank=True, default="")
+    #: What the conversation calls the character, cut to this rather than
+    #: refused: it is a handle the model picked, not a name anyone gave.
+    MAX_LABEL_CHARS = 100
+
+    label = models.CharField(max_length=MAX_LABEL_CHARS, blank=True, default="")
     game_master_skill_points = models.PositiveIntegerField(default=0)
     # Luck spent in this session (issue #861): "once per session per level"
     # (skills glossary), so the count is the session's, not the character's.
@@ -338,8 +342,11 @@ class GMTurnRecord(models.Model):
     started_at = models.DateTimeField(default=timezone.now)
     duration_ms = models.PositiveIntegerField(default=0)
     outcome = models.CharField(max_length=10, choices=OUTCOME_CHOICES)
+    #: The column's length; a longer command is cut to it when recorded,
+    #: since this is a label for the record, not text anyone reads back.
+    MAX_COMMAND_CHARS = 16
     # "" for an ordinary message; otherwise the slash command it was.
-    command = models.CharField(max_length=16, blank=True)
+    command = models.CharField(max_length=MAX_COMMAND_CHARS, blank=True)
     mode = models.CharField(max_length=8, choices=MODE_CHOICES)
     is_game_master = models.BooleanField(default=False)
     model = models.CharField(max_length=200, blank=True)
@@ -533,7 +540,9 @@ class GMReviewRequest(models.Model):
     status = models.CharField(
         max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True
     )
-    runner = models.CharField(max_length=200, blank=True)
+    #: The column's length; a runner's self-description is cut to it (#938).
+    MAX_RUNNER_CHARS = 200
+    runner = models.CharField(max_length=MAX_RUNNER_CHARS, blank=True)
     findings = models.TextField(blank=True)
     failure = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -611,7 +620,7 @@ class GMReviewRequest(models.Model):
             .filter(pk=review_id)
             .update(
                 status=cls.STATUS_CLAIMED,
-                runner=runner[:200],
+                runner=runner[: cls.MAX_RUNNER_CHARS],
                 claimed_at=timezone.now(),
             )
         )

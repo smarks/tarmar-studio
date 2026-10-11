@@ -11,7 +11,7 @@
  */
 
 const {
-    test, expect, loginAs, TEST_ADMIN, createNamedCharacter,
+    test, expect, loginAs, TEST_ADMIN, createNamedCharacter, searchPicker,
 } = require('./fixtures');
 
 test.describe('Battle teams', () => {
@@ -34,7 +34,7 @@ test.describe('Battle teams', () => {
         await adminPage.click('button:has-text("Form Party")');
         await adminPage.waitForURL(/\/tarmar\/parties\/\d+\//);
         for (const memberName of [firstName, secondName]) {
-            await adminPage.fill('#party-character-filter', memberName);
+            await searchPicker(adminPage, '#party-character-filter', memberName);
             await adminPage
                 .locator('.party-addable-row', { hasText: memberName })
                 .locator('button:has-text("Add")')

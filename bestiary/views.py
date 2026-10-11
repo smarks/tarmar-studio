@@ -51,7 +51,11 @@ class CatalogView(BreadcrumbMixin, DMToolsAccessMixin, ListView):
     paginate_by = CATALOG_PAGE_SIZE
 
     def get_queryset(self):
-        return self._filtered(Beast.objects.filter(is_generated=False))
+        # Two beasts may share a name (only the slug is unique): the pk breaks
+        # the tie, so a beast stays on one page (issue #950).
+        return self._filtered(Beast.objects.filter(is_generated=False)).order_by(
+            "category", "name", "pk"
+        )
 
     def _filtered(self, queryset):
         """Narrow ``queryset`` by the toolbar's category and name box.

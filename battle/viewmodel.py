@@ -62,6 +62,7 @@ shows nobody's numbers rather than everybody's.
 
 from __future__ import annotations
 
+from .classic_adaptation import classic_team
 from .engine import hexes
 from .engine.state import BattleState, CombatantState
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE
@@ -452,9 +453,9 @@ def _classic_figure(figure, layout, detail_ids: frozenset[int]) -> dict:
         "facing_vector": [faced_x - cube_x, faced_z - cube_z],
         # Classic has no beast/character split — every combatant is a Figure.
         "is_beast": False,
-        # A classic figure's team is its side, unless the side is its own
-        # uid — the crossing's spelling of free-for-all (#275).
-        "team": "" if figure.side == figure.uid else figure.side,
+        # The team's name, decoded from the side key (#275, #930): a
+        # teamless figure's side is its uid, a team's carries a prefix.
+        "team": classic_team(figure),
         "status": _status(
             not figure.is_dead,
             not figure.collapsed and not figure.is_dead,

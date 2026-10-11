@@ -1,0 +1,53 @@
+name: Runner image
+
+# Build the datahorde runner's image whenever its files change (issue #964).
+# No machine the test suite runs on has Docker, so this is the one place the
+# Dockerfile is built before install.sh builds it on datahorde. The walls
+# (firewall, no socket, no IPv6) are proven on datahorde by install.sh.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/ci-runner-linux/**"
+      - ".github/workflows/runner-image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build --tag tarmar-ci-runner:check scripts/ci-runner-linux
+
+      - name: Runs as the runner account, on a uid nothing on datahorde uses
+        run: |
+          uid=$(sed -n 's/^ARG RUNNER_UID=//p' scripts/ci-runner-linux/Dockerfile)
+          test "$(docker run --rm --entrypoint id tarmar-ci-runner:check -u)" = "$uid"
+          test "$uid" != "0"
+
+      - name: Has no sudo
+        run: docker run --rm --entrypoint bash tarmar-ci-runner:check -c '! command -v sudo'
+
+      - name: Holds the pinned runner and gh
+        run: |
+          runner=$(sed -n 's/^ARG RUNNER_VERSION=//p' scripts/ci-runner-linux/Dockerfile)
+          docker run --rm --entrypoint ./config.sh tarmar-ci-runner:check --version | grep -qx "$runner"
+          gh_version=$(sed -n 's/^ARG GH_VERSION=//p' scripts/ci-runner-linux/Dockerfile)
+          docker run --rm --entrypoint gh tarmar-ci-runner:check --version | grep -q "gh version ${gh_version} "
+
+      - name: Leaves PLAYWRIGHT_BROWSERS_PATH unset
+        run: test -z "$(docker run --rm --entrypoint printenv tarmar-ci-runner:check PLAYWRIGHT_BROWSERS_PATH || true)"
+
+      - name: Refuses to run without a one-job registration
+        run: |
+          if docker run --rm tarmar-ci-runner:check 2> refusal.txt; then
+            echo "the entrypoint ran a runner with no registration" >&2
+            exit 1
+          fi
+          grep -q "not registered: no ACTIONS_RUNNER_INPUT_JITCONFIG" refusal.txt

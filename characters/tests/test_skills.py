@@ -1311,7 +1311,9 @@ class SkillsViewsTest(BaseTestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("deceased", response.json()["error"])
+        # The one refusal every write gives a dead character (issue #932).
+        self.assertIn("is dead", response.json()["error"])
+        self.assertIn("bring them back to life", response.json()["error"])
 
     def test_add_experience_term_invalid_track(self):
         """Adding experience term with invalid track fails."""

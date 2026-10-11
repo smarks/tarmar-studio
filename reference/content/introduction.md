@@ -1,6 +1,6 @@
 # Welcome to Tarmar
 
-*Version 2026-06-16 20:31 EDT, committed to main in [559277ab1cdef5c4d0b767fe1e4daf2b5e2f4a2c](https://github.com/smarks/tarmar-studio/commit/559277ab1cdef5c4d0b767fe1e4daf2b5e2f4a2c).*
+*Version 2026-06-16 20:31 EDT, committed to main as 559277a.*
 
 There is a world that is older than its own memory.
 

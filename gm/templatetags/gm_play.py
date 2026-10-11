@@ -3,7 +3,9 @@
 The sheet and the home page both offer it, from one template, so the two
 cannot drift. It renders only where ``gm_characters_attach`` would take the
 character (``gm.attach.attach_refusal``), and the sessions it offers are the
-viewer's own, because the endpoint attaches to the viewer's sessions only.
+viewer's own, because the endpoint attaches to the viewer's sessions only. On
+the sheet they are a searchable picker (``gm.pickers.play_session_picker``,
+issue #973), a page at a time, most recently played first.
 
 The viewer is passed in rather than read from the template context, so a
 fragment rendered without a request (a repaint of part of the sheet) can
@@ -16,6 +18,8 @@ from characters.models import Character
 from gm.attach import attach_refusal
 from gm.luck import LuckPanel
 from gm.models import GMSession
+from gm.pickers import play_session_picker, sessions_holding_character
+from gm.text_limits import GM_TEXT_LIMITS
 from gm.unarmed import unarmed_notice
 from gm.withdraw import holding_sessions
 
@@ -37,23 +41,25 @@ def play_with_game_master(
 
     Returns:
         The partial's context. ``offered`` is False when the attach would be
-        refused; the partial then renders its slot empty.
+        refused; the partial then renders its slot empty. ``picker`` is the
+        first page of the viewer's sessions (``gm.pickers``) where a session
+        is chosen, and ``holding`` the ids of those already holding the
+        character.
     """
     offered = viewer.is_authenticated and attach_refusal(viewer, character) is None
-    sessions: list[dict] = []
+    picker = None
+    holding: set[int] = set()
     if offered and choose_session:
-        holding = set(
-            character.gm_sessions.filter(user=viewer).values_list("pk", flat=True)
-        )
-        sessions = [
-            {"pk": session.pk, "name": session.name, "holds": session.pk in holding}
-            for session in GMSession.objects.filter(user=viewer).only("pk", "name")
-        ]
+        # A page of the viewer's sessions with a search that reaches every
+        # page (#973); the whole list grew with every session played.
+        picker = play_session_picker(viewer, character)
+        holding = sessions_holding_character(viewer, character)
     return {
         "offered": offered,
         "character": character,
         "choose_session": choose_session,
-        "sessions": sessions,
+        "picker": picker,
+        "holding": holding,
     }
 
 
@@ -90,6 +96,8 @@ def luck_control(panel: LuckPanel | None, character_id: int) -> dict:
     return {
         "account": account,
         "character_id": character_id,
+        # The roll note's maxlength, the one spend_luck refuses past (#938).
+        "gm_text_limits": GM_TEXT_LIMITS,
         "url": panel.url if panel is not None else "",
     }
 

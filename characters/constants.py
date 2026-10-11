@@ -106,13 +106,32 @@ LITERACY_ROLL_MAXIMUM = 18
 # band, not a fraction of the pool -- so it is the same number for every
 # character. See reference/content/public-rules/characters/injury-thresholds-death.md.
 SEVERE_INJURY_BAND_TOP = 5
+# The table's penalty to all rolls: down to half a pool (but above the severe
+# band), and inside the severe band.
+MINOR_INJURY_ROLL_PENALTY = -1
+SEVERE_INJURY_ROLL_PENALTY = -2
 
 # Equipment quantity and weight bounds.
 MAX_EQUIPMENT_QUANTITY = 999
 MAX_EQUIPMENT_WEIGHT_LBS = 1000
+
+# The longest each free-text field of a character's record may be (issue
+# #928). One number per field, read by every path that writes the field --
+# the model's ``max_length`` (or its JSON validator), the sheet's endpoints,
+# the Games Master chat's services and the importer -- so nothing the app
+# writes is longer than its own importer takes back, the #800 class. Skill
+# names were the one field the paths disagreed on: unbounded on the sheet
+# and in the importer, 200 characters in the chat's ``spend_skill_points``,
+# 60 in its ``skill_check`` (#843) and 50 in ``Character.origin_skill``,
+# which holds one. 60 was taken over 50 because the sheet stored names with
+# no bound, and ``origin_skill`` widened to it (migration 0024).
 MAX_EQUIPMENT_NOTES_LENGTH = 200
 MAX_EQUIPMENT_NAME_LENGTH = 100
 MAX_EQUIPMENT_DAMAGE_LENGTH = 20
+MAX_SKILL_NAME_LENGTH = 60
+MAX_DEATH_CAUSE_LENGTH = 200
+#: The reason on a coin movement's history line (#802); a Game Master's.
+MAX_COIN_REASON_LENGTH = 100
 
 # Inclusive bounds for to_hit_mod / damage_mod / critical_mod / stops_mod / dex_mod
 # and analogues. Anything outside this range is rejected.
@@ -136,6 +155,40 @@ DAMAGE_DICE_PATTERN = re.compile(r"\A\d{1,2}d\d{1,3}(?:[+-]\d{1,3})?\Z")
 CHARACTER_NAME_CHARACTERS = r"\w \-.\'"
 CHARACTER_NAME_PATTERN = re.compile(rf"\A[{CHARACTER_NAME_CHARACTERS}]+\Z", re.UNICODE)
 MAX_CHARACTER_NAME_LENGTH = 100
+
+#: Each free-text field's limit by the name the sheet's template reads it
+#: under (``text_limits.<field>``), so an input's ``maxlength`` is the
+#: server's number rather than a copy of it (issue #928).
+CHARACTER_TEXT_LIMITS: dict[str, int] = {
+    "name": MAX_CHARACTER_NAME_LENGTH,
+    "skill_name": MAX_SKILL_NAME_LENGTH,
+    "item_name": MAX_EQUIPMENT_NAME_LENGTH,
+    "item_notes": MAX_EQUIPMENT_NOTES_LENGTH,
+    "item_damage": MAX_EQUIPMENT_DAMAGE_LENGTH,
+    "death_cause": MAX_DEATH_CAUSE_LENGTH,
+    "coin_reason": MAX_COIN_REASON_LENGTH,
+}
+
+
+def too_long(label: str, text: str, limit: int) -> str:
+    """Why ``text`` is refused for passing ``limit``, or ``""`` when it fits.
+
+    The one wording every path gives for a free-text field over its limit
+    (issue #928), the sheet's: "Name must be 100 characters or fewer".
+
+    Args:
+        label: The field as the refusal names it, capitalised.
+        text: The value, as it would be stored.
+        limit: The field's limit, one of the constants above.
+
+    Returns:
+        The refusal, or ``""``.
+    """
+    if len(text) <= limit:
+        return ""
+    return f"{label} must be {limit} characters or fewer"
+
+
 #: The name a character takes when nothing gives it one (the Games Master
 #: chat's unnamed character, a blank account name; issue #870).
 UNNAMED_CHARACTER = "Unnamed character"
@@ -211,4 +264,14 @@ CHARACTER_ATTRIBUTE_FIELDS: tuple[str, ...] = (
     "wisdom",
     "constitution",
     "charisma",
+)
+
+
+#: The per-item modifiers an equipment entry may carry (issue #752).
+ITEM_MODIFIER_FIELDS: tuple[str, ...] = (
+    "to_hit_mod",
+    "damage_mod",
+    "critical_mod",
+    "stops_mod",
+    "dex_mod",
 )

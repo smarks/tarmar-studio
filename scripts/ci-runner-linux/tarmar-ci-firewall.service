@@ -1,0 +1,12 @@
+# Reapply the CI runner's firewall table (issue #964). Started every minute by
+# tarmar-ci-firewall.timer: if anything on the host flushed the ruleset, an
+# idle runner container could otherwise take its next job with no wall.
+# firewall.sh replaces the table in one transaction, so rerunning it opens no
+# gap. install.sh copies this to /etc/systemd/system/.
+
+[Unit]
+Description=Reapply the tarmar CI runner's firewall table
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/tarmar-ci-runner/firewall.sh

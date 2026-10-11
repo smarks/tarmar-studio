@@ -390,17 +390,26 @@ class BackgroundRollTest(BaseTestCase):
         self.assertEqual(changed["location"], "City")
         self.assertEqual(changed["wealth_level"], "Subsistence")
 
-    def test_a_player_may_still_choose_a_rolled_origin_and_the_grant_follows(self):
-        """A player whose Origin is rolled may still choose it (location.md),
-        so the grant follows the choice as it follows the roll."""
+    def test_a_player_may_not_choose_over_a_rolled_origin(self):
+        """A rolled Origin is final for a player (Spencer's ruling on #970).
+
+        This asserted that a player whose Origin was rolled could choose
+        another and the grant followed, which was the bug: "choose or roll"
+        read as "roll, and choose instead if the roll was bad". The grant
+        following a chosen Origin is pinned by OriginSkillFollowsTheOriginTest.
+        """
         character = unrolled(self.player)
         with d100(*RURAL_MODERATE_COMMONER):
             services.roll_background(character.pk)
 
-        services.update_field(character.pk, "location", "City")
+        with self.assertRaisesMessage(
+            CharacterChangeError, services.ROLL_FIXED_REASONS["location"]
+        ):
+            services.update_field(character.pk, "location", "City")
 
         character.refresh_from_db()
-        self.assertEqual(character.skills, {"street smarts": 1})
+        self.assertEqual(character.location, "Rural")
+        self.assertEqual(character.skills, {"survival": 1})
 
 
 class OriginRollLogTest(BaseTestCase):

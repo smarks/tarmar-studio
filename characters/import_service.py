@@ -17,13 +17,17 @@ its best, with any XP, skills, coin or age, or with a dead character alive.
 Nor is a file this site wrote the importer's character as it stands: it may
 be someone else's public character, or the player's own from before a bad
 roll. Spencer's house rule holds players to the rules and lets a Game Master
-override, so a Game Master's import is kept verbatim, and every player's
-import arrives as a new character: :data:`PLAYER_KEPT_FIELDS` kept,
+override, so a Game Master's import is kept as written, held only to the
+bounds the sheet holds a Game Master to (issue #940; he edits on the sheet
+afterwards, where it is recorded), and every player's import arrives as a
+new character: :data:`PLAYER_KEPT_FIELDS` kept,
 everything rolled, awarded or ruled at a fresh character's value, and a
 notice naming each value dropped and why.
 """
 
-from collections.abc import Callable, Sequence
+import copy
+import math
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from django.core.exceptions import ValidationError
@@ -38,6 +42,8 @@ from .constants import (
     CHARACTER_EXPORT_FORMAT,
     CONTROL_CHARACTERS_PATTERN,
     CORE_ATTRIBUTE_FIELDS,
+    ITEM_MODIFIER_FIELDS,
+    MAX_EQUIPMENT_DAMAGE_LENGTH,
     MAX_EQUIPMENT_MODIFIER,
     MAX_EQUIPMENT_NAME_LENGTH,
     MAX_EQUIPMENT_NOTES_LENGTH,
@@ -46,15 +52,31 @@ from .constants import (
 )
 from .dice import LOCATION_LITERACY_MODIFIER, location_effects
 from .equipment import get_item, settle_worn_armour
-from .models import CHARACTER_INT_FIELDS, Character
+from .equipment_service import custom_equipment_item
+from .models import CHARACTER_INT_FIELDS, DIE_ROLL_FIELDS, Character
 from .skills import MAX_SKILL_POINTS, normalize_skill_name
 
-_EQUIPMENT_MODIFIER_FIELDS = (
-    "to_hit_mod",
-    "damage_mod",
-    "critical_mod",
-    "stops_mod",
-    "dex_mod",
+#: The numbers an item stores as whole numbers and its readers add up with no
+#: type check: the Game Master's modifiers and a custom armour's or shield's
+#: own Stops and DEX penalty (``Character._sum_armor_field``).
+_WHOLE_NUMBER_ITEM_FIELDS: tuple[str, ...] = (
+    *ITEM_MODIFIER_FIELDS,
+    "stops",
+    "dex_penalty",
+)
+
+#: The numbers an item stores as a weight or a price, either int or float.
+_AMOUNT_ITEM_FIELDS: tuple[str, ...] = ("weight", "cost")
+
+#: The flags an item stores as booleans.
+_FLAG_ITEM_FIELDS: tuple[str, ...] = ("equipped", "in_pack")
+
+#: The fields the sheet's single-field editor rules on that the import runs
+#: through the same rule (``Character.clean_field_value``): the integers
+#: (#136) and the height and weight die rolls (#805, #939). The rest of the
+#: sheet's fields are held by the model's own checks in ``full_clean``.
+_SHEET_RULED_FIELDS: frozenset[str] = frozenset(
+    {*CHARACTER_INT_FIELDS, *DIE_ROLL_FIELDS}
 )
 
 # The JSON collections a saved character carries. ``full_clean`` skips their
@@ -154,23 +176,51 @@ class ImportedCharacter:
     left_out: list[str] = field(default_factory=list)
 
 
+def _is_whole_number(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_amount(value: object) -> bool:
+    """A weight or a price: a finite number, as the builder stores one."""
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 def _validate_equipment(equipment) -> None:
     """Structurally validate imported equipment, mirroring the add/update bounds.
 
     The add/update endpoints carefully bound quantity/weight/modifiers; import
     must not be a bypass for those. A non-list is left to the caller's
     container check.
+
+    A custom item -- any entry the catalog does not know, which its readers
+    take at its own numbers -- is held to the sheet's builder itself
+    (:func:`characters.equipment_service.custom_equipment_item`, issue
+    #939): its name, category, weight, cost, damage dice, Stops, DEX penalty
+    and modifiers, in the builder's words. The checks above it hold each
+    number to the type the builder stores, since the builder reads a form and
+    coerces what it is given. A player's import brings in no gear
+    (:func:`held_to_player`), so this mostly holds a Game Master's import,
+    whose custom items the sheet holds to the same rule.
+
+    Raises:
+        CharacterImportError: An item the sheet would not store.
     """
     if not isinstance(equipment, list):
         return
     for index, item in enumerate(equipment):
         if not isinstance(item, dict):
             raise CharacterImportError(f"Equipment item {index} is not an object")
-        # The add/update endpoints cap these two and drop control characters
-        # from them; an import file must not be a way around that (issue #120).
+        # The add/update endpoints cap these and drop control characters
+        # from them; an import file must not be a way around that (issues
+        # #120, #928). Skill names are held by the model's own validator.
         for text_field, max_length in (
             ("name", MAX_EQUIPMENT_NAME_LENGTH),
             ("notes", MAX_EQUIPMENT_NOTES_LENGTH),
+            ("damage", MAX_EQUIPMENT_DAMAGE_LENGTH),
         ):
             text_value = item.get(text_field)
             if text_value is None:
@@ -192,23 +242,34 @@ def _validate_equipment(equipment) -> None:
             raise CharacterImportError(
                 f"Equipment item {index} has an invalid quantity"
             )
-        weight = item.get("weight")
-        if weight is not None and (
-            isinstance(weight, bool)
-            or not isinstance(weight, int | float)
-            or not (0 <= weight <= MAX_EQUIPMENT_WEIGHT_LBS)
-        ):
+        # Present means stated: a null reaches the readers' arithmetic as
+        # None, so it is refused like any other wrong type.
+        for amount_field in _AMOUNT_ITEM_FIELDS:
+            if amount_field in item and not _is_amount(item[amount_field]):
+                raise CharacterImportError(
+                    f"Equipment item {index} has an invalid {amount_field}"
+                )
+        if "weight" in item and not (0 <= item["weight"] <= MAX_EQUIPMENT_WEIGHT_LBS):
             raise CharacterImportError(f"Equipment item {index} has an invalid weight")
-        for modifier_field in _EQUIPMENT_MODIFIER_FIELDS:
-            modifier = item.get(modifier_field)
-            if modifier is not None and (
-                not isinstance(modifier, int)
-                or isinstance(modifier, bool)
-                or abs(modifier) > MAX_EQUIPMENT_MODIFIER
-            ):
+        for number_field in _WHOLE_NUMBER_ITEM_FIELDS:
+            if number_field in item and not _is_whole_number(item[number_field]):
+                raise CharacterImportError(
+                    f"Equipment item {index} has an invalid {number_field}"
+                )
+        for modifier_field in ITEM_MODIFIER_FIELDS:
+            if abs(item.get(modifier_field, 0)) > MAX_EQUIPMENT_MODIFIER:
                 raise CharacterImportError(
                     f"Equipment item {index} has an invalid {modifier_field}"
                 )
+        for flag_field in _FLAG_ITEM_FIELDS:
+            if flag_field in item and not isinstance(item[flag_field], bool):
+                raise CharacterImportError(
+                    f"Equipment item {index} has an invalid {flag_field}"
+                )
+        if get_item(str(item.get("item_id", ""))) is None:
+            _built, refusal = custom_equipment_item(item)
+            if refusal:
+                raise CharacterImportError(f"Equipment item {index}: {refusal}")
 
 
 def _validate_experience_log(experience_log: list) -> None:
@@ -335,21 +396,28 @@ def validate_import_payload(payload: object) -> ImportedCharacter:
     # SQLite dev/test database they don't actually enforce PositiveIntegerField
     # vs. PositiveSmallIntegerField bounds the way they would against
     # production Postgres. Validating explicitly here keeps import and the
-    # edit endpoint in sync everywhere (#136).
-    for int_field in CHARACTER_INT_FIELDS:
-        if int_field not in fields:
+    # edit endpoint in sync everywhere (#136). The height and weight rolls
+    # share the edit endpoint's die-roll rule the same way (#939): the model
+    # holds them only to a length, so "tall" used to import.
+    for ruled_field in _SHEET_RULED_FIELDS:
+        if ruled_field not in fields:
             continue
         # A roll not made yet is null on the row (issue #571), and a player's
         # import leaves the rolls unmade (issue #744), so a file carrying a
         # null there is a character this site holds, not a mistake.
-        if fields[int_field] is None and Character._meta.get_field(int_field).null:
+        if fields[ruled_field] is None and Character._meta.get_field(ruled_field).null:
             continue
         try:
-            fields[int_field] = Character.clean_field_value(
-                int_field, fields[int_field]
+            fields[ruled_field] = Character.clean_field_value(
+                ruled_field, fields[ruled_field]
             )
         except ValidationError as validation_error:
-            raise CharacterImportError(validation_error.messages[0]) from None
+            # A number's rule does not say which number it is (#940); the
+            # die rolls' and the name's do.
+            refusal = validation_error.messages[0]
+            if ruled_field in CHARACTER_INT_FIELDS:
+                refusal = f"Import failed: {ruled_field}: {refusal}"
+            raise CharacterImportError(refusal) from None
 
     # Reject wrong-typed containers outright rather than silently skipping their
     # validation -- every downstream reader (total_allocated_skill_points, the
@@ -407,7 +475,8 @@ def fresh_player_fields(fields: dict) -> dict:
     rolls; the skills are the one the Origin grants a new character. Each
     field's fresh value is the model's own default, so nothing here restates
     one; nothing is rolled, and nothing is written to the dice log, which
-    records only dice this site rolled.
+    records only dice this site rolled (a chain kept from the importer's own
+    character is recorded there by :func:`_unchosen_faces`, issue #941).
 
     Args:
         fields: The validated fields of the file.
@@ -455,6 +524,12 @@ def _describe(name: str, value: object) -> str:
         return f"the experience log ({len(value)} entries)"
     if name == "dice_log":
         return "the dice log"
+    if name in services.PLAYER_CHOSEN_FACE_FIELDS:
+        return (
+            f"{name.replace('_', ' ')} {value} (a chain comes only from the dice "
+            "or a Game Master, and no character of yours is the record this "
+            "file came from)"
+        )
     if name == "total_xp":
         return f"{value} XP"
     if name == "is_alive":
@@ -500,22 +575,27 @@ def player_import_notice(
     fields: dict,
     fresh: dict,
     left_out: Sequence[str] = (),
+    site_rolls_kept: Sequence[str] = (),
 ) -> str:
-    """What a player's import dropped, and why, for the sheet (issue #744).
+    """What a player's import dropped and kept, and why (issues #744, #941).
 
     Names each value the file stated that the character did not keep --
     every field that arrived at a different value, except what
-    :data:`_NOT_NAMED` leaves out -- and each thing carried that was left
-    out.
+    :data:`_NOT_NAMED` leaves out -- each thing carried that was left out,
+    and each roll kept because the file is an export of the importer's own
+    character.
 
     Args:
         fields: The validated fields of the file.
         fresh: What the player's import holds instead.
         left_out: What was carried and not brought in
             (:attr:`ImportedCharacter.left_out`).
+        site_rolls_kept: Each roll kept as this site rolled it
+            (:func:`_unchosen_faces`).
 
     Returns:
-        The notice, or ``""`` when nothing the file stated was dropped.
+        The notice, or ``""`` when nothing the file stated was dropped or
+        kept by its record.
     """
     dropped = [
         _describe(name, fields[name])
@@ -524,19 +604,27 @@ def player_import_notice(
         if _stated(name, fields[name], fresh[name])
     ]
     dropped.extend(left_out)
-    if not dropped:
-        return ""
-    listed = (
-        dropped[0]
-        if len(dropped) == 1
-        else f"{'; '.join(dropped[:-1])}; and {dropped[-1]}"
-    )
-    return (
-        "Imported by a player, so this is a new, living character: what the "
-        f"file said was rolled, earned or ruled was not kept: {listed}. "
-        "Attributes and rolls are set again on this sheet, and experience is "
-        "earned here."
-    )
+    sentences = []
+    if dropped:
+        sentences.append(
+            "Imported by a player, so this is a new, living character: what the "
+            f"file said was rolled, earned or ruled was not kept: {_listed(dropped)}. "
+            "Attributes and rolls are set again on this sheet, and experience is "
+            "earned here."
+        )
+    if site_rolls_kept:
+        sentences.append(
+            "Kept, since this file is an export of your own character, whose "
+            f"record holds it: {_listed(site_rolls_kept)}."
+        )
+    return " ".join(sentences)
+
+
+def _listed(items: Sequence[str]) -> str:
+    """``items`` joined for the notice: "a", "a; and b", "a; b; and c"."""
+    if len(items) == 1:
+        return items[0]
+    return f"{'; '.join(items[:-1])}; and {items[-1]}"
 
 
 def _clean(character: Character, *, owned: bool = True) -> None:
@@ -610,12 +698,161 @@ def _gear_left_out(equipment: Sequence[dict]) -> list[str]:
     return left_out
 
 
+#: What a file must agree on with the importer's own character to be that
+#: character's export (issue #941): its name, its site-rolled values and its
+#: whole dice log, as the server stores them. A chain belongs to one
+#: character: re-importing that character's export keeps it, copying the
+#: chain onto another character's file does not (coordinator's ruling on the
+#: #941 review, for Spencer to confirm).
+_SOURCE_MATCH_FIELDS: tuple[str, ...] = (
+    "name",
+    *(field_name for field_name, _short in CORE_ATTRIBUTE_FIELDS),
+    "fatigue_roll",
+    "appearance_roll",
+    "height_roll",
+    "weight_roll",
+    "dice_log",
+)
+
+
+def _source_character(
+    importer: User | None, file_fields: Mapping[str, object]
+) -> Character | None:
+    """The importer's own character this file is a faithful export of (#941).
+
+    A file carries no provenance and every value in it, the dice log
+    included, is the player's to edit, so nothing in the file alone can tie
+    it to a roll. The server's record can: a character the importer owns
+    whose name, site-rolled values and whole dice log
+    (:data:`_SOURCE_MATCH_FIELDS`) equal the file's is the character the file
+    was exported from. A file that differs in any of them is another
+    character's, edited or copied, and matches nothing.
+
+    Args:
+        importer: Who imports; ``None`` when unknown, which matches nothing.
+        file_fields: The validated fields of the file.
+
+    Returns:
+        The first such character, or ``None``.
+    """
+    if importer is None or any(
+        name not in file_fields for name in _SOURCE_MATCH_FIELDS
+    ):
+        return None
+    stated = {
+        name: Character._meta.get_field(name).to_python(file_fields[name])
+        for name in _SOURCE_MATCH_FIELDS
+    }
+    owned = Character.objects.filter(user=importer, name=stated["name"])
+    for candidate in owned.order_by("pk"):
+        if all(
+            getattr(candidate, name) == stated[name] for name in _SOURCE_MATCH_FIELDS
+        ):
+            return candidate
+    return None
+
+
+def _unchosen_faces(
+    kept: Mapping[str, object],
+    *,
+    importer: User | None = None,
+    file_fields: Mapping[str, object] | None = None,
+) -> tuple[dict[str, object], list[str]]:
+    """The "choose or roll" values a player keeps, and which stay rolled.
+
+    A player chooses one face of a d6 for each (#748); a demon die's chain
+    comes only from the dice or a Game Master, and a file is not dice
+    (#744). Such a value is kept when the file is a faithful export of the
+    importer's own character (:func:`_source_character`, issue #941), and the
+    new character's dice log says where it came from, so it counts as that
+    field's roll (``services.may_roll_physical``) and the copy is no
+    character's export but its own. A single face, or an Origin, from such an
+    export whose character rolled it and holds it still gets the same line,
+    so the roll stays final (:data:`services.ROLL_FIXED_REASONS`, issues
+    #948, #970). Otherwise a chain arrives blank, as a fresh
+    character's, and the notice names it, as it does every rolled value
+    dropped (#939). The rule is the sheet's own,
+    :func:`characters.services.check_player_choice`.
+
+    Args:
+        kept: The fields the player's import keeps.
+        importer: Who imports.
+        file_fields: The validated fields of the file.
+
+    Returns:
+        ``(changes, site_rolls_kept)``: each field to set -- a blanked value
+        at the model's default, or the dice log recording a kept chain -- and
+        a line for the notice for each chain kept.
+    """
+    changes: dict[str, object] = {}
+    site_rolls_kept: list[str] = []
+    kept_lines: list[str] = []
+    source: Character | None = None
+    looked_up = False
+
+    def source_character() -> Character | None:
+        """The importer's character this file is an export of, looked up once."""
+        nonlocal source, looked_up
+        if not looked_up:
+            source = _source_character(importer, file_fields or {})
+            looked_up = True
+        return source
+
+    for rolled_field in services.ROLL_FIXED_REASONS:
+        if rolled_field not in kept:
+            continue
+        value = kept[rolled_field]
+        try:
+            services.check_player_choice(rolled_field, value, is_game_master=False)
+        except services.CharacterChangeError:
+            matched = source_character()
+            if matched is None:
+                changes[rolled_field] = Character._meta.get_field(
+                    rolled_field
+                ).get_default()
+                continue
+            site_rolls_kept.append(
+                f"{rolled_field.replace('_', ' ')} {value} (on your character "
+                f"{matched.name})"
+            )
+        else:
+            # A value a player could have chosen comes in as it stands. It was
+            # a roll, and a roll is final for a player (#948, #970), when the
+            # file is the export of the player's own character, that character
+            # still holds the value, and its dice log records the roll: the
+            # copy records it too, so it is fixed as the original is. (The
+            # height and weight are among the fields a file must match to be
+            # that export; the Origin is not, so it is compared here.)
+            # Coordinator's ruling under the standing rule; Spencer may
+            # overrule.
+            if not str(value).strip():
+                continue
+            matched = source_character()
+            if (
+                matched is None
+                or getattr(matched, rolled_field) != value
+                or not services.roll_lines(matched.dice_log or "", rolled_field)
+            ):
+                continue
+        kept_lines.append(
+            f"{services.ROLL_LOG_LABELS[rolled_field]}: kept from your character "
+            f"{matched.name} on import = {value}"
+        )
+    if kept_lines:
+        changes["dice_log"] = "\n".join(kept_lines)
+    return changes, site_rolls_kept
+
+
 def held_to_player(
-    imported: ImportedCharacter, *, is_game_master: bool
+    imported: ImportedCharacter,
+    *,
+    is_game_master: bool,
+    importer: User | None = None,
 ) -> ImportedCharacter:
     """Hold a player's import to the rules (issues #744, #757): the one place.
 
-    A Game Master's import comes in verbatim. Every player's import is a new
+    A Game Master's import comes in as written, to be held to the sheet's
+    bounds when saved (:func:`save_imported_character`). Every player's import is a new
     character held to what a player may set, whatever file it came from --
     one this site wrote is still someone's character as it once stood, not
     the importer's as it stands (the coordinator's ruling on the #744
@@ -628,10 +865,19 @@ def held_to_player(
       value (:func:`fresh_player_fields`), the explicit exceptions in
       :data:`PLAYER_IMPORT_NEVER_KEPT` included whatever the table says --
       so the character is alive, unplayed and unrolled;
+    * a height or weight no player could choose arrives blank, unless the
+      file is a faithful export of the importer's own character
+      (:func:`_unchosen_faces`);
     * the background arrives unrolled, so nothing is bought: each thing the
       file carries is left out and named (:func:`_gear_left_out`);
     * the notice names each value dropped and why
       (:func:`player_import_notice`).
+
+    Args:
+        imported: The validated file.
+        is_game_master: Whether a Game Master imports.
+        importer: Who imports, among whose own characters the file's source
+            is looked for; ``None`` keeps no chain.
 
     Raises:
         CharacterImportError: The file as written breaks the model's rules.
@@ -645,10 +891,64 @@ def held_to_player(
         if name in PLAYER_KEPT_FIELDS
     }
     fields.update(fresh_player_fields(imported.fields))
+    face_changes, site_rolls_kept = _unchosen_faces(
+        fields, importer=importer, file_fields=imported.fields
+    )
+    fields.update(face_changes)
     fields["equipment"] = []
     left_out = _gear_left_out(imported.fields.get("equipment") or [])
-    fields["import_notice"] = player_import_notice(imported.fields, fields, left_out)
+    fields["import_notice"] = player_import_notice(
+        imported.fields, fields, left_out, site_rolls_kept
+    )
     return ImportedCharacter(name=imported.name, fields=fields, left_out=left_out)
+
+
+def _held_to_sheet_bounds(character: Character) -> None:
+    """Hold the pools only a Game Master's import keeps to the sheet (#940).
+
+    Spencer's ruling on #940: a Game Master's import is held to the bounds
+    the sheet holds him to, refusing what the sheet would refuse; he edits on
+    the sheet afterwards, where it is recorded. Each wound and the spent mana
+    (``services.POOL_LOSS_FIELDS``) goes through the sheet's own pools
+    setting, ``services.apply_current_pools``, as the pool it leaves --
+    the pool's maximum (``services.pool_maxima``) less what is gone -- so no
+    pool sits where it may not be set: Mana below 0, or a wound on a
+    character whose pools are not known yet. It runs on a copy, so the
+    character is not changed by it.
+
+    A player's import holds these at a fresh character's values
+    (:func:`fresh_player_fields`), which pass. The aging penalties are not
+    checked: ``Character.save`` sets them from the age, whatever the file
+    says (``reconcile_aging_penalties``, issue #680). The purse is held to
+    its column only: a stored purse may sit below nothing after a Game
+    Master's purchase before the wealth roll (#851), which the sheet keeps.
+
+    Raises:
+        CharacterImportError: The sheet's refusal, naming the field.
+    """
+    scratch = copy.copy(character)
+    # What save() will store, so the pools' maxima read the age's aging.
+    scratch.reconcile_aging_penalties()
+    maxima = services.pool_maxima(scratch)
+    for label, loss_field in services.POOL_LOSS_FIELDS.items():
+        gone = getattr(scratch, loss_field)
+        if not gone:
+            continue
+        now = (maxima[label] or 0) - gone
+        try:
+            services.apply_current_pools(
+                scratch, is_game_master=True, **{label.lower(): now}
+            )
+        except services.CharacterChangeError as refusal:
+            raise CharacterImportError(
+                f"Import failed: {loss_field}: {refusal}"
+            ) from None
+
+
+def _clean_to_sheet(character: Character) -> None:
+    """The model's own validation, then the sheet's bounds (issue #940)."""
+    _clean(character)
+    _held_to_sheet_bounds(character)
 
 
 def save_imported_character(user: User, imported: ImportedCharacter) -> Character:
@@ -656,16 +956,17 @@ def save_imported_character(user: User, imported: ImportedCharacter) -> Characte
 
     The payload's name is kept verbatim; names are not unique per user
     (issue #571). What a player may bring in is decided before this, by
-    :func:`held_to_player`.
+    :func:`held_to_player`; what is brought in is held to the model's rules
+    and to the sheet's bounds on its pools (:func:`_held_to_sheet_bounds`).
 
     Raises:
-        CharacterImportError: When the model's own validation rejects the
-            instance.
+        CharacterImportError: When the model's own validation or the sheet's
+            bounds reject the instance.
     """
 
     def _create() -> Character:
         return services.create_character(
-            user, imported.name, imported.fields, validate=_clean
+            user, imported.name, imported.fields, validate=_clean_to_sheet
         )
 
     return _saving(_create)

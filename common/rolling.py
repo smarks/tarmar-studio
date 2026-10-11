@@ -12,7 +12,9 @@ depends on it transitively.
 """
 
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -87,6 +89,42 @@ class _RandintSource(Protocol):
     def randint(self, a: int, b: int, /) -> int: ...
 
 
+#: The source an unseeded :class:`Roller` draws from inside
+#: :func:`pinned_dice`, or ``None`` outside it. A ``ContextVar`` rather than a
+#: module global so pinning one request's dice cannot reach a request being
+#: served on another thread of the same process.
+_PINNED_SOURCE: ContextVar[random.Random | None] = ContextVar(
+    "pinned_dice_source", default=None
+)
+
+
+@contextmanager
+def pinned_dice(seed: int) -> Iterator[None]:
+    """Make every unseeded roll inside the block come from ``Random(seed)``.
+
+    The browser tests' way to fix a roll the page makes through the server
+    (issue #959): ``common.middleware.PinnedDiceMiddleware`` wraps one request
+    in this when a test asks for it, and that middleware is installed only in
+    a DEBUG process started with ``E2E_DICE_SEEDING`` (``settings.py`` refuses
+    the switch otherwise). Pure Python, like the rest of this module.
+
+    A :class:`Roller` built with its own seed keeps drawing from that seed;
+    only the module-global fallback is replaced. The source is fresh on every
+    entry, so the same seed around the same calls gives the same faces.
+
+    Args:
+        seed: Seeds the private ``random.Random`` the block's rolls draw from.
+
+    Yields:
+        Nothing; the pin holds until the block exits, however it exits.
+    """
+    token = _PINNED_SOURCE.set(random.Random(seed))
+    try:
+        yield
+    finally:
+        _PINNED_SOURCE.reset(token)
+
+
 class Roller:
     """Rolls dice from one randomness source and records every roll.
 
@@ -96,7 +134,8 @@ class Roller:
             battle simulator, issue #176, needs). When ``None``, faces come
             from the module-global ``random`` at call time, so ``random.seed()``
             and test patches of ``<module>.random.randint`` keep working for
-            the module-default rollers the existing call sites use.
+            the module-default rollers the existing call sites use -- except
+            inside :func:`pinned_dice`, which supplies the source instead.
         on_roll: Called with each :class:`RollRecord` as it is produced, so a
             caller (e.g. a battle engine) can capture every roll without the
             roller knowing anything about persistence.
@@ -107,8 +146,8 @@ class Roller:
         seed: int | None = None,
         on_roll: Callable[[RollRecord], None] | None = None,
     ) -> None:
-        self._random_source: _RandintSource = (
-            random.Random(seed) if seed is not None else random
+        self._seeded_source: random.Random | None = (
+            random.Random(seed) if seed is not None else None
         )
         self._on_roll = on_roll
 
@@ -143,7 +182,8 @@ class Roller:
         """
         count, sides, specification_modifier = parse_dice_specification(specification)
         total_modifier = specification_modifier + modifier
-        faces = tuple(self._random_source.randint(1, sides) for _ in range(count))
+        source = self._randomness_source()
+        faces = tuple(source.randint(1, sides) for _ in range(count))
         record = RollRecord(
             purpose=purpose,
             specification=specification.strip().lower(),
@@ -156,3 +196,17 @@ class Roller:
         if self._on_roll is not None:
             self._on_roll(record)
         return record
+
+    def _randomness_source(self) -> _RandintSource:
+        """The source this roll draws from, resolved at call time.
+
+        Its own seed first; then a :func:`pinned_dice` block's source; then
+        the module-global ``random``, read now rather than at construction so
+        ``random.seed()`` and patches of ``random.randint`` reach it.
+        """
+        if self._seeded_source is not None:
+            return self._seeded_source
+        pinned_source = _PINNED_SOURCE.get()
+        if pinned_source is not None:
+            return pinned_source
+        return random

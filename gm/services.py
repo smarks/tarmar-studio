@@ -97,6 +97,8 @@ def extraction_options() -> dict[str, int | float]:
 def extract_structured_json(
     build_messages: Callable[..., list[dict[str, str]]],
     schema: dict[str, Any],
+    *,
+    stop_at: float | None = None,
 ) -> str:
     """The GM's schema-constrained call: this app's model and options.
 
@@ -112,16 +114,22 @@ def extract_structured_json(
         build_messages: Builds the call's messages; called with
             ``schema_in_prompt=True`` on the fallback path.
         schema: The JSON schema to constrain the answer to.
+        stop_at: A ``time.monotonic()`` past which the call, its fallback
+            included, does not hold the model (issue #936).
 
     Returns:
         The model's reply, unparsed -- each caller owns how it reads and how
         it reports a malformed one.
+
+    Raises:
+        StreamDeadlinePassed: ``stop_at`` passed.
     """
     return ollama_client.chat_structured(
         get_gm_model(),
         build_messages,
         schema,
         options=extraction_options(),
+        stop_at=stop_at,
     )
 
 
@@ -299,7 +307,12 @@ class RecapOutOfTime(TimeoutError):
     """A recap the turn stopped waiting for; its call was closed (review of #783)."""
 
 
-def write_session_recap(prompt: str, *, deadline: float | None = None) -> str:
+def write_session_recap(
+    prompt: str,
+    *,
+    deadline: float | None = None,
+    hang_up: ollama_client.HangUp | None = None,
+) -> str:
     """Ask the model for a session recap, in one plain call (issue #579).
 
     Its own call rather than part of a turn: it is not narration, nothing
@@ -316,15 +329,19 @@ def write_session_recap(prompt: str, *, deadline: float | None = None) -> str:
             at the deadline even while a read waits on a stream that stalled
             after its first tokens (issue #887), and it is closed at the
             deadline between tokens.
+        hang_up: Lets the thread waiting on the recap end its call when it
+            gives up on it (issue #936). One hang-up serves one call.
 
     Raises:
         RecapOutOfTime: The deadline passed.
+        StreamHungUp: ``hang_up`` was used while the recap was written.
     """
     if deadline is None:
         tokens = ollama_client.stream_chat(
             get_gm_model(),
             [{"role": "user", "content": prompt}],
             options=get_gm_options(),
+            hang_up=hang_up,
         )
         return "".join(tokens)
     left = deadline - time.monotonic()
@@ -336,6 +353,7 @@ def write_session_recap(prompt: str, *, deadline: float | None = None) -> str:
         options=get_gm_options(),
         timeout=httpx.Timeout(connect=10.0, read=left, write=10.0, pool=10.0),
         stop_at=deadline,
+        hang_up=hang_up,
     )
     written: list[str] = []
     try:
@@ -376,13 +394,25 @@ def fold_needed(session, history: Sequence[ChatMessage]) -> bool:
 
 
 def write_fold(
-    session, history: Sequence[ChatMessage], *, deadline: float | None = None
+    session,
+    history: Sequence[ChatMessage],
+    *,
+    deadline: float | None = None,
+    hang_up: ollama_client.HangUp | None = None,
 ) -> tuple[str, int]:
     """Write the recap a fold needs: one model call, and no database access.
 
     Kept apart from the write so a turn can run it off its own thread and
     send keep-alives while it waits (issue #783), and bounded by the turn's
     ``deadline`` so the call ends when the turn stops waiting for it.
+
+    Args:
+        session: The session whose earlier turns are folded.
+        history: The stored history to fold.
+        deadline: ``time.monotonic()`` past which the recap is abandoned.
+        hang_up: Lets the turn end the recap's call when it stops waiting
+            on it before the deadline (issue #935). One hang-up serves the
+            one call.
 
     Returns:
         ``(summary, folded_through)``, as :func:`gm.summary.fold` gives them;
@@ -391,8 +421,8 @@ def write_fold(
 
     def ask_model(prompt: str) -> str:
         if deadline is None:
-            return write_session_recap(prompt)
-        return write_session_recap(prompt, deadline=deadline)
+            return write_session_recap(prompt, hang_up=hang_up)
+        return write_session_recap(prompt, deadline=deadline, hang_up=hang_up)
 
     return summary.fold(
         history,

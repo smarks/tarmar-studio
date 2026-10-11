@@ -25,6 +25,10 @@ test.describe('GM chat — characters are records from the first change', () => 
         await page.click('#send-btn');
         await expect(page.locator('.message.assistant').last()).toContainText('nothing stirs', { timeout: 30000 });
         await expect(page).toHaveURL(/session=\d+/);
+        // The words stream before the turn is saved; Send comes back only once
+        // the stream has closed, after the done frame the server sends once the
+        // turn is saved (issue #910).
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
 
         await page.reload();
         await page.click('#gm-panel-tab-characters');

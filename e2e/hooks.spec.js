@@ -6,7 +6,7 @@
  * for a logged-out reader, no DM role needed.
  */
 
-const { test, expect, createCharacter } = require('./fixtures');
+const { test, expect, createCharacter, searchPicker } = require('./fixtures');
 
 test.describe('Hook generator', () => {
     test('DM rolls a party-matched hook and sees the roll', async ({ adminPage }) => {
@@ -24,7 +24,7 @@ test.describe('Hook generator', () => {
         await adminPage.fill('#id_name', partyName);
         await adminPage.click('button:has-text("Form Party")');
         await adminPage.waitForURL(/\/tarmar\/parties\/\d+\//);
-        await adminPage.fill('#party-character-filter', name);
+        await searchPicker(adminPage, '#party-character-filter', name);
         const shelfRow = adminPage.locator('.party-addable-row', { hasText: name });
         await shelfRow.locator('button:has-text("Add")').click();
         await expect(adminPage.locator('.party-member', { hasText: name })).toBeVisible();

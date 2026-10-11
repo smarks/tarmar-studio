@@ -12,18 +12,22 @@
 
     <div class="field">
         <label for="id_username">Username</label>
-        <input type="text" name="username" id="id_username" maxlength="25" required>
+        <input type="text" name="username" id="id_username" maxlength="{{ account_text_limits.sign_in_username }}" required>
         {% include "_field_error.html" with field=form.username %}
     </div>
 
     <div class="field">
         <label for="id_password">Password</label>
-        <input type="password" name="password" id="id_password" maxlength="128" required>
+        <input type="password" name="password" id="id_password" required>
         {% include "_field_error.html" with field=form.password %}
     </div>
 
     <button type="submit">Login</button>
 </form>
+
+<div class="links">
+    <a href="{% url 'password_reset' %}" id="forgot-password-link">Forgot your password?</a>
+</div>
 
 <div class="links">
     Don't have an account? <a href="{% url 'register' %}">Register</a>

@@ -11,6 +11,12 @@ A request the roll service refuses is never turned into a number: the
 resolution carries the error, and the player and the model are both told no
 dice fell.
 
+A free-form roll carries no injury penalty (#911). The injury table's -1/-2
+makes a roll worse whichever way it is read, and nothing here says which way
+that is; a roll against a score is ``skill_check``, ``survival_save`` or
+``attribute_check``, each of which applies the penalty in the rule's own
+direction.
+
 Django-free on purpose, like :mod:`gm.engine`.
 """
 
@@ -41,12 +47,6 @@ class RollRequest:
         roller: Who rolls; ``""`` when nobody was named.
         times: How many separate rolls of ``expression``. Each is rolled,
             shown and reported on its own; this is never a bigger dice pool.
-        injury_penalty: The roller's injury-table penalty (-1 or -2 to all
-            rolls, ``characters.skill_checks.injury_penalty``), or 0 (#886).
-        direction: ``"over"`` when a higher total is better, ``"under"``
-            when the roll must come in at or under a score, or ``""`` when
-            the plan did not say, in which case the penalty is named and not
-            applied: which way it counts depends on the roll.
         game_master_call: What a Game Master called the roll past, named on
             its line (an unconscious roller), or ``""``.
     """
@@ -55,23 +55,7 @@ class RollRequest:
     purpose: str = ""
     roller: str = ""
     times: int = 1
-    injury_penalty: int = 0
-    direction: str = ""
     game_master_call: str = ""
-
-    def counts_as(self, total: int) -> int | None:
-        """What ``total`` counts as with the injury penalty, or None.
-
-        None when there is no penalty, or no direction to apply it in. "-1
-        to all rolls" makes a roll worse whichever way it is read: a roll
-        over a number loses the point, and a roll that must come in under a
-        score counts a point higher.
-        """
-        if not self.injury_penalty or self.direction not in ("over", "under"):
-            return None
-        if self.direction == "over":
-            return total + self.injury_penalty
-        return total - self.injury_penalty
 
     @property
     def label(self) -> str:
@@ -165,19 +149,6 @@ def dice_line(resolution: RollResolution) -> str:
         f"🎲 {who} rolls {record.specification}{what}: "
         f"[{_faces_text(record)}] = {record.total}"
     )
-    if request.injury_penalty:
-        counted = request.counts_as(record.total)
-        if counted is not None:
-            line += (
-                f", {request.injury_penalty:+d} injured on a roll "
-                f"{request.direction}: counts as {counted}"
-            )
-        else:
-            line += (
-                f"; injured, {request.injury_penalty:+d} to all rolls, not "
-                "applied: the plan did not say whether this roll is made over "
-                "or under a number"
-            )
     if request.game_master_call:
         line += f" (called by the Game Master: {request.game_master_call})"
     return line
@@ -203,11 +174,4 @@ def roll_frame_payload(resolution: RollResolution) -> dict[str, object]:
     payload["expression"] = resolution.record.specification
     payload["rolls"] = _faces_text(resolution.record)
     payload["total"] = resolution.record.total
-    if request.injury_penalty:
-        # The dice's own total stays ``total``; what it counts as is its own
-        # key, set only when the penalty was applied (#886).
-        payload["injury_penalty"] = request.injury_penalty
-        counted = request.counts_as(resolution.record.total)
-        if counted is not None:
-            payload["counts_as"] = counted
     return payload

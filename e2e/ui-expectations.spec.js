@@ -12,7 +12,7 @@
 
 const {
     test, expect, TEST_USER, TEST_ADMIN, loginAs, submitPassphrase,
-    createBattleViaSetup, battleRowOnList,
+    createBattleViaSetup, battleRowOnList, chooseToAttach,
 } = require('./fixtures');
 const { startCoverage } = require('./coverage');
 
@@ -204,7 +204,7 @@ test.describe('The GM chat keeps what the player typed (#339)', () => {
         // A real session, made by attaching a seeded character — the same way
         // gm-character.spec.js gets one without Ollama in the room.
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 

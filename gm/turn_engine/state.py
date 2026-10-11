@@ -18,7 +18,7 @@ from characters.constants import CORE_ATTRIBUTE_FIELDS
 from characters.magic import known_spells
 from characters.models import Character
 from characters.purse import format_purse
-from characters.skill_checks import governing_attribute, injury_penalty
+from characters.skill_checks import governing_attribute
 from characters.skills import format_skill_level
 from characters.weapon_skill import is_weapon_skill
 
@@ -174,9 +174,6 @@ class RosterLine:
         figures: The key figures, already written out.
         ledger: The same running totals one by one, for a reply that has to
             quote one back (issue #622).
-        injured: Whether the injury table's -1 or -2 applies to the
-            character's rolls now (``characters.skill_checks.injury_penalty``),
-            so a player's roll for them must say which way it is read (#886).
     """
 
     character_id: int
@@ -184,7 +181,6 @@ class RosterLine:
     label: str
     figures: str
     ledger: tuple[LedgerFigure, ...] = ()
-    injured: bool = False
 
     @property
     def called(self) -> str:
@@ -340,7 +336,6 @@ def roster_lines(session: GMSession | None) -> list[RosterLine]:
             label=entry.label,
             figures=key_figures(entry.character),
             ledger=ledger_figures(entry.character),
-            injured=bool(injury_penalty(entry.character)),
         )
         for entry in roster.roster(session)
     ]

@@ -506,7 +506,11 @@ class PlainLineTest(BaseTestCase):
                 "Dodge: +4 to your Target Number against missiles and thrown weapons only, jogging toward Foe",
                 "",
             ),
-            "d": ("Drop prone where you stand", ""),
+            # A DROP may jog first to a picked hex (#866).
+            "d": (
+                "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+                "",
+            ),
             "e": ("Ready the Longbow", ""),
             "g": ("Stand up; it takes the whole turn", ""),
             "p": ("Stand up; it takes the whole turn", ""),
@@ -519,7 +523,12 @@ class PlainLineTest(BaseTestCase):
             "o": ("Try to grapple Foe: a hold pins them rather than hurting them", ""),
             "q": ("Pick up the Mace", "the Broadsword is dropped"),
             "u": ("Try to draw your dagger: 3d6 at or under your DEX", ""),
-            "v": ("Struggle free of Foe: 4d6 at or under your DEX", ""),
+            # Outside a grapple, v is the HTH DISENGAGE (tarmar-engine #19).
+            "v": (
+                "Break away from hand-to-hand: 4d6 at or under your DEX, then "
+                "stand in a hex next to you",
+                "",
+            ),
             "hold_still": ("Hold still in Foe's grip", ""),
             "squeeze": ("Squeeze Foe", ""),
             "maintain": ("Keep your hold on Foe", ""),
@@ -548,6 +557,18 @@ class PlainLineTest(BaseTestCase):
 
     def test_an_attack_with_no_forecast_in_its_working_names_no_odds(self):
         self.assertEqual(self.line("j"), ("Attack Foe with the Broadsword", ""))
+
+    def test_a_held_figure_struggles_free(self):
+        self.actor.grappled_by = 2
+        self.assertEqual(
+            self.line("v"), ("Struggle free of Foe: 4d6 at or under your DEX", "")
+        )
+
+    def test_a_sword_in_hand_strikes_in_close_with_bare_hands(self):
+        """The HTH table's t is "Bare hands or dagger" (tarmar-engine #19)."""
+        self.assertEqual(self.line("t"), ("Strike Foe in close with bare hands", ""))
+        self.actor.weapon = _catalog_weapon("dagger")
+        self.assertEqual(self.line("t"), ("Strike Foe in close with the Dagger", ""))
 
     def test_bare_hands_and_nothing_to_ready(self):
         self.actor.weapon = WeaponState(damage="1d6-2")

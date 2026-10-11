@@ -2,10 +2,11 @@
 
 On a classic-arena host the front door IS the arena: the root URL lands on
 the battle list, login without a ``next`` returns there, and the menu is
-arena-shaped. The default host keeps the studio's landing and nav exactly as
-they were. One source of truth decides which is which -- the same
-``THEME_HOSTS`` mapping the theme reads -- so a host cannot wear one door's
-skin and open onto the other's rooms.
+arena-shaped. The default host keeps the studio's landing and nav; a sign-in
+there lands on the player's journal (issue #952), while the root still opens
+onto the public front page. One source of truth decides which is which -- the
+same ``THEME_HOSTS`` mapping the theme reads -- so a host cannot wear one
+door's skin and open onto the other's rooms.
 """
 
 from django.test import override_settings
@@ -56,9 +57,38 @@ class LoginLandsPerHostTest(BaseTestCase):
             HTTP_HOST=host,
         )
 
-    def test_login_on_default_host_lands_on_the_studio_home(self):
+    def test_login_on_default_host_lands_on_the_journal(self):
+        """Issue #952: the journal, not the front page, after signing in."""
         response = self._login("testserver")
-        self.assertEqual(response.request["PATH_INFO"], "/tarmar/")
+        self.assertEqual(response.request["PATH_INFO"], "/tarmar/journal/")
+
+    def test_the_default_host_root_stays_the_front_page_once_signed_in(self):
+        """Signing in moves where a login lands, not where the root opens."""
+        self._login("testserver")
+        response = self.client.get("/")
+        self.assertRedirects(response, "/tarmar/")
+
+    def test_an_explicit_next_still_wins_on_the_default_host(self):
+        self.create_user()
+        response = self.client.post(
+            "/tarmar/accounts/login/?next=/tarmar/characters/",
+            {"username": "testuser", "password": TEST_PASSWORD},
+        )
+        self.assertRedirects(response, "/tarmar/characters/")
+
+    def test_an_offsite_next_is_ignored_and_the_journal_is_used(self):
+        self.create_user()
+        response = self.client.post(
+            "/tarmar/accounts/login/?next=https://elsewhere.example.com/",
+            {"username": "testuser", "password": TEST_PASSWORD},
+        )
+        self.assertRedirects(response, "/tarmar/journal/")
+
+    def test_a_signed_in_visit_to_login_goes_to_the_journal(self):
+        """The login page sends an account already signed in on, too."""
+        self.login_as(self.create_user())
+        response = self.client.get("/tarmar/accounts/login/")
+        self.assertRedirects(response, "/tarmar/journal/")
 
     def test_login_on_arena_host_lands_on_the_battle_list(self):
         response = self._login(ARENA_HOST)
@@ -93,7 +123,7 @@ class LoginLandsPerHostTest(BaseTestCase):
         )
         self.assertEqual(response.request["PATH_INFO"], "/tarmar/battles/")
 
-    def test_register_on_default_host_lands_on_the_studio_home(self):
+    def test_register_on_default_host_lands_on_the_journal(self):
         response = self.client.post(
             "/tarmar/accounts/register/",
             {
@@ -103,7 +133,43 @@ class LoginLandsPerHostTest(BaseTestCase):
             },
             follow=True,
         )
-        self.assertEqual(response.request["PATH_INFO"], "/tarmar/")
+        self.assertEqual(response.request["PATH_INFO"], "/tarmar/journal/")
+
+    def test_register_with_an_offsite_next_ignores_it_and_lands_on_the_journal(
+        self,
+    ):
+        response = self.client.post(
+            "/tarmar/accounts/register/?next=https://elsewhere.example.com/",
+            {
+                "username": "newwanderer",
+                "password1": TEST_PASSWORD,
+                "password2": TEST_PASSWORD,
+            },
+        )
+        self.assertRedirects(response, "/tarmar/journal/")
+
+    def test_register_with_an_explicit_next_goes_there(self):
+        response = self.client.post(
+            "/tarmar/accounts/register/?next=/tarmar/characters/",
+            {
+                "username": "newwriter",
+                "password1": TEST_PASSWORD,
+                "password2": TEST_PASSWORD,
+            },
+        )
+        self.assertRedirects(response, "/tarmar/characters/")
+
+    def test_register_on_arena_host_with_next_goes_there(self):
+        response = self.client.post(
+            "/tarmar/accounts/register/?next=/tarmar/battles/new/",
+            {
+                "username": "newchallenger",
+                "password1": TEST_PASSWORD,
+                "password2": TEST_PASSWORD,
+            },
+            HTTP_HOST=ARENA_HOST,
+        )
+        self.assertEqual(response["Location"], "/tarmar/battles/new/")
 
 
 @arena_settings

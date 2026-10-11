@@ -26,6 +26,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bestiary.models import Beast
+from common.helpers import column_length
+
+#: The longest a foe's name may be: the bestiary's name column (issue #938).
+#: A stand-in beast keeps what was asked for as its own name there, so
+#: :func:`gm.fight.stand_in_beast` refuses a longer one; a person's board
+#: name (:attr:`PersonFoe.label`) is held to the same length.
+FOE_NAME_MAX_LENGTH = column_length(Beast, "name")
+
 #: A calling, singular and lower-case, to the generated archetype it fights
 #: as (one of :data:`battle.generation.ARCHETYPES`). Soldiers and watchmen wear armour; outlaws and zealots fight light;
 #: bowmen shoot; casters cast. A plain person with no calling is a brawler.
@@ -243,7 +252,12 @@ def person_foe(name: str) -> PersonFoe | None:
     described = [word for word in words[:-1] if word.lower() not in _LEADING]
     for form in _singulars(head.lower()):
         if form in PERSON_ARCHETYPES:
-            label = " ".join([*described, form])[:100]
+            # Cut, not refused (#938): the label is a handle this code makes
+            # from the words asked for -- articles dropped, the calling made
+            # singular -- never longer than the name itself, and held to a
+            # beast's name length so the board's numbering (" (2)") still
+            # fits the combatant's display-name column.
+            label = " ".join([*described, form])[:FOE_NAME_MAX_LENGTH]
             return PersonFoe(_capitalised(label), PERSON_ARCHETYPES[form])
     return None
 

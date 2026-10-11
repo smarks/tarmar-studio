@@ -56,7 +56,7 @@ graph TB
         review["tarmar-gm-review agent<br/>scripts/llm-host/"]
     end
 
-    gh["GitHub smarks/tarmar-studio<br/>origin/main + refs/notes/gate"]
+    gh["GitHub smarks/tarmar-studio-private<br/>origin/main + refs/notes/gate"]
 
     player --> browser
     gm --> browser
@@ -1137,8 +1137,10 @@ stateDiagram-v2
 
 The client half: a lost view calls `awaitRunningTurn(turnId)` in `chat.js`,
 polling `gm:turn` (`turns/<int:turn_id>/`) for `running | finished | failed`.
-`expire_stale_running_turns()` clears anything past
-`RUNNING_TURN_GRACE_SECONDS = 180`. A genuine retry
+`expire_stale_running_turns()` clears anything running longer than
+`GM_RECAP_BUDGET_SECONDS + GM_STREAM_BUDGET_SECONDS + RUNNING_TURN_GRACE_SECONDS`
+(the grace is 180 s; the recap budget counts because a continued session's
+first turn spends it before its own, issue #936). A genuine retry
 (`data["retry"]` plus `resumes_interrupted_turn`) sets `TurnRequest.plan =
 False` and feeds the already-filed results back as `known_results`, so the turn
 is **narrated, not re-run** — nothing is applied twice.
@@ -1153,6 +1155,38 @@ dispatches on the JSON keys: `token`, `status`, `procedure`, `gm_roll`, `done`,
 `GM_STREAM_KEEPALIVE_SECONDS = 10` of model silence, which becomes a `WAITING`
 event, and a literal `": keep-alive"` comment goes out ahead of it so a proxy
 does not close an idle connection.
+Every model call a turn makes is given the turn's deadline as `stop_at`, which
+hangs up its connection there even while a read waits on a stream that stalled,
+and `KeepAliveTokens.close()` hangs up a call the turn has given up on (issues
+#887, #904). The hang-up needs the response's socket, which httpx exposes only
+once the headers arrive, and Ollama sends its headers with the first token: a
+hang-up asked for before then runs when they arrive. So during prefill, or
+while the call is queued behind another turn, the model is held until the first
+token or the turn's deadline, whichever comes first; the read timeout is held to
+that deadline.
+
+The calls made outside a turn's clock carry deadlines of their own (issue
+#936). A continued session's catch-up recap, written before the turn starts,
+is given `GM_RECAP_BUDGET_SECONDS` (default 300) as `stop_at`; a recap cut
+there is carried as the last session's fold recap, labelled as one, as when the
+model fails; the view hands its worker a hang-up and waits at most
+`CATCH_UP_GRACE_SECONDS` (1 s) past the deadline for it to hand back what it
+has. A page that leaves does not end the call (`_RunToCompletion` drains the
+stream), so the deadline is what bounds it.
+`/fight`'s foe calls are non-streaming `chat` calls, which take `stop_at` too:
+Ollama sends a non-streaming answer's headers only once the answer is written,
+so the read timeout held to the time left ends the wait, and the body is read
+over a streamed response that is hung up at the deadline. `chat_structured`
+gives its call and its no-`format` fallback one deadline, and `/fight` gives
+all of its foe calls, the second ask included, one deadline of
+`GM_FIGHT_BUDGET_SECONDS` (default 50); a cut is answered with a 504 in words
+and the turn record marked too slow. That budget is below nginx's 60 s
+`proxy_read_timeout`; raise the two together. `/fight` is a plain JSON POST
+that sends nothing until it answers, so a longer budget alone lets nginx cut
+the request with an HTML 504 while the server still holds the model;
+`gm-panel-battle.js` reports such a non-JSON answer with its status.
+Connect, write and pool timeouts (10 s each) are not held to a deadline, so a
+call can outlive its `stop_at` by about 10 s before any bytes arrive.
 
 ### The side panel
 
@@ -1463,8 +1497,10 @@ bestiary slugs — and the canon index (`var/gm-index.json`).
 
 ## 8. Testing and quality gates
 
-`ci.yml` runs on a self-hosted runner on the Mac Studio, under its own account
-so a job can reach nothing of the developer's (`scripts/ci-runner/`, #576).
+`ci.yml` runs where the repository variable `CI_RUNNER` says (#964): unset,
+on GitHub's `ubuntu-latest`; `datahorde`, on a self-hosted runner in a
+container on datahorde. The Mac Studio runner (`scripts/ci-runner/`, #576) no
+longer receives jobs.
 Independently of it, the check that stands between a merge and production runs
 locally: `./run gate`.
 
@@ -1491,7 +1527,7 @@ graph TD
         g0 --> g1
     end
     gate -->|"green, and HEAD did not move"| note["git notes --ref=refs/notes/gate<br/>gate: pass, commit, recorded, host,<br/>e2e-port, steps"]
-    note -->|"pushed to origin"| deploy["deploy.sh require_gate_record"]
+    note -->|"pushed to origin; the gate then starts the Deploy workflow"| deploy["deploy.sh require_gate_record"]
     deploy -->|"no record"| refuse["refuses unless --force"]
 
     behav["scripts/gm_behaviour_check.py<br/>on demand only, real Ollama"] -.->|"never collected by pytest,<br/>outside the coverage source"| gate
@@ -1517,6 +1553,17 @@ answers only `POST /api/chat`; everything else 404s, which the app treats as a
 degraded grounding step rather than a failed turn. It recognises the planning
 call by the phrase "Reply with only the JSON plan" and returns plans for the
 scenarios the specs exercise.
+
+A roll the page makes through the server is pinned the same way (issue #959):
+the dev server starts with `E2E_DICE_SEEDING=true`, which installs
+`common.middleware.PinnedDiceMiddleware`, and `e2e/dice.js` adds an
+`X-E2E-Dice-Seed` header to the one request a spec names. Inside that request
+every unseeded `Roller` draws from `random.Random(seed)` (`common.rolling.pinned_dice`),
+so the spec asserts the exact faces rather than retrying until real dice
+cooperate. The pin is per request because four workers share one server,
+and it ends when the view returns, so dice rolled while a streamed response's
+body is being generated are not pinned. `settings.py` refuses the switch unless
+`DEBUG` is on.
 
 `E2E_PORT` also sets `baseURL` and the classic arena's `melee.localhost` origin,
 which is how two worktrees run at once without one silently testing the other's
@@ -1547,6 +1594,10 @@ commit, the time, the host, the e2e port and the steps, then pushes it. It
 re-checks that HEAD did not move and the tree did not change before recording.
 `deploy.sh::require_gate_record` fetches that ref (a plain fetch does not carry
 `refs/notes/*`) and refuses a commit with no record unless given `--force`.
+A pass on the head of `main` that ran the Tarmar canon then starts the Deploy
+workflow with `--expect <sha>`; Deploy no longer starts on a merge, and
+`deploy.sh` stands down, green, if `main` has moved to an unrecorded commit by
+the time the run starts.
 
 ---
 

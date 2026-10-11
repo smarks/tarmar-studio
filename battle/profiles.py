@@ -43,7 +43,7 @@ from hexarena.dice import Dice
 
 from common.rolling import Roller
 
-from . import policy, viewmodel
+from . import agreement, policy, viewmodel
 from .engine.engine import run_turn as run_tarmar_turn
 from .engine.state import BattleState
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
@@ -201,6 +201,9 @@ class TarmarProfile(BattleProfile):
         return Roller(seed=self.battle.seed + self.battle.turn_number)
 
     def run_turn(self, state: BattleState, roller, decide) -> list[dict]:
+        # A Game Master's "HTH by agreement" ruling, read from the battle
+        # every turn so a change takes effect on the next one (#867).
+        agreement.fill(state, agreement.Agreement.of(self.battle))
         events: list[dict] = []
         run_tarmar_turn(state, roller, events.append, decide)
         return events
@@ -346,8 +349,10 @@ class ClassicProfile(BattleProfile):
         lines: list[str] = []
         get_profile(self.name).run_turn(state, roller, lines.append, choose)
 
+        from .classic_adaptation import name_sides_in_lines
+
         events = list(decisions)
-        for line in lines:
+        for line in name_sides_in_lines(lines, state.figures):
             events.append(
                 {
                     "turn": turn,
@@ -423,10 +428,16 @@ class ClassicProfile(BattleProfile):
         return actor.name
 
     def actor_team(self, actor) -> str:
-        """A classic figure's team IS its side — unless the side is its own
-        uid, the crossing's spelling of free-for-all (``SIDE_IS_UID`` in
-        :mod:`battle.classic_adaptation`)."""
-        return "" if actor.side == actor.uid else actor.side
+        """A classic figure's team, decoded from its side by ``classic_team``.
+
+        A team's side is spelled with ``TEAM_SIDE_PREFIX`` and a teamless
+        figure's is its own uid (``SIDE_IS_UID``), both in
+        :mod:`battle.classic_adaptation`; the name returned is the team's
+        own, never the side key (#930).
+        """
+        from .classic_adaptation import classic_team
+
+        return classic_team(actor)
 
     def turn_number(self, state) -> int:
         """The last turn played — one behind the classic state's own counter.

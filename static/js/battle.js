@@ -181,8 +181,13 @@ if (typeof module !== 'undefined' && module.exports) {
      * field, which hexes a figure covers, and which way it faces. The page
      * turns those into pixels and paints; it works out nothing about the
      * rules, which is what lets one renderer draw both profiles.
+     *
+     * ``picker`` (optional) is the hex picker for a selected option that
+     * places the figure (#819, #866): ``{hexes, chosen, onPick}``, every
+     * hex the server listed for the option, drawn on top so each is a
+     * button, the chosen one marked.
      */
-    function renderArena(svg, view) {
+    function renderArena(svg, view, picker) {
         svg.textContent = '';
         const arena = view.arena || {};
         const orientation = arena.orientation;
@@ -282,6 +287,64 @@ if (typeof module !== 'undefined' && module.exports) {
             svg.appendChild(group);
         });
         renderGroundWeapons(svg, view, orientation);
+        if (picker) { renderDestinationPicker(svg, picker, orientation); }
+    }
+
+    /** Do two hexes, as ``[q, r]`` pairs, name the same cell? */
+    function sameHex(one, other) {
+        return Boolean(one && other) && one[0] === other[0] && one[1] === other[1];
+    }
+
+    /** A hex as the page writes it: "(q, r)", the engine's own spelling. */
+    function hexLabel(hex) {
+        return `(${hex[0]}, ${hex[1]})`;
+    }
+
+    /**
+     * The hex picker (#819, #866): one button per hex the server listed for
+     * the selected option, from the engine's own rule, so nothing it offers
+     * is a hex the engine would refuse on this board. The chosen hex is
+     * marked; the picker holds no state of its own, so a repaint draws
+     * exactly the selection. (The AI names no hex on tarmar-engine 0.9.10,
+     * house ruling ``ai_destinations``, so there is no AI hex to mark; a
+     * hand-off would still carry one the AI named.)
+     */
+    function renderDestinationPicker(svg, picker, orientation) {
+        const layer = svgElement('g', {
+            class: 'arena-destinations',
+            role: 'group',
+            'aria-label': 'Hexes this action can move to',
+        });
+        (picker.hexes || []).forEach((hex) => {
+            const { x, y } = axialToPixel(hex[0], hex[1], orientation);
+            const chosen = sameHex(hex, picker.chosen);
+            const cell = svgElement('polygon', {
+                class: 'arena-destination' + (chosen ? ' is-chosen' : ''),
+                points: hexCorners(x, y, HEX_SIZE - 1.2, orientation),
+                role: 'button',
+                tabindex: '0',
+                'aria-pressed': chosen ? 'true' : 'false',
+                'aria-label': `Move to hex ${hexLabel(hex)}`,
+                'data-hex': `${hex[0]},${hex[1]}`,
+            });
+            const pick = () => { if (picker.onPick) { picker.onPick(hex); } };
+            cell.addEventListener('click', pick);
+            cell.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    pick();
+                }
+            });
+            layer.appendChild(cell);
+            if (chosen) {
+                layer.appendChild(svgElement('circle', {
+                    class: 'arena-destination-mark',
+                    cx: x, cy: y, r: HEX_SIZE * 0.25,
+                    'pointer-events': 'none',
+                }));
+            }
+        });
+        svg.appendChild(layer);
     }
 
     /**
@@ -904,6 +967,60 @@ if (typeof module !== 'undefined' && module.exports) {
         return stage;
     }
 
+    /**
+     * What the selected option does with a hex (#819, #866): pick one on
+     * the board, or leave it and the option makes its own move. The words
+     * are the page's; which hexes are legal is the server's.
+     */
+    function buildDestinationNote(selected, opts) {
+        const note = document.createElement('div');
+        note.className = 'turn-destination';
+        const line = document.createElement('p');
+        line.className = 'turn-destination-line';
+        if (opts.destination) {
+            line.textContent = `Moving to hex ${hexLabel(opts.destination)}.`;
+        } else {
+            line.textContent = `Pick one of the ${selected.destinations.length} `
+                + 'marked hexes on the board to move there, or leave it and '
+                + 'this action moves as it says.';
+        }
+        note.appendChild(line);
+        if (opts.destination) {
+            const clear = document.createElement('button');
+            clear.type = 'button';
+            clear.className = 'battle-button battle-button-quiet turn-destination-clear';
+            clear.dataset.focusKey = 'destination-clear';
+            clear.textContent = 'Leave the hex unpicked';
+            clear.addEventListener('click', () => {
+                if (opts.onClearDestination) { opts.onClearDestination(); }
+            });
+            note.appendChild(clear);
+        }
+        return note;
+    }
+
+    /**
+     * The engine's refusals of a hex this viewer picked (#819, #866), as
+     * notices: the log keeps every refusal on the page for good, and the
+     * notice stays until dismissed, so the person who picked the hex sees
+     * why the figure did not go there without reading the whole turn.
+     *
+     * @param {Array} events - the events a response carried
+     * @param {Array} seats - the seat summaries, ``you_decide`` marking the
+     *     figures this viewer chooses for
+     * @returns {string[]} one message per refused hex of this viewer's figures
+     */
+    function refusedMoveNotices(events, seats) {
+        const mine = new Set(
+            (seats || []).filter((seat) => seat.you_decide)
+                .map((seat) => seat.display_name)
+        );
+        return (events || [])
+            .filter((event) => event.payload && event.payload.destination_refused
+                && mine.has(event.actor))
+            .map((event) => event.message);
+    }
+
     function renderTurnPanel(panel, pending, options) {
         const focusKey = focusKeyToRestore(panel);
         panel.textContent = '';
@@ -1072,6 +1189,12 @@ if (typeof module !== 'undefined' && module.exports) {
 
         if (casts.length && opts.castOpen) {
             panel.appendChild(buildCastStage(pending, casts, aiPick, opts));
+        }
+
+        const selected = opts.selectedIndex == null
+            ? null : pending.candidates[opts.selectedIndex];
+        if (selected && (selected.destinations || []).length) {
+            panel.appendChild(buildDestinationNote(selected, opts));
         }
 
         const confirm = document.createElement('button');
@@ -1263,6 +1386,8 @@ if (typeof module !== 'undefined' && module.exports) {
         // The cast stage is open when the player has declared a cast and
         // not yet picked a spell or stood down (#250's cast gate).
         let castOpen = false;
+        // The hex picked for the selected option (#819, #866), or null.
+        let destination = null;
         let showScoring = scoringPreference();
         let actionBusy = false;
         // Battle-global sequence high-water mark, for incremental polling.
@@ -1279,12 +1404,45 @@ if (typeof module !== 'undefined' && module.exports) {
             url: roster.dataset.renameUrl,
             onRenamed: (data) => {
                 if (data && data.view) { view = data.view; }
-                renderArena(arena, view);
+                drawArena();
                 renderRoster(
                     roster, view, renameOptions, seatsById(seats), openDetail
                 );
             },
         } : undefined;
+
+        /** The selected option, while the awaited figure is this viewer's. */
+        function selectedCandidate() {
+            if (!pending || !pending.is_you || selectedIndex == null) { return null; }
+            return (pending.candidates || [])[selectedIndex] || null;
+        }
+
+        /**
+         * The arena, with the hex picker while a placing option is selected.
+         *
+         * A repaint replaces every hex, so the one keyboard focus was on
+         * (or ``focusOn``, the hex just picked) takes focus back afterwards,
+         * as the turn panel's controls do (#646): a person picking hexes by
+         * keyboard stays on the board rather than landing on the option.
+         */
+        function drawArena(focusOn) {
+            const active = document.activeElement;
+            const held = focusOn ? `${focusOn[0]},${focusOn[1]}`
+                : (active && arena.contains(active) && active.getAttribute('data-hex'));
+            const selected = selectedCandidate();
+            const hexes = (selected && selected.destinations) || [];
+            renderArena(arena, view, hexes.length ? {
+                hexes,
+                chosen: destination,
+                onPick: (hex) => {
+                    destination = sameHex(hex, destination) ? null : hex;
+                    renderPanel();
+                    drawArena(hex);
+                },
+            } : null);
+            const again = held && arena.querySelector(`[data-hex="${held}"]`);
+            if (again) { again.focus(); }
+        }
 
         /** A cast selection is dropped whenever the stage closes. */
         function closeCastStage() {
@@ -1308,6 +1466,12 @@ if (typeof module !== 'undefined' && module.exports) {
                 castOpen,
                 showScoring,
                 busy: actionBusy,
+                destination,
+                onClearDestination: () => {
+                    destination = null;
+                    drawArena();
+                    renderPanel();
+                },
                 onToggleScoring: () => {
                     showScoring = !showScoring;
                     rememberScoringPreference(showScoring);
@@ -1315,6 +1479,8 @@ if (typeof module !== 'undefined' && module.exports) {
                 },
                 onSelect: (index) => {
                     selectedIndex = index === selectedIndex ? null : index;
+                    destination = null;
+                    drawArena();
                     renderPanel();
                 },
                 onCastOpen: () => {
@@ -1325,13 +1491,15 @@ if (typeof module !== 'undefined' && module.exports) {
                     closeCastStage();
                     renderPanel();
                 },
-                onConfirm: (candidate) => submitAction({
+                onConfirm: (candidate) => submitAction(Object.assign({
                     combatant_id: answering.combatant_id,
                     turn: answering.turn,
                     letter: candidate.letter,
                     target_id: candidate.target_id,
                     spell_key: candidate.spell_key || '',
-                }),
+                // The hex only when one was picked (#819, #866): with none
+                // the option makes its own move, as it always has.
+                }, destination ? { destination } : {})),
                 onAiChoose: () => submitAction({
                     combatant_id: answering.combatant_id,
                     turn: answering.turn,
@@ -1347,7 +1515,6 @@ if (typeof module !== 'undefined' && module.exports) {
             view = data.view;
             seats = data.seats || seats;
             appendTurns(log, data.turns_html || []);
-            renderArena(arena, view);
             renderRoster(
                 roster, view, renameOptions, seatsById(seats), openDetail
             );
@@ -1361,8 +1528,13 @@ if (typeof module !== 'undefined' && module.exports) {
             if (!pending || pending.combatant_id !== wasPendingFor) {
                 selectedIndex = null;
                 castOpen = false;
+                destination = null;
             }
+            drawArena();
             renderPanel();
+            refusedMoveNotices(data.events || [], seats).forEach(
+                (message) => uiNotify(message)
+            );
             // The board has changed, and in a fight that writes to records
             // so has each saved character's record (#750, #751): anything on
             // the page drawn from those records -- the GM chat's Characters
@@ -1480,7 +1652,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if (changed) { applyBattleResponse(data); }
         }
 
-        renderArena(arena, view);
+        drawArena();
         renderRoster(roster, view, renameOptions, seatsById(seats), openDetail);
 
         // Selecting a figure on the map opens that combatant's panel in the
@@ -1659,6 +1831,9 @@ if (typeof module !== 'undefined' && module.exports) {
             statusLabel,
             seatsById,
             topCandidateIndex,
+            refusedMoveNotices,
+            sameHex,
+            hexLabel,
             teamOrderOf,
             teamTint,
             renderArena,

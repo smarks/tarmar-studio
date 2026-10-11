@@ -86,6 +86,10 @@ test.describe('GM chat — continuing a campaign in a new session', () => {
         await page.fill('#user-input', 'We return to Farport.');
         await page.click('#send-btn');
         await expect(page.locator('.message.assistant').last()).toContainText('The crypt is quiet', { timeout: 30000 });
+        // The words stream before the turn is saved; Send comes back only once
+        // the stream has closed, after the done frame the server sends once the
+        // turn is saved (issue #910).
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
 
         // A reload keeps it: the line is the session's own state.
         await page.reload();

@@ -30,6 +30,11 @@
     font-size: 0.75rem;
     color: var(--colour-ink-muted);
 }
+/* An address password reset will not mail until its link is opened (#954). */
+.email-unconfirmed {
+    font-size: 0.75rem;
+    color: var(--colour-ink-muted);
+}
 .last-login {
     font-size: 0.75rem;
     color: var(--colour-ink-muted);

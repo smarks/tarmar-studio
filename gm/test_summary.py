@@ -15,7 +15,16 @@ import httpx
 from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
-from common.test_helpers import BaseTestCase, StallingOllama
+from common.services import ollama_client
+from common.services.ollama_client import HangUp, StreamHungUp
+from common.test_helpers import (
+    ACT_ONCE_SET_SECONDS,
+    STAND_IN_HOLD_SECONDS,
+    BaseTestCase,
+    HandFiredDeadlines,
+    StallingOllama,
+    act_once_set,
+)
 from gm import summary as folding
 from gm import views
 from gm.engine import SECTION_PLAN_SCHEMA, system_prompt_for
@@ -25,9 +34,10 @@ from gm.services import RecapOutOfTime, save_fold, write_fold, write_session_rec
 from gm.test_plan_turn_view import PlanTurnTestCase
 from gm.turn_engine import events as turn_events
 
-# conftest replaces httpx.stream for every test; the stalled-stream test needs
-# a real socket (issue #887), so it takes the real one, captured at import.
-REAL_STREAM = httpx.stream
+# conftest replaces ollama_client.open_stream for every test; the stalled-stream
+# tests need a real socket (issue #887), so they take the real one, captured
+# at import.
+REAL_OPEN_STREAM = ollama_client.open_stream
 
 
 def turns(count: int, *, words: int = 30) -> list[dict]:
@@ -554,6 +564,48 @@ class TheFoldRunsInsideTheTurnTest(PlanTurnTestCase):
         record = GMTurnRecord.objects.get(session=session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_TOO_SLOW)
 
+    def test_a_turn_closed_outright_mid_fold_hangs_the_recap_up_at_once(self):
+        # Issue #935: the fold's call had no hang-up, so a turn closed
+        # outright (GeneratorExit) left it holding the model until its first
+        # token or the turn's deadline. A real socket shows the hang-up.
+        session = self.long_session()
+        with StallingOllama(["A "], prefill=True) as server:
+            started: list = []
+            with (
+                patch("common.services.ollama_client.open_stream", REAL_OPEN_STREAM),
+                patch("gm.views.GM_STREAM_KEEPALIVE_SECONDS", 0.05),
+                # The turn's own generator, unwrapped: _RunToCompletion would
+                # drain it to the end rather than close it.
+                patch(
+                    "gm.views._RunToCompletion",
+                    side_effect=lambda events: started.append(events) or iter(()),
+                ),
+                override_settings(OLLAMA_BASE_URL=server.base_url),
+            ):
+                self.client.post(
+                    "/tarmar/gm/stream/",
+                    {"session_id": session.pk, "message": "We walk east"},
+                    content_type="application/json",
+                )
+                (turn,) = started
+                for frame in turn:
+                    if views.FOLDING_STATUS in frame:
+                        break
+                # The fold is asked for after its status; a keep-alive says
+                # the turn is waiting on it.
+                self.assertEqual(next(turn), views.SSE_KEEPALIVE)
+                self.assertTrue(server.requested.wait(5))
+                closing = time.monotonic()
+                turn.close()
+                close_took = time.monotonic() - closing
+                self.assertTrue(server.closed.wait(5))
+
+        # Before #935 the hang-up waited for the headers, which the stand-in
+        # holds back until it is hung up on: the server saw no hang-up.
+        # Not held until the stand-in gives up on the hang-up.
+        self.assertLess(close_took, STAND_IN_HOLD_SECONDS / 2)
+        self.assertEqual(server.hang_ups, ["prefill"])
+
     def test_a_short_session_sends_no_fold_status(self):
         session = GMSession.objects.create(user=self.user, name="short", mode="play")
         session.history = turns(6)
@@ -645,24 +697,65 @@ class ARecapTheTurnGaveUpOnStopsTest(PlanTurnTestCase):
         # Issue #887: the read timeout was set once, from the time left at the
         # start, and counts from each read, so a stream that stalled after its
         # first token held the model past the deadline by as long as it ran.
-        with StallingOllama(["A "], stall_seconds=10, first_token_after=0.6) as server:
+        # The deadline passes when the test says, once the stream has begun,
+        # rather than racing the stand-in on a loaded machine (issue #955).
+        with (
+            StallingOllama(["A "]) as server,
+            HandFiredDeadlines() as deadlines,
+            patch("common.services.ollama_client.open_stream", REAL_OPEN_STREAM),
+            override_settings(OLLAMA_BASE_URL=server.base_url),
+        ):
+            deadlines.pass_deadline_once(server.responding)
+            with self.assertRaises(RecapOutOfTime):
+                write_session_recap("recap it", deadline=time.monotonic() + 60)
+            self.assertTrue(server.closed.wait(5))
+
+        # Before the fix nothing hung the stalled read up short of its 60 s
+        # timeout: the stand-in gave up first and recorded no hang-up.
+        self.assertEqual(server.hang_ups, ["stall"])
+
+    def test_a_recap_given_up_on_is_hung_up_at_once(self):
+        # Issue #936: the catch-up recap's caller hangs it up when it stops
+        # waiting, rather than leaving the call to run to its deadline.
+        hang_up = HangUp()
+        with StallingOllama(["A "]) as server:
             with (
-                patch("common.services.ollama_client.httpx.stream", REAL_STREAM),
+                patch("common.services.ollama_client.open_stream", REAL_OPEN_STREAM),
                 override_settings(OLLAMA_BASE_URL=server.base_url),
             ):
-                started = time.monotonic()
-                with self.assertRaises(RecapOutOfTime):
-                    write_session_recap("recap it", deadline=started + 1.0)
-                returned_after = time.monotonic() - started
-            for _wait in range(50):
-                if server.hung_up_at:
-                    break
-                time.sleep(0.02)
+                asking = act_once_set(server.responding, hang_up.hang_up)
+                with self.assertRaises(StreamHungUp):
+                    write_session_recap(
+                        "recap it", deadline=time.monotonic() + 30, hang_up=hang_up
+                    )
+                asking.join(ACT_ONCE_SET_SECONDS)
+                self.assertTrue(server.closed.wait(5))
 
-        # Before the fix: about 1.6 s (0.6 s of tokens, then a 1 s read).
-        self.assertLess(returned_after, 1.35)
-        self.assertEqual(len(server.hung_up_at), 1)
-        self.assertLess(server.hung_up_at[0] - (started + 1.0), 0.35)
+        self.assertEqual(server.hang_ups, ["stall"])
+
+    def test_a_recap_given_up_on_during_its_prefill_is_hung_up_at_once(self):
+        # Issue #935: before its first token, when Ollama sends the headers,
+        # the hang-up had no socket and the recap held the model until then.
+        hang_up = HangUp()
+        with StallingOllama(["A "], prefill=True) as server:
+            with (
+                patch("common.services.ollama_client.open_stream", REAL_OPEN_STREAM),
+                override_settings(OLLAMA_BASE_URL=server.base_url),
+            ):
+                # Once the request is in, so the hang-up lands in the prefill
+                # rather than before the connection is made.
+                asking = act_once_set(server.requested, hang_up.hang_up)
+                with self.assertRaises(StreamHungUp):
+                    write_session_recap(
+                        "recap it", deadline=time.monotonic() + 30, hang_up=hang_up
+                    )
+                asking.join(ACT_ONCE_SET_SECONDS)
+                self.assertTrue(server.closed.wait(5))
+
+        # Before #935 the hang-up waited for the headers, which the stand-in
+        # holds back until it is hung up on: the server saw no hang-up.
+        self.assertEqual(server.hang_ups, ["prefill"])
+        self.assertFalse(server.responding.is_set())
 
     def test_the_stream_is_closed_when_the_turn_runs_out(self):
         closed = threading.Event()

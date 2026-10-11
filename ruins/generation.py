@@ -9,7 +9,7 @@ reference markdown at call time — this module only names the tables it needs.
 from dataclasses import dataclass
 
 from common.rolling import Roller, RollRecord
-from ruins.tables import load_tables
+from ruins.tables import DiceTable, load_tables
 
 ORIGIN_TABLE = "Built by..."
 PURPOSE_TABLE = "Original Purpose"
@@ -56,6 +56,28 @@ class TableRoll:
     face: int
     result: str
     record: RollRecord
+
+
+def roll_table(table: DiceTable, roller: Roller) -> TableRoll:
+    """Roll one table's die and look up the row the face lands on.
+
+    Args:
+        table: The table to roll on.
+        roller: The roller every die comes through, so a seeded roller
+            reproduces the lookup.
+
+    Returns:
+        The roll and the row it landed on.
+    """
+    record = roller.roll(f"1d{table.die_sides}", purpose=table.title)
+    face = record.faces[0]
+    return TableRoll(
+        table_title=table.title,
+        die=table.die,
+        face=face,
+        result=table.row_for_face(face),
+        record=record,
+    )
 
 
 @dataclass(frozen=True)
@@ -119,16 +141,7 @@ def generate_ruin(
     roller = Roller(seed=seed)
 
     def roll_on(table_title: str) -> TableRoll:
-        table = tables[table_title]
-        record = roller.roll(f"1d{table.die_sides}", purpose=table.title)
-        face = record.faces[0]
-        return TableRoll(
-            table_title=table.title,
-            die=table.die,
-            face=face,
-            result=table.row_for_face(face),
-            record=record,
-        )
+        return roll_table(tables[table_title], roller)
 
     origin = roll_on(ORIGIN_TABLE)
     purpose = roll_on(PURPOSE_TABLE)

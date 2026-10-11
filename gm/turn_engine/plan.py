@@ -26,22 +26,36 @@ from decimal import Decimal
 from typing import Any, TypeIs
 
 from characters.constants import (
+    CHARACTER_TEXT_LIMITS,
     CORE_ATTRIBUTE_FIELDS,
     FATIGUE_ROLL_MAXIMUM,
     FATIGUE_ROLL_MINIMUM,
+    MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
+    MAX_ARMOR_STOPS,
+    MAX_EQUIPMENT_DAMAGE_LENGTH,
+    MAX_EQUIPMENT_QUANTITY,
+    MAX_SKILL_NAME_LENGTH,
 )
-from characters.purse import MAX_COIN_MOVEMENT
-from characters.skill_checks import MAX_DIFFICULTY
+from characters.purse import CUSTOM_COMBAT_CATEGORIES, MAX_COIN_MOVEMENT
+from characters.skill_checks import (
+    ATTRIBUTE_CHECK_MAXIMUM,
+    ATTRIBUTE_CHECK_MINIMUM,
+    MAX_ATTRIBUTE_CHECK_MODIFIER,
+    MAX_DIFFICULTY,
+    SKILL_CHECK_MAXIMUM,
+    SKILL_CHECK_MINIMUM,
+)
 from characters.skills import ALL_TRACKS, MAX_EXPERIENCE_YEARS_PER_RUN
 
 from ..models import (
     CampaignState,
     SceneEntity,
+    SessionCharacter,
     StoryThread,
     SupplyItem,
     TableRuling,
 )
-from ..rules_lookup import MAX_SUBJECT_CHARS
+from ..rules_lookup import MAX_SUBJECT_CHARS, MAX_TRACK_CHARS
 from .policy import ACTION_NAMES, TurnPolicy, already_refused_error
 
 #: The six attributes, written in full as the schema asks.
@@ -57,25 +71,24 @@ MAX_ACTIONS = 16
 #: The most separate rolls one ``roll`` action may ask for (``3d6 x6``).
 MAX_ROLL_TIMES = 6
 
-#: Which way a character's roll is read, so an injury penalty counts against
-#: it (#886): over a number, or at or under a score.
-ROLL_DIRECTIONS = ("over", "under")
-
 #: The longest free text a plan field may carry.
 MAX_TEXT_CHARS = 200
 
-#: The longest cause of death, as the sheet's mark-dead takes it (#802).
-MAX_DEATH_CAUSE_CHARS = 200
+#: The longest text a plan may carry for a field the character record
+#: stores -- a character's name, an item's, a skill's, a cause of death, a
+#: coin movement's reason: a bound on a plan gone wrong, not the field's
+#: limit. Each is held to its own limit
+#: (``characters.constants.CHARACTER_TEXT_LIMITS``) by the service that
+#: writes it, the one the sheet calls, so a text one character too long is a
+#: refusal the ledger shows rather than a plan the model is quietly asked to
+#: rewrite shorter (issue #928). Built from those limits, so it stays above
+#: every one of them (``gm.test_text_limits``).
+MAX_RECORD_TEXT_CHARS = 2 * max(CHARACTER_TEXT_LIMITS.values())
 
 #: The most XP one ``award_xp`` may give: past a campaign's worth, it is a
 #: typo rather than an award (#802).
 MAX_XP_AWARDED = 1_000_000
 
-#: The longest reason a coin movement's history line carries (#802).
-MAX_COIN_REASON_CHARS = 100
-
-#: The longest skill name a skill check may name (#843).
-MAX_SKILL_NAME_CHARS = 60
 
 #: Dice a ``roll`` action may ask for: ``NdM``, ``NdM+K``, ``NdM-K``, and a
 #: count of separate rolls on the end, ``3d6 x6``.
@@ -188,6 +201,14 @@ class PlannedAction:
     points: int = 0
     item: str = ""
     quantity: int = 0
+    #: For ``add_equipment`` (#927): the price of one item the catalog does
+    #: not sell, as decimal text; ``""`` when none was stated, which is not
+    #: the same as a stated 0.
+    price: str = ""
+    #: For ``add_equipment`` (#927): a custom item's combat numbers, a Game
+    #: Master's to give, as ``(field, value)`` pairs from ``category``,
+    #: ``damage``, ``stops`` and ``dex_penalty``.
+    combat: tuple[tuple[str, str | int], ...] = ()
     question: str = ""
     topic: str = ""
     rule: str = ""
@@ -220,14 +241,15 @@ class PlannedAction:
     reason: str = ""
     #: A skill check's Game Master's overrides (#843): the difficulty, the
     #: attribute used instead of the governing one, and a 2d6 total rolled
-    #: at his table.
+    #: at his table. An attribute check (#911) names its attribute here, and
+    #: a Game Master's 3d6 total rolled at his table.
     difficulty: int | None = None
     attribute: str = ""
     stated_total: int | None = None
-    #: For a character's ``roll`` (#886): "over" when a higher total is
-    #: better, "under" when it must come in at or under a score, so the
-    #: injury penalty is applied the way it counts; "" when not said.
-    direction: str = ""
+    #: A Game Master's situational modifier on an attribute check's target
+    #: (#953), never a survival save's penalty (``survival_save`` owns that).
+    #: 0 for none.
+    modifier: int = 0
     refusal: str = ""
 
     @property
@@ -273,7 +295,7 @@ class PlannedAction:
             ("reason", self.reason),
             ("attribute", self.attribute),
             ("total", self.stated_total),
-            ("direction", self.direction),
+            ("modifier", self.modifier),
             ("refusal", self.refusal),
         ):
             if value not in (None, "", 0):
@@ -296,6 +318,10 @@ class PlannedAction:
             payload["change"] = float(self.coin_change)
         if self.coin_total:
             payload["purse"] = float(self.coin_total)
+        if self.price:
+            payload["price"] = float(self.price)
+        # A combat number of 0 is a number, not a default (#927).
+        payload.update(self.combat)
         if self.new_character is not None:
             payload["new_character"] = {
                 "name": self.new_character.name,
@@ -498,7 +524,19 @@ class _ActionReader:
             if not (name.strip() or label.strip()):
                 self.fail("new_character needs a name or a label")
                 return
-            started = NewCharacter(name=name.strip()[:100], label=label.strip()[:100])
+            if len(name.strip()) > MAX_RECORD_TEXT_CHARS:
+                self.fail(
+                    f"new_character's name must be at most "
+                    f"{MAX_RECORD_TEXT_CHARS} characters"
+                )
+                return
+            # The name is held to the name rule where the character is
+            # started (``gm.roster``), a refusal the ledger shows (#870,
+            # #928); cutting it here made a 150-character name pass.
+            started = NewCharacter(
+                name=name.strip(),
+                label=label.strip()[: SessionCharacter.MAX_LABEL_CHARS],
+            )
             if started.called.casefold() in self.started:
                 # One character, started twice in one plan, would be two
                 # records with the later actions' work split between them
@@ -622,7 +660,8 @@ def _read_action(
         reader.target()
     elif name == "mark_dead":
         reader.target()
-        fields["cause"] = reader.text("cause", limit=MAX_DEATH_CAUSE_CHARS)
+        # Held to MAX_DEATH_CAUSE_LENGTH by services.apply_death (#928).
+        fields["cause"] = reader.text("cause", limit=MAX_RECORD_TEXT_CHARS)
     elif name == "award_xp":
         reader.target()
         fields["xp"] = reader.whole("xp", 1, MAX_XP_AWARDED)
@@ -636,10 +675,12 @@ def _read_action(
             if amount:
                 fields["coin_change" if said[0] == "change" else "coin_total"] = amount
         if reader.given("reason"):
-            fields["reason"] = reader.text("reason", limit=MAX_COIN_REASON_CHARS)
+            # Held to MAX_COIN_REASON_LENGTH by purse.move_coin_for_reason.
+            fields["reason"] = reader.text("reason", limit=MAX_RECORD_TEXT_CHARS)
     elif name == "skill_check":
         reader.target()
-        fields["skill"] = reader.text("skill", limit=MAX_SKILL_NAME_CHARS)
+        # A check names a skill held, so no longer than one may be (#843).
+        fields["skill"] = reader.text("skill", limit=MAX_SKILL_NAME_LENGTH)
         if reader.given("difficulty"):
             fields["difficulty"] = reader.whole("difficulty", 0, MAX_DIFFICULTY)
         if reader.given("attribute"):
@@ -651,7 +692,32 @@ def _read_action(
             else:
                 fields["attribute"] = said_attribute
         if reader.given("total"):
-            fields["stated_total"] = reader.whole("total", 2, 12)
+            fields["stated_total"] = reader.whole(
+                "total", SKILL_CHECK_MINIMUM, SKILL_CHECK_MAXIMUM
+            )
+    elif name == "attribute_check":
+        # 3d6 ≤ the attribute (#911): the rule names the direction, so the
+        # plan names only whose check and on what.
+        reader.target()
+        said_attribute = reader.text("attribute").casefold()
+        if said_attribute and said_attribute not in ATTRIBUTE_NAMES:
+            reader.fail(
+                "attribute must be written in full: " + ", ".join(ATTRIBUTE_NAMES)
+            )
+        elif said_attribute:
+            fields["attribute"] = said_attribute
+        if reader.given("total"):
+            fields["stated_total"] = reader.whole(
+                "total", ATTRIBUTE_CHECK_MINIMUM, ATTRIBUTE_CHECK_MAXIMUM
+            )
+        if reader.given("modifier"):
+            # On the target, after any injury (#953): who may set it is
+            # read_plan's ruling and the check's own.
+            fields["modifier"] = reader.whole(
+                "modifier",
+                -MAX_ATTRIBUTE_CHECK_MODIFIER,
+                MAX_ATTRIBUTE_CHECK_MODIFIER,
+            )
     elif name == "play_years":
         reader.target()
         track = entry.get("track")
@@ -666,12 +732,19 @@ def _read_action(
         fields["years"] = reader.whole("years", 1, MAX_EXPERIENCE_YEARS_PER_RUN)
     elif name == "spend_skill_points":
         reader.target()
-        fields["skill"] = reader.text("skill")
+        fields["skill"] = reader.text("skill", limit=MAX_RECORD_TEXT_CHARS)
         fields["points"] = reader.whole("points", 1, 99)
     elif name == "add_equipment":
         reader.target()
-        fields["item"] = reader.text("item")
-        fields["quantity"] = reader.whole("quantity", 1, 999, default=1)
+        fields["item"] = reader.text("item", limit=MAX_RECORD_TEXT_CHARS)
+        fields["quantity"] = reader.whole(
+            "quantity", 1, MAX_EQUIPMENT_QUANTITY, default=1
+        )
+        # Who pays it, or may name combat numbers at all, is the service's
+        # ruling (#927); the plan carries what was stated.
+        if reader.given("price"):
+            fields["price"] = reader.coin("price", allow_negative=False)
+        fields["combat"] = _combat_numbers(reader)
     elif name == "roll":
         reader.target(optional=True)
         dice = entry.get("dice")
@@ -687,12 +760,6 @@ def _read_action(
             fields["dice"] = re.sub(r"\s+", "", matched.group("dice")).lower()
             fields["times"] = times
         fields["purpose"] = reader.text("purpose", required=False)
-        if reader.given("direction"):
-            direction = reader.text("direction").casefold()
-            if direction not in ROLL_DIRECTIONS:
-                reader.fail('direction must be "over" or "under"')
-            else:
-                fields["direction"] = direction
     elif name == "rule_literacy":
         reader.target()
         literate = entry.get("literate")
@@ -702,7 +769,7 @@ def _read_action(
             fields["literate"] = literate
     elif name == "rename_character":
         reader.target()
-        fields["name"] = reader.text("name")
+        fields["name"] = reader.text("name", limit=MAX_RECORD_TEXT_CHARS)
     elif name == "set_background":
         reader.target()
         given_background = []
@@ -777,12 +844,45 @@ def _read_action(
     elif name == "rules_lookup":
         fields["subject"] = reader.text("subject", limit=MAX_SUBJECT_CHARS)
         if reader.given("track"):
-            fields["track"] = reader.text("track", limit=40)
+            fields["track"] = reader.text("track", limit=MAX_TRACK_CHARS)
     else:  # ask_gm
         fields["question"] = reader.text("question")
     if reader.errors:
         return None, reader.errors
     return PlannedAction(action=name, **fields), []
+
+
+def _combat_numbers(reader: _ActionReader) -> tuple[tuple[str, str | int], ...]:
+    """A custom item's stated combat numbers, as ``add_equipment`` carries them.
+
+    The sheet's builder holds them to its bounds again when the action runs
+    (``characters.equipment_service.custom_equipment_item``); a player's are
+    refused there (#845, #927).
+    """
+    numbers: list[tuple[str, str | int]] = []
+    if reader.given("category"):
+        category = reader.text("category").strip().casefold()
+        if category not in CUSTOM_COMBAT_CATEGORIES:
+            reader.fail(
+                "category must be one of " + ", ".join(CUSTOM_COMBAT_CATEGORIES)
+            )
+        numbers.append(("category", category))
+    if reader.given("damage"):
+        numbers.append(
+            ("damage", reader.text("damage", limit=MAX_EQUIPMENT_DAMAGE_LENGTH))
+        )
+    if reader.given("stops"):
+        numbers.append(("stops", reader.whole("stops", 0, MAX_ARMOR_STOPS)))
+    if reader.given("dex_penalty"):
+        numbers.append(
+            (
+                "dex_penalty",
+                reader.whole("dex_penalty", -MAX_ARMOR_DEX_PENALTY_MAGNITUDE, 0),
+            )
+        )
+    if numbers and not reader.given("category"):
+        reader.fail("combat numbers need a category: weapons, armor or shield")
+    return tuple(numbers)
 
 
 def policy_refusal(action: PlannedAction, policy: TurnPolicy) -> str:
@@ -811,13 +911,13 @@ PLAYER_SKILL_CHECK_ERROR = (
 )
 
 
-#: Why a player's roll for an injured character must say which way it reads
-#: (#886 review): the penalty counts against the roll either way, so the
-#: server has to know which way that is.
-PLAYER_INJURED_ROLL_ERROR = (
-    "action {index} (roll): that character is injured, so the roll says "
-    'which way it is read: "direction": "over" when a higher total is '
-    'better, or "under" when it must come in at or under a score'
+#: Why a player's attribute check may not state its dice (#911) or carry a
+#: modifier (#953).
+PLAYER_ATTRIBUTE_CHECK_ERROR = (
+    "action {index} (attribute_check): a player's attribute check carries no "
+    "total or modifier -- the dice are rolled here, and only the Game Master "
+    "states his table's or sets a modifier; plan it with the character and "
+    "the attribute alone"
 )
 
 
@@ -849,7 +949,6 @@ def read_plan(
     settled: Mapping[str, str] | None = None,
     thread_ids: Collection[int] = (),
     held_names: Mapping[str, int] | None = None,
-    injured_ids: Collection[int] = (),
 ) -> PlanReading:
     """Read a planning reply into checked actions.
 
@@ -870,11 +969,6 @@ def read_plan(
         held_names: The session's characters by name, casefolded, to their
             ids. A ``new_character`` with one of these names is an error, so
             the model is asked again and told the id (issue #856).
-        injured_ids: The listed characters the injury table's penalty
-            applies to. A player's ``roll`` for one of them with no
-            ``direction`` is an error, so the model is asked again for the
-            way the roll is read and the penalty counts (#886 review). A Game
-            Master's is run as he planned it.
 
     Returns:
         The actions with their refusals, or the errors that make the reply no
@@ -915,12 +1009,13 @@ def read_plan(
             continue
         if (
             action is not None
-            and action.action == "roll"
+            and action.action == "attribute_check"
             and not policy.is_game_master
-            and action.character_id in injured_ids
-            and not action.direction
+            and (action.stated_total is not None or action.modifier)
         ):
-            errors.append(PLAYER_INJURED_ROLL_ERROR.format(index=index))
+            # As for a skill check: the check's service refuses it too, but as
+            # a plan error the model is asked again and the check still rolls.
+            errors.append(PLAYER_ATTRIBUTE_CHECK_ERROR.format(index=index))
             continue
         if action is not None and action.new_character is not None:
             held = (held_names or {}).get(action.new_character.called.casefold())

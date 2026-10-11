@@ -24,22 +24,43 @@
 
     <div class="field" data-field="real_name">
         <label for="id_real_name">Real Name</label>
-        <input type="text" name="real_name" id="id_real_name" maxlength="100" value="{{ profile_user.real_name }}" class="autosave">
+        <input type="text" name="real_name" id="id_real_name" maxlength="{{ account_text_limits.real_name }}" value="{{ profile_user.real_name }}" class="autosave">
     </div>
 
-    <div class="field" data-field="email">
+    {% comment %}Not autosaved (issue #931): the address is where a reset link
+    goes, so it changes on its own page, with the password and a link to the
+    new address. An Admin may set another account's address here with the Set
+    button (issue #954); it lands unconfirmed and the page reloads, so the
+    state below is always read from the account.{% endcomment %}
+    <div class="field" id="profile-email"{% if admin_sets_email %} data-field="email"{% endif %}>
         <label for="id_email">Email</label>
-        <input type="email" name="email" id="id_email" maxlength="254" value="{{ profile_user.email }}" class="autosave">
+        <input type="email" name="email" id="id_email" maxlength="{{ account_text_limits.email }}" value="{{ profile_user.email }}"{% if not admin_sets_email %} readonly{% endif %}>
+        <p class="account-note" id="email-status">{% if not profile_user.email %}No address on file.{% elif profile_user.email_verified %}Confirmed.{% else %}Not confirmed yet, so a password-reset link will not be sent to it.{% endif %}</p>
+        {% if profile_user.pending_email %}
+        {% if profile_user.pending_email == profile_user.email %}
+        <p class="account-note" id="email-pending">A confirmation link was sent to it on {{ profile_user.pending_email_sent_at|date:"j F Y, H:i" }}. It is confirmed when that link is opened.</p>
+        {% else %}
+        <p class="account-note" id="email-pending">A confirmation link was sent to <strong>{{ profile_user.pending_email }}</strong> on {{ profile_user.pending_email_sent_at|date:"j F Y, H:i" }}. The address changes when that link is opened.</p>
+        {% endif %}
+        {% endif %}
+        {% if profile_user.pk == user.pk %}
+        <a href="{% url 'email_change' %}" id="email-change-link">Change email address</a>
+        {% elif admin_sets_email %}
+        <button type="button" class="secondary" id="email-set-button">Set address</button>
+        <p class="account-note" id="email-set-note">An address set here is not confirmed: a confirmation link is sent to it, the confirmed address it replaces is told, and password-reset links go to it only once its link is opened.</p>
+        {% else %}
+        <p class="account-note">Only the account holder can change this address, from their own profile.</p>
+        {% endif %}
     </div>
 
     <div class="field" data-field="phone">
         <label for="id_phone">Phone (SMS)</label>
-        <input type="tel" name="phone" id="id_phone" maxlength="20" value="{{ profile_user.phone }}" class="autosave">
+        <input type="tel" name="phone" id="id_phone" maxlength="{{ account_text_limits.phone }}" value="{{ profile_user.phone }}" class="autosave">
     </div>
 
     <div class="field" data-field="discord">
         <label for="id_discord">Discord</label>
-        <input type="text" name="discord" id="id_discord" maxlength="50" value="{{ profile_user.discord }}" class="autosave">
+        <input type="text" name="discord" id="id_discord" maxlength="{{ account_text_limits.discord }}" value="{{ profile_user.discord }}" class="autosave">
     </div>
 
     <div class="field" data-field="preferred_contact">
@@ -73,13 +94,17 @@
 {% block extra_js %}
 <script src="{% static 'js/autosave.js' %}"></script>
 <script src="{% static 'accounts/js/preferred_contact.js' %}"></script>
+{% if admin_sets_email %}<script src="{% static 'js/admin-email.js' %}"></script>{% endif %}
 <script>
     {% if profile_user.pk != user.pk %}
     const updateUrl = '{% url "user_profile_update_field" profile_user.pk %}';
     {% else %}
     const updateUrl = '{% url "profile_update_field" %}';
     {% endif %}
-    const { saveField } = initAutosave({ updateUrl: updateUrl });
+    const { saveField, updateOriginalValue } = initAutosave({ updateUrl: updateUrl });
     initPreferredContact(saveField);
+    {% if admin_sets_email %}
+    initAdminEmail({ saveField, updateOriginalValue });
+    {% endif %}
 </script>
 {% endblock %}

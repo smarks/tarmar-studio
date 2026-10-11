@@ -125,6 +125,19 @@ if (typeof module !== 'undefined' && module.exports) {
     line.hidden = !sentence;
   }
 
+  /**
+   * What to say about a fight request answered with something other than
+   * the app's JSON (issue #936), with the HTTP status in it.
+   * @param {Response} response - The answer that would not parse.
+   * @returns {string} the line for the tab's error.
+   */
+  function withoutJson(response) {
+    if (response.status === 504) {
+      return 'The server took too long to answer (HTTP 504). Try the fight again in a moment.';
+    }
+    return `The server answered with an error (HTTP ${response.status}). Try the fight again in a moment.`;
+  }
+
   /** Bring the tab into view: select it, and open the panel on a phone. */
   function showTab() {
     if (!root.gmPanel) return;
@@ -156,16 +169,25 @@ if (typeof module !== 'undefined' && module.exports) {
     setBusy(true);
     show('status', foes ? 'Setting the board…' : 'Asking the GM who you face…');
     let response;
-    let data;
     try {
       response = await postWithCsrf(fightUrl, csrfToken(), {
         session_id: sessionId,
         foes,
       });
-      data = await response.json();
     } catch (error) {
       clear('status');
       show('error', `Request failed: ${error.message}`);
+      setBusy(false);
+      return false;
+    }
+    let data;
+    try {
+      data = await response.json();
+    } catch (notJson) {
+      // A page the proxy wrote, not the app: nginx answers a request that
+      // outran its proxy_read_timeout with an HTML 504 (issue #936).
+      clear('status');
+      show('error', withoutJson(response));
       setBusy(false);
       return false;
     }

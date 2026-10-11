@@ -6,7 +6,7 @@
  * manages nothing about B's party except their own character's seat).
  */
 
-const { test, expect, loginAs, logout, createCharacter, TEST_USER, TEST_WATCHER } = require('./fixtures');
+const { test, expect, loginAs, logout, createCharacter, TEST_USER, TEST_WATCHER, searchPicker } = require('./fixtures');
 
 test.describe('Parties', () => {
     test('A publishes a character, B parties it up, A withdraws it', async ({ page }) => {
@@ -38,7 +38,7 @@ test.describe('Parties', () => {
 
         // B seats A's public character through the filtered shelf; the
         // character joins immediately — no acceptance step.
-        await page.fill('#party-character-filter', name);
+        await searchPicker(page, '#party-character-filter', name);
         const shelfRow = page.locator('.party-addable-row', { hasText: name });
         await expect(shelfRow).toBeVisible();
         await shelfRow.locator('button:has-text("Add")').click();

@@ -1,0 +1,22 @@
+{% comment %}A page of the Campaign tab's resolved threads (issue #972), as list items:
+the tab renders the latest page, and gm:resolved_threads renders each page
+above it with this same partial, which gm-history.js puts in place of the
+control that asked. The control is rendered while threads remain above the
+page and stays until it is used; a failure stays beside it (no transient UI).{% endcomment %}
+{% url 'gm:threads' campaign_session.pk as threads_url %}
+{% if campaign_resolved_page.earlier_before %}
+<li class="gm-history-earlier" data-earlier>
+    <span class="gm-campaign-detail">{{ campaign_resolved_page.earlier }} earlier resolved thread{{ campaign_resolved_page.earlier|pluralize }} not shown.</span>
+    <button type="button" class="btn btn-sm" data-earlier-url="{% url 'gm:resolved_threads' campaign_session.pk %}?before={{ campaign_resolved_page.earlier_before }}">Show earlier threads</button>
+    <span class="gm-panel-error" data-earlier-error role="alert" hidden></span>
+</li>
+{% endif %}
+{% for thread in campaign_resolved_page.threads %}
+<li data-thread-id="{{ thread.pk }}">
+    <span class="gm-campaign-detail gm-thread-number">thread {{ thread.pk }}</span>
+    <span class="gm-campaign-name">{{ thread.text }}</span>
+    {% if thread.resolution %}<span class="gm-campaign-detail">{{ thread.resolution }}</span>{% endif %}
+    {% if thread.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ thread.hand_mark }}</span>{% endif %}
+    {% if can_edit_records %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ threads_url }}" data-change="reopen" data-thread-id="{{ thread.pk }}">Reopen</button>{% endif %}
+</li>
+{% endfor %}

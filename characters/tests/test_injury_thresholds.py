@@ -224,10 +224,13 @@ class InjuryThresholdFieldUpdateTest(BaseTestCase):
         self.assertIn('id="injury-body-penalized_save_at">-31</td>', readout)
 
     def test_unrelated_edit_omits_thresholds(self):
+        # Not the name: the survival save's confirm names the character, so a
+        # rename re-renders the readout (issue #903).
         response = self.post_json(
             f"/tarmar/characters/{self.character.pk}/update-field/",
-            {"field": "name", "value": "Renamed"},
+            {"field": "height_roll", "value": "5"},
         )
+        self.assertEqual(response.status_code, 200, response.content)
         self.assertNotIn("injury_thresholds_html", response.json())
 
 

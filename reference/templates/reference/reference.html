@@ -22,6 +22,11 @@
     </ul>
 </nav>
 <article class="content">
+    {% if table_roller_url %}
+    <p class="table-roller-control">
+        <a href="{{ table_roller_url }}" class="button" id="table-roller-link">Roll these tables</a>
+    </p>
+    {% endif %}
     {{ content|safe }}
 </article>
 {% endblock %}

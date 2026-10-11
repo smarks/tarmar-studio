@@ -9,7 +9,7 @@
  * catalog's beast.
  */
 
-const { test, expect, TEST_ADMIN, TEST_USER } = require('./fixtures');
+const { test, expect, TEST_ADMIN, TEST_USER, chooseToAttach } = require('./fixtures');
 const { runDjangoShell } = require('./django');
 
 /**
@@ -38,7 +38,7 @@ test.describe('GM fight — people among the foes', () => {
         const name = `Brannoc ${testInfo.workerIndex}-${Date.now() % 100000}`;
         seedCharacter(name);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: name });
+        await chooseToAttach(page, name);
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 
@@ -66,7 +66,7 @@ test.describe('GM fight — people among the foes', () => {
         const name = `Wren ${testInfo.workerIndex}-${Date.now() % 100000}`;
         seedCharacter(name, TEST_USER);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: name });
+        await chooseToAttach(page, name);
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 
