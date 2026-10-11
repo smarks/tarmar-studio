@@ -19,6 +19,7 @@ from django.http import (
     Http404,
     HttpRequest,
     HttpResponse,
+    HttpResponseBadRequest,
     HttpResponseRedirect,
     JsonResponse,
     StreamingHttpResponse,
@@ -338,7 +339,9 @@ def _draft_ledgers(session: GMSession | None) -> list[PanelDraft]:
     ]
 
 
-def _campaign_panel_context(user, session: GMSession | None) -> dict:
+def _campaign_panel_context(
+    user, session: GMSession | None, resolved_since: StoryThread | None = None
+) -> dict:
     """What the Campaign tab renders, for the page and its live fragment.
 
     Read from the same records the model is handed in its state block
@@ -354,12 +357,14 @@ def _campaign_panel_context(user, session: GMSession | None) -> dict:
 
     The resolved threads are the latest page of them, with a control that
     loads the page above (issue #972): a long campaign settles more threads
-    than the tab can usefully list at once.
+    than the tab can usefully list at once. ``resolved_since`` is the first
+    thread of the earliest page a reader has loaded, so a refetched tab keeps
+    the pages they loaded (issue #982).
     """
     if session is None:
         return {"campaign_session": None}
     marks = latest_hand_edits(session)
-    resolved_page = resolved_threads_page(session)
+    resolved_page = resolved_threads_page(session, since=resolved_since)
     _hand_marked(resolved_page.threads, GMRecordEdit.THREAD, marks)
     return {
         "can_edit_records": may_edit_by_hand(user),
@@ -2030,12 +2035,28 @@ def gm_campaign_panel(request: HttpRequest, session_id: int) -> HttpResponse:
     just moved or an NPC it just met shows in the pane as it happens. The
     same template and context as the page render, so the fragment cannot
     drift from a reload.
+
+    ``?resolved_from=<thread id>`` is the first resolved thread of the earliest
+    page the reader has loaded (issue #982): the tab then lists every resolved
+    thread from it on, rather than the latest page alone, so the refetch does
+    not close the pages they opened. It is a view preference, not a rule, so
+    any reader of the page may send it; a thread that is not this session's
+    is ignored, as no cursor, and a value that is not a thread id is refused.
     """
     session = get_object_or_404(GMSession, pk=session_id, user=request.user)
+    resolved_since = None
+    if "resolved_from" in request.GET:
+        try:
+            resolved_from = database_integer(request.GET["resolved_from"])
+        except ValueError:
+            return HttpResponseBadRequest("resolved_from must be the id of a thread")
+        resolved_since = StoryThread.objects.filter(
+            session=session, pk=resolved_from
+        ).first()
     return render(
         request,
         "gm/_panel_campaign_body.html",
-        _campaign_panel_context(request.user, session),
+        _campaign_panel_context(request.user, session, resolved_since),
     )
 
 

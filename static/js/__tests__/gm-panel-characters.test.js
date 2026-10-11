@@ -44,12 +44,30 @@ const { resolvedJsonResponse: jsonResponse } = require('./test-helpers');
 
 let panelCharacters;
 
+// init() adds listeners to the document that nothing removes, so each is
+// recorded as it is added and removed after the test: one test's tab must not
+// answer the next test's events.
+let documentListeners = [];
+
 function loadTab() {
     jest.resetModules();
     panelCharacters = require('../gm-panel-characters.js');
+    const addListener = document.addEventListener.bind(document);
+    const spy = jest.spyOn(document, 'addEventListener').mockImplementation((type, listener, options) => {
+        documentListeners.push([type, listener, options]);
+        addListener(type, listener, options);
+    });
     panelCharacters.init();
+    spy.mockRestore();
     return panelCharacters;
 }
+
+afterEach(() => {
+    documentListeners.forEach(([type, listener, options]) => {
+        document.removeEventListener(type, listener, options);
+    });
+    documentListeners = [];
+});
 
 function flushPromises() {
     return new Promise((resolve) => setTimeout(resolve, 0));
@@ -507,5 +525,159 @@ describe('Luck (issue #861)', () => {
         expect(error.hidden).toBe(false);
         expect(error.textContent).toContain('spent all 2');
         expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('the Campaign tab keeps the resolved threads the reader loaded (issue #982)', () => {
+    const RESOLVED_LIST = `
+        <details class="gm-campaign-resolved" open>
+            <summary>4 resolved</summary>
+            <ul>
+                <li data-thread-id="31">thread 31</li>
+                <li data-thread-id="32">thread 32</li>
+            </ul>
+        </details>`;
+
+    function respondWith(campaignBody) {
+        global.fetch = jest.fn((url) =>
+            Promise.resolve({
+                ok: true,
+                statusText: 'OK',
+                text: () => Promise.resolve(url.includes('/campaign/') ? campaignBody : CHARACTERS_BODY),
+            }),
+        );
+    }
+
+    function campaignRequests() {
+        return global.fetch.mock.calls.map(([url]) => url).filter((url) => url.includes('/campaign/'));
+    }
+
+    test('the refetch names the first thread listed, the earliest page loaded', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        document.getElementById('gm-panel-campaign').insertAdjacentHTML('beforeend', RESOLVED_LIST);
+        loadTab();
+        respondWith('<p>where: the well</p>');
+
+        document.dispatchEvent(new Event('gm-stream-done'));
+        await flush();
+
+        expect(campaignRequests()).toEqual(['/tarmar/gm/sessions/12/campaign/?resolved_from=31']);
+    });
+
+    test('a list the reader had open is open again after the refetch', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        document.getElementById('gm-panel-campaign').insertAdjacentHTML('beforeend', RESOLVED_LIST);
+        loadTab();
+        respondWith(RESOLVED_LIST.replace(' open>', '>'));
+
+        await panelCharacters.refreshPanel();
+
+        expect(document.querySelector('.gm-campaign-resolved').open).toBe(true);
+    });
+
+    test('a list the reader had closed stays closed', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        document.getElementById('gm-panel-campaign').insertAdjacentHTML(
+            'beforeend', RESOLVED_LIST.replace(' open>', '>'),
+        );
+        loadTab();
+        respondWith(RESOLVED_LIST.replace(' open>', '>'));
+
+        await panelCharacters.refreshPanel();
+
+        expect(document.querySelector('.gm-campaign-resolved').open).toBe(false);
+    });
+
+    test('a tab with no resolved threads asks for the plain tab', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        loadTab();
+        respondWith('<p>where: the well</p>');
+
+        await panelCharacters.refreshPanel();
+
+        expect(campaignRequests()).toEqual(['/tarmar/gm/sessions/12/campaign/']);
+    });
+
+    test('the Characters tab is asked for without a cursor', async () => {
+        setUpDom({ sessionId: 12, live: true, withCampaign: true });
+        document.getElementById('gm-panel-campaign').insertAdjacentHTML('beforeend', RESOLVED_LIST);
+        loadTab();
+        respondWith('<p>where: the well</p>');
+
+        await panelCharacters.refreshPanel();
+
+        expect(global.fetch.mock.calls.map(([url]) => url)).toContain('/tarmar/gm/sessions/12/characters/');
+    });
+
+    describe('while the answer is on its way', () => {
+        const AGAIN = RESOLVED_LIST.replace('<li data-thread-id="31">', '<li data-thread-id="29">thread 29</li><li data-thread-id="31">');
+
+        /** A campaign request that answers when ``answer`` is called. */
+        function holdCampaignAnswer() {
+            let answer;
+            const held = new Promise((resolve) => { answer = resolve; });
+            let asked = 0;
+            global.fetch = jest.fn((url) =>
+                url.includes('/campaign/') && (asked += 1) === 1
+                    ? held.then((body) => ({ ok: true, statusText: 'OK', text: () => Promise.resolve(body) }))
+                    : Promise.resolve({
+                        ok: true,
+                        statusText: 'OK',
+                        text: () => Promise.resolve(url.includes('/campaign/') ? asked > 1 && AGAIN : CHARACTERS_BODY),
+                    }),
+            );
+            return answer;
+        }
+
+        function setUpResolvedTab(listMarkup) {
+            setUpDom({ sessionId: 12, live: true, withCampaign: true });
+            document.getElementById('gm-panel-campaign').insertAdjacentHTML('beforeend', listMarkup);
+            loadTab();
+        }
+
+        test('a list the reader closes meanwhile stays closed', async () => {
+            setUpResolvedTab(RESOLVED_LIST);
+            const answer = holdCampaignAnswer();
+
+            const refreshing = panelCharacters.refreshPanel();
+            document.querySelector('.gm-campaign-resolved').open = false;
+            answer(RESOLVED_LIST);
+            await refreshing;
+
+            expect(document.querySelector('.gm-campaign-resolved').open).toBe(false);
+        });
+
+        test('a list the reader opens meanwhile stays open', async () => {
+            setUpResolvedTab(RESOLVED_LIST.replace(' open>', '>'));
+            const answer = holdCampaignAnswer();
+
+            const refreshing = panelCharacters.refreshPanel();
+            document.querySelector('.gm-campaign-resolved').open = true;
+            answer(RESOLVED_LIST.replace(' open>', '>'));
+            await refreshing;
+
+            expect(document.querySelector('.gm-campaign-resolved').open).toBe(true);
+        });
+
+        test('an answer to a cursor that has moved is not applied; the tab is asked again', async () => {
+            setUpResolvedTab(RESOLVED_LIST);
+            const answer = holdCampaignAnswer();
+
+            const refreshing = panelCharacters.refreshPanel();
+            // "Show earlier threads" puts a page above while the request is out.
+            document.querySelector('.gm-campaign-resolved li[data-thread-id="31"]')
+                .insertAdjacentHTML('beforebegin', '<li data-thread-id="29">thread 29</li>');
+            answer(RESOLVED_LIST);
+            // The second request is the one asked for the moved cursor.
+            await flush();
+            await flush();
+            await refreshing;
+            await flush();
+
+            const campaign = campaignRequests();
+            expect(campaign[0]).toBe('/tarmar/gm/sessions/12/campaign/?resolved_from=31');
+            expect(campaign).toContain('/tarmar/gm/sessions/12/campaign/?resolved_from=29');
+            expect(document.querySelector('li[data-thread-id="29"]')).not.toBeNull();
+        });
     });
 });

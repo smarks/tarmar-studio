@@ -8,6 +8,7 @@ page above (no transient UI); the transcript export keeps everything."
 import re
 from datetime import timedelta
 
+from django.http import HttpResponseBase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -241,6 +242,12 @@ class ResolvedThreadsPageTest(BaseTestCase):
             {"before": before},
         )
 
+    def panel_from(self, resolved_from: int | str) -> HttpResponseBase:
+        return self.client.get(
+            reverse("gm:campaign_panel", args=[self.session.pk]),
+            {"resolved_from": resolved_from},
+        )
+
     def test_the_tab_lists_the_latest_page_and_counts_them_all(self):
         page = self.panel()
 
@@ -301,3 +308,83 @@ class ResolvedThreadsPageTest(BaseTestCase):
 
         self.assertEqual(self.earlier(elsewhere.pk).status_code, 404)
         self.assertEqual(self.earlier("x").status_code, 400)
+
+    def test_the_tab_refetched_from_a_cursor_lists_every_page_from_it(self):
+        """Issue #982: pages the reader loaded survive the tab's refetch."""
+        response = self.panel_from(self.threads[0].pk)
+
+        self.assertEqual(response.status_code, 200)
+        page = response.content.decode()
+        self.assertEqual(
+            shown(page, r"Settled matter (\d+)<"), list(range(1, TURNS + 1))
+        )
+        self.assertIn(f"{TURNS} resolved", page)
+        self.assertNotIn("data-earlier", page)
+
+    def test_a_cursor_with_threads_still_above_keeps_the_control(self):
+        page = self.panel_from(self.threads[1].pk).content.decode()
+
+        self.assertEqual(
+            shown(page, r"Settled matter (\d+)<"), list(range(2, TURNS + 1))
+        )
+        self.assertIn("1 earlier resolved thread not shown.", page)
+        self.assertIn(f"?before={self.threads[1].pk}", page)
+
+    def test_a_cursor_thread_reopened_since_still_marks_its_place(self):
+        self.threads[0].resolved = False
+        self.threads[0].save()
+
+        page = self.panel_from(self.threads[0].pk).content.decode()
+        resolved_list = page[page.index("gm-campaign-resolved") :]
+
+        self.assertEqual(
+            shown(resolved_list, r"Settled matter (\d+)<"), list(range(2, TURNS + 1))
+        )
+        self.assertIn(f"{TURNS - 1} resolved", page)
+        self.assertNotIn("data-earlier", resolved_list)
+
+    def test_threads_resolved_since_are_added_below_the_loaded_pages(self):
+        newest = StoryThread.objects.create(
+            session=self.session, text="Settled matter late", resolved=True
+        )
+
+        page = self.panel_from(self.threads[0].pk).content.decode()
+
+        self.assertEqual(len(shown(page, r"Settled matter (\d+)<")), TURNS)
+        self.assertIn(f'data-thread-id="{newest.pk}"', page)
+
+    def test_a_cursor_inside_the_latest_page_changes_nothing(self):
+        self.assertEqual(
+            self.panel_from(self.threads[2].pk).content.decode(), self.panel()
+        )
+
+    def test_a_cursor_of_another_session_is_ignored(self):
+        elsewhere = StoryThread.objects.create(
+            session=GMSession.objects.create(user=self.player, name="Other"),
+            text="Elsewhere",
+            resolved=True,
+        )
+
+        response = self.panel_from(elsewhere.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content.decode(), self.panel())
+        self.assertNotIn("Elsewhere", response.content.decode())
+
+    def test_a_cursor_that_names_no_thread_is_ignored(self):
+        self.assertEqual(self.panel_from(10**9).content.decode(), self.panel())
+
+    def test_a_cursor_that_is_not_a_number_is_refused(self):
+        self.assertEqual(self.panel_from("x").status_code, 400)
+        self.assertEqual(self.panel_from("").status_code, 400)
+
+    def test_a_player_may_send_a_cursor(self):
+        """The cursor is a view preference, not a rule: no Game Master needed."""
+        self.assertEqual(self.panel_from(self.threads[0].pk).status_code, 200)
+
+    def test_the_service_lists_from_a_thread_to_the_end(self):
+        page = resolved_threads_page(self.session, since=self.threads[0], size=5)
+
+        self.assertEqual(page.threads, self.threads)
+        self.assertEqual((page.earlier, page.total), (0, TURNS))
+        self.assertIsNone(page.earlier_before)
