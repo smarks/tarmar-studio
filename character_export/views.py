@@ -35,7 +35,9 @@ def _safe_url_fetcher():
     """
     from weasyprint.urls import URLFetcher
 
-    return URLFetcher(allowed_protocols=PDF_ALLOWED_PROTOCOLS)
+    # No redirects: the sheet fetches nothing, and WeasyPrint 70 leaves a
+    # refused redirect's request behind for the next fetch (review of #8).
+    return URLFetcher(allowed_protocols=PDF_ALLOWED_PROTOCOLS, allow_redirects=False)
 
 
 def _visible_character_or_404(request, character_id) -> Character:

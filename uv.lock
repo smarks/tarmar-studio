@@ -916,7 +916,7 @@ prod = [
 [package.metadata]
 requires-dist = [
     { name = "bleach", specifier = ">=6.4.0" },
-    { name = "django", specifier = ">=6.0.8" },
+    { name = "django", specifier = ">=6.0.8,<6.1" },
     { name = "hexarena", git = "https://github.com/smarks/hexarena.git?rev=v0.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "markdown", specifier = ">=3.10" },

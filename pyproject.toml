@@ -9,7 +9,7 @@ authors = [{ name = "Spencer Marks" }]
 keywords = ["tarmar", "tabletop-rpg", "django", "ollama", "game-master"]
 dependencies = [
     "bleach>=6.4.0",
-    "django>=6.0.8",
+    "django>=6.0.8,<6.1",
     "speak-friend @ git+https://github.com/smarks/speak-friend.git",
     "origami-common @ git+https://github.com/smarks/origami-common.git",
     "origami-auth @ git+https://github.com/smarks/origami-auth.git",

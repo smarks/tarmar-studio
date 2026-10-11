@@ -853,6 +853,24 @@ class ExportPdfViewTest(BaseTestCase):
         response = self.client.get("/tarmar/export/99999/pdf/")
         self.assertEqual(response.status_code, 404)
 
+    def test_the_export_renders_with_the_limited_fetcher(self):
+        """The view hands WeasyPrint the http(s)-only fetcher, not its default.
+
+        A fetcher that has lost its limit, or no fetcher at all, would let a
+        crafted resource reference read local files (issue #8).
+        """
+        from unittest.mock import patch
+
+        self.login_as(self.user)
+        with patch("weasyprint.HTML") as html:
+            html.return_value.write_pdf.return_value = b"%PDF-stand-in"
+            response = self.client.get(f"/tarmar/export/{self.character.id}/pdf/")
+
+        self.assertEqual(response.status_code, 200)
+        fetcher = html.call_args.kwargs["url_fetcher"]
+        with self.assertRaisesRegex(ValueError, "disallowed protocol"):
+            fetcher.fetch("file:///etc/hosts")
+
     @unittest.skipUnless(WEASYPRINT_AVAILABLE, "WeasyPrint not available")
     def test_response_content_is_valid_pdf(self):
         """Verify response body starts with PDF magic bytes."""
@@ -938,9 +956,10 @@ class ExportUrlPatternsTest(BaseTestCase):
 class SafeUrlFetcherTest(TestCase):
     """The PDF export's fetcher must block local-file / SSRF resource reads.
 
-    Exercised through WeasyPrint's real ``URLFetcher.fetch`` (issue #1003), so
-    a change in how WeasyPrint gates schemes fails here rather than in
-    production.
+    Exercised through WeasyPrint's real ``URLFetcher.fetch`` (issue #8), so a
+    change in how WeasyPrint gates schemes fails here rather than in
+    production. Deliberately not skipped without WeasyPrint's libraries: a
+    security check that quietly skips is no check.
     """
 
     def test_blocks_non_http_schemes(self):
@@ -974,12 +993,3 @@ class SafeUrlFetcherTest(TestCase):
             with patch("urllib.request.OpenerDirector.open", side_effect=Opened):
                 with self.assertRaises(Opened):
                     fetcher.fetch(good_url)
-
-    def test_the_export_hands_weasyprint_the_limited_fetcher(self):
-        from weasyprint.urls import URLFetcher
-
-        from character_export.views import PDF_ALLOWED_PROTOCOLS, _safe_url_fetcher
-
-        fetcher = _safe_url_fetcher()
-        self.assertIsInstance(fetcher, URLFetcher)
-        self.assertEqual(PDF_ALLOWED_PROTOCOLS, {"http", "https"})
