@@ -18,12 +18,13 @@ party -- a soft delete -- and restore it from the party list (item 18).
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import CreateView, DetailView, ListView
 
 from characters.models import characters_visible_to
@@ -31,6 +32,7 @@ from common.breadcrumbs import BreadcrumbMixin, step, trail
 from common.helpers import parse_json_text
 from common.mixins import ActivePageMixin
 from common.pagination import PAGE_SIZE
+from common.pickers import asked_for, picker_body_response
 
 from .forms import PartyForm
 from .models import (
@@ -41,6 +43,7 @@ from .models import (
     can_remove_membership,
     manageable_parties,
 )
+from .pickers import addable_picker
 
 DETAIL_TEMPLATE = "parties/party_detail.html"
 
@@ -67,7 +70,9 @@ class PartyListView(BreadcrumbMixin, PartyAccessMixin, ListView):
             Party.objects.filter(is_deleted=False)
             .select_related("owner")
             .annotate(member_count=Count("memberships"))
-            .order_by("-created_at")
+            # The pk breaks a tie in created_at, so a row stays on one page
+            # (issue #950).
+            .order_by("-created_at", "-pk")
         )
 
     def get_context_data(self, **kwargs):
@@ -118,14 +123,29 @@ def _detail_context(request, party, error=""):
         "active_page": "parties",
     }
     if manager:
-        member_ids = [membership.character_id for membership in memberships]
-        context["addable_characters"] = (
-            addable_characters(request.user)
-            .exclude(pk__in=member_ids)
-            .select_related("user")
-            .order_by("name")
-        )
+        # A page at a time, newest first, with a search that reaches every
+        # page (#864).
+        picker = addable_picker(request.user, party)
+        context["addable_picker"] = picker
+        # The rows the shelf shows, for what reads them rather than the picker.
+        context["addable_characters"] = picker.rows
     return context
+
+
+@login_required
+@require_GET
+def party_addable_picker(request, pk):
+    """One page of the Add Members picker (issue #864), for ``picker.js``.
+
+    A manager only, as the shelf and :func:`party_add_member` are: anyone
+    else is refused rather than shown whom they could not add.
+    """
+    party = get_object_or_404(Party, pk=pk, is_deleted=False)
+    if not can_manage_party(request.user, party):
+        raise PermissionDenied("Only the party's owner may add members")
+    query, page_number = asked_for(request)
+    picker = addable_picker(request.user, party, query=query, page_number=page_number)
+    return picker_body_response(request, picker, {"party": party, "user": request.user})
 
 
 class PartyDetailView(BreadcrumbMixin, PartyAccessMixin, DetailView):

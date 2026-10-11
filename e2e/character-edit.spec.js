@@ -14,6 +14,7 @@
 const {
     test, expect, loginAs, logout, createNamedCharacter, seedCharacterFromExport, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { pinDice } = require('./dice');
 
 /**
  * Create a character for this test and leave the page on its editor.
@@ -161,8 +162,11 @@ test.describe('Character Stats Display', () => {
     test('displays character status', async ({ page }, testInfo) => {
         await seedCharacterOnItsEditor(page, testInfo, 'Edited');
 
-        // Should have some status-related element
-        const statusElement = page.locator('.status-badge, [class*="status"]');
+        // Should have some status-related element. The status badge itself:
+        // a bare [class*="status"] also matched the session picker's status
+        // line (#973), which is empty, so hidden, for a viewer with no
+        // sessions.
+        const statusElement = page.locator('.status-badge');
         if (await statusElement.count() > 0) {
             await expect(statusElement.first()).toBeVisible();
         }
@@ -200,8 +204,8 @@ test.describe('Prior-experience workbench', () => {
     // on the roll. Laborer's survivability target is 2 -- the lowest of any
     // track -- so a worst-case 3d6 roll of 3 plus this character's +1 best
     // modifier (14 STR) clears it. The one roll that can still kill is a
-    // literal triple ones, which always kills (issue #223): 1 in 216 per
-    // year, which is why the rolling scenarios below play a single year.
+    // literal triple ones, which always kills (issue #223), so the rolling
+    // scenarios below pin their year's dice (see rollOneYearSurviving).
     const WORKBENCH_CHARACTER = {
         _format: 'tarmar-character',
         _version: 1,
@@ -252,28 +256,33 @@ test.describe('Prior-experience workbench', () => {
         await seedCharacterFromExport(page, TEST_USER, WORKBENCH_CHARACTER);
     }
 
+    // The dice a surviving Laborer year rolls under SURVIVING_YEAR_SEED (issue
+    // #959): the year's d20 for its skill, then its 3d6 survival, both drawn
+    // from random.Random(3) in the order characters/skills.py rolls them.
+    const SURVIVING_YEAR_SEED = 3;
+    const SURVIVING_YEAR_LINE = '(rolled 8) — survival 3d6 [5, 5, 2] + 1 = 13 vs 2: survived';
+
     /**
-     * Roll one Laborer year and come out of it alive (issue #452).
+     * Roll one Laborer year on pinned dice that survive it, and prove it.
      *
-     * A year's survival roll is live 3d6 and triple ones always kill, so any
-     * roll kills the imported character 1 time in 216 -- and a dead character's
-     * workbench shows the death card instead of the next year. These tests are
-     * about the workbench, not about surviving, so a death imports a fresh
-     * character and rolls again. Three deaths running is about 1 in 10 million.
+     * A year's survival roll is 3d6 and triple ones always kill, so on real
+     * dice the workbench character dies 1 time in 216. This helper used to
+     * import a fresh character and roll again when that happened (issue #452),
+     * which hid the roll the test was about (#959). Now the one roll is made on
+     * SURVIVING_YEAR_SEED and the history must show exactly the dice that seed
+     * gives -- a server that ignored the seed fails here rather than passing on
+     * whatever real dice came up.
+     * @param {import('@playwright/test').Page} page
      */
     async function rollOneYearSurviving(page) {
-        const nextYear = page.locator('#workbench-eyebrow', { hasText: 'NEXT — YEAR 2' });
-        const deathCard = page.locator('#workbench-card .death-card');
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-            await page.locator('#track-select').selectOption('laborer');
-            await page.locator('#roll-years-btn').click();
-            await nextYear.or(deathCard).first().waitFor({ timeout: 10000 });
-            if (await nextYear.count() > 0) {
-                return;
-            }
-            await importWorkbenchCharacter(page);
-        }
-        throw new Error('the imported character died on three rolls in a row');
+        await pinDice(page, '**/add-years/', SURVIVING_YEAR_SEED);
+        await page.locator('#track-select').selectOption('laborer');
+        await page.locator('#roll-years-btn').click();
+        await expect(page.locator('#workbench-eyebrow')).toHaveText('NEXT — YEAR 2');
+        await expect(page.locator('#workbench-card .death-card')).toHaveCount(0);
+        const yearEntries = page.locator('#experience-log .term-entry');
+        await expect(yearEntries).toHaveCount(1);
+        await expect(yearEntries.first()).toContainText(SURVIVING_YEAR_LINE);
     }
 
     test('the preview and the button follow the year count, before any roll', async ({ page }) => {

@@ -5,8 +5,9 @@ mechanic, no control and no skill-to-attribute map for them. Spencer's
 ruling on #756 (2026-09-28): a skill check is the skills glossary's
 mechanic, 2d6 + the governing attribute's modifier + the skill level against
 a difficulty the Game Master sets; 3d6 ≤ attribute stays the mechanic for a
-raw attribute check with no skill. Players roll through the sheet's control,
-which rolls here with the dice module; a Game Master may override.
+raw attribute check with no skill (:func:`attribute_check`, issue #911).
+Players roll through the sheet's control, which rolls here with the dice
+module; a Game Master may override.
 
 Scores are the effective (aged) ones, per the ruling on #773: checks use
 aged scores everywhere except the creation-time checks.
@@ -14,7 +15,7 @@ aged scores everywhere except the creation-time checks.
 
 from dataclasses import dataclass
 
-from .dice import Roller, roll_2d6_faces
+from .dice import Roller, roll_2d6_faces, roll_3d6_logged
 from .models import Character
 from .services import CharacterChangeError
 from .skills import (
@@ -101,6 +102,11 @@ ATTRIBUTES: tuple[str, ...] = (
 #: The naturals: "A natural 12 always succeeds; a natural 2 always fails".
 NATURAL_SUCCESS = 12
 NATURAL_FAILURE = 2
+
+#: What a skill check's 2d6 can show, which a Game Master's stated total is
+#: held to and the sheet's input stops at (#938): the naturals are its ends.
+SKILL_CHECK_MINIMUM = NATURAL_FAILURE
+SKILL_CHECK_MAXIMUM = NATURAL_SUCCESS
 
 #: What a focused Knowledge field adds to a check in it (#808).
 FOCUSED_FIELD_BONUS = 1
@@ -403,8 +409,11 @@ def skill_check(
         raise CharacterChangeError(f"{used.title()} is not recorded yet")
 
     if stated_total is not None:
-        if not 2 <= stated_total <= 12:
-            raise CharacterChangeError("A 2d6 total is between 2 and 12")
+        if not SKILL_CHECK_MINIMUM <= stated_total <= SKILL_CHECK_MAXIMUM:
+            raise CharacterChangeError(
+                f"A 2d6 total is between {SKILL_CHECK_MINIMUM} and "
+                f"{SKILL_CHECK_MAXIMUM}"
+            )
         faces: tuple[int, ...] = ()
         dice_total = stated_total
     else:
@@ -454,5 +463,165 @@ def skill_check(
         natural=natural,
         focus_bonus=focus_bonus,
         injury_penalty=injured,
+        game_master_call=", ".join(overridden),
+    )
+
+
+#: The lowest and highest a 3d6 attribute check's dice can come to.
+ATTRIBUTE_CHECK_MINIMUM = 3
+ATTRIBUTE_CHECK_MAXIMUM = 18
+
+#: The widest situational modifier a Game Master may set on an attribute
+#: check's target, either way (#953): a situational call, separate from the
+#: survival save's penalty in injury-thresholds-death.md, which only
+#: ``survival_save`` applies. Past ten the check is decided before the dice
+#: fall (a score of 3 to 18 against a 3d6 of 3 to 18), so a Game Master who
+#: means that rules it rather than rolls it.
+MAX_ATTRIBUTE_CHECK_MODIFIER = 10
+
+
+@dataclass(frozen=True)
+class AttributeCheck:
+    """One attribute check with no skill: 3d6 ≤ the attribute (issue #911).
+
+    The rule reads one way only, roll-under, so the injury table's penalty
+    is applied here and never in a direction somebody names: "-1 to all
+    rolls" lowers the score the dice must come in under, which is how the
+    rulebook writes a penalized roll-under (the survival save's
+    "3d6 ≤ CON − 5", which is ``survival_save``'s and not rolled here).
+
+    Attributes:
+        attribute: The attribute checked.
+        attribute_score: Its effective (aged) score.
+        dice: The dice as the line prints them: ``"3d6: [4, 4, 4] = 12"``,
+            or the Game Master's stated total.
+        dice_total: The 3d6 total.
+        injury_penalty: The injury table's -1 or -2, or 0.
+        modifier: A Game Master's situational modifier on the target, after
+            the injury penalty (#953); situational, and never a survival
+            save's penalty, which only ``survival_save`` applies. 0 for none.
+        game_master_call: What a Game Master called the check past, which a
+            player could not (``"unconscious"``); ``""`` for an ordinary one.
+    """
+
+    attribute: str
+    attribute_score: int
+    dice: str
+    dice_total: int
+    injury_penalty: int = 0
+    modifier: int = 0
+    game_master_call: str = ""
+
+    @property
+    def target(self) -> int:
+        """The highest total that passes: the score, injury, then modifier."""
+        return self.attribute_score + self.injury_penalty + self.modifier
+
+    @property
+    def passed(self) -> bool:
+        """Whether the dice came in at or under the target."""
+        return self.dice_total <= self.target
+
+    @property
+    def line(self) -> str:
+        """The history line: the dice, the target, what it is read against."""
+        against = (
+            f"{self.attribute[:3].upper()} {self.attribute_score}"
+            + (f" {self.injury_penalty:+d} injured" if self.injury_penalty else "")
+            + (
+                f" {self.modifier:+d} modifier set by a Game Master"
+                if self.modifier
+                else ""
+            )
+        )
+        comparison = "≤" if self.passed else ">"
+        text = (
+            f"{self.attribute} check, {self.dice} {comparison} {self.target} "
+            f"({against}): {'passes' if self.passed else 'fails'}"
+        )
+        if self.game_master_call:
+            text += f" (a Game Master's call: {self.game_master_call})"
+        return text
+
+
+def attribute_check(
+    character: Character,
+    attribute: str,
+    *,
+    stated_total: int | None = None,
+    modifier: int = 0,
+    is_game_master: bool = False,
+    roller: Roller | None = None,
+) -> AttributeCheck:
+    """Roll one attribute check with no skill for a character (issue #911).
+
+    ``reference/content/public-rules/combat/action-options/attack-rolls.md``:
+    "An attribute check with no skill, survival saves, and spellcasting still
+    roll **3d6 ≤ attribute**." Scores are the effective (aged) ones, as for a
+    skill check (ruling on #773). The injury table's penalty lowers the
+    target; nobody chooses which way it counts.
+
+    Held as :func:`skill_check` holds a check: a player rolls the dice, and
+    only a Game Master states a total rolled at his table, sets a
+    situational modifier on the target (#953, as only he sets a skill
+    check's difficulty) or calls a check for an unconscious character, each
+    named on the line. The dead roll nothing.
+
+    Args:
+        character: The character; not changed.
+        attribute: One of :data:`ATTRIBUTES`, written in full.
+        stated_total: A Game Master's 3d6 total from the table.
+        modifier: A Game Master's modifier on the target, within
+            :data:`MAX_ATTRIBUTE_CHECK_MODIFIER` either way; applied after the
+            injury penalty. 0 for none.
+        is_game_master: Whether a Game Master asked.
+        roller: Roll through this roller instead of the dice module default.
+
+    Returns:
+        The check.
+
+    Raises:
+        CharacterChangeError: An unknown attribute or one not yet recorded, a
+            player stating the dice or setting a modifier, a total no 3d6 can
+            make, a modifier past the bound, a player's check for an
+            unconscious character, or a dead character.
+    """
+    overridden: list[str] = []
+    unconscious = unconscious_refusal(character)
+    if unconscious is not None:
+        if not is_game_master or not character.is_alive:
+            raise CharacterChangeError(unconscious)
+        overridden.append("unconscious")
+    if attribute not in ATTRIBUTES:
+        raise CharacterChangeError(f"Unknown attribute: {attribute}")
+    if not is_game_master and (stated_total is not None or modifier):
+        raise CharacterChangeError(
+            "Only a Game Master can set a modifier or state the dice"
+        )
+    if not -MAX_ATTRIBUTE_CHECK_MODIFIER <= modifier <= MAX_ATTRIBUTE_CHECK_MODIFIER:
+        raise CharacterChangeError(
+            f"modifier must be a whole number from -{MAX_ATTRIBUTE_CHECK_MODIFIER} "
+            f"to {MAX_ATTRIBUTE_CHECK_MODIFIER}"
+        )
+    score = effective_score(character, attribute)
+    if score is None:
+        raise CharacterChangeError(f"{attribute.title()} is not recorded yet")
+    if stated_total is not None:
+        if not ATTRIBUTE_CHECK_MINIMUM <= stated_total <= ATTRIBUTE_CHECK_MAXIMUM:
+            raise CharacterChangeError(
+                f"A 3d6 total is between {ATTRIBUTE_CHECK_MINIMUM} and "
+                f"{ATTRIBUTE_CHECK_MAXIMUM}"
+            )
+        dice_total = stated_total
+        dice = f"3d6 stated by a Game Master = {stated_total}"
+    else:
+        dice_total, dice = roll_3d6_logged(roller)
+    return AttributeCheck(
+        attribute=attribute,
+        attribute_score=score,
+        dice=dice,
+        dice_total=dice_total,
+        injury_penalty=injury_penalty(character),
+        modifier=modifier,
         game_master_call=", ".join(overridden),
     )

@@ -8,6 +8,9 @@
 
 .filter-bar {
     display: flex;
+    /* The owner filter is a searchable picker (#973), wider than the bare
+       select was; on a phone it takes a row of its own. */
+    flex-wrap: wrap;
     gap: 1rem;
     align-items: center;
     margin-bottom: 1rem;

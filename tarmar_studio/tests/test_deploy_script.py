@@ -162,13 +162,46 @@ for argument in "$@"; do
     esac
 done
 echo "$*" >> "${FAKE_RESTORE_LOG:-/dev/null}"
+# As systemd stopping the backup unit would: SIGTERM the script mid-restore.
+if [ -n "${FAKE_PG_RESTORE_TERMINATES_CALLER:-}" ]; then
+    kill -TERM "$PPID"
+fi
 exit "${FAKE_PG_RESTORE_EXIT:-0}"
 """
 
-# createdb and dropdb, recording the database each was asked for so a test can
-# see that the scratch database was cleaned up however the check ended.
-RECORDING_COMMAND = """#!/bin/bash
-echo "$(basename "$0") $*" >> "${FAKE_RESTORE_LOG:-/dev/null}"
+# createdb and dropdb, behaving as the real ones do about where they connect.
+# Their positional argument is a database *name*; the server is reached through
+# --maintenance-db, or failing that libpq's defaults: the unix user over the
+# local socket. The stand-in used to accept anything and record it, so a
+# restore check that handed createdb a URL passed here and failed every night
+# on datahorde with `role "sam" does not exist` (issue #913). It records the
+# database each was asked for and the connection used, so a test can see the
+# scratch database was cleaned up however the check ended.
+FAKE_DB_COMMAND = """#!/bin/bash
+command_name=$(basename "$0")
+connection=""
+database_name=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --maintenance-db=*) connection=${1#--maintenance-db=} ;;
+        --maintenance-db) shift; connection=$1 ;;
+        -*) ;;
+        *) database_name=$1 ;;
+    esac
+    shift
+done
+if [ -z "$connection" ]; then
+    echo "$command_name: error: connection to server on socket" \
+        "\"/var/run/postgresql/.s.PGSQL.5432\" failed:" \
+        "FATAL:  role \"$(id -un)\" does not exist" >&2
+    exit 1
+fi
+case "$database_name" in
+    ""|*://*|*=*)
+        echo "$command_name: stand-in refuses database name '$database_name'" >&2
+        exit 1 ;;
+esac
+echo "$command_name $database_name via $connection" >> "${FAKE_RESTORE_LOG:-/dev/null}"
 exit "${FAKE_DB_COMMAND_EXIT:-0}"
 """
 
@@ -186,8 +219,8 @@ def backup_stand_ins(tmp_path: Path) -> Path:
     fake_bin.mkdir(exist_ok=True)
     write_command(fake_bin / "pg_dump", FAKE_PG_DUMP)
     write_command(fake_bin / "pg_restore", FAKE_PG_RESTORE)
-    write_command(fake_bin / "createdb", RECORDING_COMMAND)
-    write_command(fake_bin / "dropdb", RECORDING_COMMAND)
+    write_command(fake_bin / "createdb", FAKE_DB_COMMAND)
+    write_command(fake_bin / "dropdb", FAKE_DB_COMMAND)
     write_command(fake_bin / "psql", FAKE_PSQL)
     return fake_bin
 
@@ -220,13 +253,25 @@ def run_backup(
     )
 
 
+# The app's connection, and the restore check's own (issue #913). The check
+# must use the second for everything it does and never touch the first.
+APP_DATABASE_URL = "postgres://user:pw@example:5432/tarmar?sslmode=require"
+RESTORE_CHECK_URL = (
+    "postgres://restore_check:checkpw@example:5432/postgres?sslmode=require"
+)
+
+
 def run_backup_verification(
-    tmp_path: Path, **overrides: str
+    tmp_path: Path,
+    restore_check_url: str | None = RESTORE_CHECK_URL,
+    **overrides: str,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run verify_latest_backup over a directory holding one dump.
 
     Args:
         tmp_path: The throwaway app directory.
+        restore_check_url: The RESTORE_CHECK_DATABASE_URL line written to
+            .env.restore-check, or None to write no such file.
         **overrides: Environment for this run, steering the stand-ins.
 
     Returns:
@@ -237,6 +282,21 @@ def run_backup_verification(
     backups.mkdir(parents=True, exist_ok=True)
     (backups / "nightly-20260925T033000Z.dump").write_text("dump", encoding="utf-8")
     restore_log = tmp_path / "restore.log"
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "RESTORE_CHECK_DATABASE_URL"
+    }
+    environment.update(
+        TARMAR_APP_DIR=str(tmp_path),
+        DATABASE_URL=APP_DATABASE_URL,
+        FAKE_RESTORE_LOG=str(restore_log),
+        **overrides,
+    )
+    if restore_check_url is not None:
+        (tmp_path / ".env.restore-check").write_text(
+            f"RESTORE_CHECK_DATABASE_URL={restore_check_url}\n", encoding="utf-8"
+        )
     result = subprocess.run(
         [
             "bash",
@@ -248,13 +308,7 @@ def run_backup_verification(
         ],
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "TARMAR_APP_DIR": str(tmp_path),
-            "DATABASE_URL": "postgres://user:pw@example:5432/tarmar?sslmode=require",
-            "FAKE_RESTORE_LOG": str(restore_log),
-            **overrides,
-        },
+        env=environment,
         check=False,
     )
     recorded = (
@@ -335,13 +389,46 @@ def test_the_newest_backup_is_restored_into_a_scratch_database(
     assert result.returncode == 0, result.stdout + result.stderr
     assert "django_migrations holds 3 rows" in result.stdout
     # It built the scratch database beside the real one, restored the newest
-    # dump into it, counted a table, and took it away again.
-    assert any(line.startswith("createdb ") for line in recorded)
+    # dump into it, counted a table, and took it away again, all as the
+    # restore-check role: createdb and dropdb through --maintenance-db, the
+    # restore and the count against the scratch database (issue #913).
+    scratch_command = re.compile(
+        r"^(createdb|dropdb) tarmar_restore_check_\d+ "
+        r"via postgres://restore_check:checkpw@example:5432/postgres\?sslmode=require$"
+    )
+    database_commands = [
+        line for line in recorded if line.startswith(("createdb ", "dropdb "))
+    ]
+    assert [line.split()[0] for line in database_commands] == ["createdb", "dropdb"]
+    assert all(scratch_command.match(line) for line in database_commands)
     assert any("nightly-20260925T033000Z.dump" in line for line in recorded)
     assert any("django_migrations" in line for line in recorded)
-    assert any(line.startswith("dropdb ") for line in recorded)
-    # Never the database the site runs on.
+    scratch_url = re.compile(
+        r"postgres://restore_check:checkpw@example:5432/"
+        r"tarmar_restore_check_\d+\?sslmode=require"
+    )
+    other_commands = [line for line in recorded if line not in database_commands]
+    assert len(other_commands) == 2
+    assert all(scratch_url.search(line) for line in other_commands)
+    # Never the database the site runs on, nor the app's role.
+    assert all("user:pw@" not in line for line in recorded)
     assert all("/tarmar?" not in line for line in recorded)
+
+
+def test_createdb_given_a_url_instead_of_a_name_fails_as_on_the_server(
+    tmp_path: Path,
+) -> None:
+    """The stand-in fails the call shape that broke every nightly check (#913)."""
+    fake_bin = backup_stand_ins(tmp_path)
+    result = subprocess.run(
+        [str(fake_bin / "createdb"), "postgres://user:pw@example:5432/scratch"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "does not exist" in result.stderr
 
 
 def test_a_backup_that_will_not_restore_fails_and_cleans_up(tmp_path: Path) -> None:
@@ -350,7 +437,131 @@ def test_a_backup_that_will_not_restore_fails_and_cleans_up(tmp_path: Path) -> N
 
     assert result.returncode == 1
     assert "cannot be restored" in result.stdout
-    assert any(line.startswith("dropdb ") for line in recorded)
+    assert scratch_drops(recorded) == 1
+
+
+def scratch_drops(recorded: list[str]) -> int:
+    """How many times the stand-ins saw the scratch database dropped."""
+    return sum(
+        1
+        for line in recorded
+        if re.match(r"^dropdb tarmar_restore_check_\d+ via ", line)
+    )
+
+
+def test_without_a_restore_check_file_the_check_stops_and_says_why(
+    tmp_path: Path,
+) -> None:
+    """The check never falls back to the app's role (issue #913)."""
+    result, recorded = run_backup_verification(tmp_path, restore_check_url=None)
+
+    assert result.returncode == 1
+    assert ".env.restore-check is missing" in result.stdout
+    assert "DEPLOY.md" in result.stdout
+    assert recorded == []
+
+
+def test_a_restore_check_file_without_the_url_stops_the_check(
+    tmp_path: Path,
+) -> None:
+    """An empty value is as good as none: nothing is created."""
+    result, recorded = run_backup_verification(tmp_path, restore_check_url="")
+
+    assert result.returncode == 1
+    assert "RESTORE_CHECK_DATABASE_URL is not set" in result.stdout
+    assert "DEPLOY.md" in result.stdout
+    assert recorded == []
+
+
+def test_a_restore_check_url_in_the_environment_alone_is_not_used(
+    tmp_path: Path,
+) -> None:
+    """The file is the one source; the units' environment never carries it."""
+    result, recorded = run_backup_verification(
+        tmp_path, restore_check_url=None, RESTORE_CHECK_DATABASE_URL=RESTORE_CHECK_URL
+    )
+
+    assert result.returncode == 1
+    assert ".env.restore-check is missing" in result.stdout
+    assert recorded == []
+
+
+def test_a_restore_check_file_without_the_line_ignores_the_environment(
+    tmp_path: Path,
+) -> None:
+    """A file lacking the line stops the check, whatever the environment holds."""
+    (tmp_path / ".env.restore-check").write_text("# no url yet\n", encoding="utf-8")
+    result, recorded = run_backup_verification(
+        tmp_path, restore_check_url=None, RESTORE_CHECK_DATABASE_URL=RESTORE_CHECK_URL
+    )
+
+    assert result.returncode == 1
+    assert "RESTORE_CHECK_DATABASE_URL is not set" in result.stdout
+    assert "DEPLOY.md" in result.stdout
+    assert recorded == []
+
+
+def test_only_the_restore_check_reads_its_connection_file() -> None:
+    """The units load .env alone, so they never see a role that can create
+    databases, and git never sees the file (issue #913)."""
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    verify_body = script[
+        script.index("verify_latest_backup() {") : script.index(
+            "\n}\n", script.index("verify_latest_backup() {")
+        )
+    ]
+    assert 'load_env_file "$RESTORE_CHECK_ENV_FILE"' in verify_body
+    assert script.count("$RESTORE_CHECK_ENV_FILE") == verify_body.count(
+        "$RESTORE_CHECK_ENV_FILE"
+    )
+    units = [
+        REPO_ROOT / "tarmar.service.template",
+        REPO_ROOT / "tarmar-backup.service.template",
+    ]
+    for unit in units:
+        assert ".env.restore-check" not in unit.read_text(encoding="utf-8")
+    ignored = subprocess.run(
+        ["git", "check-ignore", "--no-index", ".env.restore-check", ".env.bak-1"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ignored.stdout.split() == [".env.restore-check", ".env.bak-1"]
+
+
+def test_a_count_that_fails_still_drops_the_scratch_database(
+    tmp_path: Path,
+) -> None:
+    """The exit trap drops it on the path with no explicit dropdb."""
+    result, recorded = run_backup_verification(tmp_path, FAKE_PSQL_EXIT="1")
+
+    assert result.returncode == 1
+    assert "could not read django_migrations" in result.stdout
+    assert scratch_drops(recorded) == 1
+
+
+def test_a_check_stopped_mid_restore_still_drops_the_scratch_database(
+    tmp_path: Path,
+) -> None:
+    """systemd's SIGTERM ends the script, and the exit trap still runs."""
+    result, recorded = run_backup_verification(
+        tmp_path, FAKE_PG_RESTORE_TERMINATES_CALLER="1"
+    )
+
+    assert result.returncode != 0
+    assert "django_migrations holds" not in result.stdout
+    assert scratch_drops(recorded) == 1
+
+
+def test_a_check_that_passes_drops_the_scratch_database_once(
+    tmp_path: Path,
+) -> None:
+    """The trap is cleared after the explicit drop, so it does not drop twice."""
+    result, recorded = run_backup_verification(tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert scratch_drops(recorded) == 1
 
 
 def test_a_backup_that_restores_an_empty_schema_fails(tmp_path: Path) -> None:
@@ -1262,3 +1473,163 @@ def test_the_lock_file_the_deploy_leaves_behind_is_ignored() -> None:
         check=False,
     )
     assert tracked.returncode != 0, ".deploy.lock is tracked; it is runtime state"
+
+
+def run_warm_up(
+    tmp_path: Path, warm_gm_output: str, exit_status: int = 0
+) -> subprocess.CompletedProcess[str]:
+    """Source deploy.sh and run its GM warm-up against a stand-in ``uv``.
+
+    The stand-in prints ``warm_gm_output`` and exits ``exit_status``, so the
+    shell around ``manage.py warm_gm`` runs for real without reaching Ollama.
+    """
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    (tmp_path / "warm_gm_output.txt").write_text(warm_gm_output, encoding="utf-8")
+    write_command(
+        stub_bin / "uv",
+        f'#!/bin/bash\ncat "{tmp_path / "warm_gm_output.txt"}"\nexit {exit_status}\n',
+    )
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -e; source "$1"; warm_gm_prompt_cache; echo "deploy continues"',
+            "warm_up",
+            str(DEPLOY_SCRIPT),
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "TARMAR_APP_DIR": str(tmp_path),
+            "TARMAR_LOCAL_BIN": str(stub_bin),
+            "PATH": f"{stub_bin}:{os.environ['PATH']}",
+        },
+        check=False,
+    )
+
+
+OVER_CEILING_LINE = (
+    "prompt budget: longest GM prompt, estimated 17000 tokens, ceiling 16384 "
+    "(25% of GM_NUM_CTX 65536) -- OVER the ceiling: the prompt is taking room "
+    "the conversation needs (issue #907)"
+)
+
+
+def test_a_prompt_over_its_ceiling_becomes_a_deploy_warning(tmp_path: Path) -> None:
+    """Issue #907: warm_gm exits 0 when over, so the deploy has to read it."""
+    result = run_warm_up(tmp_path, f"{OVER_CEILING_LINE}\nwarm: system prompt\n")
+    assert result.returncode == 0, result.stderr
+    assert OVER_CEILING_LINE in result.stdout
+    warnings = [line for line in result.stdout.splitlines() if "[WARN]" in line]
+    assert len(warnings) == 1
+    assert "OVER its share of GM_NUM_CTX" in warnings[0]
+    assert "estimated 17000 tokens, ceiling 16384" in warnings[0]
+    assert "warm-up failed" not in result.stdout
+    assert result.stdout.rstrip().endswith("deploy continues")
+
+
+def test_a_prompt_within_its_ceiling_warns_of_nothing(tmp_path: Path) -> None:
+    within = (
+        "prompt budget: longest GM prompt, estimated 11985 tokens, ceiling "
+        "16384 (25% of GM_NUM_CTX 65536)\nwarm: system prompt cached\n"
+    )
+    result = run_warm_up(tmp_path, within)
+    assert result.returncode == 0, result.stderr
+    assert "estimated 11985 tokens" in result.stdout
+    assert "[WARN]" not in result.stdout
+    assert result.stdout.rstrip().endswith("deploy continues")
+
+
+def test_a_failed_warm_up_still_warns_and_does_not_stop_the_deploy(
+    tmp_path: Path,
+) -> None:
+    result = run_warm_up(tmp_path, "CommandError: Ollama did not answer\n", 1)
+    assert result.returncode == 0, result.stderr
+    assert "GM warm-up failed; first GM turn will be slow" in result.stdout
+    assert "OVER its share" not in result.stdout
+    assert result.stdout.rstrip().endswith("deploy continues")
+
+
+# ./run gate starts Deploy with --expect <the commit it recorded> (Spencer,
+# 2026-10-10). A merge while the run waited would otherwise make it deploy a
+# commit with no record and fail red. These run the real deploy.sh.
+
+
+def push_second_commit(host: DeployHost) -> str:
+    """Move origin's main one commit on, as a merge would."""
+    (host.seed / "note.txt").write_text("second\n", encoding="utf-8")
+    git_in(host.seed, "add", "note.txt")
+    git_in(host.seed, "commit", "-m", "second")
+    git_in(host.seed, "push", "--quiet", "origin", "main")
+    return git_in(host.seed, "rev-parse", "HEAD")
+
+
+def test_expect_stands_down_green_when_main_moved_to_an_unrecorded_commit(
+    tmp_path: Path,
+) -> None:
+    host = make_deploy_host(tmp_path)
+    vouched = record_gate_note(host)
+    mark_canon_deployed(host, tmp_path)
+    push_second_commit(host)
+
+    result = run_deploy(host, "--expect", vouched)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Nothing to do" in result.stdout
+    assert "Syncing dependencies" not in result.stdout
+
+
+def test_expect_stands_down_when_main_moved_to_a_default_canon_record(
+    tmp_path: Path,
+) -> None:
+    host = make_deploy_host(tmp_path)
+    vouched = record_gate_note(host)
+    mark_canon_deployed(host, tmp_path)
+    push_second_commit(host)
+    record_gate_note(host, canon="default")
+
+    result = run_deploy(host, "--expect", vouched)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no Tarmar-canon gate record" in result.stdout
+    assert "Syncing dependencies" not in result.stdout
+
+
+def test_expect_deploys_main_when_it_moved_to_a_commit_with_its_own_record(
+    tmp_path: Path,
+) -> None:
+    host = make_deploy_host(tmp_path)
+    vouched = record_gate_note(host)
+    mark_canon_deployed(host, tmp_path)
+    newer = push_second_commit(host)
+    record_gate_note(host)
+
+    result = run_deploy(host, "--expect", vouched)
+
+    assert f"deploying {newer}" in result.stdout
+    # The pulled copy re-ran with --expect still in hand, and went on to build.
+    assert "Re-running the freshly pulled deploy.sh" in result.stdout
+    assert result.stdout.count(f"main moved past {vouched}") == 2
+    assert "Syncing dependencies" in result.stdout
+
+
+def test_expect_on_the_head_already_deployed_is_up_to_date(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    vouched = record_gate_note(host)
+    mark_canon_deployed(host, tmp_path)
+
+    result = run_deploy(host, "--expect", vouched)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Already up to date" in result.stdout
+
+
+def test_expect_without_a_commit_is_refused(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+
+    result = run_deploy(host, "--expect")
+
+    assert result.returncode != 0
+    assert "--expect needs the commit" in result.stderr

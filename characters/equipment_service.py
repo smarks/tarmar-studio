@@ -9,6 +9,8 @@ drift from what the two builders below already encode.
 """
 
 import math
+from collections.abc import Mapping
+from typing import Any
 
 from django.http import JsonResponse
 
@@ -16,6 +18,7 @@ from common.helpers import _json_error, _require_field, whole_number
 
 from .constants import (
     DAMAGE_DICE_PATTERN,
+    ITEM_MODIFIER_FIELDS,
     MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
     MAX_ARMOR_STOPS,
     MAX_EQUIPMENT_DAMAGE_LENGTH,
@@ -25,9 +28,9 @@ from .constants import (
     MAX_EQUIPMENT_QUANTITY,
     MAX_EQUIPMENT_WEIGHT_LBS,
     strip_control_characters,
+    too_long,
 )
 from .equipment import ITEM_CATEGORIES, get_item
-from .services import ITEM_MODIFIER_FIELDS
 
 
 def validate_modifier(data, field, target, default=None):
@@ -42,25 +45,33 @@ def validate_modifier(data, field, target, default=None):
 
     Either way, an out-of-range value returns ``(None, error_response)``.
     """
+    value, refusal = read_modifier(data, field, target, default)
+    return value, (_json_error(refusal) if refusal else None)
+
+
+def read_modifier(
+    data: Mapping[str, Any], field: str, target: dict, default: int | None = None
+) -> tuple[int | None, str]:
+    """:func:`validate_modifier` with the refusal as text, ``""`` for none."""
     if field not in data:
         if default is not None:
             target[field] = default
-            return default, None
-        return None, None
+            return default, ""
+        return None, ""
     try:
         val = whole_number(data[field])
     except ValueError:
         if default is not None:
             target[field] = default
-            return default, None
-        return None, _json_error(f"Invalid {field}")
+            return default, ""
+        return None, f"Invalid {field}"
     if abs(val) > MAX_EQUIPMENT_MODIFIER:
-        return None, _json_error(
+        return None, (
             f"{field} must be between "
             f"-{MAX_EQUIPMENT_MODIFIER} and +{MAX_EQUIPMENT_MODIFIER}"
         )
     target[field] = val
-    return val, None
+    return val, ""
 
 
 def item_modifiers_named(data: dict) -> list[str]:
@@ -70,7 +81,7 @@ def item_modifiers_named(data: dict) -> list[str]:
         data: The request body.
 
     Returns:
-        Those of ``services.ITEM_MODIFIER_FIELDS`` present, in that order.
+        Those of ``constants.ITEM_MODIFIER_FIELDS`` present, in that order.
     """
     return [field for field in ITEM_MODIFIER_FIELDS if field in data]
 
@@ -142,47 +153,65 @@ def build_custom_equipment_item(data) -> tuple[dict, dict, JsonResponse | None]:
     Returns ``(equipment_item, item_data, None)`` on success or
     ``(None, None, error_response)`` on validation failure.
     """
+    equipment_item, refusal = custom_equipment_item(data)
+    if refusal:
+        return {}, {}, _json_error(refusal)
+    return equipment_item, {"category": equipment_item["category"]}, None
+
+
+def custom_equipment_item(data: Mapping[str, Any]) -> tuple[dict, str]:
+    """Validate and build a custom item, for the sheet and the chat alike.
+
+    The Games Master chat's ``add_equipment`` builds its custom items here
+    (#927), so a name, a category and a custom item's combat numbers are held
+    to the one set of bounds the sheet keeps.
+
+    Args:
+        data: The item as the sheet's form would post it.
+
+    Returns:
+        ``(equipment_item, "")``, quantity 1, or ``({}, refusal)`` saying why
+        the item is refused.
+    """
     # Control characters are dropped rather than rejected: they are never typed
     # on purpose, and the field otherwise stays wide open (quotes, apostrophes
     # and parentheses are all legitimate in an item name). See issue #120.
     name = strip_control_characters(str(data.get("name", "")))
     if not name:
-        return {}, {}, _json_error("Custom item name required")
-    if len(name) > MAX_EQUIPMENT_NAME_LENGTH:
-        return (
-            {},
-            {},
-            _json_error(
-                f"Name must be {MAX_EQUIPMENT_NAME_LENGTH} characters or fewer"
-            ),
-        )
+        return {}, "Custom item name required"
+    # Refused, never cut short, on every path that builds one (issue #928):
+    # the chat's add_equipment reads its name at the plan's ceiling and is
+    # held to this one here.
+    refusal = too_long("Name", name, MAX_EQUIPMENT_NAME_LENGTH)
+    if refusal:
+        return {}, refusal
+    notes = strip_control_characters(str(data.get("notes", "")))
+    refusal = too_long("Notes", notes, MAX_EQUIPMENT_NOTES_LENGTH)
+    if refusal:
+        return {}, refusal
 
     category = data.get("category", "gear")
     # A list is unhashable, so ``in`` the dict raised TypeError (#767).
     if not isinstance(category, str) or category not in dict(ITEM_CATEGORIES):
-        return {}, {}, _json_error("Invalid category")
+        return {}, "Invalid category"
 
     try:
         weight = float(data.get("weight", 0))
         # NaN compares false with everything, so it would pass the range
         # check below; infinity is not a weight either.
         if not math.isfinite(weight) or weight < 0 or weight > MAX_EQUIPMENT_WEIGHT_LBS:
-            return (
-                {},
-                {},
-                _json_error(f"Weight must be 0-{MAX_EQUIPMENT_WEIGHT_LBS} lbs"),
-            )
+            return {}, f"Weight must be 0-{MAX_EQUIPMENT_WEIGHT_LBS} lbs"
     except (ValueError, TypeError):
-        return {}, {}, _json_error("Invalid weight")
+        return {}, "Invalid weight"
 
     try:
         cost = float(data.get("cost", 0))
         if not math.isfinite(cost):
-            return {}, {}, _json_error("Invalid cost")
+            return {}, "Invalid cost"
         if cost < 0:
-            return {}, {}, _json_error("Cost cannot be negative")
+            return {}, "Cost cannot be negative"
     except (ValueError, TypeError):
-        return {}, {}, _json_error("Invalid cost")
+        return {}, "Invalid cost"
 
     equipment_item = {
         "item_id": "custom",
@@ -192,29 +221,25 @@ def build_custom_equipment_item(data) -> tuple[dict, dict, JsonResponse | None]:
         "cost": cost,
         "quantity": 1,
         "in_pack": bool(data.get("in_pack", False)),
-        "notes": strip_control_characters(str(data.get("notes", "")))[
-            :MAX_EQUIPMENT_NOTES_LENGTH
-        ],
+        "notes": notes,
     }
 
     if category == "weapons":
-        raw_damage = str(data.get("damage", "1d6"))[:MAX_EQUIPMENT_DAMAGE_LENGTH]
-        if not DAMAGE_DICE_PATTERN.match(raw_damage):
-            return (
-                {},
-                {},
-                _json_error("Damage must look like '1d6', '2d8+1', or '1d10-2'"),
-            )
+        raw_damage = str(data.get("damage", "1d6"))
+        if len(raw_damage) > MAX_EQUIPMENT_DAMAGE_LENGTH or not (
+            DAMAGE_DICE_PATTERN.match(raw_damage)
+        ):
+            return {}, "Damage must look like '1d6', '2d8+1', or '1d10-2'"
         equipment_item["damage"] = raw_damage
         for field in ("to_hit_mod", "damage_mod", "critical_mod"):
-            _, err = validate_modifier(data, field, equipment_item, default=0)
-            if err:
-                return {}, {}, err
+            _, refusal = read_modifier(data, field, equipment_item, default=0)
+            if refusal:
+                return {}, refusal
     elif category in ("armor", "shield"):
         try:
             stops = whole_number(data.get("stops", 0))
             if stops < 0 or stops > MAX_ARMOR_STOPS:
-                return {}, {}, _json_error(f"Stops must be 0-{MAX_ARMOR_STOPS}")
+                return {}, f"Stops must be 0-{MAX_ARMOR_STOPS}"
             equipment_item["stops"] = stops
         except ValueError:
             equipment_item["stops"] = 0
@@ -224,21 +249,18 @@ def build_custom_equipment_item(data) -> tuple[dict, dict, JsonResponse | None]:
             if dex_penalty > 0 or dex_penalty < -MAX_ARMOR_DEX_PENALTY_MAGNITUDE:
                 return (
                     {},
-                    {},
-                    _json_error(
-                        f"DEX penalty must be 0 to -{MAX_ARMOR_DEX_PENALTY_MAGNITUDE}"
-                    ),
+                    f"DEX penalty must be 0 to -{MAX_ARMOR_DEX_PENALTY_MAGNITUDE}",
                 )
             equipment_item["dex_penalty"] = dex_penalty
         except ValueError:
             equipment_item["dex_penalty"] = 0
 
         for field in ("stops_mod", "dex_mod"):
-            _, err = validate_modifier(data, field, equipment_item, default=0)
-            if err:
-                return {}, {}, err
+            _, refusal = read_modifier(data, field, equipment_item, default=0)
+            if refusal:
+                return {}, refusal
 
-    return equipment_item, {"category": category}, None
+    return equipment_item, ""
 
 
 def build_catalog_equipment_item(data) -> tuple[dict, dict, JsonResponse | None]:
@@ -267,14 +289,9 @@ def build_catalog_equipment_item(data) -> tuple[dict, dict, JsonResponse | None]
     except ValueError:
         return {}, {}, _json_error("Invalid quantity")
 
-    if len(notes) > MAX_EQUIPMENT_NOTES_LENGTH:
-        return (
-            {},
-            {},
-            _json_error(
-                f"Notes must be {MAX_EQUIPMENT_NOTES_LENGTH} characters or fewer"
-            ),
-        )
+    refusal = too_long("Notes", notes, MAX_EQUIPMENT_NOTES_LENGTH)
+    if refusal:
+        return {}, {}, _json_error(refusal)
 
     equipment_item = {
         "item_id": str(item_id),

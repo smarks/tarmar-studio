@@ -1,0 +1,69 @@
+{% load gm_play %}
+{% load local_time %}
+{% comment %}
+What belongs to the signed-in player (issues #827, #924, #952): their
+characters, their latest Game Master sessions and their battles, read from the
+database on every visit. Rendered by the journal page (accounts/journal.html)
+from the ``journal`` that accounts.views.player_journal builds; the front page
+carries none of it, signed in or out.
+{% endcomment %}
+<section class="journal" id="journal" aria-labelledby="journal-heading">
+    <h1 id="journal-heading">Your journal</h1>
+    <div class="journal-parts">
+        <section class="journal-part" aria-labelledby="your-characters-heading">
+            <h2 id="your-characters-heading">Characters</h2>
+            {% if journal.characters %}
+            <ul class="journal-list">
+                {% for character in journal.characters %}
+                <li class="journal-character">
+                    <span class="journal-name">
+                        <a href="{% url 'characters:edit' character.pk %}">{{ character.name }}</a>
+                        <span class="status-badge {{ character.status_css_class }}">{{ character.status }}</span>
+                    </span>
+                    {% play_with_game_master character request.user choose_session=False %}
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="journal-more">
+                <a href="{% url 'characters:list' %}">All {{ journal.character_count }} character{{ journal.character_count|pluralize }}</a>
+                <a href="{% url 'characters:create' %}">Create another</a>
+            </p>
+            {% else %}
+            <p class="journal-empty">You have no characters yet. Everything starts with one.</p>
+            <a href="{% url 'characters:create' %}" class="button" id="journal-first-character">Create your first character</a>
+            {% endif %}
+        </section>
+        <section class="journal-part" aria-labelledby="your-sessions-heading">
+            <h2 id="your-sessions-heading">Game Master sessions</h2>
+            {% if journal.sessions %}
+            <ul class="journal-list">
+                {% for session in journal.sessions %}
+                <li>
+                    <a href="{% url 'gm:chat' %}?session={{ session.pk }}">{{ session.name }}</a>
+                    <span class="journal-when">{% local_time session.updated_at "M j, Y" style="date" %}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="journal-more"><a href="{% url 'gm:chat' %}">Every session</a></p>
+            {% else %}
+            <p class="journal-empty">No Game Master sessions yet. <a href="{% url 'gm:chat' %}">Sit down with the Game Master</a>.</p>
+            {% endif %}
+        </section>
+        <section class="journal-part" aria-labelledby="your-battles-heading">
+            <h2 id="your-battles-heading">Battles</h2>
+            {% if journal.battles %}
+            <ul class="journal-list">
+                {% for battle in journal.battles %}
+                <li>
+                    <a href="{% url 'battle:detail' battle.pk %}">{{ battle.name }}</a>
+                    <span class="journal-when">{{ battle.get_status_display }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="journal-more"><a href="{% url 'battle:list' %}">Every battle</a></p>
+            {% else %}
+            <p class="journal-empty">No battles yet. <a href="{% url 'battle:list' %}">Find or start one</a>.</p>
+            {% endif %}
+        </section>
+    </div>
+</section>

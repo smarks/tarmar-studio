@@ -17,11 +17,17 @@ Who may make a change is the caller's to decide and pass in:
   raises :class:`~django.core.exceptions.PermissionDenied` to refuse;
 * ``is_game_master`` lifts the limits a player is held to (issue #404);
 * ``actor`` is who made the change, for the history and the "played" flag.
+
+What nobody may do is decided here: a dead character's record takes no change
+the rules govern, from a player or a Game Master, until a Game Master brings
+the character back (issue #932). :func:`changing` refuses one on every path;
+the few changes that may touch the dead name why (:class:`DeadCharacterWrite`).
 """
 
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
@@ -35,10 +41,13 @@ from .constants import (
     FATIGUE_ROLL_MAXIMUM,
     FATIGUE_ROLL_MINIMUM,
     MAX_ATTRIBUTE_VALUE,
+    MAX_DEATH_CAUSE_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
+    MAX_SKILL_NAME_LENGTH,
     POINT_BUY_MAX_ATTRIBUTE,
     POINT_BUY_MIN_ATTRIBUTE,
     POINT_BUY_TOTAL,
+    too_long,
 )
 from .dice import (
     LOCATION_SKILL_CHOICES,
@@ -48,6 +57,7 @@ from .dice import (
     location_effects,
     roll_3d6_logged,
     roll_d6_logged,
+    roll_demon_die_logged,
     roll_expression,
     roll_location_logged,
     roll_provenance_logged,
@@ -56,9 +66,11 @@ from .dice import (
     wealth_gives_coin,
 )
 from .equipment import EQUIPMENT_CATALOG, get_item_name
+from .equipment_service import custom_equipment_item
 from .models import (
     CHARACTER_FIELDS,
     CHARACTER_INT_FIELD_MAX,
+    DIE_ROLL_FIELDS,
     Character,
     CurrentCondition,
 )
@@ -66,6 +78,8 @@ from .purse import (
     PurseError,
     catalog_price,
     charge_for_catalog_item,
+    charge_for_custom_item,
+    charge_for_more_of_custom_item,
     hold_purchase_to_wealth,
 )
 from .skills import (
@@ -209,11 +223,13 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "name": _player(),
         "is_public": _player(),
         # attributes.md: "Height: Choose or roll 1d6"; "Base weight is
-        # player's choice between 8 and 13 stones (or roll 1d6)".
+        # player's choice between 8 and 13 stones (or roll 1d6)". Fixed for a
+        # player once rolled (#948, can_set_field).
         "height_roll": _player(),
         "weight_roll": _player(),
         # location.md: "Roll percentile dice or choose". Fixed for a player
-        # once literacy is rolled (#741, can_change_origin).
+        # once rolled (#970, can_set_field), and a chosen one once literacy
+        # is rolled (#741, can_change_origin).
         "location": _player(),
         # Where free points go, through the skill workbench (allocation holds
         # a player to the points earned and to the glossary's skills, #862).
@@ -346,6 +362,10 @@ def field_refusal(field_name: str) -> str:
     rule = FIELD_RULES.get(field_name)
     if rule is not None and rule.reason:
         return rule.reason
+    if field_name in ROLL_FIXED_REASONS:
+        # A player's own field, refused only once a roll is recorded (#948,
+        # #970).
+        return ROLL_FIXED_REASONS[field_name]
     return f"{field_name} is not something anyone sets by hand."
 
 
@@ -354,18 +374,26 @@ def can_set_field(
 ) -> bool:
     """Whether this asker may set this field on this character now.
 
-    The role's list (:func:`update_fields_for`), plus one exception the rules
-    make for a player: an attribute nobody has recorded yet (a character
-    started in a Games Master session, #571) may be bought, held to the
-    65-point buy (:func:`check_point_buy`), and locks once recorded.
+    The role's list (:func:`update_fields_for`), plus two exceptions the
+    rules make for a player. An attribute nobody has recorded yet (a
+    character started in a Games Master session, #571) may be bought, held to
+    the 65-point buy (:func:`check_point_buy`), and locks once recorded.
     attributes.md: "Players can roll 3d6 to determine each attribute OR
-    divide 65 points between the six core attributes".
+    divide 65 points between the six core attributes". And a height, weight
+    or Origin the dice log records a roll of is fixed (:func:`field_rolled`,
+    issues #948, #970).
 
     Args:
         character: The character, as it stands.
         field_name: A field of ``Character``.
         is_game_master: Whether the asker is a Game Master.
     """
+    if (
+        field_name in ROLL_FIXED_REASONS
+        and not is_game_master
+        and field_rolled(character, field_name)
+    ):
+        return False
     if field_name in update_fields_for(is_game_master=is_game_master):
         return True
     return field_name in ATTRIBUTE_NAMES and getattr(character, field_name) is None
@@ -477,6 +505,53 @@ PLAYER_CHOSEN_FACE_FIELDS: Mapping[str, str] = MappingProxyType(
 )
 
 
+#: Why a player may not set a "choose or roll" field once it is rolled. The
+#: rules let a player choose or roll each of these: attributes.md, "Height:
+#: Choose or roll 1d6" and "Base weight is player's choice between 8 and 13
+#: stones (or roll 1d6)"; location.md, "Roll percentile dice or choose".
+#: Spencer's ruling on #948, 2026-10-09: "a rolled height or weight is fixed
+#: for a player once rolled, as the Fatigue roll and attributes are (#590); a
+#: player chooses OR rolls, and a roll is final. A Game Master may change it
+#: at any time. The one-roll record applies at creation too." And on #970,
+#: 2026-10-10: "a rolled Origin is fixed for a player once rolled, the same
+#: rule as #948". Provenance and wealth are not here: a player never chooses
+#: them (Spencer's rulings on #749), so ``FIELD_RULES`` gives them to the Game
+#: Master outright and the player's one roll is ``check_first_roll``'s.
+ROLL_FIXED_REASONS: Mapping[str, str] = MappingProxyType(
+    {
+        "height_roll": "Height was rolled, and a roll is final; only a Game "
+        "Master can change it.",
+        "weight_roll": "Weight was rolled, and a roll is final; only a Game "
+        "Master can change it.",
+        "location": "The Origin was rolled, and a roll is final; only a Game "
+        "Master can change it.",
+    }
+)
+
+#: The label each of those fields' rolls is recorded under in the dice log:
+#: the sheet's label for a height or weight (``models.DIE_ROLL_FIELDS``) and
+#: the location table's own ("Location: d100=NN -> City",
+#: ``dice.roll_location_logged``).
+ROLL_LOG_LABELS: Mapping[str, str] = MappingProxyType(
+    {**DIE_ROLL_FIELDS, "location": "Location"}
+)
+
+
+def field_rolled(character: Character, field_name: str) -> bool:
+    """Whether the character's dice log records a roll of this field.
+
+    The one-roll record (issues #948, #970): a roll at creation, on the
+    Games Master's roster, on the sheet, or one an import kept from the
+    importer's own character (:func:`roll_lines`). Clearing or choosing over
+    the cell does not clear it.
+
+    Args:
+        character: The character.
+        field_name: A field of :data:`ROLL_FIXED_REASONS`.
+    """
+    return bool(roll_lines(character.dice_log or "", field_name))
+
+
 def check_player_choice(
     field_name: str, value: object, *, is_game_master: bool
 ) -> None:
@@ -489,15 +564,6 @@ def check_player_choice(
     if reason and not is_game_master and str(value).strip() not in PLAYER_D6_FACES:
         raise CharacterChangeError(reason)
 
-
-#: The per-item modifiers an equipment entry may carry (issue #752).
-ITEM_MODIFIER_FIELDS: tuple[str, ...] = (
-    "to_hit_mod",
-    "damage_mod",
-    "critical_mod",
-    "stops_mod",
-    "dex_mod",
-)
 
 #: The rules give equipment no modifiers: attack-rolls.md names the to-hit
 #: sources (DEX, weapon skill, under-strength, situational) and the catalog
@@ -525,6 +591,70 @@ class CharacterChangeError(Exception):
     def __init__(self, message: str, reason: str = "") -> None:
         super().__init__(message)
         self.reason = reason
+
+
+# ---------------------------------------------------------------------------
+# The dead (issue #932). A dead character's record takes no change the rules
+# govern, from anyone, on any path: the guard is in :func:`changing`, which
+# every write goes through, so a path cannot be added without it.
+# ---------------------------------------------------------------------------
+
+#: The refusal's machine-readable kind (:attr:`CharacterChangeError.reason`).
+REFUSAL_DEAD = "dead"
+
+
+class DeadCharacterWrite(StrEnum):
+    """Why a change may be written to a dead character (issue #932).
+
+    The rule, extending #403/#404's ruling on years of experience to every
+    path: a dead character's record takes no change the rules govern, for a
+    player or a Game Master. A Game Master brings the character back to life
+    first (:func:`revive`), and then every rule and override applies as it
+    did before the death. :func:`changing` refuses a dead character unless
+    its caller names one of these:
+
+    * ``DEATH_AND_REVIVAL``: bringing a character back, and marking a death,
+      whose own rule (:func:`apply_death`) refuses the already dead. Both are
+      a Game Master's own (``FIELD_RULES["is_alive"]``).
+    * ``FIGHT``: what a fight on the board did (:func:`record_fight`), which
+      can be the death itself. Nobody asked for it, and a refusal would roll
+      back the board's committed turn, so a report reaching the already dead
+      is taken as nothing (:func:`apply_fight_report`) rather than refused.
+    * ``SESSION``: withdrawing a character from a Games Master session, which
+      changes the session and leaves a line on the character; a removal
+      either side may make of a dead character as of a living one.
+    * ``NO_RULE``: what no rule governs: the character's name
+      (:data:`DEAD_EDITABLE_FIELDS`) and dismissing an import notice.
+    """
+
+    DEATH_AND_REVIVAL = "death and revival"
+    FIGHT = "fight"
+    SESSION = "session"
+    NO_RULE = "no rule"
+
+
+#: The sheet fields a dead character's editor may still set: no rule governs
+#: a name, and a memorial may want one spelled right.
+DEAD_EDITABLE_FIELDS: frozenset[str] = frozenset({"name"})
+
+
+def dead_refusal(character: Character) -> str:
+    """What anyone asking to change a dead character is told (issue #932)."""
+    who = character.name or "The character"
+    return f"{who} is dead; a Game Master must bring them back to life first"
+
+
+def refuse_the_dead(character: Character) -> None:
+    """Refuse any change to a dead character (issue #932).
+
+    :func:`changing` calls it on every locked row; :func:`apply_experience_years`
+    calls it too, for the in-memory character a caller prices a run on.
+
+    Raises:
+        CharacterChangeError: The character is dead.
+    """
+    if not character.is_alive:
+        raise CharacterChangeError(dead_refusal(character), reason=REFUSAL_DEAD)
 
 
 @dataclass
@@ -575,10 +705,13 @@ def changing(
     is_deleted: bool = False,
     mark_played: bool = True,
     by: str = "",
+    dead: DeadCharacterWrite | None = None,
 ) -> Iterator[Change]:
     """Lock a character, let the caller change it, then save it with history.
 
-    Anything raised inside the block rolls the whole change back.
+    Anything raised inside the block rolls the whole change back. A dead
+    character is refused before the block runs (:func:`refuse_the_dead`,
+    issue #932) unless ``dead`` says why this change may be written to one.
 
     Args:
         character_id: The character's primary key.
@@ -589,12 +722,17 @@ def changing(
         mark_played: Whether an owner's change marks the character played.
         by: Whom the history names, when that is not a user acting (a fight
             on the board, #750); empty names the actor, or the system.
+        dead: Why this change may be written to a dead character; anything
+            but a :class:`DeadCharacterWrite` (``None``, the default) refuses
+            one.
 
     Yields:
         The change, holding the locked character.
 
     Raises:
         Character.DoesNotExist: No character with that id and state.
+        CharacterChangeError: The character is dead and ``dead`` names no
+            :class:`DeadCharacterWrite`.
     """
     with transaction.atomic():
         character = Character.objects.select_for_update().get(
@@ -602,6 +740,8 @@ def changing(
         )
         if authorize is not None:
             authorize(character)
+        if not isinstance(dead, DeadCharacterWrite):
+            refuse_the_dead(character)
         change = Change(character)
         yield change
         if change.discarded:
@@ -917,12 +1057,18 @@ def apply_death(character: Character, cause: str) -> str:
     :func:`apply_revive`, which keeps the cause in the log.
 
     Raises:
-        CharacterChangeError: The character is already dead.
+        CharacterChangeError: The character is already dead, or the cause is
+            past :data:`MAX_DEATH_CAUSE_LENGTH`.
     """
     if not character.is_alive:
         raise CharacterChangeError("Character is already dead")
+    # Refused rather than cut short (issue #928): the cause is what the Game
+    # Master wrote, and the sheet refuses the same text.
+    refusal = too_long("Cause", cause, MAX_DEATH_CAUSE_LENGTH)
+    if refusal:
+        raise CharacterChangeError(refusal)
     character.is_alive = False
-    character.death_cause = cause[: Character._meta.get_field("death_cause").max_length]
+    character.death_cause = cause
     return f"marked dead: {character.death_cause}"
 
 
@@ -1076,7 +1222,10 @@ def apply_fight_report(
     character.mana_spent = _add_damage(character.mana_spent, report.mana_spent)
     if report.died:
         character.is_alive = False
-        character.death_cause = f"Killed in battle — {report.fight}"[:200]
+        # Written here, not typed: cut to the column rather than refused.
+        character.death_cause = f"Killed in battle — {report.fight}"[
+            :MAX_DEATH_CAUSE_LENGTH
+        ]
     after = character.condition
     if not (report.closes or report.died) or before is None or after is None:
         return None
@@ -1113,7 +1262,12 @@ def record_fight(report: FightReport) -> ChangeResult | None:
     """
     if not report.changes_anything:
         return None
-    with changing(report.character_id, by=report.author, mark_played=False) as change:
+    with changing(
+        report.character_id,
+        by=report.author,
+        mark_played=False,
+        dead=DeadCharacterWrite.FIGHT,
+    ) as change:
         character = change.character
         was = (
             character.fatigue_damage,
@@ -1136,6 +1290,27 @@ def record_fight(report: FightReport) -> ChangeResult | None:
         if was[3] and not character.is_alive:
             change.note("is_alive", True, False)
     return ChangeResult(change.character, line[1] if line else "")
+
+
+#: What the record keeps of each pool a Game Master sets (#751): the amount
+#: gone from it, by the pool's name. :func:`apply_current_pools` takes each
+#: pool by that name in lower case.
+POOL_LOSS_FIELDS: Mapping[str, str] = MappingProxyType(
+    {"Fatigue": "fatigue_damage", "Body": "body_damage", "Mana": "mana_spent"}
+)
+
+
+def pool_maxima(character: Character) -> dict[str, int | None]:
+    """Each pool's maximum, by the pool's name; ``None`` while not known.
+
+    Fatigue and Body come from the attributes and the Fatigue roll; Mana is
+    the Mana Pool, ``free_spell_points``.
+    """
+    return {
+        "Fatigue": character.fatigue,
+        "Body": character.body,
+        "Mana": character.free_spell_points,
+    }
 
 
 def apply_current_pools(
@@ -1168,7 +1343,7 @@ def apply_current_pools(
         raise CharacterChangeError(POOLS_GAME_MASTER_ONLY)
     if fatigue is None and body is None and mana is None:
         raise CharacterChangeError("Give a current Fatigue, Body or Mana to set")
-    maxima = {"Fatigue": character.fatigue, "Body": character.body}
+    maxima = pool_maxima(character)
     if (fatigue is not None or body is not None) and (
         maxima["Fatigue"] is None or maxima["Body"] is None
     ):
@@ -1180,7 +1355,7 @@ def apply_current_pools(
     for label, value, maximum, floor in (
         ("Fatigue", fatigue, maxima["Fatigue"], -MAX_POOL_DAMAGE),
         ("Body", body, maxima["Body"], -MAX_POOL_DAMAGE),
-        ("Mana", mana, character.free_spell_points, 0),
+        ("Mana", mana, maxima["Mana"], 0),
     ):
         if value is None:
             continue
@@ -1193,9 +1368,9 @@ def apply_current_pools(
             below = "below 0" if floor == 0 else "further down than a record holds"
             raise CharacterChangeError(f"{label} {value} is {below}")
         spent[label] = top - value
-    character.fatigue_damage = spent.get("Fatigue", character.fatigue_damage)
-    character.body_damage = spent.get("Body", character.body_damage)
-    character.mana_spent = spent.get("Mana", character.mana_spent)
+    for label, loss_field in POOL_LOSS_FIELDS.items():
+        if label in spent:
+            setattr(character, loss_field, spent[label])
     condition = character.condition
     now = [condition.summary] if condition is not None else []
     if character.mana_text:
@@ -1266,6 +1441,15 @@ KNOWLEDGE_FIELD_REFUSED_REASON = (
 )
 
 
+#: What the history and the Games Master ledger record when a Game Master
+#: starts a skill a player could not (issue #902): the override is named, not
+#: silent. Worded to hold for every reason :func:`allocation_refusal` gives --
+#: a name the glossary does not know and a Knowledge field alike.
+GAME_MASTER_STARTED_SKILL_NOTE = (
+    "started by the Game Master: a skill only a Game Master may start"
+)
+
+
 def allocation_refusal(skills: Mapping[str, int] | None, skill: str) -> str | None:
     """Why a player may not put a free point into ``skill``, or None (#862).
 
@@ -1295,24 +1479,48 @@ def allocation_refusal(skills: Mapping[str, int] | None, skill: str) -> str | No
     return None
 
 
+def _hold_skill_name(skills: Mapping[str, int], name: str) -> None:
+    """Refuse a new skill name longer than the record keeps (issue #928).
+
+    A storage bound, not a rule of play, so it holds a Game Master too: the
+    importer refuses a longer name, and a character must survive its own
+    export. A skill already held keeps its name.
+
+    Args:
+        skills: The character's stored skills.
+        name: The stored (normalised) name a change would write.
+
+    Raises:
+        CharacterChangeError: A new name past :data:`MAX_SKILL_NAME_LENGTH`.
+    """
+    if name in skills:
+        return
+    refusal = too_long("Skill name", name, MAX_SKILL_NAME_LENGTH)
+    if refusal:
+        raise CharacterChangeError(refusal)
+
+
 def apply_skill_points(
     character: Character,
     skill: str,
     points: int,
     *,
     is_game_master: bool = False,
-    glossary_only: bool = False,
 ) -> tuple[str, int]:
     """Spend free skill points on one skill.
+
+    A player is held to :func:`allocation_refusal` on every path that spends
+    a point -- the sheet's allocate endpoint and the Games Master chat's
+    ``spend_skill_points`` alike (issues #862, #902): the rule follows the
+    authority, not an argument a caller may forget. A Game Master may start
+    any skill, and the note says when he started one a player could not.
 
     Args:
         character: The character, changed in memory.
         skill: The skill's name as asked for.
         points: How many points to spend.
         is_game_master: Whether a Game Master asked; he may grant points
-            past those earned.
-        glossary_only: Hold the name to :func:`allocation_refusal`, as the
-            sheet does for a player (issue #862).
+            past those earned and start a skill the glossary does not name.
 
     Returns:
         ``(note, granted)``: what was done, and how many points a Game Master
@@ -1320,8 +1528,9 @@ def apply_skill_points(
 
     Raises:
         CharacterChangeError: Too few free points for a player, a name
-            ``glossary_only`` refuses, or the skill would pass the storage
-            ceiling.
+            :func:`allocation_refusal` refuses a player, a new name past
+            :data:`MAX_SKILL_NAME_LENGTH`, or the skill would pass the
+            storage ceiling.
     """
     if points < 1:
         raise CharacterChangeError("A skill purchase must be at least one point")
@@ -1339,12 +1548,12 @@ def apply_skill_points(
             )
         granted = points - character.free_skill_points
         character.free_skill_points = points
-    if glossary_only:
-        refusal = allocation_refusal(character.skills, skill)
-        if refusal is not None:
-            raise CharacterChangeError(refusal)
+    refusal = allocation_refusal(character.skills, skill)
+    if refusal is not None and not is_game_master:
+        raise CharacterChangeError(refusal)
     skills = dict(character.skills or {})
     name = allocation_target(skills, skill)
+    _hold_skill_name(skills, name)
     current = int(skills.get(name, 0))
     if current + points > MAX_SKILL_POINTS:
         raise CharacterChangeError(
@@ -1368,6 +1577,8 @@ def apply_skill_points(
     )
     if granted:
         note += f"; {granted} past the points earned, granted by the Game Master"
+    if refusal is not None:
+        note += f"; {name} {GAME_MASTER_STARTED_SKILL_NOTE}"
     return note, granted
 
 
@@ -1462,17 +1673,12 @@ def apply_experience_years(
         ``(note, run_result)``.
 
     Raises:
-        CharacterChangeError: A dead character, missing attributes, a bad
-            number of years, an unknown track, or a player's character that
-            has entered play.
+        CharacterChangeError: A dead character, for everyone
+            (:func:`refuse_the_dead`), missing attributes, a bad number of
+            years, an unknown track, or a player's character that has
+            entered play.
     """
-    if not character.is_alive:
-        if is_game_master:
-            raise CharacterChangeError(
-                f"{character.name or 'The character'} is dead; bring them back "
-                "to life first"
-            )
-        raise CharacterChangeError(f"{character.name or 'The character'} is dead")
+    refuse_the_dead(character)
     if not attributes_known(character):
         raise CharacterChangeError(
             "Roll or buy the six core attributes before taking years of experience",
@@ -1665,8 +1871,9 @@ def apply_skill_rename(
         with a note when a Game Master moved points to another skill.
 
     Raises:
-        CharacterChangeError: No such skill, a name already held, or a player
-            moving points to another skill.
+        CharacterChangeError: No such skill, a name already held, a name
+            past :data:`MAX_SKILL_NAME_LENGTH`, or a player moving points to
+            another skill.
     """
     skills = dict(character.skills or {})
     if old_skill not in skills:
@@ -1681,6 +1888,7 @@ def apply_skill_rename(
         return new_skill, skills[new_skill]
     if new_skill in skills:
         raise CharacterChangeError(f"Skill '{new_skill}' already exists")
+    _hold_skill_name(skills, new_skill)
     if not is_game_master:
         if adds_to_attacks(old_skill) or adds_to_attacks(new_skill):
             # Every name an attack reads (issue #753).
@@ -1724,16 +1932,25 @@ def catalog_item_id(name: str) -> str:
 
 
 def apply_equipment(
-    character: Character, name: str, quantity: int, *, purchase: bool = False
+    character: Character,
+    name: str,
+    quantity: int,
+    *,
+    purchase: bool = False,
+    price: Decimal | None = None,
+    combat: Mapping[str, object] | None = None,
 ) -> str:
     """Add ``quantity`` of a named item, stacking onto one already carried.
 
-    With ``purchase``, a catalog item is bought at the catalog's price
-    through ``characters.purse`` and refused when the purse is short: a
-    player's Games Master session gets gear the way the sheet does
-    (coordinator's ruling on the #757 review). A Game Master's session gives
-    it free; an item the catalog does not sell has no price and carries no
-    combat numbers, so it is added as it is.
+    With ``purchase``, a player's Games Master session gets gear the way the
+    sheet does (coordinator's ruling on the #757 review): a catalog item is
+    bought at the catalog's price through ``characters.purse``, and an item
+    the catalog does not sell is held to the sheet's custom-item rule
+    (:func:`characters.purse.charge_for_custom_item`, #927) -- bought at the
+    price stated for it, refused with no price, and refused with combat
+    numbers, which are a Game Master's to give (#845). Without ``purchase``
+    a Game Master's session gives the item free, combat numbers and all, and
+    the history line says the Game Master gave it.
 
     The name is resolved against the catalog first. It used to be compared
     against each stored entry's ``name``, which a catalog entry does not
@@ -1742,13 +1959,45 @@ def apply_equipment(
     who bought a broadsword on the sheet and was then handed a broadsword by
     the Game Master ended up with two lines, the second of them with no
     ``item_id``, resolving no weight, damage or category anywhere (#719).
+
+    Args:
+        character: The character, changed in memory and not saved.
+        name: What the item is called.
+        quantity: How many.
+        purchase: A player's session buying it, rather than a Game Master's
+            giving it.
+        price: The price of one in MU, for an item the catalog does not sell;
+            None when none was stated. A catalog item's price is the
+            catalog's, whatever is stated.
+        combat: A custom item's combat numbers -- ``category`` (weapons,
+            armor or shield) with ``damage``, ``stops`` or ``dex_penalty`` --
+            held to the sheet's bounds. Such an item is a line of its own.
+
+    Raises:
+        CharacterChangeError: A quantity out of range, combat numbers for a
+            catalog item, or whatever the purse refuses.
     """
     if quantity < 1:
         raise CharacterChangeError("An item's quantity must be at least one")
     equipment = list(character.equipment or [])
     item_id = catalog_item_id(name)
+    if combat and item_id:
+        raise CharacterChangeError(
+            f"{get_item_name(item_id)} is sold from the catalog, which sets its "
+            "numbers; an item with its own needs a name the catalog does not use"
+        )
+    custom_item = None
+    if not item_id:
+        custom_item, refusal = custom_equipment_item(
+            {"name": name, "cost": price or 0, **(combat or {})}
+        )
+        if refusal:
+            raise CharacterChangeError(refusal)
+        name = custom_item["name"]
     carried_item = None
-    for item in equipment:
+    # An item with its own combat numbers is never stacked onto another of
+    # the same name, whose numbers may differ; the sheet adds it as a line.
+    for item in () if combat else equipment:
         stored_id = str(item.get("item_id", ""))
         carried = (
             stored_id == item_id
@@ -1768,33 +2017,69 @@ def apply_equipment(
             f"{held} are carried and {quantity} more would make {held + quantity}"
         )
     paid = ""
-    if purchase and item_id:
-        try:
+    try:
+        if purchase and item_id:
             # A player's session buys nothing before the wealth roll, as the
             # sheet does not (issue #851); a purchase is a player's.
             if catalog_price(item_id) > 0:
                 hold_purchase_to_wealth(character, is_game_master=False)
             paid = f"; {charge_for_catalog_item(character, item_id, quantity)}"
-        except PurseError as refusal:
-            raise CharacterChangeError(str(refusal)) from refusal
+        elif carried_item is not None and custom_item is not None:
+            # More of a custom item already carried is bought at its stored
+            # cost, as the sheet's quantity raise buys it, whatever price the
+            # plan states (review of #927).
+            name = str(carried_item.get("name", name))
+            line = charge_for_more_of_custom_item(
+                character, carried_item, quantity, is_game_master=not purchase
+            )
+            paid = f"; {line}" if line else ""
+        elif custom_item is not None:
+            line = charge_for_custom_item(
+                character,
+                name,
+                str(custom_item["category"]),
+                price,
+                quantity,
+                is_game_master=not purchase,
+            )
+            paid = f"; {line}" if line else ""
+    except PurseError as refusal:
+        raise CharacterChangeError(str(refusal)) from refusal
     if carried_item is not None:
         carried_item["quantity"] = held + quantity
         character.equipment = equipment
         stored_id = str(carried_item.get("item_id", ""))
         called = (
-            get_item_name(stored_id) if stored_id else carried_item.get("name", name)
+            get_item_name(stored_id)
+            if stored_id and stored_id != "custom"
+            else carried_item.get("name", name)
         )
         return f"now carrying {carried_item['quantity']} × {called}{paid}"
     # A catalog item is stored the way the sheet stores one, so what the
     # Game Master hands over weighs and fights like the thing it is named
-    # after; anything the catalog does not sell stays a custom entry.
-    if item_id:
+    # after; anything the catalog does not sell is the sheet's custom item.
+    if custom_item is None:
         equipment.append({"item_id": item_id, "quantity": quantity})
         name = get_item_name(item_id)
     else:
-        equipment.append({"name": name, "quantity": quantity})
+        custom_item["quantity"] = quantity
+        equipment.append(custom_item)
     character.equipment = equipment
-    return f"picked up {quantity} × {name}{paid}"
+    numbers = _custom_combat_numbers(custom_item)
+    return f"picked up {quantity} × {name}{numbers}{paid}"
+
+
+def _custom_combat_numbers(item: dict[str, Any] | None) -> str:
+    """A custom item's combat numbers for its history line, or ``""``."""
+    if item is None:
+        return ""
+    if item.get("category") == "weapons":
+        return f" (damage {item.get('damage')})"
+    if item.get("category") in ("armor", "shield"):
+        return (
+            f" ({item.get('stops')} Stops, DEX {int(item.get('dex_penalty') or 0):+d})"
+        )
+    return ""
 
 
 #: The background fields a Games Master records as changes (issue #571).
@@ -1826,8 +2111,9 @@ def _single(
     *,
     actor: User | None,
     authorize: Callable[[Character], None] | None,
+    dead: DeadCharacterWrite | None = None,
 ) -> ChangeResult:
-    with changing(character_id, actor=actor, authorize=authorize) as change:
+    with changing(character_id, actor=actor, authorize=authorize, dead=dead) as change:
         note = apply(change.character)
         change.note(field_name, "", note)
     return ChangeResult(change.character, note)
@@ -1997,8 +2283,9 @@ def apply_origin_skill(
     share Street Smarts, and a Village character who took Survival holds the
     Rural grant already.
 
-    The rule holds for whoever may move the Origin: a player before literacy
-    is rolled (``can_change_origin``), a Game Master at any time.
+    The rule holds for whoever may move the Origin: a player who chose it,
+    before literacy is rolled (``can_change_origin``; a rolled one is fixed for
+    them, ``field_rolled``), a Game Master at any time.
 
     Args:
         character: The character, its ``location`` already changed.
@@ -2274,8 +2561,10 @@ def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> 
     and literacy follow as they do for a chosen Origin (:func:`follow_origin`).
 
     A player rolls an Origin nobody has recorded, once (the #636 rule, as
-    for provenance and wealth); one already rolled or chosen they may choose
-    again on the sheet, before literacy fixes it. A Game Master may roll again.
+    for provenance and wealth), and the roll is final for them
+    (:func:`field_rolled`, Spencer's ruling on #970); one they chose they may
+    choose again on the sheet, before literacy fixes it. A Game Master may
+    roll again.
 
     Raises:
         CharacterChangeError: A player whose Origin is fixed by a literacy
@@ -2406,6 +2695,107 @@ def apply_appearance_roll(character: Character, *, is_game_master: bool = False)
     return note
 
 
+def roll_lines(dice_log: str, field_name: str) -> list[str]:
+    """The dice-log lines that record a roll of a "choose or roll" field.
+
+    The dice log is written by code alone (``FIELD_RULES``: nobody), so each
+    line is a roll this site made: a height or weight at creation
+    (``dice.roll_physical_features``), on the Games Master's roster, or on
+    the sheet (:func:`apply_physical_roll`), issue #941; an Origin at
+    creation, on the roster or on the sheet (:func:`apply_origin_roll`),
+    issue #970; and the line an import writes for a roll it kept from the
+    importer's own character. Each starts with the field's
+    :data:`ROLL_LOG_LABELS` label; the Origin's effects line ("Location
+    effects: ...") does not.
+
+    Args:
+        dice_log: A character's dice log.
+        field_name: A field of :data:`ROLL_FIXED_REASONS`.
+
+    Returns:
+        The lines, oldest first.
+    """
+    prefix = f"{ROLL_LOG_LABELS[field_name]}: "
+    return [line for line in dice_log.splitlines() if line.startswith(prefix)]
+
+
+def _roll_height() -> tuple[str, str]:
+    """attributes.md: height is 1d6, rolled again on a 1 or a 6."""
+    return roll_demon_die_logged()
+
+
+def _roll_weight() -> tuple[str, str]:
+    """attributes.md: base weight is a plain 1d6."""
+    value, log = roll_d6_logged()
+    return str(value), log
+
+
+#: The dice each physical roll the sheet offers throws, the same dice
+#: ``dice.roll_physical_features`` throws at creation.
+_PHYSICAL_ROLLERS: Mapping[str, Callable[[], tuple[str, str]]] = MappingProxyType(
+    {"height_roll": _roll_height, "weight_roll": _roll_weight}
+)
+
+
+def may_roll_physical(
+    character: Character, field_name: str, *, is_game_master: bool
+) -> bool:
+    """Whether this asker may roll a height or weight now (issue #941).
+
+    A Game Master may roll any time. A player rolls a blank one, once: a
+    character whose dice log records a roll of it has had its roll, so
+    clearing the cell does not buy another. A player who would rather choose
+    a face types it instead, before any roll (:data:`PLAYER_CHOSEN_FACE_FIELDS`);
+    after one the cell is fixed for them (:func:`field_rolled`, #948).
+    """
+    if is_game_master:
+        return True
+    return not getattr(character, field_name) and not field_rolled(
+        character, field_name
+    )
+
+
+def apply_physical_roll(
+    character: Character, field_name: str, *, is_game_master: bool = False
+) -> str:
+    """Roll a height or weight on the sheet and record it (issue #941).
+
+    A player's import blanks a height chain the importer's own records do
+    not hold (#939), and the sheet offered no way to roll it again: this is
+    that way, with the dice creation uses, written to the dice log.
+
+    Raises:
+        CharacterChangeError: A player whose character has a value or has
+            had its roll.
+    """
+    label = DIE_ROLL_FIELDS[field_name]
+    if not may_roll_physical(character, field_name, is_game_master=is_game_master):
+        raise CharacterChangeError(
+            f"{label} is already recorded or rolled; only a Game Master can "
+            "roll it again"
+        )
+    value, log = _PHYSICAL_ROLLERS[field_name]()
+    setattr(character, field_name, value)
+    _append_dice_log(character, f"{label}: {log}")
+    return f"rolled {label.lower()}, {log}"
+
+
+def _physical_sheet_roll(field_name: str) -> "SheetRoll":
+    """The sheet's roll for a height or weight (issue #941)."""
+    label = DIE_ROLL_FIELDS[field_name].lower()
+    return SheetRoll(
+        (field_name,),
+        lambda character, is_game_master=False: apply_physical_roll(
+            character, field_name, is_game_master=is_game_master
+        ),
+        lambda character, is_game_master: may_roll_physical(
+            character, field_name, is_game_master=is_game_master
+        ),
+        lambda character: bool(getattr(character, field_name)),
+        f"Roll {label} again? The recorded {label} is replaced; the history keeps it.",
+    )
+
+
 def apply_sheet_attribute_roll(
     character: Character, *, is_game_master: bool = False
 ) -> str:
@@ -2491,6 +2881,10 @@ SHEET_ROLLS: Mapping[str, SheetRoll] = MappingProxyType(
             "Roll appearance again? The recorded appearance is replaced; "
             "the history keeps it.",
         ),
+        # A blank height or weight, which a player's import leaves when the
+        # file's chain is not on the importer's own record (issue #941).
+        "height": _physical_sheet_roll("height_roll"),
+        "weight": _physical_sheet_roll("weight_roll"),
         "provenance": SheetRoll(
             ("provenance_class", "provenance_detail"),
             apply_provenance_roll,
@@ -2837,7 +3231,11 @@ def dismiss_import_notice(
     played; the history keeps the notice that was dismissed.
     """
     with changing(
-        character_id, actor=actor, authorize=authorize, mark_played=False
+        character_id,
+        actor=actor,
+        authorize=authorize,
+        mark_played=False,
+        dead=DeadCharacterWrite.NO_RULE,
     ) as change:
         old = change.character.import_notice
         change.character.import_notice = ""
@@ -2896,7 +3294,12 @@ def revive(
 ) -> ChangeResult:
     """Bring a dead character back to life."""
     return _single(
-        character_id, "is_alive", apply_revive, actor=actor, authorize=authorize
+        character_id,
+        "is_alive",
+        apply_revive,
+        actor=actor,
+        authorize=authorize,
+        dead=DeadCharacterWrite.DEATH_AND_REVIVAL,
     )
 
 
@@ -2917,7 +3320,11 @@ def mark_dead(
         CharacterChangeError: A player asking, or a character already dead.
     """
     with changing(
-        character_id, actor=actor, authorize=authorize, mark_played=False
+        character_id,
+        actor=actor,
+        authorize=authorize,
+        mark_played=False,
+        dead=DeadCharacterWrite.DEATH_AND_REVIVAL,
     ) as change:
         # A death is not a field the sheet's editor sets, so it is held to
         # its FIELD_RULES row here rather than through check_field_author.
@@ -2960,8 +3367,16 @@ def rename(
     actor: User | None = None,
     authorize: Callable[[Character], None] | None = None,
 ) -> ChangeResult:
-    """Rename a character; its id, and so its identity, stay the same."""
-    with changing(character_id, actor=actor, authorize=authorize) as change:
+    """Rename a character; its id, and so its identity, stay the same.
+
+    A dead character may be renamed: no rule governs a name (issue #932).
+    """
+    with changing(
+        character_id,
+        actor=actor,
+        authorize=authorize,
+        dead=DeadCharacterWrite.NO_RULE,
+    ) as change:
         old = change.character.name
         note = apply_name(change.character, name)
         change.note("name", old, change.character.name)
@@ -2976,12 +3391,16 @@ def add_equipment(
     actor: User | None = None,
     authorize: Callable[[Character], None] | None = None,
     purchase: bool = False,
+    price: Decimal | None = None,
+    combat: Mapping[str, object] | None = None,
 ) -> ChangeResult:
     """Add a named item to what the character carries; see ``apply_equipment``."""
     return _single(
         character_id,
         "equipment",
-        lambda character: apply_equipment(character, name, quantity, purchase=purchase),
+        lambda character: apply_equipment(
+            character, name, quantity, purchase=purchase, price=price, combat=combat
+        ),
         actor=actor,
         authorize=authorize,
     )
@@ -2996,7 +3415,22 @@ def allocate_skill_points(
     is_game_master: bool = False,
     authorize: Callable[[Character], None] | None = None,
 ) -> ChangeResult:
-    """Spend free skill points on a skill."""
+    """Spend free skill points on a skill, held to :func:`apply_skill_points`.
+
+    The Games Master chat's ``spend_skill_points`` runs here, so a player's
+    session is held to the skills glossary as the sheet is (issue #902).
+
+    Args:
+        character_id: The character's id.
+        skill: The skill's name as asked for.
+        points: How many points to spend.
+        actor: Who asked, for the history.
+        is_game_master: Whether a Game Master asked.
+        authorize: Raises when ``actor`` may not change the character.
+
+    Raises:
+        CharacterChangeError: Whatever :func:`apply_skill_points` refuses.
+    """
     with changing(character_id, actor=actor, authorize=authorize) as change:
         note, granted = apply_skill_points(
             change.character, skill, points, is_game_master=is_game_master
@@ -3042,9 +3476,18 @@ def update_field(
             for the Origin lock and the literacy reroll it decides.
 
     Raises:
-        CharacterChangeError: A player changing a rolled character's Origin.
+        CharacterChangeError: A player changing a rolled character's Origin,
+            or any field but those in :data:`DEAD_EDITABLE_FIELDS` on a dead
+            character (issue #932).
     """
-    with changing(character_id, actor=actor, authorize=authorize) as change:
+    with changing(
+        character_id,
+        actor=actor,
+        authorize=authorize,
+        dead=(
+            DeadCharacterWrite.NO_RULE if field_name in DEAD_EDITABLE_FIELDS else None
+        ),
+    ) as change:
         notes = change_field(change, field_name, value, is_game_master=is_game_master)
     return ChangeResult(change.character, "; ".join(notes))
 

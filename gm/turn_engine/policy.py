@@ -10,7 +10,7 @@ model writes, and nothing typed in the chat, changes it (issue #352).
 import re
 from dataclasses import dataclass
 
-from characters.skill_checks import GOVERNING_ATTRIBUTES
+from characters.skill_checks import ATTRIBUTES, GOVERNING_ATTRIBUTES
 
 from ..engine import MODE_AIDE, MODE_PLAY
 
@@ -49,6 +49,8 @@ ACTION_NAMES: tuple[str, ...] = (
     "skill_check",
     # After the rest again (#886): a dying character's survival save.
     "survival_save",
+    # And again (#911): 3d6 ≤ an attribute, read the rule's way.
+    "attribute_check",
 )
 
 #: Actions that change what the campaign holds: where the party is, who and
@@ -208,18 +210,30 @@ _SAVE_WORDS = re.compile(
     re.IGNORECASE,
 )
 
+#: An attribute check asked for as one (#911): "an attribute check", "a
+#: strength check", "his CON check". The three-letter forms are the sheet's.
+_ATTRIBUTE_NAMES = "|".join(
+    name for attribute in ATTRIBUTES for name in (attribute, attribute[:3])
+)
+_ATTRIBUTE_CHECK_WORDS = re.compile(
+    rf"\b(?:attribute|{_ATTRIBUTE_NAMES}|chr)\s+checks?\b", re.IGNORECASE
+)
+
 #: Every action that rolls dice in play, each refused in aide mode unless the
 #: Game Master's message asks for it (issues #598, #906). The creation rolls
 #: -- attributes, Fatigue, background, literacy, the years -- make a
 #: character he asked to have made and are not gated here.
-AIDE_DICE_ACTIONS = frozenset({"roll", "skill_check", "survival_save"})
+AIDE_DICE_ACTIONS = frozenset(
+    {"roll", "skill_check", "survival_save", "attribute_check"}
+)
 
 
 def dice_actions_asked_for(latest: str | None) -> frozenset[str]:
     """Which of :data:`AIDE_DICE_ACTIONS` ``latest`` asks for (issue #906).
 
-    Any dice word asks for any of them; a skill check or a survival save
-    named as one (:data:`_CHECK_WORDS`, :data:`_SAVE_WORDS`) asks for that
+    Any dice word asks for any of them; a skill check, a survival save or
+    an attribute check named as one (:data:`_CHECK_WORDS`,
+    :data:`_SAVE_WORDS`, :data:`_ATTRIBUTE_CHECK_WORDS`) asks for that
     action. ``None`` (no chat message, as when a
     tool runs actions) asks for all of them.
     """
@@ -230,6 +244,8 @@ def dice_actions_asked_for(latest: str | None) -> frozenset[str]:
         asked.add("skill_check")
     if _SAVE_WORDS.search(latest):
         asked.add("survival_save")
+    if _ATTRIBUTE_CHECK_WORDS.search(latest):
+        asked.add("attribute_check")
     return frozenset(asked)
 
 

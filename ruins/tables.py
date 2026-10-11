@@ -7,6 +7,11 @@ repository, issue #917) is the single source of truth for the tables (issue
 a :class:`DiceTable`, so an edit to the page changes the generator with no code
 change. The drift guard lives in ``ruins/tests/test_tables.py``: it parses the
 real file and asserts the table set the generator expects is still published.
+
+The same parser reads every other GM-tools table page for the generic table
+roller (:mod:`ruins.table_rolls`, issue #809), which is why it also takes the
+shapes those pages use: dice side by side in one pipe table, ranged faces
+(``1−2``), and extra result columns read off the same roll.
 """
 
 import re
@@ -20,6 +25,9 @@ TABLES_MARKDOWN_PATH = GM_TOOLS_DIR / "dungeons-ruins.md"
 
 _DIE_HEADER_PATTERN = re.compile(r"^d(\d+)$")
 _SEPARATOR_CELL_PATTERN = re.compile(r"^:?-+:?$")
+# A face cell: one face (``3``) or an inclusive range (``1-2``). Canon pages
+# write ranges with a hyphen, an en dash or the minus sign (U+2212).
+_FACE_PATTERN = re.compile(r"^(\d+)(?:\s*[-–−]\s*(\d+))?$")
 
 
 @dataclass(frozen=True)
@@ -33,13 +41,18 @@ class DiceTable:
             key the generator looks tables up by.
         die_sides: The die size from the header's first cell (``d8`` → 8).
         rows: The result text for each face, in face order (``rows[0]`` is
-            face 1).
+            face 1). A ranged row (``1−2``) fills every face it covers.
+        extra_columns: The labels of any further result columns the same
+            roll reads, e.g. ``("Hindered by",)`` beside ``Wants``.
+        extra_rows: For each face, the cells under ``extra_columns``.
     """
 
     section: str
     title: str
     die_sides: int
     rows: tuple[str, ...]
+    extra_columns: tuple[str, ...] = ()
+    extra_rows: tuple[tuple[str, ...], ...] = ()
 
     @property
     def die(self) -> str:
@@ -58,44 +71,171 @@ class DiceTable:
             )
         return self.rows[face - 1]
 
+    def cells_for_face(self, face: int) -> tuple[tuple[str, str], ...]:
+        """Every column a rolled face reads, as ``(label, text)`` pairs.
+
+        The table's own title comes first, then each extra column, so a
+        ``| d8 | Wants | Hindered by |`` row answers both from one roll.
+
+        Raises:
+            ValueError: If ``face`` is outside ``1..die_sides``.
+        """
+        first = (self.title, self.row_for_face(face))
+        extras = self.extra_rows[face - 1] if self.extra_rows else ()
+        return (first, *zip(self.extra_columns, extras, strict=True))
+
+
+@dataclass
+class _PendingTable:
+    """A dice table being collected: one die column group of a pipe table.
+
+    A pipe table may set several dice side by side
+    (``| d10 | Someone needs... | d6 | The catch... |``): each die cell starts
+    a group that runs up to the next die cell, and each group is its own
+    table, rolled separately.
+    """
+
+    section: str
+    die_sides: int
+    first_column: int
+    end_column: int
+    labels: tuple[str, ...]
+    rows: dict[int, tuple[str, ...]]
+
+    @property
+    def title(self) -> str:
+        return self.labels[0]
+
+    def add_row(self, cells: list[str]) -> None:
+        """Record this group's slice of one body row.
+
+        A group shorter than its neighbours leaves its cells blank on the
+        rows it does not reach; those rows are skipped.
+
+        Raises:
+            ValueError: A face cell that is not a face or range, a reversed
+                range, results with no face, an empty result cell on a face,
+                or a face given twice.
+        """
+        group_cells = cells[self.first_column : self.end_column]
+        group_cells += [""] * (self.end_column - self.first_column - len(group_cells))
+        face_cell, results = group_cells[0], tuple(group_cells[1:])
+        if not face_cell:
+            if any(results):
+                raise ValueError(f"Table “{self.title}” has a row with no face")
+            return
+        face_match = _FACE_PATTERN.fullmatch(face_cell)
+        if face_match is None:
+            raise ValueError(
+                f"Table “{self.title}” has a face “{face_cell}” that is not a "
+                "number or a range"
+            )
+        low = int(face_match.group(1))
+        high = int(face_match.group(2) or low)
+        if high < low:
+            raise ValueError(
+                f"Table “{self.title}” has a reversed range “{face_cell}”: "
+                f"write it low to high, {high}–{low}"
+            )
+        for column_index, cell in enumerate(results):
+            if not cell:
+                raise ValueError(
+                    f"Table “{self.title}” has an empty “{self.labels[column_index]}” "
+                    f"cell on face “{face_cell}”"
+                )
+        for face in range(low, high + 1):
+            if face in self.rows:
+                raise ValueError(f"Table “{self.title}” repeats face {face}")
+            self.rows[face] = results
+
+    def build(self) -> DiceTable:
+        """The finished table.
+
+        Raises:
+            ValueError: If the faces do not run exactly 1..N for a dN header.
+        """
+        faces = sorted(self.rows)
+        expected_faces = list(range(1, self.die_sides + 1))
+        if faces != expected_faces:
+            raise ValueError(
+                f"Table “{self.title}” is misnumbered: a d{self.die_sides} "
+                f"needs faces {expected_faces[0]}–{expected_faces[-1]}, got {faces}"
+            )
+        ordered = [self.rows[face] for face in expected_faces]
+        has_extra_columns = len(self.labels) > 1
+        return DiceTable(
+            section=self.section,
+            title=self.title,
+            die_sides=self.die_sides,
+            rows=tuple(cells[0] for cells in ordered),
+            extra_columns=self.labels[1:],
+            extra_rows=(
+                tuple(cells[1:] for cells in ordered) if has_extra_columns else ()
+            ),
+        )
+
+
+def _header_groups(cells: list[str], section: str) -> list[_PendingTable]:
+    """Split a dice header row into its die column groups.
+
+    Raises:
+        ValueError: If a die cell has no label beside it.
+    """
+    die_columns = [
+        index for index, cell in enumerate(cells) if _DIE_HEADER_PATTERN.fullmatch(cell)
+    ]
+    groups = []
+    for position, first_column in enumerate(die_columns):
+        end_column = (
+            die_columns[position + 1] if position + 1 < len(die_columns) else len(cells)
+        )
+        labels = tuple(cells[first_column + 1 : end_column])
+        if not labels or not labels[0]:
+            raise ValueError(
+                f"The {cells[first_column]} column under “{section}” has no "
+                "table title beside it"
+            )
+        groups.append(
+            _PendingTable(
+                section=section,
+                die_sides=int(cells[first_column][1:]),
+                first_column=first_column,
+                end_column=end_column,
+                labels=labels,
+                rows={},
+            )
+        )
+    return groups
+
 
 def parse_tables(markdown_text: str) -> dict[str, DiceTable]:
     """Parse every dice table in a markdown document, keyed by title.
 
     A dice table starts at a header row whose first cell is a die size
-    (``| d8 | Built by... |``); its body rows map face numbers to results.
-    Tables whose header is not a die size are ignored, as is all prose.
+    (``| d8 | Built by... |``); its body rows map face numbers, or ranges
+    such as ``1−2``, to results. A header may set several dice side by side
+    (``| d10 | Needs | d6 | Catch |``): each die and the columns up to the
+    next die is a separate table. Further columns after a die's title are
+    read off the same roll (``| d8 | Wants | Hindered by |``). Tables whose
+    header is not a die size are ignored, as is all prose. Tables come back
+    in page order, left to right within a row.
 
     Raises:
         ValueError: If a dice table is malformed — faces that do not run
-            exactly 1..N for a dN header, or two tables sharing a title.
+            exactly 1..N for a dN header, a face that is not a number or
+            range, or two tables sharing a title.
     """
     tables: dict[str, DiceTable] = {}
     section = ""
-    pending: dict | None = None
+    pending: list[_PendingTable] = []
 
     def finalize() -> None:
         nonlocal pending
-        if pending is None:
-            return
-        faces = sorted(pending["rows"])
-        expected_faces = list(range(1, pending["die_sides"] + 1))
-        if faces != expected_faces:
-            raise ValueError(
-                f"Table “{pending['title']}” is misnumbered: a d{pending['die_sides']} "
-                f"needs faces {expected_faces[0]}–{expected_faces[-1]}, got {faces}"
-            )
-        if pending["title"] in tables:
-            raise ValueError(f"Duplicate table title “{pending['title']}”")
-        tables[pending["title"]] = DiceTable(
-            section=pending["section"],
-            title=pending["title"],
-            die_sides=pending["die_sides"],
-            rows=tuple(
-                pending["rows"][face] for face in range(1, pending["die_sides"] + 1)
-            ),
-        )
-        pending = None
+        for group in pending:
+            if group.title in tables:
+                raise ValueError(f"Duplicate table title “{group.title}”")
+            tables[group.title] = group.build()
+        pending = []
 
     for raw_line in markdown_text.splitlines():
         line = raw_line.strip()
@@ -111,29 +251,19 @@ def parse_tables(markdown_text: str) -> dict[str, DiceTable]:
             finalize()
             continue
         first_cell = cells[0]
-        die_match = _DIE_HEADER_PATTERN.fullmatch(first_cell)
-        if die_match:
+        if _DIE_HEADER_PATTERN.fullmatch(first_cell):
             finalize()
-            pending = {
-                "section": section,
-                "title": cells[1],
-                "die_sides": int(die_match.group(1)),
-                "rows": {},
-            }
+            pending = _header_groups(cells, section)
             continue
         if _SEPARATOR_CELL_PATTERN.fullmatch(first_cell):
             continue
-        try:
-            face = int(first_cell)
-        except ValueError:
+        if first_cell and _FACE_PATTERN.fullmatch(first_cell) is None:
             # A table that is not a dice table (non-numeric first column);
             # nothing of ours to collect.
             finalize()
             continue
-        if pending is not None:
-            if face in pending["rows"]:
-                raise ValueError(f"Table “{pending['title']}” repeats face {face}")
-            pending["rows"][face] = cells[1]
+        for group in pending:
+            group.add_row(cells)
     finalize()
     return tables
 

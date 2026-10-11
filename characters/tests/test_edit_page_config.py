@@ -11,10 +11,13 @@ lands on the wrong endpoint.
 
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
+from unittest import mock
 
 from django.conf import settings
 
+from characters.constants import CHARACTER_TEXT_LIMITS
 from characters.models import Character
 from characters.skills import (
     DEFAULT_RUN_YEARS,
@@ -26,6 +29,7 @@ from characters.skills import (
 from characters.views.characters import (
     AGING_PREVIEW_HORIZON_AGE,
     AGING_PREVIEW_HORIZON_STAGE,
+    CHARACTER_NUMBER_LIMITS,
 )
 from common.test_helpers import BaseTestCase
 
@@ -60,6 +64,7 @@ EXPECTED_KEYS = {
     "currentYears",
     "defaultRunYears",
     "maxRunYears",
+    "maxExperienceLogEntries",
     "survivalDice",
     "survivalTargets",
     "trackLabels",
@@ -74,6 +79,10 @@ EXPECTED_KEYS = {
     "initialEquipment",
     "packDropped",
     "markDeadUrl",
+    # Each text field's limit, for the inputs the script builds (#928).
+    "textLimits",
+    # And each number input's bound (#938).
+    "numberLimits",
     "reviveUrl",
     "rollFatigueUrl",
     "rollLiteracyUrl",
@@ -145,6 +154,8 @@ class CharacterEditConfigBlockTest(BaseTestCase):
             f"/tarmar/characters/{pk}/equipment/toggle-pack/",
         )
         self.assertEqual(config["markDeadUrl"], f"/tarmar/characters/{pk}/mark-dead/")
+        self.assertEqual(config["textLimits"], CHARACTER_TEXT_LIMITS)
+        self.assertEqual(config["numberLimits"], CHARACTER_NUMBER_LIMITS)
         self.assertEqual(config["reviveUrl"], f"/tarmar/characters/{pk}/revive/")
         self.assertEqual(
             config["rollLiteracyUrl"], f"/tarmar/characters/{pk}/roll-literacy/"
@@ -529,3 +540,70 @@ class EditableChoiceCellsFollowTheModelTest(BaseTestCase):
 
         self.assertNotIn('data-field="location"', html)
         self.assertIn(self.character.get_location_display(), html)
+
+
+class _NumberInputs(HTMLParser):
+    """Each number input's ``min`` and ``max``, keyed by its id or name."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bounds: dict[str, tuple[str | None, str | None]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "input" and attributes.get("type") == "number":
+            key = attributes.get("id") or attributes.get("name") or ""
+            self.bounds[key] = (attributes.get("min"), attributes.get("max"))
+
+
+class NumberInputBoundsTest(BaseTestCase):
+    """The sheet's number inputs stop at the server's bounds (issue #938).
+
+    The limits are patched to numbers no template would carry by chance, so
+    an input that shows them read them from ``number_limits`` rather than
+    from a number typed into the template.
+    """
+
+    ODD = {
+        "equipment_quantity": 997,
+        "equipment_weight": 1003,
+        "equipment_modifier": 11,
+        "armor_stops": 12,
+        "armor_dex_penalty": 13,
+        "check_difficulty": 41,
+        "check_total_minimum": 3,
+        "check_total_maximum": 14,
+        "mana_grant": 101,
+        "defender_dodge": 15,
+        "situational": 21,
+    }
+
+    def test_every_bounded_input_reads_the_map(self):
+        game_master = self.create_dm(username="bounds-gm")
+        character = Character.objects.create(
+            user=game_master,
+            name="Bounds Testwright",
+            skills={"sword": 3},
+            equipment=[{"item_id": "dagger", "quantity": 1}],
+            **CHARACTER_DEFAULTS,
+        )
+        self.login_as(game_master)
+        with mock.patch.dict(CHARACTER_NUMBER_LIMITS, self.ODD):
+            page = self.client.get(f"/tarmar/characters/{character.pk}/")
+        parser = _NumberInputs()
+        parser.feed(page.content.decode())
+        odd = self.ODD
+        expected = {
+            "skill-check-difficulty": ("0", odd["check_difficulty"]),
+            "total": (odd["check_total_minimum"], odd["check_total_maximum"]),
+            "amount": (-odd["mana_grant"], odd["mana_grant"]),
+            "attack-stops": ("0", odd["armor_stops"]),
+            "attack-dodge": ("0", odd["defender_dodge"]),
+            "attack-situational": (-odd["situational"], odd["situational"]),
+            "custom-weight": ("0", odd["equipment_weight"]),
+            "custom-stops": ("0", odd["armor_stops"]),
+            "custom-dex-penalty": (-odd["armor_dex_penalty"], "0"),
+        }
+        for key, (minimum, maximum) in expected.items():
+            with self.subTest(input=key):
+                self.assertEqual(parser.bounds.get(key), (str(minimum), str(maximum)))

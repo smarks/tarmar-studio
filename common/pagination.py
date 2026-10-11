@@ -29,3 +29,28 @@ def query_without(request: HttpRequest, *parameters: str) -> str:
     for parameter in parameters:
         preserved.pop(parameter, None)
     return preserved.urlencode()
+
+
+def latest_window(
+    count: int, before: int | None = None, size: int = PAGE_SIZE
+) -> tuple[int, int]:
+    """The rows a "latest first, show earlier" page shows, as ``[start, end)``.
+
+    A conversation reads oldest first and opens at its newest end, so its
+    pages are counted back from the end: the first page is the last ``size``
+    rows, and each earlier page the ``size`` rows before the one shown
+    (issue #972). ``before`` is clamped into the list, so a stale cursor
+    shows what is there rather than failing.
+
+    Args:
+        count: How many rows the list holds.
+        before: The first row already shown, whose predecessors this page
+            holds; ``None`` for the latest page.
+        size: Rows a page holds.
+
+    Returns:
+        ``(start, end)``: the page is rows ``start`` up to, not including,
+        ``end``; ``start`` rows come before it.
+    """
+    end = count if before is None else max(0, min(before, count))
+    return max(0, end - size), end

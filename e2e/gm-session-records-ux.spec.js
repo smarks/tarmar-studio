@@ -14,7 +14,7 @@
  * are a Game Master's, whose typed foes are built as typed.
  */
 
-const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const { test, expect, loginAs, TEST_USER, TEST_ADMIN, chooseToAttach } = require('./fixtures');
 const { runDjangoShell, readDjangoShell } = require('./django');
 
 /** A character for ``owner`` whose first turn on the board is their last. */
@@ -81,7 +81,7 @@ test.describe('GM session — the chat reads back as it was played', () => {
     test('the name and the rail follow the first reply, with no reload (#829)', async ({ page }) => {
         await loginAs(page, TEST_USER);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         const sessionId = new URL(page.url()).searchParams.get('session');
@@ -122,7 +122,7 @@ test.describe('GM session — a fight on the board', () => {
         seedDyingCharacter(TEST_ADMIN.username, name);
         await loginAs(page, TEST_ADMIN);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: name });
+        await chooseToAttach(page, name);
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 
@@ -167,7 +167,7 @@ test.describe('GM session — the Characters pane draws every character one way'
     test('a chat-built character carries Physical, Mental, purse and literacy where an attached one does (#848, #872)', async ({ page }) => {
         await loginAs(page, TEST_USER);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         await page.click('#gm-panel-tab-characters');

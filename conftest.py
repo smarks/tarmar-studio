@@ -98,11 +98,13 @@ def ollama_is_unreachable(monkeypatch):
     with Ollama running got a live model deciding what the ledger recorded,
     where CI got a refused connection. Same test, two different code paths.
 
-    Patching `httpx` inside the client (rather than `chat`/`stream_chat`
-    themselves) keeps every existing mock working: the client's own tests
-    patch `common.services.ollama_client.httpx.stream` and `.post`, and any
-    test that mocks a level above this never reaches it. A test that wants a
-    live call back can monkeypatch these two names itself.
+    Patching the client's own connection opener (rather than
+    `chat`/`stream_chat` themselves) keeps every existing mock working: the
+    client's own tests patch `common.services.ollama_client.open_stream`, the
+    one place both calls open a connection (issue #935), and any test that
+    mocks a level above this never reaches it. `httpx.post` is refused too,
+    for any call that goes around it. A test that wants a live call back
+    patches `open_stream` with the real one, captured at import.
     """
     monkeypatch.setattr(ollama_client.httpx, "post", _refuse)
-    monkeypatch.setattr(ollama_client.httpx, "stream", _refuse)
+    monkeypatch.setattr(ollama_client, "open_stream", _refuse)

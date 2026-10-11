@@ -266,18 +266,11 @@ so, and whoever runs it can put it back from here.
                         <a href="{% sign_in_url %}">Sign in</a>
                         to bring your own.
                     </p>
-                    {% elif my_characters %}
+                    {% elif claim_picker.total %}
                     <form method="post"
                           action="{% url 'battle:seat-claim' battle.pk seat.combatant_id %}">
                         {% csrf_token %}
-                        <label>
-                            Bring one of your characters
-                            <select name="character_id" required>
-                                {% for character in my_characters %}
-                                <option value="{{ character.pk }}">{{ character.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </label>
+                        {% include "_picker.html" with picker=claim_picker instance=seat.combatant_id %}
                         <button type="submit" class="battle-button battle-button-primary">
                             Join with this character
                         </button>
@@ -537,9 +530,11 @@ update.
     </ul>
 </div>
 {% endif %}
+{% if hth_agreement %}{% include "battle/_hth_agreement.html" %}{% endif %}
 {% endif %}
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/picker.js' %}"></script>
 <script src="{% static 'js/battle.js' %}"></script>
 {% endblock %}

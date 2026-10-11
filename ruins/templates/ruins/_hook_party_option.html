@@ -1,0 +1,3 @@
+{% with summary=party.experience_summary %}<option value="{{ party.pk }}" {% if form_party == party.pk|stringformat:"s" %}selected{% endif %}>
+    {{ party.name }}{% if summary %} ({{ summary.count }} member{{ summary.count|pluralize }}, avg level {{ summary.average_level|floatformat:1 }}){% else %} (no members){% endif %}
+</option>{% endwith %}

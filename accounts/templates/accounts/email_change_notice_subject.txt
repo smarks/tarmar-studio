@@ -1,0 +1,1 @@
+Your email address at {{ site_name }} is being changed

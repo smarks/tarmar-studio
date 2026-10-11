@@ -52,20 +52,21 @@ from django.views.generic import DetailView, ListView
 
 from bestiary.generation import DIFFICULTY_BANDS
 from bestiary.models import CATEGORY_CHOICES, Beast
-from characters.constants import CHARACTER_NAME_CHARACTERS
+from characters.constants import CHARACTER_NAME_CHARACTERS, too_long
 from common.breadcrumbs import BreadcrumbMixin, step, trail
 from common.helpers import (
     _json_error,
     _parse_json_body,
+    column_length,
     request_theme,
     whole_number,
 )
 from common.mixins import ActivePageMixin
 from common.pagination import PAGE_SIZE, query_without
+from common.pickers import asked_for, picker_body_response
 from common.seeds import InvalidSeed, parse_seed
-from parties.models import Party
 
-from . import control, profiles
+from . import agreement, control, profiles
 from .access import (
     Actor,
     actor_of,
@@ -90,8 +91,10 @@ from .persistence import (
     TARMAR_PROFILE,
     storable_profile,
 )
+from .pickers import SETUP_PICKER_KINDS, claim_picker, setup_picker
 from .services import (
     MAX_COMBATANTS,
+    MAX_TEAM_NAME,
     MIN_COMBATANTS,
     STALE_POOLS_REFUSAL,
     TAKE_SEAT_GAME_MASTER_ONLY,
@@ -101,7 +104,6 @@ from .services import (
     advance_turn,
     bare_handed_line,
     claim_seat,
-    claimable_characters,
     dead_seats,
     import_party_into_draft,
     record_player_action,
@@ -118,6 +120,7 @@ from .services import (
     set_battle_control_mode,
     set_combatant_control_mode,
     set_entry_team,
+    set_hth_agreement,
     set_seat_ready,
     stale_pools,
     start_battle,
@@ -388,14 +391,16 @@ def _own_draft_or_404(request, pk) -> BattleDraft:
     return get_object_or_404(own_drafts(actor), pk=pk)
 
 
-#: The draft fields the terms stage edits, with their validators. Each
-#: validator returns the value to store, raising ValueError with a
-#: user-facing message otherwise. One table serves both writers — the
-#: autosave endpoint and the start-time merge — so they cannot drift.
+#: How long a battle's name may be: its column's own length, which the terms
+#: field's maxlength and the refusal below both read (issue #938).
+BATTLE_NAME_MAX_LENGTH = column_length(Battle, "name")
+
+
 def _clean_draft_name(value) -> str:
     name = str(value or "").strip()
-    if len(name) > Battle._meta.get_field("name").max_length:
-        raise ValueError("That name is too long")
+    refusal = too_long("Name", name, BATTLE_NAME_MAX_LENGTH)
+    if refusal:
+        raise ValueError(refusal)
     return name
 
 
@@ -423,6 +428,10 @@ def _clean_draft_control_mode(value) -> str:
     return control.clean_mode(value or control.AUTOMATIC)
 
 
+#: The draft fields the terms stage edits, with their validators. Each
+#: validator returns the value to store, raising ValueError with a
+#: user-facing message otherwise. One table serves both writers — the
+#: autosave endpoint and the start-time merge — so they cannot drift.
 DRAFT_FIELD_CLEANERS = {
     "name": _clean_draft_name,
     "seed": _clean_draft_seed,
@@ -641,11 +650,9 @@ def _setup_context(
         # import itself skips the members this user cannot see. A guest is
         # offered none — a party is a saved team, and saving needs an
         # account (#305) — and is told so rather than shown an empty shelf.
-        "parties": (
-            Party.objects.none()
-            if actor.is_guest
-            else Party.objects.prefetch_related("memberships")
-        ),
+        # A page at a time, newest first, with a search that reaches every
+        # page (#864).
+        "party_picker": setup_picker(draft, actor, "parties"),
         "is_guest": actor.is_guest,
         # The "This battle counts" choice is a Game Master's (#750, #751).
         "is_dm": actor.is_dm,
@@ -654,6 +661,9 @@ def _setup_context(
         "muster_total": total,
         "min_combatants": MIN_COMBATANTS,
         "max_combatants": MAX_COMBATANTS,
+        # The two text inputs' maxlength, the server's own (issue #938).
+        "battle_name_max_length": BATTLE_NAME_MAX_LENGTH,
+        "team_name_max_length": MAX_TEAM_NAME,
         "muster_full": total >= MAX_COMBATANTS,
         "blockers": blockers,
         "error": error,
@@ -665,9 +675,9 @@ def _setup_context(
         # The battle-level control default this muster will be created with
         # (#308); per-combatant modes are set from the battle page.
         "control_modes": control.MODE_CHOICES,
-        "seatable_characters": (
-            seatable_characters(actor.user).select_related("user").order_by("name")
-        ),
+        # The saved-character shelf, a page at a time, newest first, with a
+        # search that reaches every page (#864).
+        "shelf_picker": setup_picker(draft, actor, "characters"),
         "setup_url": setup_url,
         "max_seed": MAX_SEED - 1,
         "has_open_seats": any(row["kind"] == "open_seat" for row in rows),
@@ -719,6 +729,34 @@ def battle_setup(request, pk):
     notice = request.session.pop(SETUP_NOTICE_SESSION_KEY.format(pk=draft.pk), None)
     return render(
         request, SETUP_TEMPLATE, _setup_context(request, draft, notice=notice)
+    )
+
+
+@require_GET
+def battle_setup_picker(request, pk, kind: str) -> HttpResponse:
+    """One page of the setup page's shelf or party picker (issue #864).
+
+    What ``picker.js`` asks for as the reader types or turns a page: the
+    picker's body for ``?q=`` and ``?page=``, from the same rows the setup
+    page offers and its add and import endpoints accept. The draft is the
+    asker's own or a 404, as on the page.
+    """
+    draft = _own_draft_or_404(request, pk)
+    if kind not in SETUP_PICKER_KINDS:
+        raise Http404("No such picker")
+    query, page_number = asked_for(request)
+    actor = actor_of(request)
+    picker = setup_picker(draft, actor, kind, query=query, page_number=page_number)
+    rows = _muster_rows(draft, actor)
+    return picker_body_response(
+        request,
+        picker,
+        {
+            "draft": draft,
+            "setup_url": reverse("battle:setup", args=[draft.pk]),
+            "muster_full": len(rows) >= MAX_COMBATANTS,
+            "user": request.user,
+        },
     )
 
 
@@ -1405,6 +1443,40 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
         "seats": seat_summaries(battle, actor),
         "pending": pending_payload(battle, actor),
         "advance": advance_control(battle, actor),
+        "hth_agreement": hth_agreement_panel(battle, actor),
+    }
+
+
+def hth_agreement_panel(battle, actor: Actor) -> dict | None:
+    """What the page shows of the "HTH by agreement" ruling (#867), or None.
+
+    Rendered from the battle's record, the one source of truth: the line
+    every viewer reads, and, for the fight's Game Master
+    (:func:`battle.services.runs_the_seats`, the only one who may change it),
+    the marked pairs and the combatants a new pair is chosen from. A classic battle has no such ruling and gets nothing.
+
+    Args:
+        battle: The battle.
+        actor: The viewer.
+    """
+    if battle.rules_profile != TARMAR_PROFILE:
+        return None
+    record = agreement.Agreement.of(battle)
+    rows = list(battle.combatants.order_by("pk"))
+    names = {row.pk: row.display_name for row in rows}
+    return {
+        "line": agreement.describe(record, names),
+        "whole_battle": record.whole_battle,
+        "pairs": [
+            {
+                "first": first,
+                "second": second,
+                "names": agreement.pair_names((first, second), names),
+            }
+            for first, second in sorted(record.pairs)
+        ],
+        "can_rule": runs_the_seats(battle, actor.user),
+        "combatants": [{"id": row.pk, "name": row.display_name} for row in rows],
     }
 
 
@@ -1532,9 +1604,25 @@ class BattleDetailView(
             context["blocking_seats"] = dead_seats(battle)
             context["archetypes"] = ARCHETYPES
             # What a claim may bring (#270): your own living, undeleted
-            # characters — the same chokepoint claim_seat enforces.
-            context["my_characters"] = claimable_characters(actor.user).order_by("name")
+            # characters — the same chokepoint claim_seat enforces — a page
+            # at a time, newest first, with a search (#864).
+            context["claim_picker"] = claim_picker(battle, actor)
         return context
+
+
+@require_GET
+def battle_claim_picker(request, pk) -> HttpResponse:
+    """One page of a lobby seat's claim picker (issue #864).
+
+    The viewer's own living characters (``claimable_characters``, what
+    ``claim_seat`` accepts), searched by name, for a battle the viewer may
+    read. A guest has none.
+    """
+    actor = actor_of(request)
+    battle = get_object_or_404(readable_battles(actor), pk=pk)
+    query, page_number = asked_for(request)
+    picker = claim_picker(battle, actor, query=query, page_number=page_number)
+    return picker_body_response(request, picker, {"battle": battle})
 
 
 def _detail_with_error(request, battle: Battle, message: str, *, status: int = 400):
@@ -1575,6 +1663,18 @@ def _refuse(request, battle: Battle, message: str, *, status: int = 400):
     if _wants_json(request):
         return _json_error(message, status=status)
     return _detail_with_error(request, battle, message, status=status)
+
+
+def _back_or_detail(request, battle: Battle):
+    """Where a form post on a battle lands: the ``next`` it names, when that
+    is a page on this site (the GM chat's Battle tab posts from the chat),
+    else the battle page."""
+    back = str(request.POST.get("next") or "")
+    if back and url_has_allowed_host_and_scheme(
+        back, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return redirect(back)
+    return redirect("battle:detail", pk=battle.pk)
 
 
 @require_POST
@@ -1638,6 +1738,49 @@ def battle_control(request, pk):
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return redirect("battle:detail", pk=battle.pk)
+
+
+@require_POST
+def battle_hth_agreement(request, pk):
+    """Mark or unmark the battle, or a pair, "HTH by agreement" (#867).
+
+    The fight's Game Master only (:func:`battle.services.runs_the_seats`),
+    here and in the service it calls. A form post lands back where it came
+    from (the battle page, or the GM chat's Battle tab), whose panel renders
+    from the battle's record; an XHR caller gets the battle payload. ``scope`` is "battle" or
+    "pair"; ``agreed`` marks or unmarks; a pair names ``first`` and
+    ``second``.
+    """
+    actor, battle = _actor_and_readable_battle(request, pk)
+    if not runs_the_seats(battle, actor.user):
+        return _refuse(request, battle, agreement.GAME_MASTER_ONLY, status=403)
+    data, err = (
+        _parse_json_body(request) if _wants_json(request) else (request.POST, None)
+    )
+    if err:
+        return err
+    scope = str(data.get("scope") or "")
+    pair = None
+    if scope == "pair":
+        try:
+            pair = (whole_number(data.get("first")), whole_number(data.get("second")))
+        except ValueError:
+            return _refuse(request, battle, "Name two combatants for the pair")
+    elif scope != "battle":
+        return _refuse(request, battle, "Name the whole battle or one pair")
+    try:
+        battle, _event = set_hth_agreement(
+            battle.pk,
+            actor,
+            agreed=_form_flag(data.get("agreed")),
+            whole_battle=scope == "battle",
+            pair=pair,
+        )
+    except ValueError as ruling_error:
+        return _refuse(request, battle, str(ruling_error))
+    if _wants_json(request):
+        return JsonResponse(battle_payload(battle, actor, [], request))
+    return _back_or_detail(request, battle)
 
 
 @require_POST
@@ -1789,16 +1932,11 @@ def battle_resnapshot(request, pk):
         return _refuse(request, battle, str(refusal))
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
-    back = str(request.POST.get("next") or "")
-    if back and url_has_allowed_host_and_scheme(
-        back, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-    ):
-        return redirect(back)
-    return redirect("battle:detail", pk=battle.pk)
+    return _back_or_detail(request, battle)
 
 
 # Single source of truth for how long a combatant name may be: the model.
-COMBATANT_NAME_MAX_LENGTH = BattleCombatant._meta.get_field("display_name").max_length
+COMBATANT_NAME_MAX_LENGTH = column_length(BattleCombatant, "display_name")
 
 # characters.constants.CHARACTER_NAME_PATTERN plus parentheses, which
 # duplicated beast names ("Cougar (2)") already carry.
@@ -1838,10 +1976,9 @@ def battle_rename(request, pk):
     name = name.strip()
     if not name:
         return _json_error("A combatant needs a name")
-    if len(name) > COMBATANT_NAME_MAX_LENGTH:
-        return _json_error(
-            f"Name must be {COMBATANT_NAME_MAX_LENGTH} characters or fewer"
-        )
+    refusal = too_long("Name", name, COMBATANT_NAME_MAX_LENGTH)
+    if refusal:
+        return _json_error(refusal)
     if not COMBATANT_NAME_PATTERN.match(name):
         return _json_error(
             "Names may only use letters, numbers, spaces, hyphens, "
@@ -2027,6 +2164,18 @@ def battle_act(request, pk):
             target_id = whole_number(target_id_raw)
         except ValueError:
             return _json_error("A numeric target_id is required")
+    destination_raw = data.get("destination")
+    destination = None
+    if destination_raw is not None:
+        if not isinstance(destination_raw, list) or len(destination_raw) != 2:
+            return _json_error("A destination is a hex: [q, r]")
+        try:
+            destination = (
+                whole_number(destination_raw[0]),
+                whole_number(destination_raw[1]),
+            )
+        except ValueError:
+            return _json_error("A destination is a hex: [q, r]")
     try:
         battle, events = record_player_action(
             battle.pk,
@@ -2037,6 +2186,7 @@ def battle_act(request, pk):
             letter=str(data.get("letter") or ""),
             target_id=target_id,
             spell_key=str(data.get("spell_key") or ""),
+            destination=destination,
             as_ai=as_ai,
         )
     except ValueError as act_error:

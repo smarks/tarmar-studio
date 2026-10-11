@@ -61,7 +61,7 @@ skill_roll.start()
 run_actions(session, {'action': 'play_years', 'character_id': wren, 'track': 'campaigner', 'years': 7})
 survival.stop()
 skill_roll.stop()
-run_actions(session, {'action': 'spend_skill_points', 'character_id': wren, 'skill': 'sword', 'points': 1})
+run_actions(session, {'action': 'spend_skill_points', 'character_id': wren, 'skill': 'broadsword', 'points': 1})
 print('SESSION', session.pk)
 `.trim().replace(/\n/g, '; ');
 

@@ -1,0 +1,9 @@
+{% comment %}The lobby's claim (issue #864): one page of the viewer's own characters, newest first, as the options of the claim form's select.{% endcomment %}
+<label>
+    Bring one of your characters
+    <select name="character_id" required{% if not picker.rows %} disabled{% endif %}>
+        {% for character in picker.rows %}
+        <option value="{{ character.pk }}">{{ character.name }}</option>
+        {% endfor %}
+    </select>
+</label>

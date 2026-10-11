@@ -9,7 +9,7 @@ Let's Encrypt account.
 
 This file used to be the plan for issues #30 and #12: move the
 `tarmar.duckdns.org` HTTPS block off the old `pillars.duckdns.org` certificate.
-That happened in [#272](https://github.com/smarks/tarmar-studio/pull/272)
+That happened in [#272](https://github.com/smarks/tarmar-studio-private/pull/272)
 (commit `ff510fa`, "Load the duckdns cert from its own lineage, not pillars'"),
 and both issues were closed on 2026-09-04. `nginx/tarmar.conf` has pointed at
 `/etc/letsencrypt/live/tarmar.duckdns.org/` ever since. There is nothing left to

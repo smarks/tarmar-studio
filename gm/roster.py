@@ -20,7 +20,12 @@ from django.utils import timezone
 from characters.constants import UNNAMED_CHARACTER, name_within_rule
 from characters.dice import roll_2d6_logged, roll_physical_features
 from characters.models import Character
-from characters.services import apply_background_roll
+from characters.services import (
+    apply_background_roll,
+    apply_provenance_roll,
+    apply_wealth_roll,
+    follow_origin,
+)
 
 from .ledger import (
     GAME_MASTER_SKILL_POINTS_KEY,
@@ -103,7 +108,9 @@ def built_here(session: GMSession | None) -> list[RosterEntry]:
     return [entry for entry in roster(session) if entry.character.pk in labelled]
 
 
-def start_character(session: GMSession, who: str, *, name: str = "") -> Character:
+def start_character(
+    session: GMSession, who: str, *, name: str = "", origin: str = ""
+) -> Character:
     """Create a character record for this session and attach it.
 
     The server rolls the dice nobody chooses now, because code owns the dice:
@@ -122,6 +129,16 @@ def start_character(session: GMSession, who: str, *, name: str = "") -> Characte
         session: The session; its owner owns the character.
         who: What the conversation calls the character; kept as its label.
         name: The character's name, when the change that starts it gives one.
+        origin: The Origin the plan that starts the character states
+            (``set_background``), as a choice of ``Character.location``; empty
+            to roll it. The rules let the Origin be rolled or chosen, a stated
+            one is recorded, not rolled (#860), and a roll is final for a
+            player (#970), so it is recorded here as a choice, with the skill
+            it grants, instead of being rolled and then refused. Recorded at
+            creation rather than by the ``set_background`` itself, so a part
+            of that change the server refuses (a player's provenance or
+            wealth) does not take the Origin back with it. Provenance and
+            wealth are rolled as ever.
 
     Returns:
         The saved, attached character.
@@ -138,7 +155,7 @@ def start_character(session: GMSession, who: str, *, name: str = "") -> Characte
     # under the standing rule; Spencer may overrule.
     if name:
         name = str(Character.clean_field_value("name", name))
-    label = who.strip()[:100]
+    label = who.strip()[: SessionCharacter.MAX_LABEL_CHARS]
     physical, log_entries = roll_physical_features()
     fatigue_roll, fatigue_log = roll_2d6_logged()
     log_entries.append(f"Fatigue: {fatigue_log}")
@@ -161,7 +178,19 @@ def start_character(session: GMSession, who: str, *, name: str = "") -> Characte
         dice_log="\n".join(log_entries),
         **physical,
     )
-    apply_background_roll(character)
+    if origin:
+        # Chosen, as the sheet records a chosen Origin (services.change_field):
+        # on the record, with its skill, and no dice-log line, so it stays the
+        # player's to choose again until literacy fixes it.
+        unrolled = character.location
+        character.location = origin
+        character.location_recorded = True
+        follow_origin(character, unrolled, was_recorded=False)
+        # The creation page's order, less the Origin: provenance, then wealth.
+        apply_provenance_roll(character)
+        apply_wealth_roll(character)
+    else:
+        apply_background_roll(character)
     with transaction.atomic():
         character.save()
         session.characters.add(character)

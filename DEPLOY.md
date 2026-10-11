@@ -25,12 +25,97 @@ from each release checkout back to the main checkout.
 `DATABASE_URL` included. The units read it through systemd's `EnvironmentFile`,
 and `deploy.sh` reads the same file with `load_env_file`, so `migrate` always
 targets the database the site serves from (issue #574). Nothing in the
-repository holds a database URL.
+repository holds a database URL. The one setting kept apart is the nightly
+restore check's connection, in `.env.restore-check` beside it, which the units
+never load (see [Backups](#backups)). Both files are mode 600.
 
 Both readers agree only on plain lines, so `deploy.sh` accepts only blank lines,
 `#` comments and `KEY=value` with no quotes, backslashes, `$`, backticks or
 spaces in the value. Any other line fails the deploy, naming the line and key
 but never printing the value.
+
+### Mail
+
+Password reset (issue #929) sends its link by email, and so does email-address
+confirmation (issue #931); nothing else on the site sends mail. Production
+hands every message to the host's own postfix on `localhost:25`, with no login
+and no TLS, which is what the settings default to. The one value `.env` must add is the sender:
+
+```
+DEFAULT_FROM_EMAIL=tarmar@roots.origamisoftware.com
+```
+
+With `DEBUG=False` the settings refuse to start without it, so a deploy that
+lacks it stops at `collectstatic` and the live colour keeps serving. Use an
+address postfix will accept as a sender, and a bare address: `load_env_file`
+refuses spaces, quotes, backslashes, `$` and backticks in a value, so the
+space in a `Name <address>` form fails the deploy. Whether the
+receiving server takes the message is down to that domain's SPF and DMARC
+records, so test it from the main checkout before relying on it:
+
+```bash
+set -a; . ./.env; set +a
+uv run python manage.py sendtestemail you@example.com
+```
+
+A send that fails during a reset is logged to the journal (`django.contrib.auth`,
+"Failed to send password reset email"), and the visitor still sees the same
+"sent if the account exists" page, so the journal is where to look.
+
+| Variable | Default | Set it when |
+|----------|---------|-------------|
+| `DEFAULT_FROM_EMAIL` | none in production (`tarmar@localhost` under DEBUG) | always, in production |
+| `EMAIL_BACKEND` | console under DEBUG, SMTP otherwise | never on the host |
+| `EMAIL_HOST` / `EMAIL_PORT` | `localhost` / `25` | relaying somewhere other than the local postfix |
+| `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | empty | that relay needs a login |
+| `EMAIL_USE_TLS` | `false` | that relay needs STARTTLS |
+| `SITE_BASE_URL` | unset: the email follows the request, the command uses `https://` + the first `ALLOWED_HOSTS` entry | you want every reset link on one fixed name, independent of the Host header |
+
+An account with no email address on file, or a site whose mail is not working
+yet, gets its link from the host operator instead. It is the same signed link
+the email would carry, it works once, it expires after three days, and whoever
+holds it can set the password, so hand it over the way you would a password.
+From the main checkout:
+
+```bash
+set -a; . ./.env; set +a
+uv run python manage.py password_reset_link <username>
+uv run python manage.py password_reset_link <username> --base-url https://tarmar.origamisoftware.com
+```
+
+`manage.py changepassword <username>` still works too, when the operator is
+the one choosing the password.
+
+#### Confirmed addresses (issue #931)
+
+The reset form mails only an address that has been **confirmed**: someone
+opened a link sent to it. Changing an address on the profile takes the
+account's password, sends a confirmation link to the new address and a notice
+to the old one, and the address on file changes only when the link is opened
+(it works once, expires with `PASSWORD_RESET_TIMEOUT`, and dies if a newer
+change is asked for or the password changes). An address typed at
+registration is unconfirmed until its link is opened. Admins and DMs cannot
+change another account's address. Migration `accounts.0012` marked every
+address already on file as confirmed, since each was a working reset route
+until then.
+
+When the operator doubts an address, or has confirmed one some other way:
+
+```bash
+uv run python manage.py set_email_verified <username> false
+uv run python manage.py set_email_verified <username> true
+```
+
+`false` stops the reset form mailing that address until its holder confirms it
+again from their profile (Change email address, the same address). Both lines
+are written to the audit log. Django's admin shows the same flag under "Email
+confirmation"; an address changed there is not confirmed by being typed, so
+saving a changed address unticks the flag unless the same save changes the
+flag on purpose. A confirmation link that
+fails to send is logged to the journal (`accounts.email_change`), and the
+change form shows again saying nothing changed. The notice to the old address
+goes only to a confirmed address, within the same three-an-hour allowance per
+inbox as everything else that mails.
 
 ### The Tarmar canon (`TARMAR_CANON_DIR`)
 
@@ -120,27 +205,58 @@ the lock afresh rather than deploying without one.
 
 ### The gate, and what "green" means
 
-CI runs on the Mac Studio's self-hosted runner (`scripts/ci-runner/`, issue
-#576); the commit hook no longer runs pytest or Playwright, so a commit that
-skipped `./run gate` and never went through a pull request has had no suite run
-on it at all. `./run gate` is the check that stands between a merge and a
-deploy whatever CI says, and the only one while the runner is not registered.
+CI runs where the repository variable `CI_RUNNER` says (issue #964): on
+GitHub's machines when it is unset, on datahorde's container runner when it is
+`datahorde`. The commit hook no longer runs pytest or Playwright, so a commit
+that skipped `./run gate` and never went through a pull request has had no
+suite run on it at all. `./run gate` is the check that stands between a merge
+and a deploy whatever CI says, and the only one while CI is not running, for
+instance with `CI_RUNNER=datahorde` and no runner online there, where jobs
+queue rather than run.
 
 ```bash
-./run gate                 # run everything, record the commit, push the record
+./run gate                 # run everything, record the commit, push the record, deploy
+./run gate --no-deploy     # ...but do not start the Deploy workflow
 ./run gate --check         # does HEAD already have a record?
 ./run gate --check <sha>   # ...or that commit
 ./run gate --no-push       # record locally only (a deploy host will not see it)
 ```
 
+**To deploy, run `./run ship`** after merging: it gates the head of `main`
+against the canon's head in a temporary worktree, follows the Deploy run the
+gate starts, and removes what it made. `docs/repositories.md` lists every
+repository a deployment depends on and how a change in each reaches
+production.
+
+**The gate starts the deploy.** When the recorded commit is still the head of
+`main` on GitHub and the first pass ran the Tarmar canon, `./run gate` starts
+the Deploy workflow once the record is pushed (`gh workflow run deploy.yml
+--ref main -f command="--expect <sha>"`). Deploy no longer starts on push: a
+merge has no record yet, so every push-started run refused and showed red
+(Spencer, 2026-10-10). A pass on an older commit, or one that ran only the
+default canon, starts nothing; a Tarmar-canon gate run on the head deploys
+it. `--expect` tells `deploy.sh` which commit was vouched for: if `main` has
+moved by the time the run starts (it may wait behind another deploy),
+`deploy.sh` deploys the new head only if it has its own Tarmar-canon record,
+and otherwise stands down and exits 0. If the workflow will not start, the
+gate exits 1 with the record kept, and Deploy can be started from the
+Actions tab.
+
 It runs, in order: `ruff check`, `ruff format --check`, `pyright`,
 `makemigrations --check --dry-run`, `build_guides.py --check`, `pytest -q`,
 `npx jest`, and Playwright through `scripts/update_js_coverage_threshold.py
---check` on its own `E2E_PORT` (8390, so a dev server on 8000 neither answers
+--check` on its own `E2E_PORT` (so a dev server on 8000 neither answers
 the suite's requests nor loses its own). It then runs pytest, Jest and
 Playwright a second time, named `pytest (default canon)` and so on, with
 `TARMAR_CANON_DIR` set to the absolute path of `reference/default_canon` and
-Playwright on `E2E_PORT` 8391 (`--default-canon-e2e-port`). That second pass
+Playwright on a second `E2E_PORT`. Each port, and the fake Ollama's port 1000
+above it, is picked free from 8390 upward (starting at an offset derived from
+the checkout's path, so two worktrees' gates seldom reach for the same pair),
+and the note records both as `e2e-port` and `default-canon-e2e-port`.
+`--e2e-port` and `--default-canon-e2e-port` name them instead; a named port
+something is already listening on is refused, as is a picked one taken
+before its browser step starts, since Playwright would test that server's
+code (issue #966). That second pass
 proves the configuration of a checkout without the private canon (issue
 #920). Ruff, pyright and the migration check do not read the canon and run
 once. So does `build_guides.py --check`, in the first pass: `build/` holds only
@@ -206,11 +322,17 @@ Run as `sam` (the script uses `sudo` for the root-owned pieces, as `deploy.sh` d
 
 ### Deploy
 
+From the Mac, after merging:
+
 ```bash
-./deploy.sh
+./run ship
 ```
 
-This will:
+That gates the head of `main` and starts the Deploy workflow, which runs
+`./deploy.sh --expect <sha>` on this host. Running `./deploy.sh` here by hand
+still works, but collides on the deploy lock with any Deploy run in progress.
+
+`deploy.sh` will:
 1. Refuse the commit outright if `refs/notes/gate` holds no passing record for it (unless `--force`)
 2. Pull latest code into the main checkout, then re-run itself from the pulled copy (bash reads the script before the pull replaces it)
 3. Check out origin/main into the inactive colour's release checkout
@@ -227,6 +349,7 @@ This will:
 |---------|-------------|
 | `./deploy.sh` | Deploy latest changes |
 | `./deploy.sh --force` | Redeploy even if no changes, and without a passing gate record |
+| `./deploy.sh --expect <sha>` | Deploy, but stand down (exit 0) if `main` has moved past `<sha>` to a commit with no Tarmar-canon gate record; what the gate's Deploy run sends |
 | `./deploy.sh rollback` | Switch back to previous environment |
 | `./deploy.sh status` | Show which environment is active and what revision each colour runs |
 | `./deploy.sh backup` | `pg_dump -Fc` the database into `var/backups/` (what the nightly timer runs) |
@@ -260,6 +383,47 @@ newest 10. A failed dump stops the deploy before anything is migrated.
 `tarmar-backup.service.template` and `tarmar-backup.timer`) takes a
 `nightly-<timestamp>.dump` around 03:30, also keeping 10. The two kinds are
 pruned separately.
+
+The nightly run (`deploy.sh backup --verify`) then restores its dump into a
+throwaway `tarmar_restore_check_<pid>` database, counts `django_migrations`,
+and drops it again; an exit trap drops it however the check ends. It does not
+connect as the app's role. Creating a database needs `CREATEDB`, which the
+role in `DATABASE_URL` does not have and should not get, so the check runs as
+a role of its own, `tarmar_restore_check`, that holds `CREATEDB` and owns
+nothing but the scratch databases it makes (issue #913). `pg_dump` still reads
+as the role in `DATABASE_URL`.
+
+Its connection lives in `.env.restore-check` in the main checkout, a file of
+its own holding one line, `RESTORE_CHECK_DATABASE_URL`, which names the
+`postgres` maintenance database on the same server. Only the restore check
+reads it. It is kept out of `.env` because the units load `.env`: there, the
+running app could have read a role that can create databases. Create the role
+and the file once, generating the password on the host so it is never shown
+(`openssl rand -hex` gives a value the env reader accepts unquoted):
+
+```bash
+cd /home/sam/dev/tarmar-studio
+umask 077
+password=$(openssl rand -hex 24)
+printf "SET log_min_error_statement = panic;\nCREATE ROLE tarmar_restore_check LOGIN CREATEDB PASSWORD '%s';\n" \
+    "$password" | sudo -u postgres psql --quiet -v ON_ERROR_STOP=1
+printf 'RESTORE_CHECK_DATABASE_URL=postgres://tarmar_restore_check:%s@localhost:5432/postgres\n' \
+    "$password" > .env.restore-check
+unset password
+chmod 600 .env .env.restore-check
+```
+
+The `SET` keeps a failed `CREATE ROLE` from being written to the server log
+with the password in it. The stock `pg_hba.conf` lines for `127.0.0.1` and
+`::1` (`scram-sha-256`, all users) admit the role exactly as they admit
+`tarmar`. `.env`, `.env.restore-check` and any `.env.bak-*` copy hold
+credentials: keep them mode 600, and `.gitignore` keeps them out of git. To
+remove the role, delete `.env.restore-check` and run
+`sudo -u postgres psql -c 'DROP ROLE tarmar_restore_check'`.
+
+Without `.env.restore-check`, or without the variable in it, the check stops
+with a message pointing at this file, and `tarmar-backup.service` ends
+`failed` even though the dump itself was written.
 
 Restore one with:
 

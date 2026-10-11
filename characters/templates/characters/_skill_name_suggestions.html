@@ -1,0 +1,6 @@
+{% comment %}The add-skill input's type-ahead (issue #224). A partial because a
+skill allocated in place joins it, and those responses send it back
+re-rendered (issue #903).{% endcomment %}
+{% for skill_name in skill_name_suggestions %}
+<option value="{{ skill_name|title }}"></option>
+{% endfor %}

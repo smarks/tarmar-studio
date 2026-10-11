@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
+from functools import partial
 from typing import NamedTuple
 
 import httpx
@@ -29,24 +30,29 @@ from django.views.generic import ListView, TemplateView
 
 from battle.access import Actor, is_dm
 from battle.views import arena_context
+from characters.constants import too_long
 from characters.models import Character
 from common.breadcrumbs import BreadcrumbMixin, step, trail
 from common.decorators import rate_limit
 from common.helpers import (
     _json_error,
     _parse_json_body,
+    column_length,
     database_integer,
 )
 from common.mixins import ActivePageMixin
 from common.pagination import query_without
+from common.pickers import asked_for, picker_body_response
+from common.services.ollama_client import HangUp, StreamDeadlinePassed
 from reference.rendering import render_reference_markdown
 
 from . import roster
-from .attach import attach_refusal, attachable_characters
+from .attach import attach_refusal
 from .battle_report import fight_verdict, filed_verdict
 from .character_sheet import CharacterSheet, sheets_for
 from .fight import FightError, fight_in_progress, start_fight
 from .hand_records import latest_hand_edits, may_edit_by_hand
+from .history_pages import history_page, resolved_threads_page
 from .ledger import DraftLedger
 from .luck import luck_panel
 from .maps import MAP_AREAS, MapScope, detect_place, party_place
@@ -74,6 +80,13 @@ from .models import (
     StoryThread,
     SupplyItem,
     name_from_history,
+)
+from .pickers import (
+    SESSION_PICKER_SOURCES,
+    attachable_picker,
+    play_session_picker,
+    session_picker,
+    sessions_holding_character,
 )
 from .retrieval import (
     PROCEDURE_KIND,
@@ -105,6 +118,7 @@ from .services import (
     write_fold,
     write_session_recap,
 )
+from .text_limits import GM_TEXT_LIMITS
 from .transcript import render_transcript_text, transcript_filename, transcript_payload
 from .turn_engine import events as turn_events
 from .turn_engine import history as turn_history
@@ -147,7 +161,7 @@ MAX_GM_MESSAGE_CHARS = 4000
 # How long a session name may be: the model's own column width, read off the
 # field rather than restated, so the page, the endpoint and the database
 # cannot disagree about where a rename is refused.
-SESSION_NAME_MAX_STORED = GMSession._meta.get_field("name").max_length
+SESSION_NAME_MAX_STORED = column_length(GMSession, "name")
 
 # What the player reads when a turn outruns settings.GM_STREAM_BUDGET_SECONDS.
 # chat.js renders an ``error`` frame as an assistant message, so this arrives
@@ -175,6 +189,11 @@ FIGHT_COMMAND = "fight"
 FIGHT_MODEL_UNREACHABLE = (
     "The Game Master could not be reached to choose who you face. Nothing was "
     "started; try the fight again in a moment."
+)
+#: /fight when the model was still choosing at the fight's deadline (#936).
+FIGHT_MODEL_TOO_SLOW = (
+    "The Game Master took longer than this table will wait to choose who you "
+    "face, so nothing was started. Try the fight again in a moment."
 )
 # A Retry of a turn that in fact finished after its page lost the stream
 # (issue #515). Running it again would play its procedures twice.
@@ -205,22 +224,6 @@ def _get_gm_session(session_id, user) -> tuple[GMSession | None, JsonResponse | 
         return None, _json_error("GM session not found", status=404)
 
 
-def _living_characters_of(user):
-    """The characters ``user`` may pick for a session, living and not deleted.
-
-    A player's own. A Game Master's own and every player's, which is what
-    the attach endpoint has always accepted from him (``_can_edit_object``):
-    the picker listing only his own left a hand-built request as the one way
-    to bring the table's party into his session (issue #759). Which
-    characters those are is ``gm.attach.attachable_characters``, the
-    endpoint's own rule; this only orders them for the picker.
-    """
-    living = attachable_characters(user)
-    if not is_dm(user):
-        return living.order_by("name")
-    return living.order_by("user__username", "name")
-
-
 #: What a Game Master's own characters are grouped under in the picker.
 OWN_CHARACTERS_GROUP = "Your characters"
 
@@ -241,7 +244,11 @@ class AttachableGroup:
 
 
 def _attachable_groups(user, characters: list[Character]) -> list[AttachableGroup]:
-    """``characters`` grouped by owner for the picker, the viewer's own first."""
+    """``characters`` grouped by owner for the picker, the viewer's own first.
+
+    ``characters`` is one page of the picker, newest first (#864); each group
+    keeps that order, and the other owners' groups follow by username.
+    """
     if not is_dm(user):
         return [AttachableGroup("", characters)] if characters else []
     own = [character for character in characters if character.user_id == user.pk]
@@ -250,7 +257,7 @@ def _attachable_groups(user, characters: list[Character]) -> list[AttachableGrou
     for character in characters:
         if character.user_id != user.pk:
             by_owner.setdefault(character.user.username, []).append(character)
-    groups += [AttachableGroup(owner, listed) for owner, listed in by_owner.items()]
+    groups += [AttachableGroup(owner, by_owner[owner]) for owner in sorted(by_owner)]
     return groups
 
 
@@ -344,15 +351,20 @@ def _campaign_panel_context(user, session: GMSession | None) -> dict:
     #789), and a Game Master gets the controls that add, correct, retire,
     resolve and remove them by hand (issues #789, #790); each record set by
     hand says who set it.
+
+    The resolved threads are the latest page of them, with a control that
+    loads the page above (issue #972): a long campaign settles more threads
+    than the tab can usefully list at once.
     """
     if session is None:
         return {"campaign_session": None}
     marks = latest_hand_edits(session)
-    threads = _hand_marked(
-        list(StoryThread.objects.filter(session=session)), GMRecordEdit.THREAD, marks
-    )
+    resolved_page = resolved_threads_page(session)
+    _hand_marked(resolved_page.threads, GMRecordEdit.THREAD, marks)
     return {
         "can_edit_records": may_edit_by_hand(user),
+        # Each hand-set text's maxlength, the column's own (issue #938).
+        "gm_text_limits": GM_TEXT_LIMITS,
         "campaign_rulings": _hand_marked(
             active_rulings(session), GMRecordEdit.RULING, marks
         ),
@@ -369,8 +381,15 @@ def _campaign_panel_context(user, session: GMSession | None) -> dict:
             GMRecordEdit.THING,
             marks,
         ),
-        "campaign_threads": [thread for thread in threads if not thread.resolved],
-        "campaign_resolved": [thread for thread in threads if thread.resolved],
+        "campaign_threads": _hand_marked(
+            list(StoryThread.objects.filter(session=session, resolved=False)),
+            GMRecordEdit.THREAD,
+            marks,
+        ),
+        # The page of them the tab lists, and the page itself for its count
+        # and its "Show earlier" control (issue #972).
+        "campaign_resolved": resolved_page.threads,
+        "campaign_resolved_page": resolved_page,
     }
 
 
@@ -397,15 +416,12 @@ def _characters_panel_context(user, session: GMSession | None) -> dict:
     """
     attached = list(session.attached_characters()) if session else []
     built_ids = {entry.character.pk for entry in roster.built_here(session)}
-    groups = _attachable_groups(
-        user,
-        list(
-            _living_characters_of(user).exclude(
-                pk__in=[character.pk for character in attached]
-            )
-        ),
-    )
+    # A page at a time, newest first, with a search that reaches every page
+    # (#864); a Game Master's page is grouped by owner (#759).
+    picker = attachable_picker(user, session, attached)
+    groups = _attachable_groups(user, picker.rows)
     return {
+        "attachable_picker": picker,
         "panel_characters": sheets_for(
             character
             for character in attached
@@ -652,18 +668,10 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
         # reaches them, and the sidebar is a scrolling column that can hold
         # them. If this ever needs bounding it wants a pager on the page,
         # not a limit nothing tells the reader about.
-        sessions = GMSession.objects.filter(user=self.request.user)
         session_id = self.request.GET.get("session")
         active_session = None
+        running = None
         history: list[ChatMessage] = []
-
-        if session_id:
-            try:
-                active_session = get_object_or_404(
-                    GMSession, pk=session_id, user=self.request.user
-                )
-            except (ValueError, TypeError):
-                raise Http404("No GMSession matches the given query.")
 
         # A turn this page's session is still running (issue #515): the page
         # was reloaded, or came back after the stream dropped. It says so and
@@ -678,18 +686,25 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
         # remembers its own turn instead, per tab, and asks after it by id
         # (issue #650).
         #
-        # Asked before the history is read (issue #880). A turn saves its
-        # history and only then finishes its record, so asking in this order
-        # always finds one or the other. Read the other way round, a turn
-        # that saved and finished between the two reads left a page with
-        # neither: the history from before the save, and no running turn to
-        # wait for, so the turn's dice and reply never appeared.
-        running = (
-            running_turn_for(self.request.user, active_session.pk)
-            if active_session is not None
-            else None
-        )
-        if active_session is not None:
+        # Asked before the session is read (issues #880, #910). A turn saves
+        # its history and only then finishes its record, so asking in this
+        # order always finds one or the other. Read the other way round, a
+        # turn that saved and finished between the two reads left a page
+        # with neither: the session from before the save, and no running
+        # turn to wait for, so the turn's dice and reply never appeared. The
+        # row itself is the read that counts: its history, name and recap
+        # are all loaded with it, so fetching it before asking (as #880's
+        # fix still did) kept the race. running_turn_for filters on the
+        # owner, so asking before the ownership check reveals nothing.
+        if session_id:
+            try:
+                requested_pk = int(session_id)
+            except ValueError:
+                raise Http404("No GMSession matches the given query.")
+            running = running_turn_for(self.request.user, requested_pk)
+            active_session = get_object_or_404(
+                GMSession, pk=requested_pk, user=self.request.user
+            )
             history = _visible_history(active_session)
 
         # The Battle tab (issue #345): the session's battle rendered with the
@@ -712,13 +727,32 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
             active_session.mode if active_session else self.request.GET.get("mode"),
             self.request.user,
         )
+        # The rail and its small-screen menu, a page at a time, most
+        # recently played first, with a search that reaches every page; the
+        # open session is listed whatever page it is on (#864).
+        rail_picker = session_picker(
+            self.request.user, "rail", active_session=active_session
+        )
         context.update(
             {
-                "sessions": sessions,
+                "session_rail_picker": rail_picker,
+                "session_menu_picker": session_picker(
+                    self.request.user, "menu", active_session=active_session
+                ),
+                # The sessions the rail shows, as one list, for what reads
+                # the page's sessions rather than the picker.
+                "sessions": [*rail_picker.pinned, *rail_picker.rows],
                 "active_session": active_session,
                 # The name field's own limit, from the column (item 10).
                 "session_name_max_length": SESSION_NAME_MAX_STORED,
+                # The recap correction's maxlength, the fold's own (#938).
+                "gm_text_limits": GM_TEXT_LIMITS,
+                # Every visible entry, for what reads the conversation
+                # (the map below, the empty state); the chat renders the
+                # latest page of turns, with a control for the page above
+                # (issue #972).
                 "history": history,
+                "history_page": history_page(history),
                 "is_game_master": is_dm(self.request.user),
                 # Mode is a separate axis from the role above: the role says
                 # what this person may do, the mode says how the model
@@ -907,6 +941,11 @@ GM_STREAM_KEEPALIVE_SECONDS = 10.0
 CATCHING_UP_STATUS = "reading back over the last session"
 SSE_KEEPALIVE = ": keep-alive\n\n"
 
+#: How long past ``GM_RECAP_BUDGET_SECONDS`` a continued session's first turn
+#: waits for a recap whose call was hung up at the deadline to hand back what
+#: it has, before carrying the fold recap without it (issue #936).
+CATCH_UP_GRACE_SECONDS = 1.0
+
 #: What the page shows while a long session's older turns are folded into a
 #: recap before the turn is planned (issue #783).
 FOLDING_STATUS = "reading back over the story so far"
@@ -950,8 +989,9 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     command = data.get("command")
 
     # Bound user input before it is appended to history / sent to the model.
-    if len(user_message) > MAX_GM_MESSAGE_CHARS:
-        return _json_error(f"Message too long (max {MAX_GM_MESSAGE_CHARS} characters).")
+    refusal = too_long("Message", user_message, MAX_GM_MESSAGE_CHARS)
+    if refusal:
+        return _json_error(refusal)
 
     # Load or create session (scoped to the requesting user)
     if session_id:
@@ -1015,7 +1055,11 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     recorder = TurnRecorder(
         user=request.user,
         session_id=session.pk if session is not None else None,
-        command=command[:16] if isinstance(command, str) else "",
+        command=(
+            command[: GMTurnRecord.MAX_COMMAND_CHARS]
+            if isinstance(command, str)
+            else ""
+        ),
         mode=mode,
         is_game_master=is_dm(request.user),
         user_message=user_message,
@@ -1223,22 +1267,54 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         )
 
     def catch_up():
-        """Write and file the carried recap, with keep-alives while it is written."""
+        """Write and file the carried recap, with keep-alives while it is written.
+
+        Bounded by ``GM_RECAP_BUDGET_SECONDS`` (issue #936): the call is hung
+        up at that deadline, a recap cut there is carried as the fold recap
+        like any recap the model failed to write (a turn that then fails
+        tries the whole one again), and the turn goes ahead on its own clock.
+        Nothing here waits on a recap it has given up on.
+        """
         nonlocal prior_count
         assert session is not None and previous is not None
         yield _sse({"status": CATCHING_UP_STATUS})
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        fallback = (
+            CarriedRecap(previous.summary, whole=False) if previous.summary else None
+        )
+        recap_deadline = time.monotonic() + float(settings.GM_RECAP_BUDGET_SECONDS)
+        # write_carried_recap makes one model call, which this one hang-up
+        # serves.
+        hang_up = HangUp()
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
             writing = pool.submit(
                 write_carried_recap,
                 previous,
-                write_session_recap,
+                partial(write_session_recap, deadline=recap_deadline, hang_up=hang_up),
                 settings.GM_NUM_CTX,
             )
+            given_up_at = recap_deadline + CATCH_UP_GRACE_SECONDS
             while True:
                 try:
-                    recap = writing.result(timeout=GM_STREAM_KEEPALIVE_SECONDS)
+                    recap = writing.result(
+                        timeout=min(
+                            GM_STREAM_KEEPALIVE_SECONDS,
+                            max(given_up_at - time.monotonic(), 0.0),
+                        )
+                    )
                     break
                 except FutureTimeout:
+                    if time.monotonic() >= given_up_at:
+                        # The call is cut at the deadline; a worker that has
+                        # still not let go is not waited on.
+                        logger.warning(
+                            "Continuation recap for session %s passed the %gs "
+                            "budget; carried the fold recap",
+                            session.pk,
+                            settings.GM_RECAP_BUDGET_SECONDS,
+                        )
+                        recap = fallback
+                        break
                     yield SSE_KEEPALIVE
                 except Exception:
                     # A bug rather than a model failure (write_carried_recap
@@ -1247,12 +1323,16 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                     logger.exception(
                         "Continuation recap failed for session %s", session.pk
                     )
-                    recap = (
-                        CarriedRecap(previous.summary, whole=False)
-                        if previous.summary
-                        else None
-                    )
+                    recap = fallback
                     break
+        finally:
+            # A recap given up on above leaves no call holding the model and
+            # no thread waiting on it. A page that leaves does not end the
+            # call: _RunToCompletion drains this stream to the end, so the
+            # recap's deadline is what bounds it; only a stream closed
+            # outright (GeneratorExit) is hung up early here.
+            hang_up.hang_up()
+            pool.shutdown(wait=False, cancel_futures=True)
         if recap is None:
             return
         filed = file_carried_recap(session, recap)
@@ -1285,12 +1365,18 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             yield _sse({"status": FOLDING_STATUS})
             covered_before = session.summary_covers
             began = time.monotonic()
+            # write_fold makes one model call, which this one hang-up serves.
+            hang_up = HangUp()
             pool = ThreadPoolExecutor(max_workers=1)
             try:
                 # Bounded by the turn's budget, so a recap the turn gives up
                 # on stops rather than holding the model (review of #783).
                 writing = pool.submit(
-                    write_fold, session, stored, deadline=started_at + budget_seconds
+                    write_fold,
+                    session,
+                    stored,
+                    deadline=started_at + budget_seconds,
+                    hang_up=hang_up,
                 )
                 while True:
                     try:
@@ -1303,7 +1389,11 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                             raise TurnBudgetExceeded from None
                         yield SSE_KEEPALIVE
             finally:
-                # Never wait on a recap the turn has given up on.
+                # Never wait on a recap the turn has given up on, nor leave
+                # its call holding the model: a recap that ended is left
+                # alone, and one still running -- a turn closed outright
+                # (GeneratorExit) mid-fold -- is hung up at once (#935).
+                hang_up.hang_up()
                 pool.shutdown(wait=False, cancel_futures=True)
             kept = covered != covered_before and save_fold(session, written, covered)
             sink.record(
@@ -1663,10 +1753,9 @@ def gm_save(request: HttpRequest) -> JsonResponse:
         return _json_error("No session_id")
     if not name:
         return _json_error("A session needs a name")
-    if len(name) > SESSION_NAME_MAX_STORED:
-        return _json_error(
-            f"Name must be {SESSION_NAME_MAX_STORED} characters or fewer"
-        )
+    refusal = too_long("Name", name, SESSION_NAME_MAX_STORED)
+    if refusal:
+        return _json_error(refusal)
 
     session, err = _get_gm_session(session_id, request.user)
     if err:
@@ -1826,6 +1915,95 @@ def gm_characters_attach(request: HttpRequest) -> JsonResponse:
     return JsonResponse(_session_characters_payload(session))
 
 
+def _own_session_or_none(request: HttpRequest, raw_id: str) -> GMSession | None:
+    """The asker's session named by ``raw_id``; None for none; 404 otherwise."""
+    if not raw_id:
+        return None
+    if not raw_id.isdigit():
+        raise Http404("No GMSession matches the given query.")
+    return get_object_or_404(GMSession, pk=int(raw_id), user=request.user)
+
+
+@login_required
+@require_GET
+def gm_session_picker(request: HttpRequest, view: str) -> HttpResponse:
+    """One page of the session rail or its menu (issue #864), for picker.js.
+
+    The asker's own sessions only. ``?active=`` names the open session,
+    which stays listed and marked.
+    """
+    if view not in SESSION_PICKER_SOURCES:
+        raise Http404("No such picker")
+    active_session = _own_session_or_none(request, request.GET.get("active", ""))
+    query, page_number = asked_for(request)
+    picker = session_picker(
+        request.user,
+        view,
+        active_session=active_session,
+        query=query,
+        page_number=page_number,
+    )
+    return picker_body_response(request, picker, {"active_session": active_session})
+
+
+@login_required
+@require_GET
+def gm_play_session_picker(request: HttpRequest) -> HttpResponse:
+    """One page of the sheet's "Take <name> to" session picker (issue #973).
+
+    Guarded as ``gm_characters_attach``, the endpoint the picker's form posts
+    to: ``?character=`` must be a character the asker may attach
+    (``_get_attachable_character``, the same refusal and status), and the
+    sessions are the asker's own.
+    """
+    character, error = _get_attachable_character(
+        request, request.GET.get("character", "")
+    )
+    if error:
+        return error
+    assert character is not None
+    query, page_number = asked_for(request)
+    picker = play_session_picker(
+        request.user, character, query=query, page_number=page_number
+    )
+    return picker_body_response(
+        request,
+        picker,
+        {
+            "character": character,
+            "holding": sessions_holding_character(request.user, character),
+        },
+    )
+
+
+@login_required
+@require_GET
+def gm_attach_picker(request: HttpRequest) -> HttpResponse:
+    """One page of the Characters tab's attach picker (issue #864).
+
+    What ``gm_characters_attach`` would take from the asker
+    (``attachable_characters``), less what ``?session=`` (the asker's own)
+    already holds.
+    """
+    session = _own_session_or_none(request, request.GET.get("session", ""))
+    attached = list(session.attached_characters()) if session else []
+    query, page_number = asked_for(request)
+    picker = attachable_picker(
+        request.user, session, attached, query=query, page_number=page_number
+    )
+    groups = _attachable_groups(request.user, picker.rows)
+    return picker_body_response(
+        request,
+        picker,
+        {
+            "attachable_groups": groups,
+            "attachable_characters": [
+                character for group in groups for character in group.characters
+            ],
+        },
+    )
+
+
 @login_required
 @require_GET
 def gm_characters_panel(request: HttpRequest, session_id: int) -> HttpResponse:
@@ -1916,8 +2094,9 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
     foes_text = data.get("foes", "")
     if not isinstance(foes_text, str):
         return _json_error("foes must be a string")
-    if len(foes_text) > MAX_GM_MESSAGE_CHARS:
-        return _json_error(f"Foes too long (max {MAX_GM_MESSAGE_CHARS} characters).")
+    refusal = too_long("Foes", foes_text, MAX_GM_MESSAGE_CHARS)
+    if refusal:
+        return _json_error(refusal)
     # The fight takes the session's one-turn claim like a message does
     # (issues #515, #836). Started while a turn was running, its opening
     # lines landed in the history and the turn then saved a reply written
@@ -1944,7 +2123,15 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
             status=409,
         )
     try:
-        started = start_fight(session, foes_text=foes_text)
+        # One deadline for every foe call, the fallback and the second ask
+        # included (issue #936). /fight is a plain POST that sends nothing
+        # until it answers, so its budget sits below nginx's 60 s
+        # proxy_read_timeout, where an SSE turn's keep-alives need not.
+        started = start_fight(
+            session,
+            foes_text=foes_text,
+            stop_at=time.monotonic() + float(settings.GM_FIGHT_BUDGET_SECONDS),
+        )
     except FightError as fight_error:
         recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=str(fight_error))
         return _json_error(str(fight_error))
@@ -1958,6 +2145,10 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
             error=str(model_error) or model_error.__class__.__name__,
         )
         return _json_error(FIGHT_MODEL_UNREACHABLE, status=503)
+    except StreamDeadlinePassed as out_of_time:
+        logger.warning("GM fight: the foe call passed its deadline: %s", out_of_time)
+        recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=str(out_of_time))
+        return _json_error(FIGHT_MODEL_TOO_SLOW, status=504)
     except Exception as error:
         recorder.finish(
             GMTurnRecord.OUTCOME_ERROR, error=str(error) or error.__class__.__name__

@@ -1,0 +1,12 @@
+# Every minute, reapply the CI runner's firewall table (issue #964).
+
+[Unit]
+Description=Reapply the tarmar CI runner's firewall table every minute
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

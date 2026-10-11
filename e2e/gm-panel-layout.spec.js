@@ -9,7 +9,7 @@
  * gm-panel-battle.spec.js), so the Battle pane has a real board to pop out.
  */
 
-const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const { test, expect, loginAs, TEST_USER, chooseToAttach } = require('./fixtures');
 
 /** The panel's rendered width, in CSS pixels. */
 async function panelWidth(page) {
@@ -187,7 +187,7 @@ test.describe('GM panel — pop-out', () => {
         // each says why rather than opening a blank window.
         await expect(page.locator('.gm-pane[data-pane="characters"] .gm-pane-popout')).toBeDisabled();
 
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 

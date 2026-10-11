@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Your journal{% endblock %}
+{% block main_attrs %}class="page-width-1100"{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/journal.css' %}">
+{% endblock %}
+
+{% block content %}
+{% include "accounts/_journal.html" %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/play-with-gm.js' %}"></script>
+{% endblock %}

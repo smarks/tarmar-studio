@@ -7,6 +7,10 @@ This module drives one deliberately long conversation to establish that
 restore point and then sends a fresh single-turn probe whose
 ``prompt_eval_cached_count`` shows whether the cache took.
 
+It also measures the system prompt against its share of ``GM_NUM_CTX``
+(issue #907): once by estimate for the longest of the four prompts, before
+Ollama is asked anything, and once by the probe's own prompt count.
+
 Django-free on purpose (``manage.py warm_gm`` wires in the settings) so the
 HTTP exchange can be tested end to end against an ``httpx.MockTransport``.
 """
@@ -19,6 +23,7 @@ from typing import Any
 import httpx
 
 from common.services.ollama_client import chat_payload
+from gm.model_config import system_prompt_token_ceiling
 from gm.retrieval import CHARS_PER_TOKEN, estimate_message_tokens
 
 # Total tokens the warm-up conversation must exceed before the MLX runner
@@ -116,6 +121,51 @@ class WarmupResult:
         if coverage is None:
             return None
         return coverage >= SYSTEM_PROMPT_CACHE_FRACTION
+
+
+@dataclass(frozen=True)
+class PromptBudget:
+    """A system prompt's size against its ceiling in the window (issue #907).
+
+    Attributes:
+        prompt_tokens: The prompt's size in tokens, estimated or measured.
+        num_ctx: The context window it is judged against (``GM_NUM_CTX``).
+    """
+
+    prompt_tokens: int
+    num_ctx: int
+
+    @property
+    def ceiling_tokens(self) -> int:
+        """The most the prompt may take; see ``SYSTEM_PROMPT_CONTEXT_SHARE``."""
+        return system_prompt_token_ceiling(self.num_ctx)
+
+    @property
+    def within_ceiling(self) -> bool:
+        """Whether the prompt leaves the rest of the window its share."""
+        return self.prompt_tokens <= self.ceiling_tokens
+
+
+def estimate_longest_prompt_tokens(prompts: Iterable[str]) -> int:
+    """The estimated size of the longest of ``prompts`` as a system message.
+
+    Estimated with :func:`gm.retrieval.estimate_message_tokens`, the same
+    estimate the context guard and the excerpt budget use, so the ceiling and
+    the budgets it is reasoned from count tokens the same way.
+
+    Args:
+        prompts: System prompt texts, such as the four GM prompts.
+
+    Returns:
+        The largest estimate.
+
+    Raises:
+        ValueError: When ``prompts`` is empty.
+    """
+    return max(
+        estimate_message_tokens({"role": "system", "content": prompt})
+        for prompt in prompts
+    )
 
 
 def create_client(base_url: str, *, read_timeout: float) -> httpx.Client:

@@ -12,6 +12,8 @@ import json
 import re
 from unittest import mock
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from battle.services import _seated_arms, _shield_bonus
@@ -21,6 +23,7 @@ from characters.import_service import CharacterImportError, validate_import_payl
 from characters.models import Character
 from characters.purse import WEALTH_FIRST_REFUSAL
 from characters.tests.test_incomplete_characters import incomplete_character
+from characters.views.characters import sheet_repaint
 from common.test_helpers import BaseTestCase, create_character
 
 
@@ -855,3 +858,222 @@ class StaleSweepFollowUpTest(SheetTestCase):
         self.as_player()
         page = self.client.get(self.url("edit")).content.decode()
         self.assertNotIn('id="roll-starting-coin-btn"', page)
+
+
+class LifeAndNameRepaintTest(SheetTestCase):
+    """#903: whether the character lives, the saved name and the slot that needs both.
+
+    Each is server-rendered state a change made without a reload moves: a
+    fatal run of years kills the character, the last score or the Fatigue
+    roll completes it, and a rename changes every place the sheet prints the
+    name. Every response carries them through ``sheet_repaint``; the page
+    renders each control it hides by them, so the painter has one to show.
+    """
+
+    FATAL_DICE = (1, 1, 1, 3)
+
+    def add_fatal_year(self) -> dict:
+        """Roll one year whose survival check is the automatic death."""
+        with mock.patch(
+            "characters.skills.roll_survival_dice", return_value=self.FATAL_DICE
+        ):
+            response = self.post_json(
+                self.url("add_years"), {"track": "campaigner", "years": 1}
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()
+
+    def test_a_field_update_carries_the_saved_name_and_the_slot(self):
+        data = self.update("charisma", 9).json()
+        self.assertEqual(data["name"], self.character.name)
+        self.assertTrue(data["is_alive"])
+        self.assertIn(
+            f'id="play-with-gm-{self.character.pk}"', data["play_with_gm_html"]
+        )
+        self.assertIn('<form class="play-with-gm', data["play_with_gm_html"])
+
+    def test_a_rename_answers_with_the_name_it_saved(self):
+        data = self.update("name", "  Brannoc  ").json()
+        self.character.refresh_from_db()
+        self.assertEqual(data["name"], self.character.name)
+        self.assertEqual(data["name"], "Brannoc")
+        self.assertIn("Take Brannoc to", data["play_with_gm_html"])
+
+    def test_a_rename_re_renders_the_survival_saves_confirm(self):
+        body = self.character.body
+        assert body is not None
+        self.character.body_damage = body + (body + 1) // 2
+        self.character.save()
+        data = self.update("name", "Brannoc").json()
+        self.assertIn("Roll Brannoc's survival save?", data["injury_thresholds_html"])
+
+    def test_a_field_that_is_not_the_name_sends_no_injury_readout(self):
+        self.assertNotIn("injury_thresholds_html", self.update("charisma", 9).json())
+
+    def test_a_fatal_run_answers_dead_with_no_way_to_the_table(self):
+        data = self.add_fatal_year()
+        self.character.refresh_from_db()
+        self.assertFalse(self.character.is_alive)
+        self.assertFalse(data["is_alive"])
+        self.assertEqual(data["name"], self.character.name)
+        self.assertIn(
+            f'id="play-with-gm-{self.character.pk}"', data["play_with_gm_html"]
+        )
+        self.assertNotIn("<form", data["play_with_gm_html"])
+
+    def test_the_last_score_offers_the_way_to_the_table(self):
+        character = incomplete_character(
+            self.owner,
+            strength=12,
+            dexterity=12,
+            intelligence=12,
+            wisdom=12,
+            constitution=12,
+            fatigue_roll=7,
+        )
+        before = self.client.get(self.url("edit", character)).content.decode()
+        self.assertNotIn('<form class="play-with-gm', before)
+        data = self.update("charisma", 10, character).json()
+        self.assertTrue(data["is_complete"])
+        self.assertIn('<form class="play-with-gm', data["play_with_gm_html"])
+
+    def test_the_slot_offers_the_viewers_own_sessions(self):
+        from gm.models import GMSession
+
+        GMSession.objects.create(user=self.game_master, name="Kell's table")
+        GMSession.objects.create(user=self.owner, name="The owner's own")
+        data = self.update("charisma", 9).json()
+        self.assertIn("Kell&#x27;s table", data["play_with_gm_html"])
+        self.assertNotIn("The owner", data["play_with_gm_html"])
+
+    def test_an_allocated_skill_joins_the_type_ahead(self):
+        self.character.free_skill_points = 1
+        self.character.save()
+        data = self.post_json(
+            self.url("allocate_skill"), {"skill": "basket weaving"}
+        ).json()
+        self.assertIn(
+            '<option value="Basket Weaving"></option>',
+            data["skill_name_suggestions_html"],
+        )
+
+    def test_the_page_and_the_response_render_the_same_type_ahead(self):
+        page = self.client.get(self.url("edit")).content.decode()
+        data = self.update("charisma", 9).json()
+        self.assertIn(data["skill_name_suggestions_html"].strip(), page)
+
+    def test_equipment_and_mechanics_responses_carry_them_too(self):
+        equipment = self.post_json(
+            self.url("equipment_add"), {"item_id": "backpack", "free": True}
+        ).json()
+        dismissal = self.post_json(self.url("dismiss_import_notice"), {}).json()
+        for data in (equipment, dismissal):
+            with self.subTest(keys=sorted(data)[:3]):
+                self.assertEqual(data["name"], self.character.name)
+                self.assertIn("is_alive", data)
+                self.assertIn("play_with_gm_html", data)
+                self.assertIn("skill_name_suggestions_html", data)
+
+    def test_a_living_sheet_renders_revive_and_hides_it(self):
+        page = self.client.get(self.url("edit")).content.decode()
+        self.assertIn(
+            '<button type="button" id="mark-dead-btn" class="button danger" '
+            "data-alive-only>",
+            page,
+        )
+        self.assertIn(
+            '<button type="button" id="revive-btn" class="button" data-dead-only hidden>',
+            page,
+        )
+        self.assertIn('id="magic-controls" data-alive-only>', page)
+
+    def test_a_dead_sheet_renders_the_living_controls_hidden(self):
+        self.character.is_alive = False
+        self.character.death_cause = "Fell"
+        self.character.save()
+        page = self.client.get(self.url("edit")).content.decode()
+        self.assertIn(
+            'id="mark-dead-btn" class="button danger" data-alive-only hidden>', page
+        )
+        self.assertIn('id="revive-btn" class="button" data-dead-only>', page)
+        self.assertIn('id="magic-controls" data-alive-only hidden>', page)
+        self.assertIn(
+            f"<h3><span data-name-chrome>{self.character.name}</span> died</h3>", page
+        )
+
+    def test_the_sessions_holding_it_mark_the_name(self):
+        from gm.models import GMSession
+
+        session = GMSession.objects.create(user=self.game_master, name="Kell's table")
+        session.characters.add(self.character)
+        self.as_player()
+        page = self.client.get(self.url("edit")).content.decode()
+        self.assertIn(
+            f"<span data-name-chrome>{self.character.name}</span> is in", page
+        )
+
+    def test_the_config_names_the_history_the_record_keeps(self):
+        from characters.models import MAX_EXPERIENCE_LOG_ENTRIES
+
+        page = self.client.get(self.url("edit")).content.decode()
+        self.assertEqual(
+            page_config(page)["maxExperienceLogEntries"], MAX_EXPERIENCE_LOG_ENTRIES
+        )
+
+
+class OneRepaintPerResponseTest(SheetTestCase):
+    """#933: a response carries the sheet repaint once, not once per payload in it.
+
+    A run of years nests the equipment payload under ``movement``. That
+    payload carried ``sheet_repaint`` as well, so the "Play with the Game
+    Master" slot and its session queries, the completion partial, the skill
+    check's options, Recent Changes and the type-ahead all rendered twice,
+    and the page painted the same values twice.
+    """
+
+    SAFE_DICE = (6, 6, 6, 18)
+
+    def add_year(self) -> tuple[dict, int]:
+        """Roll one survivable year; the response and its session queries."""
+        with (
+            mock.patch(
+                "characters.skills.roll_survival_dice", return_value=self.SAFE_DICE
+            ),
+            CaptureQueriesContext(connection) as captured,
+        ):
+            response = self.post_json(
+                self.url("add_years"), {"track": "laborer", "years": 1}
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json(), session_queries(captured)
+
+    def test_a_run_of_years_queries_the_sessions_for_one_slot(self):
+        from gm.models import GMSession
+
+        GMSession.objects.create(user=self.game_master, name="Kell's table")
+        with CaptureQueriesContext(connection) as one_repaint:
+            sheet_repaint(self.character, self.game_master)
+        per_repaint = session_queries(one_repaint)
+        # The slot is offered, so a repaint does query the sessions; a test
+        # that counted zero against zero would prove nothing.
+        self.assertGreater(per_repaint, 0)
+        _data, queried = self.add_year()
+        self.assertEqual(queried, per_repaint)
+
+    def test_the_movement_payload_leaves_the_repaint_to_the_response(self):
+        data, _queried = self.add_year()
+        self.character.refresh_from_db()
+        for key in sheet_repaint(self.character, self.game_master):
+            with self.subTest(key=key):
+                self.assertIn(key, data)
+                self.assertNotIn(key, data["movement"])
+        # The movement payload still carries what updateEquipmentDisplay paints.
+        self.assertEqual(
+            data["movement"]["effective_strength"], self.character.effective_strength
+        )
+        self.assertEqual(data["movement"]["equipment"], self.character.equipment)
+
+
+def session_queries(captured: CaptureQueriesContext) -> int:
+    """How many captured queries read the Games Master sessions table."""
+    return sum('"gm_gmsession"' in query["sql"] for query in captured.captured_queries)

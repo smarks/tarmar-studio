@@ -1,0 +1,8 @@
+{% comment %}The small screen's session menu (issue #864): the open session (pinned), then one page of the viewer's sessions, most recently played first. chat.js renames and recounts options by value and these data attributes.{% endcomment %}
+<label class="sr-only" for="mobile-session-select">Session</label>
+<select id="mobile-session-select"
+        onchange="if (this.value) window.location.href = '?session=' + encodeURIComponent(this.value);">
+    <option value="">Sessions…</option>
+    {% for s in picker.pinned %}{% include "gm/_session_menu_option.html" %}{% endfor %}
+    {% for s in picker.rows %}{% include "gm/_session_menu_option.html" %}{% endfor %}
+</select>

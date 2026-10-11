@@ -1,0 +1,12 @@
+{% comment %}The setup page's party import (issue #864): one page of parties, newest first, as the options of the form's select.{% endcomment %}
+<label class="setup-field">
+    <span class="setup-field-label">Party</span>
+    <select name="party_id"{% if not picker.rows %} disabled{% endif %}>
+        {% for party in picker.rows %}
+        <option value="{{ party.pk }}">
+            {{ party.name }} — {{ party.memberships.count }}
+            member{{ party.memberships.count|pluralize }}
+        </option>
+        {% endfor %}
+    </select>
+</label>

@@ -46,6 +46,15 @@ const CHARACTER_EDIT_CONFIG = JSON.parse(
     document.getElementById('character-edit-config').textContent
 );
 
+// Each free-text field's limit, as the server holds it (issue #928):
+// characters.constants.CHARACTER_TEXT_LIMITS, never a number typed here.
+const TEXT_LIMITS = CHARACTER_EDIT_CONFIG.textLimits;
+
+// Each number input's bound, as the server holds it (issue #938):
+// characters.views.characters.CHARACTER_NUMBER_LIMITS. A range symmetric
+// about zero is given by its magnitude.
+const NUMBER_LIMITS = CHARACTER_EDIT_CONFIG.numberLimits;
+
 // ---- Delete character confirmation ----
 // Was its own inline <script> at the foot of the content block.
 (function () {
@@ -205,12 +214,9 @@ const autosave = initAutosave({
         // A player's bought score locks once recorded (issue #748): the cell
         // becomes the text and reason a reload would render.
         if (data.locked_reason) lockFieldCell(field, value, data.locked_reason);
-        // Completion, points, the history line (issues #764, #792).
+        // Completion, points, the history line (issues #764, #792), and the
+        // name everywhere the sheet prints it, from the saved record (#903).
         paintSheet(data);
-        // The page title and the breadcrumb name the character (issue #792).
-        if (field === 'name') {
-            paintNameChrome(value, { title: value, breadcrumb: '.breadcrumb [aria-current="page"]' });
-        }
     }
 });
 
@@ -422,6 +428,22 @@ function paintPointControls(data) {
  */
 function paintSheet(data) {
     if (!data) return;
+    paintLifeControls(data.is_alive);
+    if (data.name !== undefined) {
+        // Every place the sheet prints the name (issues #792, #903): the
+        // title, the breadcrumb and each element marked data-name-chrome --
+        // the death card's heading, the Game Masters' sessions holding it.
+        paintNameChrome(data.name, {
+            title: data.name,
+            breadcrumb: '.breadcrumb [aria-current="page"]',
+        });
+    }
+    paintPlayWithGameMaster(data.play_with_gm_html);
+    if (data.skill_name_suggestions_html !== undefined) {
+        // A skill allocated in place joins the type-ahead (issue #903).
+        const suggestions = document.getElementById('skill-name-suggestions');
+        if (suggestions) suggestions.innerHTML = data.skill_name_suggestions_html;
+    }
     if (data.completion_html !== undefined) {
         const completion = document.getElementById('sheet-completion');
         if (completion) completion.innerHTML = data.completion_html;
@@ -474,6 +496,100 @@ function paintSheet(data) {
     }
 }
 
+/**
+ * Show the controls for a living character or for a dead one (issue #903).
+ *
+ * Mark Dead and the Magic section's controls are a living character's;
+ * Revive is a dead one's. Each renders on the page hidden or shown by the
+ * record, marked data-alive-only or data-dead-only, so a run of years that
+ * kills the character in place leaves what a reload would.
+ *
+ * @param {boolean|undefined} isAlive - The record's is_alive; absent leaves
+ *     the controls alone.
+ */
+function paintLifeControls(isAlive) {
+    if (isAlive === undefined) return;
+    document.querySelectorAll('[data-alive-only]').forEach((control) => {
+        control.hidden = !isAlive;
+    });
+    document.querySelectorAll('[data-dead-only]').forEach((control) => {
+        control.hidden = isAlive;
+    });
+}
+
+/**
+ * The slot as the server rendered it, without what the viewer has done to it.
+ *
+ * play-with-gm.js reveals each form, disables its button while a request is
+ * out, and writes a refusal into the error line; those are the page's, not
+ * the record's. A chosen session lives in the select's value, which markup
+ * does not carry. Undoing the three on a copy leaves markup that compares
+ * equal to a fresh rendering of the same record.
+ *
+ * The session choice is a searchable picker (issue #973). picker.js marks
+ * the picker wired, and a search or a page turn replaces its body with
+ * another page of sessions and stamps a ticket on it; the marks are dropped
+ * on the copy, and once the viewer has searched (a ticket) the body is left
+ * out of both sides, since the search is the viewer's and no rendering of
+ * the record can match it.
+ *
+ * @param {Element} slot - A .play-with-gm-slot.
+ * @param {boolean} [withoutPickerBody] - Leave the picker's body out.
+ * @returns {string} The copy's markup.
+ */
+function playWithGameMasterMarkup(slot, withoutPickerBody = false) {
+    const copy = slot.cloneNode(true);
+    copy.querySelectorAll('form.play-with-gm').forEach((form) => { form.hidden = true; });
+    copy.querySelectorAll('.play-with-gm-error').forEach((line) => {
+        line.textContent = '';
+        line.hidden = true;
+    });
+    copy.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+    copy.querySelectorAll('[data-picker]').forEach((picker) => {
+        delete picker.dataset.pickerReady;
+        delete picker.dataset.pickerTicket;
+    });
+    if (withoutPickerBody) {
+        copy.querySelectorAll('[data-picker-body]').forEach((body) => { body.innerHTML = ''; });
+    }
+    return copy.outerHTML;
+}
+
+/** Whether the viewer has searched or turned a page in the slot's picker. */
+function pickerWasSearched(slot) {
+    return Array.from(slot.querySelectorAll('[data-picker]'))
+        .some((picker) => picker.dataset.pickerTicket !== undefined);
+}
+
+/**
+ * Swap in the "Play with the Game Master" slot the server rendered (#903).
+ *
+ * The slot (gm/_play_with_gm.html) holds the form only where the attach
+ * would be taken -- a living, complete character -- and names the
+ * character in it. Completing, killing or renaming the character in place
+ * changes it; the response carries the slot re-rendered from the record,
+ * and play-with-gm.js reveals its form as it does at load.
+ *
+ * Every response carries the slot, and most leave it as it was. Those are
+ * not swapped: a swap would drop the session the viewer picked, a refusal
+ * the error line keeps until the next attempt, keyboard focus (#903
+ * review), and what the viewer typed into the session search (#973).
+ *
+ * @param {string|undefined} slotHtml - The rendered slot; absent leaves it.
+ */
+function paintPlayWithGameMaster(slotHtml) {
+    if (slotHtml === undefined) return;
+    const fresh = elementFromHtml(slotHtml);
+    const current = fresh && fresh.id ? document.getElementById(fresh.id) : null;
+    if (!current) return;
+    const searched = pickerWasSearched(current);
+    if (playWithGameMasterMarkup(current, searched) === playWithGameMasterMarkup(fresh, searched)) return;
+    current.replaceWith(fresh);
+    if (typeof window.revealPlayWithGameMaster === 'function') {
+        window.revealPlayWithGameMaster(fresh);
+    }
+}
+
 /** An element from one fragment of server-rendered markup. */
 function elementFromHtml(html) {
     const holder = document.createElement('template');
@@ -496,6 +612,12 @@ function prependRunToLog(runHtml) {
     const noHistory = log.querySelector('.no-history');
     if (noHistory) noHistory.remove();
     log.insertBefore(entry, log.firstChild);
+    // The record keeps the latest runs only (MAX_EXPERIENCE_LOG_ENTRIES), and
+    // so does the page, so it never shows a run a reload would not (#903).
+    const limit = CHARACTER_EDIT_CONFIG.maxExperienceLogEntries;
+    if (limit) {
+        [...log.querySelectorAll('.term-entry')].slice(limit).forEach((old) => old.remove());
+    }
 }
 
 /**
@@ -581,19 +703,21 @@ function renderWorkbenchPreview(track) {
  * renders for an already-dead character (both come from
  * characters/_death_card.html), so an in-place death and a reload show the
  * identical card. No Close button, no reload.
+ * @param {string} name - The character's saved name from the server, not
+ *     the name input's text (issue #903).
  * @param {string} cause - The character's death_cause from the server.
  * @param {object} [fatalCheck] - The fatal year's survival_check, when the
  *     death came from a failed survival roll — shown so the player sees the
  *     dice that did it (issue #175).
  */
-function showDeathCard(cause, fatalCheck) {
+function showDeathCard(name, cause, fatalCheck) {
     const workbenchCard = document.getElementById('workbench-card');
     const template = document.getElementById('death-card-template');
     if (!workbenchCard || !template) return;
 
     const clone = template.content.cloneNode(true);
-    const nameInput = document.getElementById('id_name');
-    clone.querySelector('h3').textContent = `${nameInput ? nameInput.value : ''} died`;
+    // Marked data-name-chrome, so a later rename repaints it too.
+    clone.querySelector('h3 [data-name-chrome]').textContent = name;
     clone.querySelector('.death-cause').textContent = cause;
     const fatalRollEl = clone.querySelector('.fatal-roll');
     if (fatalRollEl) {
@@ -651,7 +775,7 @@ document.getElementById('roll-years-btn')?.addEventListener('click', async funct
                 // so its last year's survival_check is the fatal roll.
                 diedThisRoll = true;
                 const finalYear = data.run_result.years[data.run_result.years.length - 1];
-                showDeathCard(data.character.death_cause, finalYear && finalYear.survival_check);
+                showDeathCard(data.name, data.character.death_cause, finalYear && finalYear.survival_check);
             }
         } else {
             uiNotify(data.error || 'Failed to add experience years');
@@ -1299,6 +1423,12 @@ async function renderEquipmentList(equipment) {
     }
 
     const annotated = applyEquipmentSort(annotateForSort(equipment, catalog));
+    // Every value written into this markup is escaped, the limits too: they
+    // come from the page's JSON config and the items from the stored sheet,
+    // and neither is markup this page may trust (CodeQL js/xss-through-dom).
+    const modifierBound = escapeHtml(NUMBER_LIMITS.equipment_modifier);
+    const quantityBound = escapeHtml(NUMBER_LIMITS.equipment_quantity);
+    const notesMaxLength = escapeHtml(TEXT_LIMITS.item_notes);
 
     list.innerHTML = annotated.map(({ item, originalIndex, name, weight: itemWeight, category }) => {
         const index = originalIndex;
@@ -1315,7 +1445,7 @@ async function renderEquipmentList(equipment) {
             const readOnlyBits = [
                 `<span class="item-name">${escapeHtml(name)}${isCustom ? ' <em>(custom)</em>' : ''}</span>`,
                 `<span class="item-weight">${weight.toFixed(1)} lbs</span>`,
-                `<span class="item-quantity">Qty: ${item.quantity || 1}</span>`,
+                `<span class="item-quantity">Qty: ${escapeHtml(item.quantity || 1)}</span>`,
                 item.in_pack ? '<span class="item-pack">In pack</span>' : '',
                 item.notes ? `<span class="item-notes">${escapeHtml(item.notes)}</span>` : '',
             ].filter(Boolean).join('\n                    ');
@@ -1341,15 +1471,15 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Hit:</label>
-                            <input type="number" value="${item.to_hit_mod || 0}" data-field="to_hit_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.to_hit_mod || 0)}" data-field="to_hit_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>Dmg:</label>
-                            <input type="number" value="${item.damage_mod || 0}" data-field="damage_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.damage_mod || 0)}" data-field="damage_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>Crit:</label>
-                            <input type="number" value="${item.critical_mod || 0}" data-field="critical_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.critical_mod || 0)}" data-field="critical_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                     </div>
                 `;
@@ -1363,11 +1493,11 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Stops:</label>
-                            <input type="number" value="${item.stops_mod || 0}" data-field="stops_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.stops_mod || 0)}" data-field="stops_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>DEX:</label>
-                            <input type="number" value="${item.dex_mod || 0}" data-field="dex_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.dex_mod || 0)}" data-field="dex_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                     </div>
                 `;
@@ -1376,11 +1506,11 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Stops:</label>
-                            <input type="number" value="${item.stops_mod || 0}" data-field="stops_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.stops_mod || 0)}" data-field="stops_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>DEX:</label>
-                            <input type="number" value="${item.dex_mod || 0}" data-field="dex_mod" min="-10" max="10">
+                            <input type="number" value="${escapeHtml(item.dex_mod || 0)}" data-field="dex_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                     </div>
                 `;
@@ -1393,14 +1523,14 @@ async function renderEquipmentList(equipment) {
                     <span class="item-weight">${weight.toFixed(1)} lbs</span>
                     <div class="item-quantity">
                         <label>Qty:</label>
-                        <input type="number" value="${item.quantity || 1}" min="1" max="999" data-field="quantity">
+                        <input type="number" value="${escapeHtml(item.quantity || 1)}" min="1" max="${quantityBound}" data-field="quantity">
                     </div>
                     <div class="item-pack">
                         <input type="checkbox" ${item.in_pack ? 'checked' : ''} data-field="in_pack">
                         <label>Pack</label>
                     </div>
                     <div class="item-notes">
-                        <input type="text" value="${escapeHtml(item.notes || '')}" placeholder="Notes..." maxlength="200" data-field="notes">
+                        <input type="text" value="${escapeHtml(item.notes || '')}" placeholder="Notes..." maxlength="${notesMaxLength}" data-field="notes">
                     </div>
                     ${modsHtml}
                     <button class="remove-btn" data-index="${index}">Remove</button>
@@ -1829,7 +1959,7 @@ document.getElementById('equipment-bulk-delete')?.addEventListener('click', asyn
 document.getElementById('mark-dead-btn')?.addEventListener('click', async function () {
     const cause = await uiPrompt('Cause of death:', {
         confirmLabel: 'Mark dead',
-        maxLength: 200,
+        maxLength: TEXT_LIMITS.death_cause,
         placeholder: 'How they died',
     });
     if (cause === null) return;
@@ -2128,6 +2258,8 @@ if (typeof module !== 'undefined' && module.exports) {
         paintFieldInput,
         lockFieldCell,
         paintSheetRolls,
+        paintLifeControls,
+        paintPlayWithGameMaster,
         itemModifierSummary,
         LITERACY_RESPONSE_KEYS,
         paintLiteracyRow,

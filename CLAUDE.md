@@ -19,7 +19,8 @@ On macOS, also `brew install glib pango` so weasyprint can render PDFs.
 ./run lint        # Lint and auto-fix with ruff
 ./run format      # Format code with ruff
 ./run check       # Run all pre-commit checks
-./run gate        # Every suite a deploy depends on, recording the commit
+./run gate        # Every suite a deploy depends on; records the commit, then deploys it if it is main's head
+./run ship        # Deploy the head of main, completely: gate it in a temporary worktree, watch Deploy, clean up
 ./run migrate     # Run database migrations
 ./run update-cov  # Update coverage threshold
 ```
@@ -28,12 +29,25 @@ On macOS, also `brew install glib pango` so weasyprint can render PDFs.
 ```bash
 gh issue list                          # All open issues
 gh issue list --assignee @me           # Issues assigned to you
-gh issue list --label enhancement      # Filter by label
+gh issue list --label bug              # Filter by label (bug, feature, comment)
 gh issue view <num>                    # Show issue details
-gh issue create --title "..." --body "..." --label enhancement
+gh issue create --title "..." --body "..." --label bug --label filed-by-claude
 gh issue edit <num> --add-assignee @me # Claim an issue
 gh issue comment <num> --body "what I did"  # Progress notes
 gh issue close <num>                   # Mark done
+```
+
+Filing an issue: use the same fields the issue forms ask for, since a session
+files from the command line and the forms never apply. Label it `bug`,
+`feature` or `comment` (`feature` replaces `enhancement` for new issues; the
+old ones keep theirs), add `filed-by-claude` (the author GitHub shows is
+Spencer's account), and a `priority: high|medium|low` label. Give the body
+`### Description`, `### Severity` and `### Author` sections, the last saying
+which session filed it:
+
+```bash
+gh issue create --title "..." --label bug --label filed-by-claude --label "priority: medium" \
+    --body $'### Description\n...\n\n### Severity\nMajor: ...\n\n### Author\nclaude-<session id>'
 ```
 
 - **Use GitHub issues for all task tracking**, not markdown TODOs or comments.
@@ -124,9 +138,11 @@ uv sync --group prod  # Install psycopg
 | `ALLOWED_HOSTS` | localhost | Comma-separated host list |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
 | `GM_MODEL` | `qwen3:32b` | Ollama model the GM (web and CLI) talks to |
-| `GM_NUM_CTX` | `32768` | GM context window sent as `options.num_ctx` |
+| `GM_NUM_CTX` | `65536` | GM context window sent as `options.num_ctx`; the system prompt may take a quarter of it (`SYSTEM_PROMPT_CONTEXT_SHARE`, issue #907) |
 | `GM_TEMPERATURE` | `0.8` | GM sampling temperature sent as `options.temperature` |
 | `GM_STREAM_BUDGET_SECONDS` | `300` | Wall-clock budget for one streamed GM turn; past it the player gets a readable "took too long" message instead of a connection that never ends, and the turn keeps whatever the server already ran (issue #553) |
+| `GM_RECAP_BUDGET_SECONDS` | `300` | Wall-clock budget for the recap a continued session's first turn writes before the turn's own budget starts; at it the call is hung up and the last session's fold recap is carried instead, labelled as one (issue #936) |
+| `GM_FIGHT_BUDGET_SECONDS` | `50` | Wall-clock budget for `/fight`'s foe calls together (call, fallback and second ask share one deadline); a cut is a 504 in words. Below nginx's 60 s proxy_read_timeout; raise the two together (issue #936) |
 | `RULES_DIR` | `<BASE_DIR>/reference/content/public-rules` | Rules markdown the GM loads |
 | `GM_RETRIEVAL_ENABLED` | `true` | Ground each GM chat turn in retrieved canon excerpts (forced off under pytest) |
 | `GM_EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model for the GM index |

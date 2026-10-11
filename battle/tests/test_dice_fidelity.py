@@ -236,6 +236,26 @@ class EngineRollSpecTest(SimpleTestCase):
         runner.grapple_struggle_free(held)
         self.assertIsNone(held.grappled_by)
 
+    def test_hth_disengage_rolls_4d6_against_effective_dex(self):
+        # special-combat-situations.md, "From HTH (option v)": "Roll 4d6 ≤
+        # DEX", "Success: stand up and move to adjacent empty hex", "Failure:
+        # remain in HTH" (tarmar-engine #19, outside a grapple).
+        state = duel_state()
+        first, second = state.by_id(1), state.by_id(2)
+        first.hth_with, second.hth_with = [2], [1]
+        runner, events = make_runner(state)
+        runner.roller = ScriptedRoller([[4, 4, 4, 4]])  # 16 > DEX 12: stays in
+        runner.hth_disengage(first)
+        escape = roll_events(events)[0]
+        self.assertEqual(escape["payload"]["specification"], "4d6")
+        self.assertEqual(escape["payload"]["purpose"], "escape")
+        self.assertEqual(escape["payload"]["target_number"], first.dexterity)
+        self.assertEqual(first.hth_with, [2])
+        runner.roller = ScriptedRoller([[3, 3, 3, 3]])  # 12 ≤ DEX 12: breaks away
+        runner.hth_disengage(first)
+        self.assertEqual((first.hth_with, second.hth_with), ([], []))
+        self.assertFalse(combat_math.figures_adjacent(first, second))
+
     def test_blocked_retreat_saves_3d6_against_dex(self):
         # special-combat-situations.md: "No retreat hex → enemy rolls
         # 3d6 ≤ DEX or falls."

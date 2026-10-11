@@ -176,6 +176,33 @@ class CharacterImportTest(BaseTestCase):
                 # silently reverted to Ready on every round trip.
                 self.assertEqual(imported.is_played, played)
 
+    def test_round_trip_keeps_an_item_stored_before_custom_items_kept_a_cost(self):
+        """Review of #927: the chat used to store custom items as name and quantity."""
+        old_shape = [{"name": "Vane's key", "quantity": 2}]
+        source = Character.objects.create(
+            user=self.user,
+            name="Old Shape",
+            strength=10,
+            dexterity=11,
+            intelligence=12,
+            wisdom=13,
+            constitution=14,
+            charisma=15,
+            appearance_roll="3",
+            height_roll="3",
+            weight_roll="3",
+            fatigue_roll=7,
+            equipment=old_shape,
+        )
+        self.logout()
+        self.login_as(self.create_dm("old-shape-dm"))
+
+        response = self._post_import(generate_character_json(source).encode("utf-8"))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        imported = Character.objects.get(pk=response.json()["character_id"])
+        self.assertEqual(imported.equipment, old_shape)
+
     def test_round_trip_export_then_import_with_the_free_text_rolls_cleared(self):
         """Issue #637: an empty Appearance box saved but would not re-import.
 

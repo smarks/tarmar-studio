@@ -1,0 +1,62 @@
+name: Deploy
+
+# Started by `./run gate` once it has recorded a pass for the head of main,
+# or by hand from the Actions tab. Not on push: deploy.sh refuses a commit with
+# no gate record, and a merge has none yet, so every push-started run failed
+# (Spencer, 2026-10-10).
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "deploy.sh arguments: blank for a normal deploy, '--expect <sha>' (what ./run gate sends), or 'rollback' / 'status'."
+        required: false
+        default: ""
+
+# One deploy at a time. deploy.sh does a blue-green swap -- it restarts
+# systemd units and flips which one nginx points at, on a single host -- so two
+# runs interleaving can flip the live colour to a unit the other is mid-restart
+# on, or leave the host serving the older of two merges while main shows the
+# newer. Without this, any two merges inside a deploy's ~21-minute window
+# overlap, and that is routine here: an hourly watchdog merges green pull
+# requests alongside whoever else is working. It happened on 2026-09-07, when
+# #314 and #317 merged a minute apart and both deploys ran at once. They
+# happened to succeed. See issue #319.
+#
+# cancel-in-progress is false on purpose. Cancelling a half-finished blue-green
+# swap is worse than queueing behind it: the point is that only one run may
+# touch the host at a time, not that the newest wins.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+# The token's least permissions. smarks/ops-workflows deploy-blue-green uses
+# no GitHub token at all (it reaches the host over SSH with DEPLOY_SSH_KEY),
+# so the deploy job needs nothing past the read every job here is held to.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: smarks/ops-workflows/.github/workflows/deploy-blue-green.yml@main
+    with:
+      app-dir: /home/sam/dev/tarmar-studio
+      command: ${{ inputs.command || '' }}
+    secrets:
+      ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+  notify:
+    needs: [deploy]
+    if: always()
+    # The notify action asks `gh run list` for this workflow's previous run,
+    # to tell a recovery from a first green; that read needs actions: read.
+    # Without it the lookup fails quietly and no recovery mail is ever sent.
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Email on failure or green-after-red
+        uses: smarks/base_repo_template/.github/actions/notify@main
+        with:
+          job-status: ${{ needs.deploy.result }}
+          mail-password: ${{ secrets.MAIL_PASSWORD }}

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import gate
 import pytest
+import yaml
 
 PORTS = {"e2e_port": "8399", "default_canon_e2e_port": "8398"}
 
@@ -32,6 +33,20 @@ def caller_has_no_canon_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     needs the variable sets it itself.
     """
     monkeypatch.delenv(gate.CANON_DIR_ENV, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_port_is_listening(monkeypatch: pytest.MonkeyPatch) -> set[int]:
+    """Start every test with every port free, whatever this machine is running.
+
+    The gate refuses a port something listens on (issue #966), so a test that
+    asked the real network would pass or fail with whichever other gate or
+    dev server happened to be up. A test that needs a port taken adds it to
+    the returned set.
+    """
+    listening: set[int] = set()
+    monkeypatch.setattr(gate, "port_listening", lambda port: port in listening)
+    return listening
 
 
 def git(repository: Path, *arguments: str) -> str:
@@ -300,7 +315,9 @@ def test_a_dirty_tree_is_refused_before_a_single_step_runs(
     )
     monkeypatch.setattr(gate, "run_step", record_that_it_ran)
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 1
     assert ran == []
@@ -322,7 +339,9 @@ def test_every_step_passing_records_the_commit(
         ],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 0
     record = note_on(checkout, commit_sha)
@@ -344,7 +363,9 @@ def test_the_first_failing_step_stops_the_run_and_records_nothing(
         ],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 3
     assert not (checkout / "ran-later").exists()
@@ -366,7 +387,9 @@ def test_a_tree_changed_by_the_suites_is_not_recorded(
         ],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 1
     assert "tracked.txt" in capsys.readouterr().out
@@ -393,7 +416,9 @@ def test_a_commit_made_while_the_suites_ran_is_not_recorded(
         ],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 1
     assert "HEAD moved" in capsys.readouterr().out
@@ -466,7 +491,9 @@ def test_the_note_records_the_external_canons_commit(
         lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 0
     record = note_on(checkout, gate.head_commit_sha(checkout))
@@ -489,7 +516,9 @@ def test_a_canon_checkout_with_changes_is_refused(
         lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 1
     assert "canon checkout" in capsys.readouterr().out
@@ -500,14 +529,16 @@ def test_the_command_line_defaults_to_running_and_pushing() -> None:
     default = gate.parse_arguments([])
     assert default.check is None
     assert default.no_push is False
-    assert default.e2e_port == gate.DEFAULT_E2E_PORT
+    # No fixed default: a free port is picked (issue #966). This asserted
+    # DEFAULT_E2E_PORT, the fixed port two sessions' gates collided on.
+    assert default.e2e_port is None
 
     checking = gate.parse_arguments(["--check"])
     assert checking.check == "HEAD"
     assert gate.parse_arguments(["--check", "abc123"]).check == "abc123"
     assert gate.parse_arguments(["--no-push"]).no_push is True
     assert gate.parse_arguments(["--e2e-port", "8123"]).e2e_port == "8123"
-    assert default.default_canon_e2e_port == gate.DEFAULT_CANON_E2E_PORT
+    assert default.default_canon_e2e_port is None
     assert (
         gate.parse_arguments(
             ["--default-canon-e2e-port", "8124"]
@@ -518,7 +549,14 @@ def test_the_command_line_defaults_to_running_and_pushing() -> None:
 
 def test_there_is_no_flag_that_skips_the_default_canon_run() -> None:
     option_names = set(vars(gate.parse_arguments([])))
-    assert option_names == {"check", "no_push", "e2e_port", "default_canon_e2e_port"}
+    # --no-deploy skips starting the Deploy workflow, never a step.
+    assert option_names == {
+        "check",
+        "no_push",
+        "no_deploy",
+        "e2e_port",
+        "default_canon_e2e_port",
+    }
 
 
 def test_the_steps_run_with_the_environment_the_run_wrapper_builds() -> None:
@@ -582,7 +620,9 @@ def test_each_step_runs_with_its_own_modes_canon_variable(
 
     monkeypatch.setattr(gate, "run_step", capture_environment)
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 0
     assert seen == {"own canon": None, "default canon": str(canon_dir)}
@@ -604,7 +644,9 @@ def test_a_failing_default_canon_step_records_nothing(
         ],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 5
     assert note_on(checkout, gate.head_commit_sha(checkout)) is None
@@ -634,6 +676,7 @@ def test_the_note_lists_both_modes_and_both_ports(
         e2e_port="8399",
         default_canon_e2e_port="8398",
         push=False,
+        deploy=False,
     )
 
     assert status == 0
@@ -659,7 +702,9 @@ def test_a_missing_default_canon_is_refused_before_any_step_runs(
         ],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 1
     assert str(absent) in capsys.readouterr().out
@@ -677,6 +722,7 @@ def test_colliding_ports_are_refused_before_any_step_runs(
         e2e_port="8399",
         default_canon_e2e_port="8399",
         push=False,
+        deploy=False,
     )
 
     assert status == 1
@@ -701,7 +747,9 @@ def test_a_checkout_records_its_own_canon_not_the_gate_script_s(
         lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
     )
 
-    status = gate.run_gate(repository_root=checkout, e2e_port="8399", push=False)
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
 
     assert status == 0
     record = note_on(checkout, gate.head_commit_sha(checkout))
@@ -710,3 +758,355 @@ def test_a_checkout_records_its_own_canon_not_the_gate_script_s(
     assert f"canon-dir: {in_tree_canon}" in record
     # Inside this checkout, the canon has no commit of its own.
     assert "canon-commit: none" in record
+
+
+# Issue #966: two sessions' gates collided on the fixed ports 8390/8391, and
+# Playwright's reuseExistingServer had one pass test the other worktree's code.
+
+
+def candidate(checkout: Path, step: int) -> int:
+    """The port ``step`` places after where ``checkout``'s search starts."""
+    base = int(gate.DEFAULT_E2E_PORT)
+    start = gate.first_e2e_port_for(checkout) - base
+    return base + (start + step) % gate.E2E_PORT_SPAN
+
+
+def test_free_ports_are_picked_past_any_port_or_fake_ollama_port_in_use(
+    tmp_path: Path, no_port_is_listening: set[int]
+) -> None:
+    # The first candidate's app port is taken, the second's fake Ollama.
+    no_port_is_listening.update(
+        {candidate(tmp_path, 0), candidate(tmp_path, 1) + gate.FAKE_OLLAMA_PORT_OFFSET}
+    )
+
+    first, second = gate.choose_e2e_ports(
+        tmp_path, e2e_port=None, default_canon_e2e_port=None
+    )
+
+    assert (int(first), int(second)) == (candidate(tmp_path, 2), candidate(tmp_path, 3))
+    gate.gate_steps(e2e_port=first, default_canon_e2e_port=second)  # no collision
+
+
+def test_the_search_starts_where_the_checkout_says_and_stays_in_the_span(
+    tmp_path: Path,
+) -> None:
+    one = gate.first_e2e_port_for(tmp_path / "one")
+    assert one == gate.first_e2e_port_for(tmp_path / "one")
+    base = int(gate.DEFAULT_E2E_PORT)
+    starts = {gate.first_e2e_port_for(tmp_path / str(number)) for number in range(20)}
+    assert all(base <= start < base + gate.E2E_PORT_SPAN for start in starts)
+    assert len(starts) > 1  # different checkouts, different starting points
+
+
+def test_a_named_port_is_kept_and_the_other_avoids_its_claims(
+    tmp_path: Path,
+) -> None:
+    named = candidate(tmp_path, 0)
+
+    first, second = gate.choose_e2e_ports(
+        tmp_path, e2e_port=str(named), default_canon_e2e_port=None
+    )
+
+    assert first == str(named)
+    assert second == str(candidate(tmp_path, 1))
+
+
+def test_no_free_port_in_the_span_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(gate, "port_listening", lambda port: True)
+
+    with pytest.raises(gate.GateError, match="no free e2e port"):
+        gate.choose_e2e_ports(tmp_path, e2e_port=None, default_canon_e2e_port=None)
+
+
+@pytest.mark.parametrize("taken_offset", [0, gate.FAKE_OLLAMA_PORT_OFFSET])
+def test_a_named_port_in_use_is_refused_before_any_step_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_port_is_listening: set[int],
+    taken_offset: int,
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    no_port_is_listening.add(8398 + taken_offset)
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        lambda *, e2e_port, default_canon_e2e_port: [
+            gate.GateStep("touches", ["bash", "-c", "touch ran"])
+        ],
+    )
+
+    status = gate.run_gate(
+        repository_root=checkout,
+        e2e_port="8399",
+        default_canon_e2e_port="8398",
+        push=False,
+        deploy=False,
+    )
+
+    assert status == 1
+    output = capsys.readouterr().out
+    assert "refusing to run" in output
+    assert f"port {8398 + taken_offset} is already listening" in output
+    assert not (checkout / "ran").exists()
+    assert note_on(checkout, gate.head_commit_sha(checkout)) is None
+
+
+def test_a_port_taken_before_its_browser_step_records_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_port_is_listening: set[int],
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+
+    def run_and_take(
+        step: gate.GateStep, *, repository_root: Path, environment: dict[str, str]
+    ) -> gate.StepResult:
+        """Stand in for run_step; the first step leaves 8399 taken."""
+        no_port_is_listening.add(8399)
+        return gate.StepResult(step=step, returncode=0, seconds=0.0)
+
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        lambda *, e2e_port, default_canon_e2e_port: [
+            passing_step("pytest"),
+            gate.GateStep("playwright", ["bash", "-c", "true"], {"E2E_PORT": e2e_port}),
+        ],
+    )
+    monkeypatch.setattr(gate, "run_step", run_and_take)
+
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
+
+    assert status == 1
+    assert "playwright: port 8399 is already listening" in capsys.readouterr().out
+    assert note_on(checkout, gate.head_commit_sha(checkout)) is None
+
+
+def test_the_note_records_the_ports_the_gate_picked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    expected = gate.choose_e2e_ports(
+        checkout, e2e_port=None, default_canon_e2e_port=None
+    )
+    ports_given: list[tuple[str, str]] = []
+
+    def steps_for(*, e2e_port: str, default_canon_e2e_port: str) -> list[gate.GateStep]:
+        """Stand in for gate_steps, noting the ports the gate chose."""
+        ports_given.append((e2e_port, default_canon_e2e_port))
+        return [passing_step()]
+
+    monkeypatch.setattr(gate, "gate_steps", steps_for)
+
+    status = gate.run_gate(repository_root=checkout, push=False, deploy=False)
+
+    assert status == 0
+    assert ports_given == [expected]
+    record = note_on(checkout, gate.head_commit_sha(checkout))
+    assert record is not None
+    assert f"e2e-port: {expected[0]}" in record.splitlines()
+    assert f"default-canon-e2e-port: {expected[1]}" in record.splitlines()
+
+
+# Spencer, 2026-10-10: Deploy started on every push to main and refused each
+# merge, which had no record yet, so every merge showed a red run. Deploy now
+# starts only when a gate run has recorded the head of main.
+
+
+def test_a_pass_on_the_head_of_main_starts_deploy_for_that_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    commit_sha = gate.head_commit_sha(checkout)
+    started: list[tuple[Path, str]] = []
+    monkeypatch.setattr(
+        gate,
+        "dispatch_deploy_workflow",
+        lambda root, sha: started.append((root, sha)) or "",
+    )
+
+    outcome = gate.start_deploy_if_head(checkout, commit_sha)
+
+    assert started == [(checkout, commit_sha)]
+    assert outcome.startswith(f"started deploy.yml for {commit_sha}")
+
+
+def test_a_pass_on_an_older_commit_starts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    older = gate.head_commit_sha(checkout)
+    push_a_newer_main(checkout)
+    started: list[str] = []
+    monkeypatch.setattr(
+        gate, "dispatch_deploy_workflow", lambda root, sha: started.append(sha) or ""
+    )
+
+    outcome = gate.start_deploy_if_head(checkout, older)
+
+    # deploy.sh deploys the head; the head's own gate run starts that deploy.
+    assert started == []
+    assert outcome.startswith("not deploying")
+
+
+def push_a_newer_main(checkout: Path) -> None:
+    """Move origin's main one commit past the checkout's HEAD."""
+    (checkout / "tracked.txt").write_text("second\n", encoding="utf-8")
+    git(checkout, "commit", "--quiet", "-am", "second")
+    git(checkout, "push", "--quiet", "origin", "main")
+    git(checkout, "reset", "--quiet", "--hard", "HEAD~1")
+
+
+def run_passing_gate(
+    tmp_path: Path,
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    push: bool,
+    deploy: bool,
+    tarmar_canon: bool = True,
+) -> tuple[int, list[str]]:
+    """Run a gate whose one step passes, recording any Deploy it starts."""
+    if tarmar_canon:
+        monkeypatch.setenv(gate.CANON_DIR_ENV, str(make_canon_checkout(tmp_path)))
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+    )
+    started: list[str] = []
+    monkeypatch.setattr(
+        gate, "dispatch_deploy_workflow", lambda root, sha: started.append(sha) or ""
+    )
+    status = gate.run_gate(repository_root=checkout, push=push, deploy=deploy, **PORTS)
+    return status, started
+
+
+def test_a_pushed_tarmar_record_of_the_head_starts_deploy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    status, started = run_passing_gate(
+        tmp_path, checkout, monkeypatch, push=True, deploy=True
+    )
+    assert status == 0
+    assert started == [gate.head_commit_sha(checkout)]
+
+
+def test_a_default_canon_record_starts_no_deploy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # deploy.sh refuses it, so starting Deploy would only make a red run.
+    checkout, _ = make_repository_with_remote(tmp_path)
+    status, started = run_passing_gate(
+        tmp_path, checkout, monkeypatch, push=True, deploy=True, tarmar_canon=False
+    )
+    assert status == 0
+    assert started == []
+    assert "not deploying: this record ran the default canon" in capsys.readouterr().out
+
+
+def test_a_gate_run_on_a_commit_main_has_moved_past_starts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    push_a_newer_main(checkout)
+    status, started = run_passing_gate(
+        tmp_path, checkout, monkeypatch, push=True, deploy=True
+    )
+    assert status == 0
+    assert started == []
+
+
+@pytest.mark.parametrize(("push", "deploy"), [(False, True), (True, False)])
+def test_no_deploy_without_a_pushed_record_or_when_told_not_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, push: bool, deploy: bool
+) -> None:
+    # A local-only record is invisible to deploy.sh, so a deploy would refuse.
+    checkout, _ = make_repository_with_remote(tmp_path)
+    status, started = run_passing_gate(
+        tmp_path, checkout, monkeypatch, push=push, deploy=deploy
+    )
+    assert status == 0
+    assert started == []
+
+
+def test_a_deploy_that_will_not_start_fails_the_run_but_keeps_the_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    commit_sha = gate.head_commit_sha(checkout)
+    monkeypatch.setenv(gate.CANON_DIR_ENV, str(make_canon_checkout(tmp_path)))
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+    )
+
+    def gh_refuses(root: Path, sha: str) -> str:
+        raise subprocess.CalledProcessError(1, ["gh"], stderr="HTTP 403")
+
+    monkeypatch.setattr(gate, "dispatch_deploy_workflow", gh_refuses)
+
+    status = gate.run_gate(repository_root=checkout, push=True, deploy=True, **PORTS)
+
+    assert status == 1
+    assert note_on(checkout, commit_sha) is not None
+    assert "did not start: HTTP 403" in capsys.readouterr().out
+
+
+def test_the_command_line_starts_deploy_unless_told_not_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        gate, "run_gate", lambda **options: calls.append(options["deploy"]) or 0
+    )
+    gate.main([])
+    gate.main(["--no-deploy"])
+    assert calls == [True, False]
+
+
+def test_deploy_starts_only_on_request_not_on_push() -> None:
+    workflow = yaml.safe_load(
+        (
+            gate.REPOSITORY_ROOT / ".github" / "workflows" / gate.DEPLOY_WORKFLOW
+        ).read_text()
+    )
+    # PyYAML reads the bare key `on` as True.
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"workflow_dispatch"}
+
+
+def test_deploy_is_started_with_exactly_this_gh_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def record_call(
+        command: list[str], **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate.subprocess, "run", record_call)
+    gate.dispatch_deploy_workflow(tmp_path, "abc123")
+
+    assert calls == [
+        [
+            "gh",
+            "workflow",
+            "run",
+            "deploy.yml",
+            "--ref",
+            "main",
+            "-f",
+            "command=--expect abc123",
+        ]
+    ]

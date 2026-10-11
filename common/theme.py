@@ -43,11 +43,17 @@ class Theme:
         attribution: Footer line naming whose game the theme evokes; empty
             when there is nobody to credit.
         landing_url_name: URL name the front door opens onto -- where the
-            root URL, and every login/logout/register without a ``next`` of
-            its own, sends the visitor. The arena's door lands on the arena;
-            the studio's lands on the studio home. Kept here so "which host
-            is which" is decided in exactly one place (``THEME_HOSTS``) and
-            never re-derived by parsing hostnames elsewhere (issue #269).
+            root URL, and a logout, sends the visitor. The arena's door lands
+            on the arena; the studio's lands on the public front page. Kept
+            here so "which host is which" is decided in exactly one place
+            (``THEME_HOSTS``) and never re-derived by parsing hostnames
+            elsewhere (issue #269).
+        signed_in_landing_url_name: URL name a sign-in or registration with
+            no ``next`` of its own lands on. The studio's is the player's
+            journal (issue #952), so the front page can stay the same for
+            everyone; the arena's is its own door, the battle list. Separate
+            from ``landing_url_name`` because the front door is public and
+            this one is where an account goes once it has signed in.
         nav: Which menu ``base.html`` renders -- ``"studio"`` for the full
             Tarmar nav, ``"arena"`` for the battles-first menu. A key rather
             than a boolean so a third front door needs a value, not a
@@ -67,6 +73,7 @@ class Theme:
     stylesheet: str | None
     attribution: str
     landing_url_name: str
+    signed_in_landing_url_name: str
     nav: str
     default_rules_profile: str
 
@@ -79,6 +86,7 @@ TARMAR_THEME = Theme(
     stylesheet=None,
     attribution="",
     landing_url_name="home",
+    signed_in_landing_url_name="journal",
     nav="studio",
     default_rules_profile="tarmar",
 )
@@ -101,6 +109,7 @@ CLASSIC_ARENA_THEME = Theme(
         "with or endorsed by Steve Jackson Games."
     ),
     landing_url_name="battle:list",
+    signed_in_landing_url_name="battle:list",
     nav="arena",
     default_rules_profile="classic-melee",
 )

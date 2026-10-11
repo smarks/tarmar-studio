@@ -19,7 +19,7 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase, override_settings
 
 from gm import warmup
-from gm.engine import SYSTEM_PROMPT
+from gm.engine import SYSTEM_PROMPT, SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE
 from gm.retrieval import estimate_message_tokens
 
 FAKE_SYSTEM = {"role": "system", "content": "You are the GM."}
@@ -358,6 +358,35 @@ class WarmPromptCacheTest(SimpleTestCase):
         self.assertEqual(len(fake.chat_payloads), 3)
 
 
+class PromptBudgetTest(SimpleTestCase):
+    """The prompt's size against its share of GM_NUM_CTX (issue #907)."""
+
+    def test_at_the_ceiling_is_within_it(self):
+        budget = warmup.PromptBudget(prompt_tokens=16384, num_ctx=65536)
+        self.assertEqual(budget.ceiling_tokens, 16384)
+        self.assertIs(budget.within_ceiling, True)
+
+    def test_one_token_over_is_not(self):
+        budget = warmup.PromptBudget(prompt_tokens=16385, num_ctx=65536)
+        self.assertIs(budget.within_ceiling, False)
+
+    def test_ceiling_moves_with_the_window(self):
+        self.assertEqual(
+            warmup.PromptBudget(prompt_tokens=0, num_ctx=8192).ceiling_tokens, 2048
+        )
+
+    def test_longest_prompt_uses_the_shared_message_estimate(self):
+        prompts = ("short", "x" * 400, "y" * 40)
+        self.assertEqual(
+            warmup.estimate_longest_prompt_tokens(prompts),
+            estimate_message_tokens({"role": "system", "content": "x" * 400}),
+        )
+
+    def test_no_prompts_is_an_error(self):
+        with self.assertRaises(ValueError):
+            warmup.estimate_longest_prompt_tokens(())
+
+
 class WarmGMCommandTest(SimpleTestCase):
     """manage.py warm_gm."""
 
@@ -373,16 +402,16 @@ class WarmGMCommandTest(SimpleTestCase):
     def tearDown(self):
         self._temp.cleanup()
 
-    def _settings(self, corpus_root: Path | None = None):
+    def _settings(self, corpus_root: Path | None = None, num_ctx: int = 4096):
         return override_settings(
             GM_CORPUS_ROOT=self.root if corpus_root is None else corpus_root,
             GM_MODEL="fake-model",
-            GM_NUM_CTX=4096,
+            GM_NUM_CTX=num_ctx,
             GM_TEMPERATURE=0.5,
             OLLAMA_BASE_URL="http://ollama:11434",
         )
 
-    def _run(self, fake: RecordingOllama, *arguments: str) -> str:
+    def _run(self, fake: RecordingOllama, *arguments: str, num_ctx: int = 4096) -> str:
         out = StringIO()
 
         def fake_create_client(base_url: str, *, read_timeout: float) -> httpx.Client:
@@ -391,11 +420,42 @@ class WarmGMCommandTest(SimpleTestCase):
             return fake.client()
 
         with (
-            self._settings(),
+            self._settings(num_ctx=num_ctx),
             patch.object(warmup, "create_client", fake_create_client),
         ):
             call_command("warm_gm", *arguments, "--filler-tokens", "50", stdout=out)
         return out.getvalue()
+
+    def test_states_both_prompt_budgets_within_the_ceiling(self):
+        """Issue #907: the estimate before warming, Ollama's count after."""
+        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        output = self._run(fake, num_ctx=65536)
+        longest = warmup.estimate_longest_prompt_tokens(
+            SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values()
+        )
+        self.assertIn(
+            f"prompt budget: longest GM prompt, estimated {longest} tokens, "
+            "ceiling 16384 (25% of GM_NUM_CTX 65536)",
+            output,
+        )
+        self.assertIn(
+            "prompt budget: shortest GM prompt with the probe, measured by "
+            "Ollama 7342 tokens, ceiling 16384 (25% of GM_NUM_CTX 65536)",
+            output,
+        )
+        self.assertNotIn("OVER the ceiling", output)
+        self.assertLess(
+            output.index("prompt budget: longest"), output.index("Ollama 0.33.3")
+        )
+
+    def test_prompt_over_the_ceiling_is_reported_loudly_and_exits_zero(self):
+        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        output = self._run(fake)
+        self.assertIn(
+            "ceiling 1024 (25% of GM_NUM_CTX 4096) -- OVER the ceiling", output
+        )
+        self.assertEqual(output.count("OVER the ceiling"), 2)
+        self.assertIn("warm: system prompt cached", output)
 
     def test_reports_cached_system_prompt(self):
         fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))

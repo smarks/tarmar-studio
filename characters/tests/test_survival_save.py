@@ -94,8 +94,10 @@ class SurvivalSaveTest(BaseTestCase):
             [(entry["old"], entry["new"]) for entry in death], [("True", "False")]
         )
         # The dead roll no more saves; only a Game Master's revive brings
-        # them back.
-        with self.assertRaisesMessage(CharacterChangeError, NO_SURVIVAL_SAVE_DUE):
+        # them back, and the refusal says so (issue #932).
+        with self.assertRaisesMessage(
+            CharacterChangeError, "a Game Master must bring them back to life first"
+        ):
             roll_survival_save(self.character.pk, actor=self.player)
 
     def test_past_minus_the_full_pool_the_save_is_penalized(self) -> None:

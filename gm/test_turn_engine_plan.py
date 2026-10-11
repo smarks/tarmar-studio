@@ -989,3 +989,67 @@ class NonFiniteCoinTest(SimpleTestCase):
                     )
                     reading = read_plan(raw, roster_ids={41}, policy=GAME_MASTER)
                     self.assertFalse(reading.ok)
+
+
+class CustomItemPlanTest(SimpleTestCase):
+    """What ``add_equipment`` carries for an item the catalog does not sell (#927).
+
+    Who pays the price, and who may give combat numbers, is the service's
+    ruling; the plan carries what was stated, and an unstated price is not 0.
+    """
+
+    def read_one(self, **fields):
+        reading = read_plan(
+            json.dumps(
+                {"actions": [{"action": "add_equipment", "character_id": 41, **fields}]}
+            ),
+            roster_ids={41},
+            policy=PLAYER,
+        )
+        return reading
+
+    def test_a_stated_price_is_carried_and_an_unstated_one_is_not_zero(self):
+        for raw, carried in ((15, "15.00"), (0, "0.00"), (None, "")):
+            with self.subTest(raw=raw):
+                reading = self.read_one(item="Heirloom ring", price=raw)
+
+                self.assertEqual(reading.errors, ())
+                self.assertEqual(reading.actions[0].price, carried)
+
+    def test_combat_numbers_are_carried_and_written_back(self):
+        reading = self.read_one(
+            item="Dragonhide", price=5, category="Armor", stops=0, dex_penalty=-1
+        )
+
+        (action,) = reading.actions
+        self.assertEqual(
+            action.combat, (("category", "armor"), ("stops", 0), ("dex_penalty", -1))
+        )
+        self.assertEqual(
+            action.as_payload(),
+            {
+                "action": "add_equipment",
+                "character_id": 41,
+                "item": "Dragonhide",
+                "quantity": 1,
+                "price": 5.0,
+                "category": "armor",
+                "stops": 0,
+                "dex_penalty": -1,
+            },
+        )
+
+    def test_a_bad_price_or_combat_number_is_an_error(self):
+        for fields, said in (
+            ({"price": -1}, "price must be between"),
+            ({"price": "free"}, "price must be a number"),
+            ({"category": "potion"}, "category must be one of"),
+            ({"stops": 3}, "combat numbers need a category"),
+            ({"category": "armor", "stops": 99}, "stops"),
+            ({"category": "armor", "dex_penalty": 2}, "dex_penalty"),
+        ):
+            with self.subTest(fields=fields):
+                reading = self.read_one(item="Odd thing", **fields)
+
+                self.assertFalse(reading.ok)
+                self.assertIn(said, reading.errors[0])

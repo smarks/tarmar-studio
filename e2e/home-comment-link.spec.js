@@ -4,15 +4,15 @@
  * What only a browser proves: the link sits on the same row as Play at the
  * desktop and laptop widths, the row wraps instead of pushing the page
  * sideways where it no longer fits, and clicking the link opens the public
- * feedback repository's GitHub issues in a new tab (the code repository is
- * private). GitHub itself is never contacted; the new tab's request is
- * answered locally.
+ * repository's issue forms in a new tab (the code repository is private).
+ * GitHub itself is never contacted; the new tab's request is answered
+ * locally.
  */
 
 const { test, expect, submitPassphrase } = require('./fixtures');
 
 const HOME_URL = '/tarmar/';
-const ISSUES_URL = 'https://github.com/smarks/tarmar-feedback/issues';
+const ISSUES_URL = 'https://github.com/smarks/tarmar-studio/issues/new/choose';
 
 /** Top edge of a locator's box, rounded to the pixel. */
 async function topOf(locator) {

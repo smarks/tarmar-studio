@@ -67,6 +67,19 @@ const CONFIG_DEFAULTS = {
     // modifiers. The player's shape is exercised below (issues #748, #752).
     canSetItemModifiers: true,
     setVisibilityUrl: '/tarmar/characters/7/set-visibility/',
+    // Numbers no input would carry by chance, so a test that finds them
+    // proves the script read them from here (issue #928).
+    textLimits: {
+        name: 101, skill_name: 61, item_name: 102, item_notes: 203,
+        item_damage: 21, death_cause: 207, coin_reason: 103,
+    },
+    // Bounds no input would carry by chance either (issue #938).
+    numberLimits: {
+        equipment_quantity: 998, equipment_weight: 1003, equipment_modifier: 11,
+        armor_stops: 12, armor_dex_penalty: 13, check_difficulty: 41,
+        check_total_minimum: 3, check_total_maximum: 14, mana_grant: 101,
+        defender_dodge: 15, situational: 21,
+    },
 };
 
 /** A json-ish Response stand-in for the mocked fetch. */
@@ -95,8 +108,8 @@ function pageHtml(config) {
         <script id="character-edit-config" type="application/json">${JSON.stringify(config)}<\/script>
 
         <p class="dm-actions">
-            <button type="button" id="mark-dead-btn">Mark Dead</button>
-            <button type="button" id="revive-btn">Revive</button>
+            <button type="button" id="mark-dead-btn" data-alive-only>Mark Dead</button>
+            <button type="button" id="revive-btn" data-dead-only hidden>Revive</button>
         </p>
 
         <p class="visibility-control">
@@ -283,7 +296,7 @@ function pageHtml(config) {
 
         <template id="death-card-template">
             <div class="death-card">
-                <h3></h3>
+                <h3><span data-name-chrome></span> died</h3>
                 <p class="death-cause"></p>
                 <p class="fatal-roll" hidden></p>
                 <p class="death-note">A DM can resurrect this character.</p>
@@ -1980,6 +1993,25 @@ describe('the experience workbench', () => {
         expect(document.getElementById('movement-penalty').textContent).toBe('-2 movement');
     });
 
+    test('the movement payload, which carries no repaint, leaves the sheet as the response painted it', async () => {
+        // The response carries sheet_repaint once, at the top; the movement
+        // payload handed to updateEquipmentDisplay has none of its keys
+        // (issue #933). Its paintSheet call leaves alone every part whose
+        // key is absent, so it does not undo what the top-level one painted.
+        await loadPage({}, [jsonResponse({
+            success: true,
+            run_result: TERM,
+            run_html: RUN_HTML,
+            character: CHARACTER,
+            is_alive: true,
+            movement: { success: true, carried_weight: 22, pack_dropped: false, equipment: [] },
+        })]);
+        await rollTerm();
+
+        expect(document.getElementById('mark-dead-btn').hidden).toBe(false);
+        expect(document.getElementById('carried-weight').textContent).toBe('22');
+    });
+
     test('a response with no movement data does not error', async () => {
         // Belt-and-suspenders: older/mocked responses without the new key
         // should not break the rest of the success path.
@@ -2082,7 +2114,7 @@ describe('death', () => {
         test('swaps the workbench card for the death card, matching the template fragment', async () => {
             // A fatal term stops at the year that killed the character; its
             // last year's survival_check is the fatal roll (issue #175).
-            await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER })]);
+            await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER, name: 'Aldwin', is_alive: false })]);
             await rollTerm();
 
             const card = document.querySelector('#workbench-card .death-card');
@@ -2097,7 +2129,7 @@ describe('death', () => {
         });
 
         test('the history log still marks the fatal year', async () => {
-            await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER })]);
+            await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER, name: 'Aldwin', is_alive: false })]);
             await rollTerm();
 
             const entry = document.querySelector('#experience-log .term-entry');
@@ -2116,7 +2148,7 @@ describe('death', () => {
         });
 
         test('never reloads the page', async () => {
-            await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER })]);
+            await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER, name: 'Aldwin', is_alive: false })]);
             await rollTerm();
 
             expect(window.location.reload).not.toHaveBeenCalled();
@@ -2281,6 +2313,93 @@ describe('read-only equipment rendering (issue #273)', () => {
         const list = document.getElementById('equipment-list');
         expect(list.querySelectorAll('.remove-btn').length).toBe(2);
         expect(list.querySelectorAll('input[data-field="quantity"]').length).toBe(2);
+    });
+});
+
+describe('text limits come from the server (issue #928)', () => {
+    afterEach(() => { delete window.promptDialog; });
+
+    test("an equipment row's notes input carries the server's limit", async () => {
+        await loadPage({ initialEquipment: [{ item_id: 'rope', quantity: 1 }] });
+
+        const notes = document.querySelector('#equipment-list [data-field="notes"]');
+        expect(notes.getAttribute('maxlength')).toBe(
+            String(CONFIG_DEFAULTS.textLimits.item_notes),
+        );
+    });
+
+    test("the cause-of-death prompt carries the server's limit", async () => {
+        await loadPage();
+        window.promptDialog = jest.fn(() => Promise.resolve(null));
+        document.getElementById('mark-dead-btn').click();
+        await flush();
+
+        expect(window.promptDialog).toHaveBeenCalledWith(
+            'Cause of death:',
+            expect.objectContaining({ maxLength: CONFIG_DEFAULTS.textLimits.death_cause }),
+        );
+    });
+});
+
+describe('number bounds come from the server (issue #938)', () => {
+    test("an equipment row's quantity input stops at the server's bound", async () => {
+        await loadPage({ initialEquipment: [{ item_id: 'rope', quantity: 1 }] });
+
+        const quantity = document.querySelector('#equipment-list [data-field="quantity"]');
+        expect(quantity.getAttribute('max')).toBe(
+            String(CONFIG_DEFAULTS.numberLimits.equipment_quantity),
+        );
+    });
+
+    test("a weapon's modifier inputs stop at the server's bound both ways", async () => {
+        await loadPage({ initialEquipment: [{ item_id: 'dagger', quantity: 1 }] });
+
+        const bound = CONFIG_DEFAULTS.numberLimits.equipment_modifier;
+        const modifiers = document.querySelectorAll(
+            '#equipment-list [data-field$="_mod"]',
+        );
+        expect(modifiers.length).toBe(3);
+        modifiers.forEach((input) => {
+            expect(input.getAttribute('min')).toBe(String(-bound));
+            expect(input.getAttribute('max')).toBe(String(bound));
+        });
+    });
+});
+
+describe('equipment markup escapes what it is handed (CodeQL js/xss-through-dom)', () => {
+    // The config's limits and the stored items reach the row markup as data;
+    // a value that is not the number it should be must stay text, never
+    // become an element or an attribute.
+    const hostile = '"><img src=x id=injected>';
+
+    test('limits and item values that are not numbers stay inside their attributes', async () => {
+        await loadPage({
+            canSetItemModifiers: true,
+            textLimits: { ...CONFIG_DEFAULTS.textLimits, item_notes: hostile },
+            numberLimits: {
+                ...CONFIG_DEFAULTS.numberLimits,
+                equipment_quantity: hostile,
+                equipment_modifier: hostile,
+            },
+            initialEquipment: [{ item_id: 'dagger', quantity: hostile, to_hit_mod: hostile }],
+        });
+
+        const list = document.getElementById('equipment-list');
+        expect(list.querySelector('#injected')).toBeNull();
+        expect(list.querySelector('[data-field="notes"]').getAttribute('maxlength')).toBe(hostile);
+        expect(list.querySelector('[data-field="quantity"]').getAttribute('max')).toBe(hostile);
+        expect(list.querySelector('[data-field="to_hit_mod"]').getAttribute('max')).toBe(hostile);
+    });
+
+    test('a read-only row shows a quantity that is not a number as text', async () => {
+        await loadPage({
+            canEdit: false,
+            initialEquipment: [{ item_id: 'rope', quantity: hostile }],
+        });
+
+        const list = document.getElementById('equipment-list');
+        expect(list.querySelector('#injected')).toBeNull();
+        expect(list.textContent).toContain(`Qty: ${hostile}`);
     });
 });
 
@@ -2899,6 +3018,8 @@ describe('autosave wiring', () => {
             fatigue: 33, body: 22, physical: 19, mental: 20,
             dex_modifier: 3, dodge_modifier: 3,
             height_display: "6'0\"", weight_lbs: 180, starting_coin: 250, level: 4,
+            // Every response carries the saved name (sheet_repaint, #903).
+            name: 'Aldwin the Bolder',
             injury_thresholds_html:
                 '<table class="injury-table"><tbody><tr>'
                 + '<td id="injury-fatigue-minus_one_at">16</td>'
@@ -3355,7 +3476,7 @@ describe('the sheet repaints what a change moves (issues #763-#766, #792, #797, 
     test('renaming the character repaints the title and the breadcrumb (#792)', async () => {
         await loadPage();
         addSheetParts();
-        routeFetch([jsonResponse({ success: true })]);
+        routeFetch([jsonResponse({ success: true, name: 'Brannoc' })]);
         const input = document.getElementById('id_name');
         input.value = 'Brannoc';
         input.dispatchEvent(new Event('blur'));
@@ -3558,5 +3679,271 @@ describe('the sheet repaints what a change moves (issues #763-#766, #792, #797, 
         input.dispatchEvent(new Event('blur'));
         await flush();
         expect(document.getElementById('height_display').textContent).toBe('(—)');
+    });
+});
+
+describe('the states a reload used to be needed for (#903)', () => {
+    /** The parts of the sheet this issue marks, as the templates render them. */
+    function addLifeParts() {
+        document.body.insertAdjacentHTML('beforeend', `
+            <nav class="breadcrumb"><ol><li><span aria-current="page">Aldwin</span></li></ol></nav>
+            <div class="play-with-gm-slot" id="play-with-gm-7">
+                <form class="play-with-gm" data-character-id="7" data-attach-url="/gm/attach/"
+                      data-chat-url="/gm/"><label>Take Aldwin to</label>
+                    <button type="submit">Play with the Game Master</button>
+                    <p class="play-with-gm-error" hidden></p></form>
+            </div>
+            <section id="sessions-holding"><span><span data-name-chrome>Aldwin</span> is in
+                <strong>Kell's table</strong></span>
+                <a class="sessions-holding-fight">play <span data-name-chrome>Aldwin</span>'s turns</a></section>
+            <div class="magic-controls" id="magic-controls" data-alive-only>
+                <div class="learn-spell needs-free-points"></div>
+            </div>
+            <datalist id="skill-name-suggestions"><option value="Sword"></option></datalist>
+        `);
+    }
+
+    /** An empty slot: the attach would be refused (dead or incomplete). */
+    const EMPTY_SLOT = '<div class="play-with-gm-slot" id="play-with-gm-7">\n</div>';
+    /** The slot with its form, rendered hidden as the partial renders it. */
+    const OFFERED_SLOT = '<div class="play-with-gm-slot" id="play-with-gm-7">'
+        + '<form class="play-with-gm" data-character-id="7" hidden><label>Take Brannoc to</label>'
+        + '<button type="submit">Play with the Game Master</button></form></div>';
+
+    const FATAL_RUN = {
+        success: true,
+        run_result: { years: [{ year: 5, survival_check: { text: '3d6 [1, 1, 1] - 5 = -2 vs 9' } }] },
+        run_html: '<details class="term-entry"><summary>Campaigner, Age 21</summary></details>',
+        character: {
+            age: 21, experience_years: 5, total_xp: 1200, level: 1, money_earned: 200,
+            free_skill_points: 1, free_spell_points: 0, total_allocated_points: 3,
+            is_alive: false, death_cause: 'Died on campaign',
+        },
+        // sheet_repaint's keys, as the add-years response carries them.
+        name: 'Aldwin',
+        is_alive: false,
+        free_skill_points: 1,
+        play_with_gm_html: EMPTY_SLOT,
+    };
+
+    test('a fatal run shows Revive, hides Mark Dead and the magic controls, and empties the slot', async () => {
+        await loadPage({}, [jsonResponse(FATAL_RUN)]);
+        addLifeParts();
+        expect(document.getElementById('revive-btn').hidden).toBe(true);
+
+        document.getElementById('roll-years-btn').click();
+        await flush();
+
+        expect(document.getElementById('mark-dead-btn').hidden).toBe(true);
+        expect(document.getElementById('revive-btn').hidden).toBe(false);
+        expect(document.getElementById('magic-controls').hidden).toBe(true);
+        expect(document.querySelector('#play-with-gm-7 form')).toBeNull();
+        expect(document.querySelector('#workbench-card .death-card h3').textContent).toBe('Aldwin died');
+        expect(window.location.reload).not.toHaveBeenCalled();
+    });
+
+    test('the death card names the saved character, not the text in the name input', async () => {
+        await loadPage({}, [jsonResponse({ ...FATAL_RUN, name: 'Aldwin the Late' })]);
+        document.getElementById('id_name').value = 'half-typed';
+
+        document.getElementById('roll-years-btn').click();
+        await flush();
+
+        expect(document.querySelector('#workbench-card .death-card h3').textContent)
+            .toBe('Aldwin the Late died');
+    });
+
+    test('a living record shows the living controls and hides Revive', async () => {
+        await loadPage();
+        addLifeParts();
+        characterEdit.paintSheet({ is_alive: false });
+        characterEdit.paintSheet({ is_alive: true });
+
+        expect(document.getElementById('mark-dead-btn').hidden).toBe(false);
+        expect(document.getElementById('revive-btn').hidden).toBe(true);
+        expect(document.getElementById('magic-controls').hidden).toBe(false);
+    });
+
+    test('a response without is_alive leaves the life controls alone', async () => {
+        await loadPage();
+        addLifeParts();
+        characterEdit.paintSheet({ free_skill_points: 0 });
+
+        expect(document.getElementById('mark-dead-btn').hidden).toBe(false);
+        expect(document.getElementById('revive-btn').hidden).toBe(true);
+    });
+
+    test('a rename paints the saved name into every marked place, the title and the breadcrumb', async () => {
+        await loadPage();
+        addLifeParts();
+        document.getElementById('workbench-card').innerHTML =
+            '<div class="death-card"><h3><span data-name-chrome>Aldwin</span> died</h3></div>';
+        // The server answers with the name it saved, which wins over the typing.
+        routeFetch([jsonResponse({ success: true, name: 'Brannoc', play_with_gm_html: OFFERED_SLOT })]);
+        const input = document.getElementById('id_name');
+        input.value = '  Brannoc  ';
+        input.dispatchEvent(new Event('blur'));
+        await flush();
+
+        expect(document.title).toBe('Brannoc');
+        expect(document.querySelector('.breadcrumb [aria-current="page"]').textContent).toBe('Brannoc');
+        expect([...document.querySelectorAll('[data-name-chrome]')].map((element) => element.textContent))
+            .toEqual(['Brannoc', 'Brannoc', 'Brannoc']);
+        expect(document.querySelector('#play-with-gm-7 label').textContent).toBe('Take Brannoc to');
+    });
+
+    test('completing the character in place offers the slot, revealed as at load', async () => {
+        await loadPage();
+        require('../play-with-gm.js');
+        document.body.insertAdjacentHTML('beforeend', EMPTY_SLOT);
+
+        characterEdit.paintSheet({ play_with_gm_html: OFFERED_SLOT });
+
+        const form = document.querySelector('#play-with-gm-7 form.play-with-gm');
+        expect(form).not.toBeNull();
+        expect(form.hidden).toBe(false);
+        expect(document.querySelectorAll('.play-with-gm-slot')).toHaveLength(1);
+    });
+
+    test('a response that leaves the slot as it was keeps the choice, the refusal and focus', async () => {
+        await loadPage();
+        require('../play-with-gm.js');
+        const slotHtml = '<div class="play-with-gm-slot" id="play-with-gm-7">\n'
+            + '<form class="play-with-gm" data-character-id="7" data-attach-url="/gm/attach/"'
+            + ' data-chat-url="/gm/" hidden>\n'
+            + '<label for="play-with-gm-session-7">Take Aldwin to</label>\n'
+            + '<select id="play-with-gm-session-7" name="session_id">\n'
+            + '<option value="">A new session</option>\n'
+            + '<option value="12">Kell table</option>\n'
+            + '</select>\n'
+            + '<button type="submit" class="button">Play with the Game Master</button>\n'
+            + '<p class="play-with-gm-error" role="alert" hidden></p>\n'
+            + '</form>\n</div>';
+        document.body.insertAdjacentHTML('beforeend', slotHtml);
+        window.revealPlayWithGameMaster(document);
+        const slot = document.getElementById('play-with-gm-7');
+        const choice = document.getElementById('play-with-gm-session-7');
+        choice.value = '12';
+        const refusal = slot.querySelector('.play-with-gm-error');
+        refusal.textContent = 'The Game Master could not take this character: Character is dead.';
+        refusal.hidden = false;
+        choice.focus();
+
+        characterEdit.paintSheet({ play_with_gm_html: slotHtml });
+
+        expect(document.getElementById('play-with-gm-7')).toBe(slot);
+        expect(choice.value).toBe('12');
+        expect(refusal.hidden).toBe(false);
+        expect(refusal.textContent).toContain('Character is dead');
+        expect(document.activeElement).toBe(choice);
+
+        // A slot the record changed is still swapped in.
+        characterEdit.paintSheet({ play_with_gm_html: slotHtml.replace('Take Aldwin to', 'Take Brannoc to') });
+        expect(document.querySelector('#play-with-gm-7 label').textContent).toBe('Take Brannoc to');
+    });
+
+    describe('the slot\'s session picker (#973)', () => {
+        const pickerSlot = (options) => '<div class="play-with-gm-slot" id="play-with-gm-7">\n'
+            + '<form class="play-with-gm" data-character-id="7" data-attach-url="/gm/attach/"'
+            + ' data-chat-url="/gm/" hidden>\n'
+            + '<label for="play-with-gm-session-7">Take Aldwin to</label>\n'
+            + '<div class="picker" id="play-with-gm-picker-7" data-picker'
+            + ' data-picker-url="/gm/sessions/play-picker/?character=7">'
+            + '<input type="search" id="play-with-gm-search-7" class="picker-search" data-picker-search value="">'
+            + '<div class="picker-body" data-picker-body>'
+            + '<select id="play-with-gm-session-7" name="session_id">'
+            + '<option value="">A new session</option>' + options
+            + '</select></div></div>\n'
+            + '<button type="submit" class="button">Play with the Game Master</button>\n'
+            + '<p class="play-with-gm-error" role="alert" hidden></p>\n'
+            + '</form>\n</div>';
+        const FIRST_PAGE = '<option value="12">Kell table</option>';
+
+        async function mountPickerSlot() {
+            await loadPage();
+            require('../picker.js');
+            require('../play-with-gm.js');
+            document.body.insertAdjacentHTML('beforeend', pickerSlot(FIRST_PAGE));
+            window.revealPlayWithGameMaster(document);
+            return document.getElementById('play-with-gm-7');
+        }
+
+        test('a wired picker the viewer has not searched is not swapped for the same record', async () => {
+            const slot = await mountPickerSlot();
+            expect(slot.querySelector('[data-picker]').dataset.pickerReady).toBe('yes');
+
+            characterEdit.paintSheet({ play_with_gm_html: pickerSlot(FIRST_PAGE) });
+
+            expect(document.getElementById('play-with-gm-7')).toBe(slot);
+        });
+
+        test('a search the viewer made survives a repaint of the same record', async () => {
+            const slot = await mountPickerSlot();
+            const picker = slot.querySelector('[data-picker]');
+            // What picker.js leaves after a search: a ticket and another page.
+            picker.dataset.pickerTicket = '1';
+            picker.querySelector('[data-picker-body]').innerHTML =
+                '<select id="play-with-gm-session-7" name="session_id">'
+                + '<option value="">A new session</option><option value="3">Old barrow</option></select>';
+
+            characterEdit.paintSheet({ play_with_gm_html: pickerSlot(FIRST_PAGE) });
+
+            expect(document.getElementById('play-with-gm-7')).toBe(slot);
+            expect(slot.querySelector('option[value="3"]')).not.toBeNull();
+        });
+
+        test('a record change is still swapped in after a search, and its picker wired', async () => {
+            const slot = await mountPickerSlot();
+            slot.querySelector('[data-picker]').dataset.pickerTicket = '1';
+
+            characterEdit.paintSheet({
+                play_with_gm_html: pickerSlot(FIRST_PAGE).replace('Take Aldwin to', 'Take Brannoc to'),
+            });
+
+            const fresh = document.getElementById('play-with-gm-7');
+            expect(fresh).not.toBe(slot);
+            expect(fresh.querySelector('label').textContent).toBe('Take Brannoc to');
+            expect(fresh.querySelector('[data-picker]').dataset.pickerReady).toBe('yes');
+        });
+
+        test('an unsearched picker takes the sessions the record now has', async () => {
+            const slot = await mountPickerSlot();
+
+            characterEdit.paintSheet({
+                play_with_gm_html: pickerSlot(`<option value="15">New night</option>${FIRST_PAGE}`),
+            });
+
+            expect(document.getElementById('play-with-gm-7')).not.toBe(slot);
+            expect(document.querySelector('#play-with-gm-7 option[value="15"]')).not.toBeNull();
+        });
+    });
+
+    test('a page without the slot ignores the slot key', async () => {
+        await loadPage();
+        expect(() => characterEdit.paintSheet({ play_with_gm_html: OFFERED_SLOT })).not.toThrow();
+        expect(document.getElementById('play-with-gm-7')).toBeNull();
+    });
+
+    test('a skill allocated in place joins the add-skill type-ahead', async () => {
+        await loadPage();
+        addLifeParts();
+        characterEdit.paintSheet({
+            skill_name_suggestions_html: '<option value="Sword"></option><option value="Weaving"></option>',
+        });
+
+        expect([...document.querySelectorAll('#skill-name-suggestions option')].map((option) => option.value))
+            .toEqual(['Sword', 'Weaving']);
+    });
+
+    test('a run joining a full history drops the oldest, as the record does', async () => {
+        await loadPage({ maxExperienceLogEntries: 2 });
+        const log = document.getElementById('experience-log');
+        log.innerHTML = '<details class="term-entry" id="newer"></details>'
+            + '<details class="term-entry" id="oldest"></details>';
+
+        characterEdit.prependRunToLog('<details class="term-entry" id="newest"></details>');
+
+        expect([...log.querySelectorAll('.term-entry')].map((entry) => entry.id))
+            .toEqual(['newest', 'newer']);
     });
 });

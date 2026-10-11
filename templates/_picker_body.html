@@ -1,0 +1,17 @@
+{% comment %}
+One page of a picker's results (issue #864), rendered by common.pickers for the
+page and for each search: the source's rows, how many match, and the pager.
+The count line is state, rendered from the results; nothing here dismisses
+itself.
+{% endcomment %}
+{% include picker.source.rows_template %}
+<p class="picker-status" data-picker-status role="status">
+    {% if picker.total %}{{ picker.total }} {{ picker.noun }}{% if picker.query %} matching “{{ picker.query }}”{% endif %}, {{ picker.source.order_note }}{% elif picker.query %}No {{ picker.source.noun_plural }} match “{{ picker.query }}”.{% endif %}
+</p>
+{% if picker.page.has_other_pages %}
+<nav class="pagination picker-pager" aria-label="Pages of {{ picker.source.noun_plural }}">
+    <button type="button" class="picker-page" data-picker-page="{% if picker.page.has_previous %}{{ picker.page.previous_page_number }}{% endif %}"{% if not picker.page.has_previous %} disabled{% endif %}>&laquo; Newer</button>
+    <span class="page-current">Page {{ picker.page.number }} of {{ picker.page.paginator.num_pages }}</span>
+    <button type="button" class="picker-page" data-picker-page="{% if picker.page.has_next %}{{ picker.page.next_page_number }}{% endif %}"{% if not picker.page.has_next %} disabled{% endif %}>Older &raquo;</button>
+</nav>
+{% endif %}

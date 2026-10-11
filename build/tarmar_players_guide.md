@@ -58,7 +58,7 @@
 
 ## Get Started
 
-*Version 2026-09-04 23:07 EDT, merged to main in commit [bd9e50d3db5178942723366873f0c17f259fd4bc](https://github.com/smarks/tarmar-studio/commit/bd9e50d3db5178942723366873f0c17f259fd4bc) via [PR #284](https://github.com/smarks/tarmar-studio/pull/284).*
+*Version 2026-09-04 23:07 EDT, merged to main as bd9e50d via PR #284.*
 
 New to Tarmar? Here is the short path from "curious" to "playing." Take the steps in order, or jump to whatever pulls at you.
 
@@ -222,7 +222,7 @@ Come find them.
 
 ## Welcome to Tarmar
 
-*Version 2026-06-16 20:31 EDT, committed to main in [559277ab1cdef5c4d0b767fe1e4daf2b5e2f4a2c](https://github.com/smarks/tarmar-studio/commit/559277ab1cdef5c4d0b767fe1e4daf2b5e2f4a2c).*
+*Version 2026-06-16 20:31 EDT, committed to main as 559277a.*
 
 There is a world that is older than its own memory.
 
@@ -1448,7 +1448,7 @@ Those who intervene successfully earn deep gratitude. Those who try and fail… 
 
 Mages can attempt to counter enemy spells by investing their own mana and engaging in a contest of will. The defender commits mana and both roll opposed INT checks—the more mana invested, the better your chances.
 
-If the defender wins, the spell is countered. If the caster wins, the spell goes through—but the caster may attempt again next turn, escalating the duel. Only the caster can escalate; the defender gets one chance to stop each casting.
+If the caster wins, the spell goes through. If the defender wins, the spell is countered—but the caster may attempt again next turn, escalating the duel. Only the caster can escalate; the defender gets one chance to stop each casting.
 
 These duels can drain both parties quickly, and a failed Control Roll during escalation can trigger Runaway.
 

@@ -6,7 +6,9 @@
  *   called after its account. Both cards now ask; a player must answer, a
  *   Game Master may leave it blank as before.
  * - #827: after signing in the home page offered nothing of the player's own.
- *   It now lists their characters, sessions and battles.
+ *   It now lists their characters, sessions and battles -- on a page of their
+ *   own since #924, the journal since #952, reached from the site menu and
+ *   where a sign-in lands, so the front page stays the same for everyone.
  * - #828: the sheet had no way to take the character to the Game Master. It
  *   now attaches the character to a new or chosen session and opens it.
  *
@@ -17,9 +19,12 @@
 const {
     test, expect, loginAs, createCharacter, TEST_USER, TEST_ADMIN, TEST_WATCHER,
 } = require('./fixtures');
+const { runDjangoShell } = require('./django');
 
 const CREATE_URL = '/tarmar/characters/create/';
 const HOME_URL = '/tarmar/';
+const JOURNAL_URL = '/tarmar/journal/';
+const OLD_TABLE_URL = '/tarmar/table/';
 
 const VIEWPORTS = [
     { name: 'desktop', width: 1440, height: 900 },
@@ -115,19 +120,60 @@ test.describe('the creation page asks for a name (#786)', () => {
     });
 });
 
-test.describe('the home page shows the player their table (#827)', () => {
-    test('a player with no characters is offered a first one', async ({ page }, testInfo) => {
+test.describe('the journal shows the player what is theirs (#827, #924, #952)', () => {
+    test('signing in lands on the journal, and the front page stays public', async ({ page }) => {
+        // The fixture's own sign-in, by the menu's Login link with no next.
         await loginAs(page, TEST_WATCHER);
-        await atEveryWidth(page, HOME_URL, 'home-empty', testInfo, async () => {
-            await expect(page.locator('#your-table-heading')).toHaveText('Your table');
-            await expect(page.locator('#your-table-first-character')).toBeVisible();
-        });
+        await expect(page).toHaveURL(new RegExp(`${JOURNAL_URL}$`));
+        await expect(page.locator('#journal-heading')).toHaveText('Your journal');
+        await expect(page).toHaveTitle('Your journal');
 
-        await page.click('#your-table-first-character');
+        await page.goto('/');
+        await expect(page).toHaveURL(new RegExp(`${HOME_URL}$`));
+        await expect(page.locator('#journal')).toHaveCount(0);
+    });
+
+    test('an explicit next still wins over the journal', async ({ page }) => {
+        // The page fixture has already answered the gate.
+        await page.goto(`/tarmar/accounts/login/?next=${CREATE_URL}`);
+        await page.fill('input[name="username"]', TEST_WATCHER.username);
+        await page.fill('input[name="password"]', TEST_WATCHER.password);
+        await page.click('button[type="submit"]');
         await expect(page).toHaveURL(new RegExp(`${CREATE_URL}$`));
     });
 
-    test('a player finds their character and plays it from the home page', async ({ page }, testInfo) => {
+    test('the old address leads to the journal', async ({ page }) => {
+        await loginAs(page, TEST_WATCHER);
+        await page.goto(OLD_TABLE_URL);
+        await expect(page).toHaveURL(new RegExp(`${JOURNAL_URL}$`));
+        await expect(page.locator('#journal-heading')).toHaveText('Your journal');
+    });
+
+    test('the front page carries no journal; the menu leads to it', async ({ page }) => {
+        await loginAs(page, TEST_WATCHER);
+        await page.goto(HOME_URL);
+        await expect(page.locator('.home-nav')).toBeVisible();
+        await expect(page.locator('#journal')).toHaveCount(0);
+
+        await page.click('#menuToggle');
+        await page.locator('#menu a', { hasText: 'Journal' }).click();
+        await expect(page).toHaveURL(new RegExp(`${JOURNAL_URL}$`));
+        await expect(page.locator('#journal-heading')).toHaveText('Your journal');
+        await expect(page.locator('.home-nav')).toHaveCount(0);
+    });
+
+    test('a player with no characters is offered a first one', async ({ page }, testInfo) => {
+        await loginAs(page, TEST_WATCHER);
+        await atEveryWidth(page, JOURNAL_URL, 'journal-empty', testInfo, async () => {
+            await expect(page.locator('#journal-heading')).toHaveText('Your journal');
+            await expect(page.locator('#journal-first-character')).toBeVisible();
+        });
+
+        await page.click('#journal-first-character');
+        await expect(page).toHaveURL(new RegExp(`${CREATE_URL}$`));
+    });
+
+    test('a player finds their character and plays it from the journal', async ({ page }, testInfo) => {
         test.setTimeout(90000);
         await loginAs(page, TEST_USER);
         // Long enough to wrap at 390px, where the button must keep its column.
@@ -135,8 +181,8 @@ test.describe('the home page shows the player their table (#827)', () => {
         await createCharacter(page, name);
         const sheetPath = new URL(page.url()).pathname;
 
-        await atEveryWidth(page, HOME_URL, 'home-table', testInfo, async () => {
-            const row = page.locator('.your-table-character', { hasText: name });
+        await atEveryWidth(page, JOURNAL_URL, 'journal-characters', testInfo, async () => {
+            const row = page.locator('.journal-character', { hasText: name });
             const link = row.locator(`a[href="${sheetPath}"]`);
             const play = row.getByRole('button', { name: `Play ${name} with the Game Master` });
             await expect(link).toHaveText(name);
@@ -149,17 +195,17 @@ test.describe('the home page shows the player their table (#827)', () => {
             expect(playBox.y).toBeLessThan(linkBox.y + linkBox.height);
         });
 
-        await page.goto(HOME_URL);
+        await page.goto(JOURNAL_URL);
         await page.getByRole('button', { name: `Play ${name} with the Game Master` }).click();
 
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         const sessionId = new URL(page.url()).searchParams.get('session');
         await expect(page.locator('.gm-sheet-name')).toHaveText(name);
 
-        // The session it started is now the newest on the home page.
-        await page.goto(HOME_URL);
+        // The session it started is now the newest in the journal.
+        await page.goto(JOURNAL_URL);
         await expect(
-            page.locator(`#your-table a[href="/tarmar/gm/?session=${sessionId}"]`)
+            page.locator(`#journal a[href="/tarmar/gm/?session=${sessionId}"]`)
         ).toBeVisible();
     });
 });
@@ -167,6 +213,14 @@ test.describe('the home page shows the player their table (#827)', () => {
 test.describe('the sheet takes the character to the Game Master (#828)', () => {
     test('to a new session, then a second character to the same one', async ({ page }, testInfo) => {
         test.setTimeout(90000);
+        // A session named the way a first message names one: long, with an
+        // unbroken run in it. The session choice used to grow to its longest
+        // option and push the sheet sideways at phone width (#985).
+        runDjangoShell(
+            'from django.contrib.auth import get_user_model; from gm.models import GMSession; '
+            + `GMSession.objects.create(user=get_user_model().objects.get(username="${TEST_USER.username}"), `
+            + `name="Roll up Ysolde${testInfo.workerIndex}${Date.now()}. She grew up in a village by the sea")`
+        );
         await loginAs(page, TEST_USER);
         const first = uniqueName('Sheet', testInfo);
         await createCharacter(page, first);

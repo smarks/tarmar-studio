@@ -9,6 +9,7 @@ reached: the model's answer is a mocked ``chat``.
 """
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -24,7 +25,10 @@ from battle.services import (
 )
 from bestiary.models import Beast
 from characters.models import Character
-from common.services.ollama_client import STRUCTURED_OUTPUT_UNAVAILABLE_STATUS
+from common.services.ollama_client import (
+    STRUCTURED_OUTPUT_UNAVAILABLE_STATUS,
+    StreamDeadlinePassed,
+)
 from common.test_helpers import BaseTestCase, create_character
 from common.test_helpers import make_beast as shared_make_beast
 
@@ -111,6 +115,42 @@ class FoeTextTest(SimpleTestCase):
     def test_nothing_named_is_an_error(self):
         with self.assertRaises(FightError):
             parse_foe_text("  , ; . ")
+
+    def test_and_after_a_comma_still_separates(self):
+        # The separator no longer swallows the space before "and", so an
+        # Oxford comma no longer leaves a foe named "and a bear".
+        requests = parse_foe_text("two wolves, and a bear")
+        self.assertEqual(
+            [(request.name, request.count) for request in requests],
+            [("wolves", 2), ("bear", 1)],
+        )
+
+    def test_and_inside_a_word_does_not_separate(self):
+        requests = parse_foe_text("sand wraith and Andrew")
+        self.assertEqual(
+            [request.name for request in requests], ["sand wraith", "Andrew"]
+        )
+
+    def test_long_runs_of_spaces_parse_without_backtracking(self):
+        # Each input is one of CodeQL's py/polynomial-redos witnesses for the
+        # patterns this module had before: thousands of spaces that the old
+        # separator, count prefix and "x N" suffix each split in every possible
+        # way before failing. The linear patterns parse them in one pass.
+        spaces = " " * 5000
+        cases = {
+            "separator": (f"wolf{spaces}bear", [(f"wolf{spaces}bear", 1)]),
+            # The newline stops ".", so the count prefix must fail.
+            "prefix": (f"a{spaces}b\nc", [(f"a{spaces}b\nc", 1)]),
+            "suffix": (f"rat{spaces}b", [(f"rat{spaces}b", 1)]),
+            "suffix with a count": (f"rat{spaces}x 2", [("rat", 2)]),
+        }
+        for label, (text, expected) in cases.items():
+            with self.subTest(label):
+                requests = parse_foe_text(text)
+                self.assertEqual(
+                    [(request.name, request.count) for request in requests],
+                    expected,
+                )
 
 
 class FoeResolutionTest(BaseTestCase):
@@ -1450,6 +1490,44 @@ class PlayersFoesAreTheGameMastersTest(BaseTestCase):
         retry = mock_chat.call_args_list[1].args[1][-1]["content"]
         self.assertIn("'a-rat-of-my-own-design' is not a slug from the bestiary", retry)
         self.assertEqual(Beast.objects.count(), variants_before, "no stand-in made")
+
+    @patch("gm.services.ollama_client.chat")
+    def test_every_foe_call_shares_one_turns_budget(self, mock_chat):
+        """Issue #936: each call had the 300 s read timeout and nothing more.
+
+        The no-``format`` fallback and the second ask used to add a call's
+        worth each; now all of them end at one deadline, the fight's budget on.
+        """
+        refused = MagicMock(status_code=STRUCTURED_OUTPUT_UNAVAILABLE_STATUS)
+        mock_chat.side_effect = [
+            httpx.HTTPStatusError("501", request=MagicMock(), response=refused),
+            self.answer(("no-such-beast", 1)),
+            self.answer((self.wolf_slug(), 1)),
+        ]
+
+        with self.settings(GM_FIGHT_BUDGET_SECONDS=40, GM_STREAM_BUDGET_SECONDS=300):
+            asked_at = time.monotonic()
+            response = self._post("a wolf")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        deadlines = {call.kwargs["stop_at"] for call in mock_chat.call_args_list}
+        self.assertEqual(len(mock_chat.call_args_list), 3)
+        self.assertEqual(len(deadlines), 1, deadlines)
+        self.assertAlmostEqual(deadlines.pop() - asked_at, 40, delta=5)
+
+    @patch("gm.services.ollama_client.chat")
+    def test_a_foe_call_cut_at_its_deadline_is_said_in_words(self, mock_chat):
+        """Issue #936: a cut is the player's to read, not a 500."""
+        mock_chat.side_effect = StreamDeadlinePassed("cut off at its deadline")
+
+        response = self._post("wolves")
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(response.json()["error"], views.FIGHT_MODEL_TOO_SLOW)
+        self.assertIsNone(Battle.objects.first())
+        record = GMTurnRecord.objects.get(session=self.session)
+        self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_TOO_SLOW)
+        self.assertIsNone(running_turn_for(self.user, self.session.pk))
 
     @patch("gm.services.ollama_client.chat")
     def test_two_unusable_answers_start_no_fight(self, mock_chat):

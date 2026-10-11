@@ -69,12 +69,13 @@ from bestiary.generation import (
     pick_base,
 )
 from bestiary.models import CATEGORY_CHOICES, Beast
+from characters.constants import too_long
 from characters.models import Character
-from common.helpers import is_owner_or_manager
+from common.helpers import column_length, is_owner_or_manager
 
 from .battle_report import battle_entry, pending_battle_entries
 from .character_schema import SCHEMA_IN_PROMPT_PREAMBLE, parse_extraction_reply
-from .foe_people import PERSON_ARCHETYPES, person_foe
+from .foe_people import FOE_NAME_MAX_LENGTH, PERSON_ARCHETYPES, person_foe
 from .models import GMSession
 from .retrieval import ChatMessage
 from .services import extract_structured_json, messages_for_model
@@ -106,7 +107,9 @@ FOE_SCHEMA: dict = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    # The model is told the limit a stand-in's name is
+                    # refused past (#938), rather than finding out after.
+                    "name": {"type": "string", "maxLength": FOE_NAME_MAX_LENGTH},
                     "beast_slug": {"type": "string"},
                     "category": {
                         "type": "string",
@@ -189,11 +192,17 @@ FOE_REQUEST_PREAMBLE = (
     "party is about to fight, and nothing that is not hostile to them. "
 )
 
+# The foe text is the player's or the model's words, so each pattern below
+# matches in linear time. Wherever two repeated parts could take the same
+# characters (a run of spaces, say), a part only one of them can take sits
+# between them: the name starts or ends on a non-space (``\S``), and the count
+# is set off by an "x". There is then one way to divide the text, never a
+# quadratic search over how many spaces each side takes.
 _COUNT_PREFIX = re.compile(
-    r"^(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(.+)$",
+    r"^(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(\S.*)$",
     re.IGNORECASE,
 )
-_COUNT_SUFFIX = re.compile(r"^(.+?)\s*[x×]\s*(\d+)$", re.IGNORECASE)
+_COUNT_SUFFIX = re.compile(r"^(.*\S)\s*[x×]\s*(\d+)$", re.IGNORECASE)
 _NUMBER_WORDS = {
     "a": 1,
     "an": 1,
@@ -208,7 +217,10 @@ _NUMBER_WORDS = {
     "nine": 9,
     "ten": 10,
 }
-_FOE_SEPARATOR = re.compile(r"\s*,\s*|\s+and\s+|\s*;\s*", re.IGNORECASE)
+# The whitespace around a separator is not part of it: every entry is stripped
+# after the split. "and" still needs whitespace on both sides, so "sand" and
+# "Andrew" stay whole; the lookarounds check that without consuming it.
+_FOE_SEPARATOR = re.compile(r"[,;]|(?<=\s)and(?=\s)", re.IGNORECASE)
 
 
 class FightError(ValueError):
@@ -366,7 +378,7 @@ def foe_request_message(
 
 
 def request_foes_from_model(
-    history: Sequence[ChatMessage], max_foes: int
+    history: Sequence[ChatMessage], max_foes: int, *, stop_at: float | None = None
 ) -> list[FoeRequest]:
     """Ask the model who the party faces, as schema-constrained JSON.
 
@@ -380,6 +392,8 @@ def request_foes_from_model(
     Args:
         history: The session so far, as the model should see it.
         max_foes: How many figures the field still has room for.
+        stop_at: A ``time.monotonic()`` past which the call does not hold the
+            model (issue #936).
 
     Returns:
         One request per kind of foe, in the order the model listed them.
@@ -389,12 +403,14 @@ def request_foes_from_model(
         httpx.HTTPStatusError: on any Ollama failure other than the runner
             saying it cannot constrain output, which is not the player's
             problem to read about.
+        StreamDeadlinePassed: ``stop_at`` passed.
     """
     answer = extract_structured_json(
         lambda schema_in_prompt=False: messages_for_model(
             [*history, foe_request_message(max_foes, schema_in_prompt=schema_in_prompt)]
         ),
         FOE_SCHEMA,
+        stop_at=stop_at,
     )
     try:
         data = parse_extraction_reply(answer)
@@ -538,7 +554,11 @@ def _person_request(
 
 
 def request_set_foes(
-    history: Sequence[ChatMessage], max_foes: int, requested: str
+    history: Sequence[ChatMessage],
+    max_foes: int,
+    requested: str,
+    *,
+    stop_at: float | None = None,
 ) -> list[FoeRequest]:
     """Have the Game Master set a player's session's foes (issue #841).
 
@@ -548,9 +568,17 @@ def request_set_foes(
     a list the server builds. Asked once more with the errors when the answer
     names a beast the catalog does not hold.
 
+    Args:
+        history: The session so far, as the model should see it.
+        max_foes: How many figures the field still has room for.
+        requested: What the player typed after ``/fight``, or ``""``.
+        stop_at: One ``time.monotonic()`` deadline for every call this makes,
+            the second ask included (issue #936).
+
     Raises:
         FightError: The model set no foes the catalog holds, twice.
         httpx.HTTPStatusError: As :func:`request_foes_from_model`.
+        StreamDeadlinePassed: ``stop_at`` passed.
     """
     errors: list[str] = []
     for _attempt in range(2):
@@ -575,7 +603,7 @@ def request_set_foes(
                 )
             return messages_for_model(asked)
 
-        answer = extract_structured_json(messages, SET_FOES_SCHEMA)
+        answer = extract_structured_json(messages, SET_FOES_SCHEMA, stop_at=stop_at)
         requests, errors = read_set_foes(answer)
         if requests:
             return requests
@@ -587,7 +615,7 @@ def request_set_foes(
 
 
 def foe_requests_for(
-    session: GMSession, foes_text: str, room: int
+    session: GMSession, foes_text: str, room: int, *, stop_at: float | None = None
 ) -> tuple[list[FoeRequest], bool]:
     """Who the party faces, decided as the account allows (issue #841).
 
@@ -596,6 +624,13 @@ def foe_requests_for(
     to set (:func:`request_set_foes`). Keyed on the account, as every Game
     Master power is (#352).
 
+    Args:
+        session: The session the fight starts in.
+        foes_text: What followed ``/fight``, or ``""``.
+        room: How many figures the field still has room for.
+        stop_at: A ``time.monotonic()`` past which no foe call holds the
+            model (issue #936).
+
     Returns:
         ``(requests, chosen_by_game_master)``: the second is whether the
         model set them for a player, which the player is told.
@@ -603,8 +638,11 @@ def foe_requests_for(
     if is_dm(session.user):
         if foes_text.strip():
             return parse_foe_text(foes_text), False
-        return request_foes_from_model(session.history, room), False
-    return request_set_foes(session.history, room, foes_text), True
+        return request_foes_from_model(session.history, room, stop_at=stop_at), False
+    return (
+        request_set_foes(session.history, room, foes_text, stop_at=stop_at),
+        True,
+    )
 
 
 def name_candidates(name: str) -> list[str]:
@@ -701,7 +739,8 @@ def stand_in_beast(
             unseeded, as the bestiary's own generator does.
 
     Raises:
-        FightError: when the catalog is empty.
+        FightError: when the catalog is empty, or the name asked for is longer
+            than :data:`gm.foe_people.FOE_NAME_MAX_LENGTH`.
     """
     difficulty = request.difficulty or DEFAULT_STAND_IN_DIFFICULTY
     attempts = (
@@ -718,8 +757,14 @@ def stand_in_beast(
             continue
     if base is None:
         raise FightError("The bestiary is empty — load the catalog before fighting")
+    # The stand-in keeps what was asked for as its own name, so a name past
+    # the bestiary's column is refused, not cut to fit (#938).
+    name = request.name.strip()
+    refusal = too_long("A foe's name", name, FOE_NAME_MAX_LENGTH)
+    if refusal:
+        raise FightError(refusal)
     variant = generate_variant(base, rng=rng)
-    variant.name = request.name.strip()[:100]
+    variant.name = name
     variant.save(update_fields=["name"])
     return variant, base
 
@@ -905,7 +950,7 @@ def battle_name_for(party: Sequence[Character], foes: Sequence[ResolvedFoe]) -> 
     look for work.: fight" in the Battle pane, the battle list and every
     battle log entry. Cut to the name column on a word, with an ellipsis.
     """
-    column_width = int(Battle._meta.get_field("name").max_length or 100)
+    column_width = column_length(Battle, "name")
     party_names = ", ".join(character.name for character in party)
     foe_names = ", ".join(
         # foe.name: a beast's name, or a person's label (#787).
@@ -933,6 +978,7 @@ def start_fight(
     *,
     foes_text: str = "",
     seed: int | None = None,
+    stop_at: float | None = None,
 ) -> FightStart:
     """Put the session's fight on the hex board.
 
@@ -958,9 +1004,14 @@ def start_fight(
     inside the same transaction, so the stand-in Beast rows a refused fight
     generated are rolled back with it (issue #675).
 
+    ``stop_at``, a ``time.monotonic()``, bounds every model call that names
+    the foes, together (issue #936).
+
     Raises:
         FightError: no living characters, a fight already under way, no room
             on the field, or foes that could not be named.
+        StreamDeadlinePassed: the model was still naming the foes at
+            ``stop_at``; nothing was started.
     """
     if fight_in_progress(session):
         raise FightError("A fight is already under way — finish it on the board first")
@@ -994,7 +1045,9 @@ def start_fight(
         )
     # Outside the transaction: asking the model can take half a minute, and
     # nothing should hold the session's row for that.
-    requests, chosen_by_game_master = foe_requests_for(session, foes_text, room)
+    requests, chosen_by_game_master = foe_requests_for(
+        session, foes_text, room, stop_at=stop_at
+    )
     with transaction.atomic():
         # The session is locked before anything is built, and the "already
         # fighting" question asked again under the lock. The check at the top

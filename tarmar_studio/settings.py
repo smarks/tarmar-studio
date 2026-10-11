@@ -32,6 +32,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from common.base_url import (  # noqa: E402
+    BASE_URL_RULE,
+    BASE_URL_WITH_PATH_RULE,
+    is_base_url,
+    is_base_url_with_path,
+)
 from common.gate import DEV_GATE_PASSPHRASE, normalize_passphrase  # noqa: E402
 from common.public_paths import LOGIN_PATH  # noqa: E402
 from common.services import ollama_client  # noqa: E402
@@ -171,6 +177,82 @@ else:
 # today's peer-IP-only behaviour rather than refusing every forwarded header.
 PROXY_SHARED_SECRET = os.environ.get("PROXY_SHARED_SECRET", "")
 
+# --- Mail ---
+# Password reset (issue #929) is the one thing that sends mail. Production
+# hands it to the host's own postfix on localhost:25, which needs no login and
+# no TLS, so every value below defaults to that; a relay elsewhere sets the
+# rest. DEBUG prints each message to runserver's console instead of sending
+# it. EMAIL_BACKEND, when set, wins over both: the browser tests point it at
+# the project's file backend (common/mail_backends.py, one file per
+# connection) so a spec can read the link it was sent.
+SMTP_EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+CONSOLE_EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND") or (
+    CONSOLE_EMAIL_BACKEND if DEBUG else SMTP_EMAIL_BACKEND
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "False").lower() == "true"
+# Django's SMTP default is to wait forever. A mail server that accepts the
+# connection and then stalls would hold a gunicorn worker for good; ten
+# seconds is far longer than a localhost postfix ever takes.
+EMAIL_TIMEOUT = 10
+# Only the file backend reads this; the browser tests set both.
+if os.environ.get("EMAIL_FILE_PATH"):
+    EMAIL_FILE_PATH = os.environ["EMAIL_FILE_PATH"]
+# The sender every message carries. Production must name it (the check below
+# refuses to start without it): postfix has to accept it as a sender, and the
+# receiving side judges the message by its domain. Development and the test
+# suite fall back to a local address no one will ever see on a real message.
+DEV_DEFAULT_FROM_EMAIL = "tarmar@localhost"
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL") or (
+    DEV_DEFAULT_FROM_EMAIL if DEBUG or _is_test_run else ""
+)
+# The address `manage.py password_reset_link` builds its link on when no
+# --base-url is given. Unset, the command derives one from ALLOWED_HOSTS.
+_configured_site_base_url = os.environ.get("SITE_BASE_URL", "")
+if _configured_site_base_url and not is_base_url(_configured_site_base_url):
+    # Checked once, here, in every mode: a bad value would otherwise surface
+    # only as a broken link in somebody's inbox. The message quotes the value
+    # as configured, before the trailing slash is dropped.
+    raise ImproperlyConfigured(
+        f"SITE_BASE_URL is {_configured_site_base_url!r}; it must be {BASE_URL_RULE}."
+    )
+SITE_BASE_URL = _configured_site_base_url.rstrip("/")
+# --- end Mail ---
+
+# --- Source repositories (issue #914) ---
+# The public repository is a snapshot with its own history, so a deployed
+# commit id does not exist there; everyone is linked to its root. The private
+# repository holds the real history and is what is deployed, so a commit link
+# into it is offered only to a Game Master or admin, who can open it.
+
+
+def _repository_url_from_environment(name: str, default: str) -> str:
+    """Read a repository address from the environment, refusing a bad one.
+
+    Checked once, here, in every mode, as ``SITE_BASE_URL`` is: a bad value
+    would otherwise surface only as a broken link in the footer. The message
+    quotes the value as configured, before the trailing slash is dropped.
+    """
+    configured = os.environ.get(name, default)
+    if not is_base_url_with_path(configured):
+        raise ImproperlyConfigured(
+            f"{name} is {configured!r}; it must be {BASE_URL_WITH_PATH_RULE}."
+        )
+    return configured.rstrip("/")
+
+
+REPOSITORY_PUBLIC_URL = _repository_url_from_environment(
+    "REPOSITORY_PUBLIC_URL", "https://github.com/smarks/tarmar-studio"
+)
+REPOSITORY_PRIVATE_URL = _repository_url_from_environment(
+    "REPOSITORY_PRIVATE_URL", "https://github.com/smarks/tarmar-studio-private"
+)
+# --- end Source repositories ---
+
 # Fail-fast in production: a silent dev fallback for SECRET_KEY or empty
 # ALLOWED_HOSTS is a security hole, not a bootable misconfiguration. Skip
 # the check under pytest / manage.py test so the suite can run without env vars.
@@ -185,6 +267,18 @@ if not DEBUG and not _is_test_run:
         raise ImproperlyConfigured(
             "ALLOWED_HOSTS must be set in the environment when DEBUG=False. "
             "Set ALLOWED_HOSTS as a comma-separated list of hostnames."
+        )
+    if not DEFAULT_FROM_EMAIL:
+        # Without a sender, a password-reset message is either refused by the
+        # mail server or sent from Django's webmaster@localhost, and the send
+        # failure is only logged: the visitor is told a message is on its way
+        # either way (issue #929). Refuse to boot instead, as for SECRET_KEY.
+        raise ImproperlyConfigured(
+            "DEFAULT_FROM_EMAIL must be set in the environment when "
+            "DEBUG=False. Password reset sends mail from it; use an address "
+            "the host's postfix accepts as a sender, e.g. "
+            "DEFAULT_FROM_EMAIL=tarmar@roots.origamisoftware.com (DEPLOY.md, "
+            "Mail)."
         )
     # Production with no TARMAR_CANON_DIR falls back to the generic default
     # canon (issue #921). Warn rather than refuse, like the passphrase below:
@@ -265,6 +359,21 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Pinned dice for the browser tests (issue #959). With this on, a request
+# carrying an X-E2E-Dice-Seed header rolls its dice from that seed, so a spec
+# can click a roll button and assert the exact faces instead of retrying until
+# real dice cooperate. It lets any caller choose a roll's outcome, so it is
+# refused outright unless DEBUG is on: production cannot boot with it, and
+# without it the middleware is not even in the stack.
+E2E_DICE_SEEDING = os.environ.get("E2E_DICE_SEEDING", "").lower() == "true"
+if E2E_DICE_SEEDING:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "E2E_DICE_SEEDING lets a request choose its own dice; it is for the "
+            "browser tests and is refused unless DEBUG=true."
+        )
+    MIDDLEWARE.append("common.middleware.PinnedDiceMiddleware")
 
 ROOT_URLCONF = "tarmar_studio.urls"
 
@@ -387,7 +496,7 @@ AUTH_PASSWORD_VALIDATORS = [
 OLLAMA_BASE_URL = ollama_client.base_url_from_environ()
 # The GM (gm.services.load_rules) reads every markdown file under this dir into
 # its system prompt. Default to the canonical player ruleset, which is the
-# single source of truth and fits the model's 32k context. The full dm-rules
+# single source of truth and fits the model's context window. The full dm-rules
 # tree (incl. the large world gazetteer) would overflow the window, so it is
 # not loaded by default; set RULES_DIR to widen or narrow the scope.
 RULES_DIR = Path(os.environ.get("RULES_DIR", str(PUBLIC_RULES_DIR)))
@@ -417,6 +526,25 @@ GM_TEMPERATURE = _gm_model_config.temperature
 # about 120 s.
 GM_STREAM_BUDGET_SECONDS = float(os.environ.get("GM_STREAM_BUDGET_SECONDS", "300"))
 
+# Wall-clock budget for the recap a continued session's first turn writes
+# before the turn starts (issue #936). It runs before the turn's own clock by
+# design (#761), so GM_STREAM_BUDGET_SECONDS never covered it, and with only
+# the 300 s per-read timeout a recap that trickled tokens or stalled could
+# hold the shared model for as long as it liked. At this deadline the call is
+# hung up, the last session's fold recap is carried in its place and labelled
+# as one (as when the model fails), and the turn goes ahead with its full
+# budget. The recap is one call over at most the context window, the size of
+# prompt a turn's own fold reads inside its 300 s, so it takes the same
+# figure; it has not been measured on its own.
+GM_RECAP_BUDGET_SECONDS = float(os.environ.get("GM_RECAP_BUDGET_SECONDS", "300"))
+
+# Wall-clock budget for /fight's foe calls together -- the call, its
+# no-format fallback and the second ask share one deadline (issue #936).
+# Below nginx's 60 s proxy_read_timeout; raise the two together. /fight is a
+# plain JSON POST that sends nothing until it answers, so past 60 s nginx
+# cuts it with an HTML 504 while the server would go on holding the model.
+GM_FIGHT_BUDGET_SECONDS = float(os.environ.get("GM_FIGHT_BUDGET_SECONDS", "50"))
+
 # --- GM retrieval ---
 # Each ordinary GM chat turn is grounded in the top-k canon chunks retrieved
 # from the index that ``manage.py build_gm_index`` writes (issue #325; see
@@ -443,9 +571,11 @@ GM_CORPUS_ROOT = _gm_retrieval_config.corpus_root
 AUTH_USER_MODEL = "accounts.User"
 LOGIN_URL = LOGIN_PATH
 # The root routes per host (accounts.views.FrontDoorView): the studio home
-# on the default host, the battle list on a classic-arena host. A login with
-# no ``next`` of its own must land on the door the visitor came in by, so it
-# points at the router rather than hard-coding either destination.
+# on the default host, the battle list on a classic-arena host. The site's own
+# sign-in and registration views do not read this: they land on the theme's
+# ``signed_in_landing_url_name`` (accounts.views.signed_in_landing_url), the
+# journal on the default host since #952. It stays pointed at the router for
+# anything else of Django's that falls back on it.
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = LOGIN_PATH
 
@@ -590,6 +720,16 @@ LOGGING = {
             "propagate": False,
         },
         "django.security": {
+            "handlers": ["server_errors"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        # PasswordResetForm.send_mail catches a failed send and logs it here
+        # ("Failed to send password reset email to <pk>") so the page never
+        # says whether an account exists. Under Django's default config that
+        # record is dropped when DEBUG is off, which would leave a broken
+        # mail setup invisible (issue #929); this puts it in the journal.
+        "django.contrib.auth": {
             "handlers": ["server_errors"],
             "level": "ERROR",
             "propagate": False,

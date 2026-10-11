@@ -26,7 +26,7 @@ from django.views.decorators.http import require_POST
 from battle.models import Battle
 from battle.services import withdraw_from_fight
 from characters.models import Character
-from characters.services import changing
+from characters.services import DeadCharacterWrite, changing
 from common.decorators import rate_limit
 from common.helpers import database_integer
 
@@ -132,7 +132,13 @@ def withdraw(character: Character, session_id: int, owner) -> bool:
             },
         ]
         session.save(update_fields=["history_json", "updated_at"])
-        with changing(character.pk, actor=owner, mark_played=False) as change:
+        # A dead character may be withdrawn as a living one may (#932).
+        with changing(
+            character.pk,
+            actor=owner,
+            mark_played=False,
+            dead=DeadCharacterWrite.SESSION,
+        ) as change:
             change.note("Games Master session", session.name, "withdrawn")
         if session.battle_id is not None:
             withdraw_from_fight(session.battle_id, character, by=owner)

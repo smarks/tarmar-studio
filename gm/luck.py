@@ -23,6 +23,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from characters import services as character_services
+from characters.constants import too_long
 from characters.models import Character
 from characters.skills import get_skill_level
 from common.decorators import rate_limit
@@ -121,16 +122,24 @@ def spend_luck(
         The history line.
 
     Raises:
-        CharacterChangeError: Not attached, no Luck, or a player past the
-            level.
+        CharacterChangeError: Not attached, no Luck, a player past the
+            level, or a ``roll`` longer than :data:`MAX_ROLL_NOTE`.
     """
-    roll = " ".join(roll.split())[:MAX_ROLL_NOTE]
+    roll = " ".join(roll.split())
+    # Refused past the limit, never cut (#938): the history line keeps what
+    # was asked for whole, or nothing is spent.
+    refusal = too_long("The roll", roll, MAX_ROLL_NOTE)
+    if refusal:
+        raise character_services.CharacterChangeError(refusal)
     with transaction.atomic():
         character = session.attached_characters().filter(pk=character_id).first()
         if character is None:
             raise character_services.CharacterChangeError(
                 "That character is not in this session"
             )
+        # Before a use is counted: the dead spend nothing (#932). changing()
+        # below would refuse them too, after the count was saved.
+        character_services.refuse_the_dead(character)
         level = luck_level(character)
         if not level:
             raise character_services.CharacterChangeError(

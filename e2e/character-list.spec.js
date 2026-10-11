@@ -14,6 +14,12 @@
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { readDjangoShell, runDjangoShell } = require('./django');
+const { specAccount, deleteSpecAccountsScript } = require('./accounts');
+
+// The owner of the deleted row the manager test reads, named for the worker
+// and the repeat (issue #889, #949).
+const ghostOwnerFor = (testInfo) => specAccount('ghostowner', 'ghostowner-pass-949', testInfo);
 
 /**
  * Create a character owned by whoever this page is signed in as, and land
@@ -233,6 +239,10 @@ test.describe('Show Deleted Checkbox', () => {
 });
 
 test.describe('Manager Character List', () => {
+    test.afterAll(({}, testInfo) => {
+        runDjangoShell(deleteSpecAccountsScript([ghostOwnerFor(testInfo)]));
+    });
+
     test('manager can see user filter dropdown', async ({ page }) => {
         await loginAs(page, TEST_ADMIN);
         await page.goto('/tarmar/characters/');
@@ -251,23 +261,32 @@ test.describe('Manager Character List', () => {
         await expect(ownerHeader).toBeVisible();
     });
 
-    test('manager can see restore button for deleted characters', async ({ page }) => {
+    test('manager can see restore button for deleted characters', async ({ page }, testInfo) => {
+        // The deleted row belongs to an owner of its own, so the owner-filtered
+        // list holds just that row. Under the shared testuser it sat behind
+        // every character the battle specs had given testuser first: the list
+        // pages at 50 with deleted rows last, so in a single-worker run it fell
+        // to page 2 and this test found nothing (issue #949).
+        const owner = ghostOwnerFor(testInfo);
+        const seeded = readDjangoShell(`
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from common.test_helpers import create_character
+User = get_user_model()
+User.objects.filter(username=${JSON.stringify(owner.username)}).delete()
+owner = User.objects.create_user(username=${JSON.stringify(owner.username)}, password=${JSON.stringify(owner.password)})
+ghost = create_character(owner, name='Old Ghost')
+ghost.is_deleted = True
+ghost.deleted_at = timezone.now()
+ghost.save()
+print('OWNER', owner.pk)
+`);
+        const match = seeded.match(/OWNER (\d+)/);
+        expect(match, `no owner id in: ${seeded}`).not.toBeNull();
+        const ownerId = match[1];
+
         await loginAs(page, TEST_ADMIN);
-        // global-setup seeds a soft-deleted character ("Old Ghost") owned by
-        // TEST_USER. The manager's list is paginated at 50 and sorts deleted
-        // rows last, so an unfiltered page 1 stops holding it as soon as the
-        // rest of the suite has rolled 50 characters between them -- which
-        // every battle spec does, a few fighters at a time. Filtering to its
-        // owner makes this test about the restore button rather than about
-        // how many characters the run happened to create before it.
-        await page.goto('/tarmar/characters/?show_deleted=1');
-        const ownerId = await page.locator('#user-filter option')
-            .filter({ hasText: new RegExp(`^${TEST_USER.username}$`) })
-            .first()
-            .getAttribute('value');
-        await page.goto(
-            `/tarmar/characters/?show_deleted=1&user=${ownerId}`
-        );
+        await page.goto(`/tarmar/characters/?show_deleted=1&user=${ownerId}`);
 
         const deletedRow = page.locator('.deleted-row', { hasText: 'Old Ghost' });
         await expect(deletedRow.locator('button.restore-btn')).toBeVisible();

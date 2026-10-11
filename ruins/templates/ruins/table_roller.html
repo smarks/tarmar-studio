@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load static roll_detail %}
+
+{% block title %}{{ page.title }} Roller{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/generators.css' %}">
+{% endblock %}
+
+{% block main_attrs %}class="page-width-900"{% endblock %}
+
+{% block extra_styles %}
+.table-roll { margin: 0.35rem 0; }
+.table-roll-cell + .table-roll-cell::before { content: "; "; }
+{% endblock %}
+
+{% block content %}
+<h1>{{ page.title }} Roller</h1>
+<p>
+    Rolls each table on
+    <a href="{% url 'reference:view' page.reference_path %}" id="table-roll-source">{{ page.title }}</a>
+    once, in the order the page sets them out.
+</p>
+
+{% if generate_error %}
+{% include "_notice.html" with message=generate_error %}
+{% endif %}
+
+<form method="get" action="{% url 'table_rolls:roll' page.slug %}" class="generator-form" id="table-roll-form">
+    <label>Seed (blank for random)
+        <input type="text" name="seed" inputmode="numeric" value="{{ form_seed }}" placeholder="random">
+    </label>
+    <button type="submit" class="button">{% if rolled %}Roll again{% else %}Roll{% endif %}</button>
+</form>
+
+{% if rolled %}
+<div id="table-roll-result">
+    <h2>Results <span class="generator-seed">seed {{ rolled.seed }}</span></h2>
+    <p class="generator-seed-note">This page's URL reproduces these exact rolls — bookmark or share it.</p>
+    {% for rolled_table in rolled.rolls %}
+    {% ifchanged rolled_table.table.section %}{% if rolled_table.table.section %}<h3>{{ rolled_table.table.section }}</h3>{% endif %}{% endifchanged %}
+    <p class="table-roll">
+        {% for label, text in rolled_table.cells %}<span class="table-roll-cell"><strong>{{ label }}</strong> {{ text }}</span>{% endfor %}
+        {% roll_detail rolled_table.roll %}
+    </p>
+    {% empty %}
+    <p id="table-roll-none">{{ page.title }} has no dice tables in the loaded canon, so there is nothing to roll.</p>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

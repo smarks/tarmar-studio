@@ -1,0 +1,20 @@
+{% comment %}The Add Members rows (issue #864): one page of the characters this manager may add, rendered by common.pickers for the page and for each search. data-filter-text lets picker.js narrow the rows on screen while the server is asked.{% endcomment %}
+<ul class="party-addable" id="party-addable-list">
+    {% for character in picker.rows %}
+    <li class="party-addable-row"
+        data-filter-text="{{ character.name|lower }} {{ character.user.username|lower }}">
+        <div class="party-member-words">
+            <strong>{{ character.name }}</strong>
+            <span class="party-member-detail">
+                {% if character.user == user %}yours{% else %}{{ character.user.username }}'s{% endif %}
+                — level {{ character.level }}
+            </span>
+        </div>
+        <form method="post" action="{% url 'parties:add_member' party.pk %}" class="party-member-action">
+            {% csrf_token %}
+            <input type="hidden" name="character_id" value="{{ character.pk }}">
+            <button type="submit" class="button">Add</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>

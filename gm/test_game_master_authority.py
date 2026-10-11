@@ -165,9 +165,9 @@ class DeadCharacterYearsTest(SimpleTestCase):
 class AuthorityFromTheAccountTest(BaseTestCase):
     """The authority a turn runs with comes from the session owner's account."""
 
-    def _play(self, user, actions: list[dict]):
+    def _play(self, user, actions: list[dict], **values):
         session = session_with_character(
-            user, {**DRAFT_DEFAULTS, "name": "Kael"}, name="Authority"
+            user, {**DRAFT_DEFAULTS, "name": "Kael", **values}, name="Authority"
         )
         character_id = session.attached_characters().get().pk
         for action in actions:
@@ -226,6 +226,99 @@ class AuthorityFromTheAccountTest(BaseTestCase):
         self.assertTrue(all(result.ran for result in outcome.results))
         entry = GMSession.objects.get(pk=session.pk).session_characters.get()
         self.assertEqual(entry.game_master_skill_points, 3)
+
+    def test_a_players_session_cannot_start_a_skill_the_glossary_does_not_name(
+        self,
+    ):
+        """The chat held to the sheet's rule (issue #902, after #862).
+
+        Whatever name the model writes, a player's free point goes only into a
+        skill the glossary names or one the character holds, and the ledger
+        says why the rest were not done.
+        """
+        cases = (
+            ("brawling", services.ALLOCATION_REFUSED_REASON),
+            ("sword", services.ALLOCATION_REFUSED_REASON),
+            ("Knowledge (History)", services.KNOWLEDGE_FIELD_REFUSED_REASON),
+        )
+        session, outcome = self._play(
+            self.create_user(),
+            [
+                {"action": "spend_skill_points", "skill": name, "points": 1}
+                for name, _reason in cases
+            ],
+            free_skill_points=3,
+        )
+
+        for result, (name, reason) in zip(outcome.results, cases, strict=True):
+            with self.subTest(name=name):
+                self.assertFalse(result.ran)
+                self.assertEqual(result.error, reason)
+                self.assertIsNotNone(result.procedure)
+                self.assertEqual(
+                    result.procedure["lines"][-1],
+                    f"⚙️ Not done: spending skill points for Kael, because {reason}",
+                )
+        values = character_values(session)
+        self.assertEqual(values["skills"], {})
+        self.assertEqual(values["free_skill_points"], 3)
+
+    def test_a_players_session_starts_what_the_glossary_names(self):
+        session, outcome = self._play(
+            self.create_user(),
+            [
+                {"action": "spend_skill_points", "skill": "Broadsword", "points": 1},
+                {"action": "spend_skill_points", "skill": "Perception", "points": 1},
+            ],
+            free_skill_points=3,
+        )
+
+        self.assertTrue(all(result.ran for result in outcome.results))
+        self.assertNotIn(
+            services.GAME_MASTER_STARTED_SKILL_NOTE, outcome.results[0].note
+        )
+        values = character_values(session)
+        self.assertEqual(values["skills"], {"broadsword": 1, "perception": 1})
+        self.assertEqual(values["free_skill_points"], 1)
+
+    def test_a_game_masters_session_may_start_any_skill_and_says_so(self):
+        session, outcome = self._play(
+            self.create_dm(),
+            [
+                {"action": "spend_skill_points", "skill": "brawling", "points": 1},
+                {
+                    "action": "spend_skill_points",
+                    "skill": "Knowledge (History)",
+                    "points": 1,
+                },
+                {"action": "spend_skill_points", "skill": "Broadsword", "points": 1},
+            ],
+            free_skill_points=3,
+        )
+
+        unnamed, knowledge_field, glossary = outcome.results
+        # One wording for either reason a player is refused (review of #902):
+        # it must not call a Knowledge field a skill the glossary lacks.
+        self.assertEqual(
+            services.GAME_MASTER_STARTED_SKILL_NOTE,
+            "started by the Game Master: a skill only a Game Master may start",
+        )
+        for result, stored in (
+            (unnamed, "brawling"),
+            (knowledge_field, "knowledge (history)"),
+        ):
+            with self.subTest(stored=stored):
+                self.assertTrue(result.ran, result.error)
+                self.assertIn(
+                    f"{stored} {services.GAME_MASTER_STARTED_SKILL_NOTE}",
+                    result.note,
+                )
+        self.assertTrue(glossary.ran, glossary.error)
+        self.assertNotIn(services.GAME_MASTER_STARTED_SKILL_NOTE, glossary.note)
+        self.assertEqual(
+            character_values(session)["skills"],
+            {"brawling": 1, "knowledge (history)": 1, "broadsword": 1},
+        )
 
 
 class TheSkillPointBreakdownNeverGoesNegativeTest(SimpleTestCase):

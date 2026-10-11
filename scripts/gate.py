@@ -49,6 +49,7 @@ needs on macOS); running this file directly builds the same environment.
 """
 
 import argparse
+import hashlib
 import importlib.machinery
 import importlib.util
 import socket
@@ -79,10 +80,18 @@ RUN_SCRIPT = REPOSITORY_ROOT / "run"
 NOTES_REF_NAME = "gate"
 GATE_NOTES_REF = f"refs/notes/{NOTES_REF_NAME}"
 DEFAULT_REMOTE = "origin"
+# The workflow a passing gate starts, and the branch it deploys (Spencer,
+# 2026-10-10). Deploy no longer starts on every push to main: it refused each
+# one, because the merge commit had no record yet, and showed red on every
+# merge. Now the gate that writes the record starts it.
+# By file, which a rename of the workflow's display name does not break.
+DEPLOY_WORKFLOW = "deploy.yml"
+DEPLOY_BRANCH = "main"
 
 # Playwright defaults to port 8000, which is also the dev server's. The gate
 # takes a port of its own so a dev server left running does not answer the
 # suite's requests, and so a gate run and a hand-run suite do not collide.
+# Since #966 this is where the search for a free port begins (E2E_PORT_SPAN).
 DEFAULT_E2E_PORT = "8390"
 
 # The second mode's browser suite gets a port of its own as well. Playwright
@@ -90,6 +99,14 @@ DEFAULT_E2E_PORT = "8390"
 # neither it nor its +1000 is in use by the other mode.
 DEFAULT_CANON_E2E_PORT = "8391"
 FAKE_OLLAMA_PORT_OFFSET = 1000
+
+# Two sessions' gates on the same fixed ports tested each other's code
+# (issue #966): Playwright reused the other worktree's dev server. A port the
+# caller does not name is picked free instead, from this many ports upward of
+# DEFAULT_E2E_PORT. The search starts at an offset derived from the checkout's
+# path, so two worktrees starting at once do not reach for the same pair, and
+# moves upward past any port, or +1000 port, that something is listening on.
+E2E_PORT_SPAN = 200
 
 # The stand-in canon is ``reference.paths.DEFAULT_CANON_DIR``, an absolute path
 # (the suites start servers and child processes in other working directories).
@@ -128,6 +145,107 @@ class StepResult:
     def passed(self) -> bool:
         """Whether the step exited zero."""
         return self.returncode == 0
+
+
+def claimed_ports(e2e_port: str) -> tuple[int, int]:
+    """The ports one Playwright run listens on: the app's and the fake Ollama's."""
+    return int(e2e_port), int(e2e_port) + FAKE_OLLAMA_PORT_OFFSET
+
+
+def port_listening(port: int) -> bool:
+    """Whether something accepts connections on ``port`` at 127.0.0.1.
+
+    That is what Playwright asks before it reuses a server, so it is the
+    question that decides whether a run would test another checkout's code.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
+def busy_ports(e2e_ports: Sequence[str]) -> list[int]:
+    """Every port these Playwright runs would claim that is already taken.
+
+    Args:
+        e2e_ports: The app ports; each also claims its fake Ollama's.
+
+    Returns:
+        The taken ports, app and fake Ollama alike, in order.
+    """
+    return [
+        port
+        for e2e_port in e2e_ports
+        for port in claimed_ports(e2e_port)
+        if port_listening(port)
+    ]
+
+
+def first_e2e_port_for(repository_root: Path) -> int:
+    """Where this checkout's search for free ports starts (issue #966).
+
+    The same checkout starts at the same port each run, and two checkouts
+    usually start at different ones, so two gates begun together seldom
+    probe the same pair.
+    """
+    digest = hashlib.sha256(str(repository_root.resolve()).encode()).digest()
+    return int(DEFAULT_E2E_PORT) + int.from_bytes(digest[:4], "big") % E2E_PORT_SPAN
+
+
+def choose_e2e_ports(
+    repository_root: Path,
+    *,
+    e2e_port: str | None,
+    default_canon_e2e_port: str | None,
+) -> tuple[str, str]:
+    """The two modes' browser ports: as the caller named them, or free ones.
+
+    A port the caller names is kept as given; :func:`run_gate` refuses it if
+    it is taken. A port the caller leaves out is the first in the span,
+    upward of :func:`first_e2e_port_for` and wrapping round, whose app and
+    fake Ollama ports are both free and claimed by neither the other mode
+    nor each other.
+
+    Args:
+        repository_root: The checkout being gated.
+        e2e_port: The first mode's port, or None to pick one.
+        default_canon_e2e_port: The second mode's port, or None to pick one.
+
+    Returns:
+        ``(e2e_port, default_canon_e2e_port)``.
+
+    Raises:
+        GateError: No free port was left in the span.
+    """
+    taken = {
+        port
+        for named in (e2e_port, default_canon_e2e_port)
+        if named is not None
+        for port in claimed_ports(named)
+    }
+    base = int(DEFAULT_E2E_PORT)
+    start = first_e2e_port_for(repository_root) - base
+    candidates = (
+        base + (start + step) % E2E_PORT_SPAN for step in range(E2E_PORT_SPAN)
+    )
+
+    def free_port() -> str:
+        """The next candidate no other run listens on and neither mode claims."""
+        for candidate in candidates:
+            ports = claimed_ports(str(candidate))
+            if taken.isdisjoint(ports) and not any(map(port_listening, ports)):
+                taken.update(ports)
+                return str(candidate)
+        raise GateError(
+            f"no free e2e port from {base} to {base + E2E_PORT_SPAN - 1} (with "
+            f"its + {FAKE_OLLAMA_PORT_OFFSET} free too); name one with "
+            "--e2e-port / --default-canon-e2e-port"
+        )
+
+    first = e2e_port if e2e_port is not None else free_port()
+    second = (
+        default_canon_e2e_port if default_canon_e2e_port is not None else free_port()
+    )
+    return first, second
 
 
 def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
@@ -539,6 +657,97 @@ def record_passing_commit(
         )
 
 
+def remote_branch_head(
+    repository_root: Path, remote: str = DEFAULT_REMOTE, branch: str = DEPLOY_BRANCH
+) -> str | None:
+    """The commit ``branch`` points at on ``remote`` now, or None if absent.
+
+    Args:
+        repository_root: The checkout to ask from.
+        remote: The remote to ask.
+        branch: The branch to look up.
+
+    Returns:
+        The full sha, or None when the remote has no such branch.
+
+    Raises:
+        subprocess.CalledProcessError: git could not reach the remote.
+    """
+    listed = git_output(repository_root, "ls-remote", remote, f"refs/heads/{branch}")
+    return listed.split()[0] if listed else None
+
+
+def dispatch_deploy_workflow(repository_root: Path, commit_sha: str) -> str:
+    """Start the Deploy workflow on ``DEPLOY_BRANCH`` with gh, for ``commit_sha``.
+
+    deploy.sh deploys whatever the branch points at when the run starts, which
+    can be later than now: the run may wait behind another deploy. So it is
+    told the commit this record vouches for (``--expect``), and stands down,
+    green, if the branch has moved to a commit with no record of its own. gh
+    picks the repository from the checkout's remote.
+
+    Args:
+        repository_root: The checkout to run gh in.
+        commit_sha: The commit the record is for.
+
+    Returns:
+        What gh printed, which names the run it started.
+
+    Raises:
+        subprocess.CalledProcessError: gh refused or failed.
+        FileNotFoundError: gh is not installed.
+    """
+    started = subprocess.run(
+        [
+            "gh",
+            "workflow",
+            "run",
+            DEPLOY_WORKFLOW,
+            "--ref",
+            DEPLOY_BRANCH,
+            "-f",
+            f"command=--expect {commit_sha}",
+        ],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return f"{started.stdout}{started.stderr}".strip()
+
+
+def start_deploy_if_head(
+    repository_root: Path, commit_sha: str, remote: str = DEFAULT_REMOTE
+) -> str:
+    """Start Deploy when ``commit_sha`` is still the head of the deploy branch.
+
+    deploy.sh deploys whatever the branch points at, and refuses a commit with
+    no record. So a pass on an older commit starts nothing: the newer commit's
+    own gate run deploys it.
+
+    Args:
+        repository_root: The checkout the gate ran in.
+        commit_sha: The commit just recorded.
+        remote: The remote holding the branch.
+
+    Returns:
+        What happened, for the gate to announce.
+
+    Raises:
+        subprocess.CalledProcessError: git or gh failed.
+        FileNotFoundError: gh is not installed.
+    """
+    head = remote_branch_head(repository_root, remote)
+    if head != commit_sha:
+        return (
+            f"not deploying: {DEPLOY_BRANCH} is at {head or 'nothing'}, not "
+            f"{commit_sha}; a gate run on that commit deploys it"
+        )
+    printed = dispatch_deploy_workflow(repository_root, commit_sha)
+    started = f"started {DEPLOY_WORKFLOW} for {commit_sha}"
+    return f"{started}: {printed}" if printed else started
+
+
 def announce(message: str) -> None:
     """Print a gate progress line, flushed so it interleaves with the suites."""
     print(f"[gate] {message}", flush=True)
@@ -570,21 +779,42 @@ def run_step(
     )
 
 
+def refuse_busy_ports(e2e_ports: Sequence[str]) -> str:
+    """Why these browser ports may not be used, or ``""`` when they may.
+
+    A port something already listens on would have Playwright test that
+    server's code instead of this checkout's (issue #966).
+    """
+    busy = busy_ports(e2e_ports)
+    if not busy:
+        return ""
+    return (
+        f"port {', '.join(str(port) for port in busy)} is already listening (another "
+        "gate, suite or dev server holds it), and Playwright would test that "
+        "server's code; stop it, or name free ports with --e2e-port / "
+        "--default-canon-e2e-port, or leave them out to have free ones picked"
+    )
+
+
 def run_gate(
     *,
     repository_root: Path,
-    e2e_port: str,
     push: bool,
-    default_canon_e2e_port: str = DEFAULT_CANON_E2E_PORT,
+    deploy: bool,
+    e2e_port: str | None = None,
+    default_canon_e2e_port: str | None = None,
     remote: str = DEFAULT_REMOTE,
 ) -> int:
     """Run every step and record the commit when they all pass.
 
     Args:
         repository_root: The checkout to gate.
-        e2e_port: Port for the Playwright suite.
         push: Whether to push the record to ``remote``.
-        default_canon_e2e_port: Port for the default-canon Playwright run.
+        deploy: Whether to start the Deploy workflow once the record is
+            pushed, when the commit is still the head of the deploy branch.
+        e2e_port: Port for the Playwright suite, or None to pick a free one.
+        default_canon_e2e_port: Port for the default-canon Playwright run, or
+            None to pick a free one.
         remote: The remote holding the notes ref.
 
     Returns:
@@ -602,11 +832,20 @@ def run_gate(
         return 1
 
     try:
+        e2e_port, default_canon_e2e_port = choose_e2e_ports(
+            repository_root,
+            e2e_port=e2e_port,
+            default_canon_e2e_port=default_canon_e2e_port,
+        )
         steps = gate_steps(
             e2e_port=e2e_port, default_canon_e2e_port=default_canon_e2e_port
         )
     except GateError as failure:
         announce(f"refusing to run: {failure}")
+        return 1
+    busy_refusal = refuse_busy_ports((e2e_port, default_canon_e2e_port))
+    if busy_refusal:
+        announce(f"refusing to run: {busy_refusal}")
         return 1
     missing_canons = sorted(
         {
@@ -650,6 +889,13 @@ def run_gate(
     )
     results: list[StepResult] = []
     for number, step in enumerate(steps, start=1):
+        # A browser step starts long after the check above, time enough for
+        # another run to take its port; ask again just before it starts.
+        step_port = step.environment.get("E2E_PORT")
+        busy_refusal = refuse_busy_ports((step_port,)) if step_port else ""
+        if busy_refusal:
+            announce(f"{step.name}: {busy_refusal}; nothing recorded for {commit_sha}")
+            return 1
         announce(f"{number}/{len(steps)} {step.name}: {' '.join(step.command)}")
         result = run_step(
             step,
@@ -716,6 +962,30 @@ def run_gate(
         f"{GATE_NOTES_REF} on {remote}" if push else f"{GATE_NOTES_REF} (local only)"
     )
     announce(f"all {len(steps)} steps passed; recorded {commit_sha} in {where}")
+    if not (push and deploy):
+        return 0
+    # deploy.sh refuses a record whose first pass did not run the Tarmar canon,
+    # so starting Deploy from one would only make a red run.
+    if canon_name != TARMAR_CANON_NAME:
+        announce(
+            f"not deploying: this record ran the {canon_name} canon, and "
+            "production needs a Tarmar-canon pass; run the gate with "
+            "TARMAR_CANON_DIR set to a clone of smarks/tarmar-canon"
+        )
+        return 0
+    try:
+        announce(start_deploy_if_head(repository_root, commit_sha, remote))
+    except subprocess.CalledProcessError as failure:
+        announce(
+            f"recorded, but the {DEPLOY_WORKFLOW} workflow did not start: "
+            f"{(failure.stderr or '').strip() or failure}"
+        )
+        return 1
+    except FileNotFoundError as failure:
+        announce(
+            f"recorded, but the {DEPLOY_WORKFLOW} workflow did not start: {failure}"
+        )
+        return 1
     return 0
 
 
@@ -786,16 +1056,27 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="Record locally without pushing; a deploy host will not see it.",
     )
     parser.add_argument(
+        "--no-deploy",
+        action="store_true",
+        help=(
+            f"Record and push, but do not start the {DEPLOY_WORKFLOW} workflow "
+            f"(by default it starts when the commit is the head of {DEPLOY_BRANCH})."
+        ),
+    )
+    parser.add_argument(
         "--e2e-port",
-        default=DEFAULT_E2E_PORT,
-        help=f"Port for the Playwright suite (default {DEFAULT_E2E_PORT}).",
+        default=None,
+        help=(
+            "Port for the Playwright suite (default: a free one from "
+            f"{DEFAULT_E2E_PORT} up, recorded in the note). Refused if taken."
+        ),
     )
     parser.add_argument(
         "--default-canon-e2e-port",
-        default=DEFAULT_CANON_E2E_PORT,
+        default=None,
         help=(
-            "Port for the default-canon Playwright run "
-            f"(default {DEFAULT_CANON_E2E_PORT})."
+            "Port for the default-canon Playwright run (default: a free one, "
+            "recorded in the note). Refused if taken."
         ),
     )
     return parser.parse_args(list(argv))
@@ -822,6 +1103,7 @@ def main(argv: Sequence[str]) -> int:
         e2e_port=options.e2e_port,
         default_canon_e2e_port=options.default_canon_e2e_port,
         push=not options.no_push,
+        deploy=not options.no_deploy,
     )
 
 

@@ -124,6 +124,13 @@ class Battle(models.Model):
     # overrule. Recorded when the battle is made, for the same reason as the
     # flag above.
     writes_to_records = models.BooleanField(default=False, db_default=False)
+    # A Game Master's "HTH by agreement" ruling (issue #867): the whole
+    # battle, or pairs of combatants, may enter hand-to-hand by agreement.
+    # ``{"whole_battle": bool, "pairs": [[low_id, high_id], ...]}``, ``{}``
+    # for none. The one source of truth; ``battle.agreement`` reads it and
+    # writes it onto the engine state every turn, and only a Game Master
+    # changes it (``battle.services.set_hth_agreement``).
+    hth_agreement_json = models.JSONField(default=dict, blank=True, db_default={})
     # While ``status`` is ``awaiting``: which combatant the turn is paused
     # on, plus the legal candidates (policy scores included, as advice) that
     # were computed when the engine paused — so the player's page can render

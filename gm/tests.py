@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 
+from common.services import ollama_client
 from common.test_helpers import (
     CANON_EXPECTATIONS,
     BaseTestCase,
@@ -1143,41 +1144,80 @@ class GMSystemPromptContentTest(SimpleTestCase):
         self.assertIn("choices are never exhaustive", SECTION_GUIDELINES)
 
     def test_prompt_size_stays_within_the_context_budget(self):
-        """Roughly 5k–9.4k tokens at ~4 chars/token: rich, but leaves the 32k
-        window mostly free for the conversation and ``/rules`` lookups.
+        """The longest of the four prompts stays under its share of GM_NUM_CTX.
 
-        The ceiling moved from 36,000 to 37,500 for issues #375 and #376. Both
-        needed what the #353 and #363 agents found works where a summary does
-        not: the offending sentence, banned by name. The dice section's repeat
-        count, the procedures section's "correcting them is not an exception"
-        and its ban on the negated verdict replaced weaker wording where they
-        could and still cost about 3.1k characters net, and every one of them
-        was kept because a live-harness pass rate moved with it. Growing this
-        number is a decision, not a default -- the next section that wants
-        room should look for wording to replace before it looks here.
+        Measured in estimated tokens against ``SYSTEM_PROMPT_CONTEXT_SHARE``
+        of the configured window, under whichever canon this run loaded
+        (issue #907), so the ceiling moves with ``GM_NUM_CTX`` instead of by
+        hand. The reasoning for the share is on the constant.
 
-        Moved from 37,500 to 38,750 on 2026-09-29 (issues #807, #802, #843,
-        #859), with main at 37,436: the Game Master's records (a death, XP,
-        coin, a stated Fatigue roll) and the skill check became actions the
-        schema has to name, and the rules the prompt stated wrongly -- the
-        bare-handed rows above STR 24, armour's DEX penalty, which scores play
-        reads, D&D's saves -- are said right. The aging schedule, what each
-        Origin gives and the starting coin went to ``rules_lookup`` instead of
-        the prompt: stated in the creation section, they drew the model into
-        recording backgrounds nobody had stated on four board scenarios. A
-        decision for Spencer, marked as such.
-
-        Moved from 38,750 to 40,000 on 2026-09-30 (batch h: #876, #886), with
-        main at 38,562: the survival_save action and a roll's direction are
-        new actions the schema has to name. Content is not trimmed to fit a
-        budget, so the two issue citations batch h first cut to make room
-        were restored. Coordinator's decision; Spencer may overrule. Restating
-        the ceiling as a share of GM_NUM_CTX in tokens is filed separately.
+        History of the character cap this replaced: 36,000, then 37,500 for
+        issues #375 and #376 (the offending sentence banned by name, each
+        kept because a live-harness pass rate moved with it), 38,750 on
+        2026-09-29 for #807, #802, #843 and #859 (the Game Master's records
+        and the skill check named in the schema; the aging schedule, Origins
+        and starting coin moved to ``rules_lookup``), and 40,000 on
+        2026-09-30 for batch h (#876, #886). Content is not trimmed to fit a
+        budget: batch h's two issue citations, first cut to make room, were
+        restored. Growing the share is still a decision, not a default -- the
+        next section that wants room should look for wording to replace first.
         """
-        from gm.engine import SYSTEM_PROMPT
+        from django.conf import settings
+
+        from gm.engine import SYSTEM_PROMPT, SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE
+        from gm.model_config import SYSTEM_PROMPT_CONTEXT_SHARE
+        from gm.warmup import PromptBudget, estimate_longest_prompt_tokens
 
         self.assertGreaterEqual(len(SYSTEM_PROMPT), 20_000)
-        self.assertLessEqual(len(SYSTEM_PROMPT), 40_000)
+        budget = PromptBudget(
+            prompt_tokens=estimate_longest_prompt_tokens(
+                SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values()
+            ),
+            num_ctx=settings.GM_NUM_CTX,
+        )
+        self.assertTrue(
+            budget.within_ceiling,
+            f"the longest GM prompt under the {CANON_NAME!r} canon estimates at "
+            f"{budget.prompt_tokens} tokens, over its ceiling of "
+            f"{budget.ceiling_tokens} ({SYSTEM_PROMPT_CONTEXT_SHARE:.0%} of "
+            f"GM_NUM_CTX {budget.num_ctx})",
+        )
+
+    def test_prompt_ceiling_leaves_most_of_the_pre_fold_history_to_play(self):
+        """Prompt plus one turn's excerpts take at most half the fold line.
+
+        A session folds its older turns once its history, system prompt
+        included, passes ``FOLD_AT_FRACTION`` of the window less the reply
+        reserve. Holding the prompt and an excerpt block under half of that
+        is what keeps the conversation, not the prompt, the larger part of
+        what a session carries (issue #907).
+        """
+        from django.conf import settings
+
+        from gm.model_config import system_prompt_token_ceiling
+        from gm.summary import FOLD_AT_FRACTION, usable_budget
+
+        ceiling = system_prompt_token_ceiling(settings.GM_NUM_CTX)
+        fold_line = FOLD_AT_FRACTION * usable_budget(settings.GM_NUM_CTX)
+        self.assertLessEqual(
+            ceiling + settings.GM_RETRIEVAL_MAX_TOKENS,
+            fold_line / 2,
+            f"a {ceiling}-token prompt ceiling plus "
+            f"{settings.GM_RETRIEVAL_MAX_TOKENS} tokens of excerpts is more "
+            f"than half the {fold_line:.0f}-token fold line at GM_NUM_CTX "
+            f"{settings.GM_NUM_CTX}",
+        )
+
+    def test_ceiling_is_the_share_of_the_window_in_tokens(self):
+        from gm.model_config import (
+            SYSTEM_PROMPT_CONTEXT_SHARE,
+            system_prompt_token_ceiling,
+        )
+
+        self.assertEqual(SYSTEM_PROMPT_CONTEXT_SHARE, 0.25)
+        self.assertEqual(system_prompt_token_ceiling(65536), 16384)
+        self.assertEqual(system_prompt_token_ceiling(32768), 8192)
+        self.assertEqual(system_prompt_token_ceiling(10), 2)
 
 
 # ---------- Model config / settings tests (issue #324) ----------
@@ -1197,7 +1237,7 @@ class GMModelConfigTest(SimpleTestCase):
         self.assertEqual(config.num_ctx, DEFAULT_GM_NUM_CTX)
         self.assertEqual(config.temperature, DEFAULT_GM_TEMPERATURE)
         self.assertEqual(DEFAULT_GM_MODEL, "qwen3:32b")
-        self.assertEqual(DEFAULT_GM_NUM_CTX, 32768)
+        self.assertEqual(DEFAULT_GM_NUM_CTX, 65536)
         self.assertEqual(DEFAULT_GM_TEMPERATURE, 0.8)
 
     def test_reads_all_three_variables(self):
@@ -1373,6 +1413,11 @@ class GMStreamPayloadTest(BaseTestCase):
         (model, history), kwargs = mock_stream.call_args
         self.assertEqual(model, "test-model")
         self.assertEqual(history[0], {"role": "system", "content": SYSTEM_PROMPT})
+        # Bounded by the turn's deadline, and hung up on if the turn gives up
+        # on it (issue #904).
+        stop_at = kwargs.pop("stop_at")
+        self.assertIsInstance(stop_at, float)
+        self.assertIsInstance(kwargs.pop("hang_up"), ollama_client.HangUp)
         self.assertEqual(
             kwargs, {"options": {"num_ctx": 1024, "temperature": 0.5}, "think": False}
         )

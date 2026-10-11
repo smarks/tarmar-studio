@@ -21,6 +21,11 @@ The Physical/Mental composite stats (issue #144) are guarded here too:
 ``derived-pools.md`` must print the same formulas as ``Character.physical``
 and ``Character.mental`` — both built from *effective* (aging-adjusted)
 attributes, except CHA, which the model never ages.
+
+Counterspell escalation (issue #926) is guarded as a pair: the public
+Counterspell page and the canon's ``magic-mechanics/counterspell.md`` must
+agree that the caster escalates after the defender wins (the spell was
+countered), never after the caster wins, and that only the caster may.
 """
 
 import re
@@ -70,8 +75,10 @@ REFERENCE_CONTENT = CONTENT_DIR
 PUBLIC_RULES = REFERENCE_CONTENT / "public-rules"
 CHANNEL_RULES = DM_RULES_DIR / "magic-mechanics" / "channel.md"
 MANA_POOL_RULES = DM_RULES_DIR / "magic-mechanics" / "mana-pool.md"
+COUNTERSPELL_CANON_RULES = DM_RULES_DIR / "magic-mechanics" / "counterspell.md"
 MAGIC_MECHANICS_INDEX = DM_RULES_DIR / "magic-mechanics.md"
 MAGIC_RULES = PUBLIC_RULES / "magic.md"
+COUNTERSPELL_PUBLIC_RULES = PUBLIC_RULES / "magic" / "counterspell.md"
 CHARACTERS_RULES = PUBLIC_RULES / "characters"
 PRIOR_EXPERIENCE = CHARACTERS_RULES / "prior-experience"
 SKILLS_GLOSSARY = PRIOR_EXPERIENCE / "skills-glossary.md"
@@ -1257,3 +1264,62 @@ class ManaPoolRuleTest(SimpleTestCase):
         """The pool is visible and starts at 0 -- not a hidden rolled field."""
         field = Character._meta.get_field("free_spell_points")
         self.assertEqual(field.default, 0)
+
+
+# How the public Counterspell page words the duel's two outcomes and the
+# escalation limit. The canon page words them its own way, and supplies its
+# markers under "counterspell_escalation" in tests/expectations.json.
+PUBLIC_COUNTERSPELL_MARKERS = {
+    "caster_wins": "If the caster wins",
+    "defender_wins": "If the defender wins",
+    "only_caster": "Only the caster can escalate",
+}
+
+
+def _outcome_clause(text: str, marker: str) -> str:
+    """The rule a page gives for one outcome: ``marker`` to the sentence's end.
+
+    The clause runs to the first full stop or line end, so a page's line or
+    sentence for one outcome never borrows the next outcome's words.
+
+    Args:
+        text: The page's markdown.
+        marker: The words that open the outcome, such as "If the caster wins".
+
+    Returns:
+        The clause, marker included.
+    """
+    match = re.search(re.escape(marker) + r"[^.\n]*", text)
+    if match is None:
+        raise AssertionError(f"no {marker!r} clause on the page")
+    return match.group(0)
+
+
+class CounterspellEscalationRuleTest(SimpleTestCase):
+    """Issue #926: the public page said the caster escalates after winning,
+    the canon page after losing. The canon is right: a won casting has gone
+    off, so there is nothing left to escalate, and the canon's escalation ends
+    when the caster succeeds or the defender lets the spell through. Both
+    pages must now say escalation follows a countered spell and that only the
+    caster may escalate."""
+
+    def assert_escalation_follows_a_counter(
+        self, page: Path, markers: dict[str, str]
+    ) -> None:
+        text = page.read_text(encoding="utf-8")
+        defender_wins = _outcome_clause(text, markers["defender_wins"])
+        caster_wins = _outcome_clause(text, markers["caster_wins"])
+        self.assertIn("escalat", defender_wins.lower())
+        self.assertNotIn("escalat", caster_wins.lower())
+        self.assertIn(markers["only_caster"], text)
+
+    def test_public_page_escalates_after_the_spell_is_countered(self) -> None:
+        self.assert_escalation_follows_a_counter(
+            COUNTERSPELL_PUBLIC_RULES, PUBLIC_COUNTERSPELL_MARKERS
+        )
+
+    @skip_unless_canon_expects("counterspell_escalation")
+    def test_canon_page_agrees_with_the_public_page(self) -> None:
+        self.assert_escalation_follows_a_counter(
+            COUNTERSPELL_CANON_RULES, CANON_EXPECTATIONS["counterspell_escalation"]
+        )

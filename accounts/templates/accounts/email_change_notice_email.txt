@@ -1,0 +1,10 @@
+{% autoescape off %}{% if set_by_username %}The Admin "{{ set_by_username }}" at {{ site_name }} changed the email address of the account "{{ username }}" from this one to another.
+
+The new address is not confirmed yet: a link has been sent to it, and password-reset links go to it only once that link is opened.
+
+If you did not ask for this, contact the person who runs this site.{% else %}Someone signed in to the account "{{ username }}" at {{ site_name }} asked to change its email address from this one to another.
+
+The address changes only when a link sent to the new address is opened. Until then this address stays on the account.
+
+If this was not you, change your password and contact the person who runs this site.{% endif %}
+{% endautoescape %}

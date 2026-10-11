@@ -9,11 +9,14 @@ opening context. Nothing carries over unless the owner asks.
 """
 
 import json
+import threading
+import time
 from datetime import timedelta
 from unittest.mock import patch
 
 from django.utils import timezone
 
+from common.services.ollama_client import HangUp
 from common.test_helpers import BaseTestCase
 
 from .models import (
@@ -532,7 +535,7 @@ class ContinueEndpointTest(BaseTestCase):
         stream.side_effect = gm_replies("On the quay.")
         now = [1000.0]
 
-        def slow_recap(prompt: str) -> str:
+        def slow_recap(prompt: str, **_bound: object) -> str:
             now[0] += 400.0
             return WHOLE_RECAP
 
@@ -541,12 +544,62 @@ class ContinueEndpointTest(BaseTestCase):
         session = GMSession.objects.get(continued_from=self.previous)
 
         with (
-            self.settings(GM_STREAM_BUDGET_SECONDS=300),
+            # Inside its own budget, which is not the turn's.
+            self.settings(GM_STREAM_BUDGET_SECONDS=300, GM_RECAP_BUDGET_SECONDS=500),
             patch("time.monotonic", side_effect=lambda: now[0]),
         ):
             frames = self.play_first_turn(session)
 
         self.assertTrue(any(frame.get("done") for frame in frames), frames)
+
+    @patch("gm.turn_engine.model.ollama_client.stream_chat")
+    def test_the_recap_is_asked_with_its_own_deadline_and_a_hang_up(self, stream):
+        """Issue #936: the recap had no bound but the 300 s per-read timeout."""
+        stream.side_effect = gm_replies("On the quay.")
+        self.continue_from(self.previous.pk)
+        session = GMSession.objects.get(continued_from=self.previous)
+
+        with self.settings(GM_RECAP_BUDGET_SECONDS=120):
+            asked_at = time.monotonic()
+            self.play_first_turn(session)
+
+        bound = self.write_recap.call_args.kwargs
+        self.assertAlmostEqual(bound["deadline"] - asked_at, 120, delta=5)
+        self.assertIsInstance(bound["hang_up"], HangUp)
+
+    @patch("gm.turn_engine.model.ollama_client.stream_chat")
+    def test_a_recap_past_its_budget_is_hung_up_and_the_turn_goes_on(self, stream):
+        """Issue #936: the turn stops waiting at the deadline and hangs the call up.
+
+        The recap here never returns on its own, as a call whose hang-up has
+        not woken it would not; the turn carries the fold recap, labelled as
+        one, and plays.
+        """
+        stream.side_effect = gm_replies("On the quay.")
+        released = threading.Event()
+        self.addCleanup(released.set)
+
+        def stalled_recap(prompt: str, **_bound: object) -> str:
+            released.wait(10)
+            return WHOLE_RECAP
+
+        self.write_recap.side_effect = stalled_recap
+        self.continue_from(self.previous.pk)
+        session = GMSession.objects.get(continued_from=self.previous)
+
+        with (
+            self.settings(GM_RECAP_BUDGET_SECONDS=0.2),
+            patch("gm.views.HangUp") as hang_up_class,
+        ):
+            started = time.monotonic()
+            frames = self.play_first_turn(session)
+            took = time.monotonic() - started
+
+        self.assertLess(took, 3.0)
+        hang_up_class.return_value.hang_up.assert_called()
+        self.assertTrue(any(frame.get("done") for frame in frames), frames)
+        session.refresh_from_db()
+        self.assertEqual(carried_recap(session), CarriedRecap(RECAP, whole=False))
 
     def test_continuing_is_rate_limited(self):
         with self.settings(RATE_LIMIT_ENABLED=True):

@@ -7,7 +7,7 @@ answer. The rules live in the modules they call:
 * the Weapon skill's weapon — :func:`characters.weapon_skill.record_weapon_skill`
   (issue #753);
 * the skill check — :func:`characters.skill_checks.skill_check` (issue #756);
-* coin — :func:`characters.purse.move_coin` (issue #757);
+* coin — :func:`characters.purse.move_coin_for_reason` (issues #757, #928);
 * spells and mana — :func:`characters.magic.learn_spell` and
   :func:`characters.magic.grant_mana` (issues #774, #755).
 
@@ -32,7 +32,12 @@ from common.helpers import _parse_json_body, whole_number
 from .. import services
 from ..magic import grant_mana, learn_spell
 from ..models import Character
-from ..purse import MAX_COIN_MOVEMENT, PurseError, format_purse, move_coin
+from ..purse import (
+    MAX_COIN_MOVEMENT,
+    PurseError,
+    format_purse,
+    move_coin_for_reason,
+)
 from ..skill_checks import skill_check
 from ..skills import normalize_skill_name
 from ..weapon_skill import record_weapon_skill
@@ -81,7 +86,11 @@ def _change(
             change.note(field_name, "", note)
         # A check leaves the page where it is; its history line joins the
         # Recent Changes table from this (issue #792).
-        body = {"success": True, "note": note, **sheet_repaint(change.character)}
+        body = {
+            "success": True,
+            "note": note,
+            **sheet_repaint(change.character, actor),
+        }
         if answer is not None:
             body.update(answer(change.character, note))
         return JsonResponse(body)
@@ -156,8 +165,8 @@ def character_move_coin(request: HttpRequest, pk: int) -> HttpResponse:
             raise services.CharacterChangeError(
                 f"Move between -{MAX_COIN_MOVEMENT} and {MAX_COIN_MOVEMENT} gp, not 0"
             )
-        reason = str(data.get("reason") or "").strip()[:100] or "Game Master"
-        return move_coin(character, amount, reason=reason)
+        reason = str(data.get("reason") or "").strip() or "Game Master"
+        return move_coin_for_reason(character, amount, reason=reason)
 
     return _change(
         request,
@@ -232,7 +241,11 @@ def character_roll_survival_save(request: HttpRequest, pk: int) -> HttpResponse:
             is_game_master=request.user.can_manage_users,
         )
         return JsonResponse(
-            {"success": True, "note": result.note, **sheet_repaint(result.character)}
+            {
+                "success": True,
+                "note": result.note,
+                **sheet_repaint(result.character, cast(User, request.user)),
+            }
         )
 
     return answer_change(run)

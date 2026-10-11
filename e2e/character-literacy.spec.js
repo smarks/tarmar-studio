@@ -11,12 +11,23 @@
  * change the Origin, and a Game Master who does has literacy rolled again
  * against the new origin (cleared, for Consult GM, which has no check; the
  * player stays held to the roll they had).
+ *
+ * Spencer's ruling on #970: a rolled Origin is fixed for a player outright, so
+ * the literacy lock is exercised on an Origin the player chose (no roll in the
+ * dice log), and a rolled one is its own test.
  */
 
 const {
     test, expect, loginAs, createCharacter, submitPassphrase, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
 const { startCoverage } = require('./coverage');
+const { runDjangoShell } = require('./django');
+const { pinDice } = require('./dice');
+
+/** Creation's dice pinned (issue #959) so the Origin has a check to roll. */
+const ROLLED_ORIGIN_SEED = 7;
+/** What creation's location roll gives on that seed. */
+const SEEDED_ORIGIN = 'Rural';
 
 /** The check each origin prints, from characters/dice.py's modifiers. */
 const CHECKS = {
@@ -27,6 +38,34 @@ const CHECKS = {
 };
 const ORIGINS = Object.keys(CHECKS);
 const PENALTIES = { City: 0, Village: 2, Rural: 4 };
+
+/** The reason a player's sheet prints beside a rolled Origin (#970). */
+const ROLLED_ORIGIN_FIXED = 'The Origin was rolled, and a roll is final; only a Game Master can change it.';
+
+/**
+ * Create a character whose player chose the Origin rather than rolled it.
+ *
+ * Creation rolls the Origin, which fixes it for the player (#970). Taking the
+ * location table's line out of the dice log leaves the Origin creation
+ * landed on as a choice (location.md: "Roll percentile dice or choose"),
+ * which stays the player's until literacy is rolled or ruled (#741).
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<string>} The character's id.
+ */
+async function createWithChosenOrigin(page) {
+    await createCharacter(page);
+    const characterId = page.url().match(/\/characters\/(\d+)\//)[1];
+    runDjangoShell(
+        'from characters.models import Character; '
+        + `character = Character.objects.get(pk=${characterId}); `
+        + 'character.dice_log = chr(10).join(line for line in character.dice_log.splitlines() '
+        + 'if not line.startswith("Location: ")); '
+        + 'character.save(update_fields=["dice_log"])'
+    );
+    await page.reload();
+    return characterId;
+}
 
 /** The sheet's Origin select. */
 function originSelect(page) {
@@ -69,7 +108,9 @@ function expectedResult(roll, intelligence, origin) {
 test.describe('Literacy row (#740, #741)', () => {
     test('changing the Origin repaints the check with no reload', async ({ page }) => {
         await loginAs(page, TEST_USER);
-        await createCharacter(page);
+        // A chosen Origin: this chose over creation's roll, which a player
+        // may no longer do (#970).
+        await createWithChosenOrigin(page);
         const rolledOrigin = await originSelect(page).inputValue();
         // A page-lifetime marker: any reload, however late, wipes it.
         await page.evaluate(() => { window.__noReload = 1; });
@@ -93,8 +134,7 @@ test.describe('Literacy row (#740, #741)', () => {
 
     test('rolling records the outcome and fixes a player\'s Origin; a Game Master\'s change rolls again', async ({ page, browser }) => {
         await loginAs(page, TEST_USER);
-        await createCharacter(page);
-        const characterId = page.url().match(/\/characters\/(\d+)\//)[1];
+        const characterId = await createWithChosenOrigin(page);
         let origin = await originSelect(page).inputValue();
         if (origin === 'Consult GM') {
             origin = 'Village';
@@ -183,8 +223,7 @@ test.describe('Literacy row (#740, #741)', () => {
 
     test('a Game Master rules at Consult GM and the ruling fixes the player\'s Origin (#743)', async ({ page, browser }) => {
         await loginAs(page, TEST_USER);
-        await createCharacter(page);
-        const characterId = page.url().match(/\/characters\/(\d+)\//)[1];
+        const characterId = await createWithChosenOrigin(page);
         if (await originSelect(page).inputValue() !== 'Consult GM') {
             await chooseOrigin(page, 'Consult GM');
         }
@@ -231,5 +270,54 @@ test.describe('Literacy row (#740, #741)', () => {
         await expect(page.locator('#literacy-result')).toHaveText("Literate (Game Master's ruling)");
         await expect(originSelect(page)).toBeDisabled();
         await expect(page.locator('#origin-fixed-note')).toBeVisible();
+    });
+
+    test('a rolled Origin is fixed for a player and open to a Game Master (#970)', async ({ page, browser }) => {
+        await loginAs(page, TEST_USER);
+        await pinDice(page, '**/characters/create/', ROLLED_ORIGIN_SEED);
+        await createCharacter(page);
+        const characterId = page.url().match(/\/characters\/(\d+)\//)[1];
+        // Creation rolled it: text with the reason, no select, and no
+        // literacy note beside it, before literacy and after.
+        await expect(page.locator('#dice-log')).toContainText('Location: d100=');
+        await expect(page.locator('[data-field="location"]')).toHaveCount(0);
+        await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
+        await expect(page.locator('#origin-fixed-note')).toHaveCount(0);
+        const rolled = (await page.locator('#location .physical-table td').first().innerText())
+            .match(/^(City|Village|Rural|Consult GM)/)[1];
+        // The seed's Origin, which proves the pin took and has a check.
+        expect(rolled).toBe(SEEDED_ORIGIN);
+        await page.locator('#roll-literacy-btn').click();
+        await expect(page.locator('#literacy-result')).toHaveText(/^(Literate|Illiterate) \(rolled/);
+        await expect(page.locator('#origin-fixed-note')).toHaveCount(0);
+        await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
+
+        // The lock is the server's: a hand-built POST is refused with it.
+        const refused = await page.evaluate(async ({ id, value }) => {
+            const token = document.querySelector('meta[name="csrf-token"]').content;
+            const response = await fetch(`/tarmar/characters/${id}/update-field/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+                body: JSON.stringify({ field: 'location', value }),
+            });
+            return { status: response.status, body: await response.json() };
+        }, { id: characterId, value: rolled === 'City' ? 'Rural' : 'City' });
+        expect(refused.status).toBe(400);
+        expect(refused.body.error).toBe(ROLLED_ORIGIN_FIXED);
+
+        // A Game Master may change it.
+        const context = await browser.newContext();
+        try {
+            const gameMaster = await context.newPage();
+            await startCoverage(gameMaster);
+            await submitPassphrase(gameMaster);
+            await loginAs(gameMaster, TEST_ADMIN);
+            await gameMaster.goto(`/tarmar/characters/${characterId}/`);
+            await expect(originSelect(gameMaster)).toBeEnabled();
+            await expect(gameMaster.locator('[data-locked-field="location"]')).toHaveCount(0);
+            await chooseOrigin(gameMaster, rolled === 'Rural' ? 'City' : 'Rural');
+        } finally {
+            await context.close();
+        }
     });
 });

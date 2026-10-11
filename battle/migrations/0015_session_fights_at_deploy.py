@@ -181,6 +181,9 @@ class Migration(migrations.Migration):
         ("battle", "0014_battle_game_master_fights"),
         ("characters", "0020_character_current_pools"),
         ("gm", "0019_drop_retired_supplies_column"),
+        # forwards reads the session owner's role flags (issue #974: named
+        # here rather than left to arrive through gm 0007).
+        ("accounts", "0002_user_is_dm_user_is_player_user_is_role_admin"),
     ]
 
     operations = [

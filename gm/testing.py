@@ -194,11 +194,11 @@ def run_actions(
         roster_ids={line.character_id for line in lines},
         policy=policy,
         thread_ids=open_thread_ids(session),
-        # As the production paths read a plan (#886 review).
-        injured_ids={line.character_id for line in lines if line.injured},
     )
     assert reading.ok, reading.errors
     executor = RecordsExecutor(policy, session, lambda: session, session.user)
+    # As a turn does (TurnEngine._execute): the executor reads the plan first.
+    executor.begin(reading.actions)
     return [executor.run(action, lambda event: None) for action in reading.actions]
 
 
@@ -215,7 +215,9 @@ def game_master_sets_the_foes_asked_for() -> AbstractContextManager[Any]:
 
     return patch(
         "gm.fight.request_set_foes",
-        side_effect=lambda history, room, requested: fight.parse_foe_text(requested),
+        side_effect=lambda history, room, requested, stop_at=None: (
+            fight.parse_foe_text(requested)
+        ),
     )
 
 

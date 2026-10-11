@@ -517,7 +517,7 @@ function showNewSessionInRail(id, details) {
   item.dataset.id = String(id);
 
   const link = document.createElement('a');
-  link.href = `?session=${id}`;
+  link.href = `?session=${encodeURIComponent(id)}`;
   const nameSpan = document.createElement('span');
   nameSpan.className = 'session-name';
   nameSpan.textContent = name;
@@ -690,7 +690,7 @@ function setTurnRunning(text) {
 function showFinishedTurn(finishedSessionId) {
   const target = finishedSessionId || sessionId;
   window.location.href = target
-    ? `${window.location.pathname}?session=${target}`
+    ? `${window.location.pathname}?session=${encodeURIComponent(target)}`
     : window.location.pathname;
 }
 

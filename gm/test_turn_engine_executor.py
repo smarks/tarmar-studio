@@ -3,10 +3,18 @@
 import json
 import time
 from collections.abc import Sequence
+from dataclasses import replace
+from decimal import Decimal
 from unittest.mock import patch
 
 from characters import services
 from characters.models import Character
+from characters.purse import (
+    CUSTOM_COMBAT_ITEM_REFUSAL,
+    CUSTOM_ITEM_MORE_REFUSAL,
+    CUSTOM_ITEM_PRICE_REFUSAL,
+    GAME_MASTER_GIFT,
+)
 from common.test_helpers import BaseTestCase, create_character
 
 from .engine import MODE_AIDE, MODE_PLAY
@@ -267,7 +275,22 @@ class GameMasterActionsTest(ExecutorTestCase):
         character.refresh_from_db()
         self.assertTrue(character.is_alive)
         self.assertEqual(character.fatigue_roll, 7)
-        self.assertEqual(character.equipment, [{"name": "rope", "quantity": 2}])
+        # Stored as the sheet stores a custom item (#927).
+        self.assertEqual(
+            character.equipment,
+            [
+                {
+                    "item_id": "custom",
+                    "name": "rope",
+                    "category": "gear",
+                    "weight": 0.0,
+                    "cost": 0.0,
+                    "quantity": 2,
+                    "in_pack": False,
+                    "notes": "",
+                }
+            ],
+        )
         self.assertEqual(character.name, "Gorn the Second")
         self.assertEqual(
             (character.provenance_class, character.location, character.wealth_level),
@@ -542,6 +565,177 @@ class PlayerActionsTest(ExecutorTestCase):
         character.refresh_from_db()
         self.assertEqual((character.location, character.literacy_roll), ("Village", 9))
         self.assertFalse(character.is_literate)
+
+    def test_a_player_cannot_choose_over_a_rolled_origin(self):
+        """A rolled Origin is final for a player (#970) in a session as on the
+        sheet: set_background goes through change_field, which refuses it."""
+        character = add_character(self.session, recorded("Gorn"))
+        character.location = "Rural"
+        character.dice_log = "Location: d100=80 -> Rural"
+        character.save()
+
+        outcome, _yielded, model, _turn = self.play(
+            plan(
+                {
+                    "action": "set_background",
+                    "character_id": character.pk,
+                    "location": "city",
+                }
+            )
+        )
+
+        reason = services.ROLL_FIXED_REASONS["location"]
+        self.assertFalse(outcome.results[0].ran)
+        self.assertEqual(outcome.results[0].error, reason)
+        self.assertIn(reason, model.requests[1][-1]["content"])
+        character.refresh_from_db()
+        self.assertEqual(character.location, "Rural")
+
+    def test_a_stated_origin_at_creation_is_recorded_as_a_choice(self):
+        """A plan that states a new character's Origin starts it unrolled, so
+        set_background records the stated one as a choice (#860: "a stated
+        Origin is recorded, not rolled"), which stays the player's until
+        literacy; the roll that is final for a player (#970) never happens."""
+        with patch("characters.dice.roll_d100", side_effect=[40, 3, 50]) as d100:
+            outcome, *_rest = self.play(
+                plan(
+                    {"action": "roll_attributes", "new_character": {"name": "Wren"}},
+                    {
+                        "action": "set_background",
+                        "new_character_ref": "Wren",
+                        "location": "village",
+                    },
+                )
+            )
+
+        character = Character.objects.get(user=self.user, name="Wren")
+        self.assertEqual([result.ran for result in outcome.results], [True, True])
+        # Provenance (class, detail) and wealth: no Origin roll among them.
+        self.assertEqual(d100.call_count, 3)
+        self.assertEqual(character.location, "Village")
+        self.assertTrue(character.location_recorded)
+        self.assertNotIn("Location: d100=", character.dice_log)
+        self.assertTrue(character.provenance_recorded and character.wealth_recorded)
+        self.assertEqual(character.origin_skill, "street smarts")
+        self.assertIn("the Origin the plan states", outcome.results[0].result)
+        self.assertIn(
+            "background already recorded as stated: origin Village",
+            outcome.results[1].result,
+        )
+        self.assertTrue(
+            services.can_set_field(character, "location", is_game_master=False)
+        )
+        services.update_field(character.pk, "location", "Rural")
+        character.refresh_from_db()
+        self.assertEqual(character.location, "Rural")
+
+    def test_a_refused_part_does_not_take_the_stated_origin_back(self):
+        """The board's procedure_authority run: a player's plan names a whole
+        background, the provenance and wealth parts are the Game Master's, so
+        the set_background is refused as one change. The stated Origin was
+        recorded as the character was made, so it stands, and the literacy
+        roll after it is made against it rather than refused."""
+        with patch("characters.dice.roll_d100", side_effect=[40, 3, 50]):
+            outcome, *_rest = self.play(
+                plan(
+                    {"action": "roll_attributes", "new_character": {"name": "Wren"}},
+                    {
+                        "action": "set_background",
+                        "new_character_ref": "Wren",
+                        "provenance": "Commoner",
+                        "location": "City",
+                        "wealth": "Subsistence",
+                    },
+                    {"action": "roll_literacy", "new_character_ref": "Wren"},
+                )
+            )
+
+        character = Character.objects.get(user=self.user, name="Wren")
+        self.assertEqual(
+            [result.ran for result in outcome.results], [True, False, True]
+        )
+        self.assertEqual(character.location, "City")
+        self.assertTrue(character.location_recorded)
+        self.assertTrue(character.literacy_rolled)
+        self.assertEqual(character.wealth_level, "Moderate")
+
+    def test_a_refused_set_background_states_no_origin(self):
+        """A set_background the plan reader marked refused will not run, so
+        the Origin it names is not recorded; the character's is rolled. No
+        policy refuses a player's set_background today, so the refusal is
+        set here as the reader sets one (dataclasses.replace)."""
+        making, stating = read_plan(
+            plan(
+                {"action": "roll_attributes", "new_character": {"name": "Wren"}},
+                {
+                    "action": "set_background",
+                    "new_character_ref": "Wren",
+                    "location": "village",
+                },
+            ),
+            roster_ids=set(),
+            policy=self.policy,
+        ).actions
+        actions = (making, replace(stating, refusal="refused before it ran"))
+        executor = self.executor()
+
+        executor.begin(actions)
+        with patch("characters.dice.roll_d100", side_effect=[40, 3, 80, 50]):
+            results = [executor.run(action, lambda event: None) for action in actions]
+
+        character = Character.objects.get(user=self.user, name="Wren")
+        self.assertEqual([result.ran for result in results], [True, False])
+        self.assertEqual(character.location, "Rural")
+        self.assertIn("Location: d100=80 -> Rural", character.dice_log)
+
+    def test_a_plan_that_states_no_origin_rolls_it_and_the_roll_is_final(self):
+        """No set_background naming a location: the Origin is rolled as the
+        creation page rolls it, and a player may not choose over it later."""
+        with patch("characters.dice.roll_d100", side_effect=[40, 3, 80, 50]):
+            outcome, *_rest = self.play(
+                plan(
+                    {"action": "roll_attributes", "new_character": {"name": "Wren"}},
+                    {
+                        "action": "set_background",
+                        "new_character_ref": "Wren",
+                        "wealth": "moderate",
+                    },
+                )
+            )
+
+        character = Character.objects.get(user=self.user, name="Wren")
+        self.assertEqual(character.location, "Rural")
+        self.assertIn("Location: d100=80 -> Rural", character.dice_log)
+        self.assertIn("a rolled background", outcome.results[0].result)
+        with self.assertRaisesMessage(
+            services.CharacterChangeError, services.ROLL_FIXED_REASONS["location"]
+        ):
+            services.update_field(character.pk, "location", "City")
+
+    def test_a_later_plans_origin_is_refused_over_the_creation_roll(self):
+        """The Origin rolled when an earlier plan made the character is the
+        player's one roll; naming another later is choosing over it."""
+        with patch("characters.dice.roll_d100", side_effect=[40, 3, 80, 50]):
+            self.play(
+                plan({"action": "roll_attributes", "new_character": {"name": "Wren"}})
+            )
+        character = Character.objects.get(user=self.user, name="Wren")
+
+        outcome, *_rest = self.play(
+            plan(
+                {
+                    "action": "set_background",
+                    "character_id": character.pk,
+                    "location": "village",
+                }
+            )
+        )
+
+        self.assertEqual(
+            outcome.results[0].error, services.ROLL_FIXED_REASONS["location"]
+        )
+        character.refresh_from_db()
+        self.assertEqual(character.location, "Rural")
 
     def test_a_player_cannot_revive(self):
         character = add_character(self.session, recorded("Gorn"))
@@ -1964,3 +2158,219 @@ class DemotedBeforeTheExecutorTest(ExecutorTestCase):
 
         self.assertIn("Not done: awarding XP", body)
         self.assertEqual(Character.objects.get(pk=gorn.pk).total_xp, 0)
+
+
+#: Custom items with combat numbers, as a plan states them (#845, #927).
+_COMBAT_ITEMS = (
+    {"item": "Dragonhide", "category": "armor", "stops": 10, "dex_penalty": -1},
+    {"item": "Moonshield", "category": "shield", "stops": 3},
+    {"item": "Starblade", "category": "weapons", "damage": "3d6"},
+)
+
+
+class _CustomItemCase(ExecutorTestCase):
+    """One character with 100 gp and its wealth rolled, and one item added."""
+
+    def setUp(self):
+        super().setUp()
+        self.wren = create_character(self.user, name="Wren", starting_coin=100)
+        self.session.characters.add(self.wren)
+        self.history_before = len(self.wren.history or [])
+
+    def add(self, **fields):
+        """Run one ``add_equipment`` for Wren.
+
+        Returns:
+            ``(result, stored_event)``: the action's result and the event the
+            ledger shows for it.
+        """
+        outcome, _yielded, _model, turn = self.play(
+            plan({"action": "add_equipment", "character_id": self.wren.pk, **fields})
+        )
+        self.wren.refresh_from_db()
+        return outcome.results[0], GMEvent.objects.get(turn=turn, kind=events.ACTION)
+
+    def carry(self, item: dict) -> None:
+        """Wren carries only ``item``, as the Game Master left it, and 100 gp."""
+        self.wren.equipment = [item]
+        self.wren.coin_adjustment = 0
+        self.wren.save()
+        self.history_before = len(self.wren.history or [])
+
+    def assert_refused_writing_nothing(
+        self, result, event, reason: str, equipment=()
+    ) -> None:
+        self.assertFalse(result.ran)
+        self.assertIn(reason, result.error)
+        # The refusal is a line the ledger shows, not a silent drop.
+        self.assertTrue(event.visible)
+        self.wren.refresh_from_db()
+        self.assertEqual(self.wren.equipment, list(equipment))
+        self.assertEqual(self.wren.purse, Decimal(100))
+        self.assertEqual(len(self.wren.history or []), self.history_before)
+
+
+class PlayersBuyCustomItemsInChatTest(_CustomItemCase):
+    """A player's chat is held to the sheet's custom-item rule (#927, #845).
+
+    The chat added any item the catalog does not sell for nothing, where the
+    sheet charges its stated cost and refuses one with combat numbers.
+    """
+
+    game_master = False
+    mode = MODE_PLAY
+
+    def test_a_custom_item_is_bought_at_its_stated_price(self):
+        result, event = self.add(item="Heirloom ring", quantity=2, price=15)
+
+        self.assertTrue(result.ran, result.error)
+        self.assertTrue(event.visible)
+        self.assertEqual(self.wren.purse, Decimal(70))
+        (ring,) = self.wren.equipment
+        self.assertEqual(
+            (ring["item_id"], ring["name"], ring["quantity"], ring["cost"]),
+            ("custom", "Heirloom ring", 2, 15.0),
+        )
+        self.assertIn("paid 30 gp (2 × Heirloom ring)", self.wren.history[-1]["new"])
+
+    def test_a_price_the_purse_cannot_pay_is_refused(self):
+        result, event = self.add(item="Silver crown", price=500)
+
+        self.assert_refused_writing_nothing(result, event, "Not enough coin")
+
+    def test_an_item_with_no_price_is_refused_not_given(self):
+        result, event = self.add(item="Vane's key")
+
+        self.assert_refused_writing_nothing(result, event, CUSTOM_ITEM_PRICE_REFUSAL)
+
+    def test_combat_numbers_are_refused_whatever_the_price(self):
+        for fields in _COMBAT_ITEMS:
+            with self.subTest(fields["item"]):
+                result, event = self.add(price=1, **fields)
+
+                self.assert_refused_writing_nothing(
+                    result, event, CUSTOM_COMBAT_ITEM_REFUSAL
+                )
+
+    def test_more_of_a_carried_item_costs_its_stored_cost_not_the_stated_one(self):
+        """Review of #927: stacking at a stated 0 got a Game Master's 500-gp crown free."""
+        for stored_cost, purse_after in ((10, Decimal(50)), (500, None)):
+            with self.subTest(stored_cost=stored_cost):
+                crown = {
+                    "item_id": "custom",
+                    "name": "Silver crown",
+                    "category": "gear",
+                    "cost": stored_cost,
+                    "quantity": 1,
+                }
+                self.carry(crown)
+
+                result, event = self.add(item="silver crown", quantity=5, price=0)
+
+                if purse_after is None:
+                    self.assert_refused_writing_nothing(
+                        result, event, "Not enough coin", equipment=[crown]
+                    )
+                    continue
+                self.assertTrue(result.ran, result.error)
+                self.assertEqual(self.wren.purse, purse_after)
+                self.assertEqual(self.wren.equipment[0]["quantity"], 6)
+                self.assertIn(
+                    "now carrying 6 × Silver crown; paid 50 gp (5 × Silver crown)",
+                    self.wren.history[-1]["new"],
+                )
+
+    def test_more_of_an_item_carried_at_no_cost_is_the_game_masters(self):
+        """Review of #927: a cost-0 gift, or an old item with no cost, multiplied."""
+        for carried in (
+            {"item_id": "custom", "name": "Vane's key", "cost": 0, "quantity": 1},
+            {"name": "Vane's key", "quantity": 1},
+        ):
+            with self.subTest(carried=carried):
+                self.carry(carried)
+
+                result, event = self.add(item="Vane's key", quantity=3, price=20)
+
+                self.assert_refused_writing_nothing(
+                    result, event, CUSTOM_ITEM_MORE_REFUSAL, equipment=[carried]
+                )
+
+    def test_a_catalog_item_is_bought_at_the_catalogs_price(self):
+        """A price stated for a catalog item changes nothing (#757 unchanged)."""
+        result, _event = self.add(item="broadsword", price=1)
+
+        self.assertTrue(result.ran, result.error)
+        self.assertEqual(self.wren.purse, Decimal(20))
+        self.assertEqual(
+            self.wren.equipment, [{"item_id": "broadsword", "quantity": 1}]
+        )
+
+
+class GameMasterGivesCustomItemsInChatTest(_CustomItemCase):
+    """A Game Master's chat gives a custom item, and the history says so (#927)."""
+
+    game_master = True
+    mode = MODE_AIDE
+
+    def assert_given(self, result, name: str) -> dict:
+        self.assertTrue(result.ran, result.error)
+        self.assertEqual(self.wren.purse, Decimal(100))
+        self.assertIn(f"1 × {name} {GAME_MASTER_GIFT}", self.wren.history[-1]["new"])
+        (item,) = self.wren.equipment
+        self.assertEqual((item["item_id"], item["name"]), ("custom", name))
+        return item
+
+    def test_a_priced_item_is_given_free_and_keeps_its_price(self):
+        result, _event = self.add(item="Heirloom ring", price=15)
+
+        self.assertEqual(self.assert_given(result, "Heirloom ring")["cost"], 15.0)
+
+    def test_a_price_past_the_purse_is_still_a_gift(self):
+        result, _event = self.add(item="Silver crown", price=500)
+
+        self.assert_given(result, "Silver crown")
+
+    def test_an_item_with_no_price_is_a_gift(self):
+        result, _event = self.add(item="Vane's key")
+
+        self.assertEqual(self.assert_given(result, "Vane's key")["cost"], 0)
+
+    def test_combat_numbers_are_given_and_recorded(self):
+        armour = {"stops": 10, "dex_penalty": -1}
+        for fields, numbers, line in (
+            (_COMBAT_ITEMS[0], armour, "(10 Stops, DEX -1)"),
+            (_COMBAT_ITEMS[1], {"stops": 3}, "(3 Stops, DEX +0)"),
+            (_COMBAT_ITEMS[2], {"damage": "3d6"}, "(damage 3d6)"),
+        ):
+            with self.subTest(fields["item"]):
+                self.wren.equipment = []
+                self.wren.save()
+
+                result, _event = self.add(**fields)
+
+                item = self.assert_given(result, fields["item"])
+                self.assertEqual(item["category"], fields["category"])
+                self.assertEqual({key: item[key] for key in numbers}, numbers)
+                self.assertIn(line, self.wren.history[-1]["new"])
+
+    def test_more_of_an_item_carried_at_no_cost_is_given(self):
+        self.carry({"name": "Vane's key", "quantity": 1})
+
+        result, _event = self.add(item="vane's key", quantity=2)
+
+        self.assertTrue(result.ran, result.error)
+        self.assertEqual(self.wren.equipment, [{"name": "Vane's key", "quantity": 3}])
+        self.assertIn(
+            f"now carrying 3 × Vane's key; 2 × Vane's key {GAME_MASTER_GIFT}",
+            self.wren.history[-1]["new"],
+        )
+
+    def test_combat_numbers_out_of_the_sheets_bounds_are_refused(self):
+        result, event = self.add(item="Odd blade", category="weapons", damage="lots")
+
+        self.assert_refused_writing_nothing(result, event, "Damage must look like")
+
+    def test_a_catalog_item_cannot_be_given_other_numbers(self):
+        result, event = self.add(item="Broadsword", category="weapons", damage="9d9")
+
+        self.assert_refused_writing_nothing(result, event, "sold from the catalog")

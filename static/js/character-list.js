@@ -109,6 +109,10 @@ async function restoreSelectedCharacters(restoreUrlTemplate) {
     location.reload();
 }
 
+//: Marks a document whose owner filter is already listened for, so wiring
+//: the page twice cannot reload it twice for one choice.
+const USER_FILTER_BOUND = Symbol.for('tarmar.character-list.user-filter.bound');
+
 /** Wire every control the page rendered; a control that is absent is skipped. */
 function initCharacterList(doc) {
     const page = doc || document;
@@ -129,9 +133,18 @@ function initCharacterList(doc) {
     if (showDeleted) {
         showDeleted.addEventListener('change', () => toggleShowDeleted(showDeleted.checked));
     }
-    const userFilter = page.getElementById('user-filter');
-    if (userFilter) {
-        userFilter.addEventListener('change', () => filterByUser(userFilter.value));
+    // The owner filter is a searchable picker (#973): a search or a page
+    // turn swaps in a new <select id="user-filter">, so the listener sits on
+    // the document, once, rather than on the select the page loaded with.
+    // It listens in the capture phase, which every change event passes
+    // through on its way down, bubbling or not.
+    if (page.getElementById('user-filter') && !page[USER_FILTER_BOUND]) {
+        page[USER_FILTER_BOUND] = true;
+        page.addEventListener('change', (event) => {
+            if (event.target && event.target.id === 'user-filter') {
+                filterByUser(event.target.value);
+            }
+        }, true);
     }
 
     const bulkActions = page.getElementById('bulk-actions');

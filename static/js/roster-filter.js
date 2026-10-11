@@ -2,11 +2,11 @@
  * Shared as-you-type filter for character shelves (battle setup #270,
  * the parties add-member picker #274).
  *
- * One function does the filtering; wiring comes in two flavours:
- * declaratively, any `<input data-filter-list="<ul id>">` present at load
- * is wired automatically (the parties page needs no page script of its
- * own), and programmatically via `filterCharacters` for pages that wire
- * inside their own init (battle-setup.js).
+ * Since #864 the shelves are searchable pickers whose search asks the
+ * server (picker.js); picker.js calls `filterCharacters` to narrow the rows
+ * already on screen while that answer is on its way. The declarative
+ * wiring, any `<input data-filter-list="<ul id>">` present at load, still
+ * works for a list that is whole on the page.
  */
 (function (root) {
     /**

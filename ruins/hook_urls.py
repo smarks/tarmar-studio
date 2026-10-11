@@ -7,10 +7,12 @@ ruin.
 
 from django.urls import path
 
-from .views import GenerateHookView
+from .views import GenerateHookView, HookPartyPickerView
 
 app_name = "hooks"
 
 urlpatterns = [
     path("", GenerateHookView.as_view(), name="generate"),
+    # The party picker's search (#864).
+    path("parties/", HookPartyPickerView.as_view(), name="party_picker"),
 ]

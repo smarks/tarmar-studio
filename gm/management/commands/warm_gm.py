@@ -13,6 +13,11 @@ sends today, not merely against zero (issue #361): after a prompt change
 Ollama still reports the stale shared prefix as cached, which made a warm-up
 that had not actually warmed the new prompt read as a success.
 
+Before warming, it states the longest of the four GM prompts against its
+ceiling, ``SYSTEM_PROMPT_CONTEXT_SHARE`` of ``GM_NUM_CTX`` (issue #907); after
+the probe it states Ollama's own prompt count against the same ceiling, the
+estimate's reference figure. Both lines stay in the deploy log.
+
 A cold cache is a warm-up outcome, not a failure, so the command exits 0
 whether or not the probe found the prompt cached — it says so loudly instead,
 and ``deploy.sh`` turns that into a deploy warning. Ollama being unreachable
@@ -26,6 +31,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from gm import warmup
+from gm.engine import SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE
+from gm.model_config import SYSTEM_PROMPT_CONTEXT_SHARE
 from gm.retrieval import iter_corpus_chunks
 from gm.services import get_gm_model, get_gm_options, get_system_message
 
@@ -73,6 +80,16 @@ class Command(BaseCommand):
         num_predict = int(options["num_predict"])
         model = get_gm_model()
         base_url = settings.OLLAMA_BASE_URL
+        num_ctx = int(settings.GM_NUM_CTX)
+        self._report_prompt_budget(
+            "longest GM prompt, estimated",
+            warmup.PromptBudget(
+                prompt_tokens=warmup.estimate_longest_prompt_tokens(
+                    SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values()
+                ),
+                num_ctx=num_ctx,
+            ),
+        )
 
         try:
             filler = warmup.build_filler(
@@ -112,6 +129,34 @@ class Command(BaseCommand):
                 raise CommandError(f"GM warm-up request failed: {error}") from error
 
         self._report_outcome(result)
+        self._report_prompt_budget(
+            "shortest GM prompt with the probe, measured by Ollama",
+            warmup.PromptBudget(
+                prompt_tokens=result.probe.prompt_tokens, num_ctx=num_ctx
+            ),
+        )
+
+    def _report_prompt_budget(self, label: str, budget: warmup.PromptBudget) -> None:
+        """State a prompt's size against its ceiling, loudly when it is over.
+
+        Over the ceiling is not a warm-up failure -- the GM still answers --
+        so it does not change the exit status; it is printed as an error for
+        the deploy log to carry.
+        """
+        line = (
+            f"prompt budget: {label} {budget.prompt_tokens} tokens, ceiling "
+            f"{budget.ceiling_tokens} ({SYSTEM_PROMPT_CONTEXT_SHARE:.0%} of "
+            f"GM_NUM_CTX {budget.num_ctx})"
+        )
+        if budget.within_ceiling:
+            self.stdout.write(self.style.SUCCESS(line))
+        else:
+            self.stdout.write(
+                self.style.ERROR(
+                    f"{line} -- OVER the ceiling: the prompt is taking room the "
+                    "conversation needs (issue #907)"
+                )
+            )
 
     def _report_turn(self, label: str, turn: warmup.ChatTurnResult) -> None:
         cached = (

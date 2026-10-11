@@ -1,10 +1,15 @@
 # The CI runner on the Mac Studio
 
-`ci.yml` runs on a self-hosted runner labelled `self-hosted, tarmar` (issue
-#576, PR #585). GitHub bills no minutes for a self-hosted runner, which is what
-let CI come back after it was disabled for billing on 2026-09-13. The workflow
-stays disabled until the installer below registers the runner and enables it;
-until then `./run gate` before each deploy is the only check.
+**Since #964 no CI job is sent here.** `ci.yml` runs on GitHub's machines
+unless the repository variable `CI_RUNNER` is `datahorde`, which selects a
+runner on datahorde; neither matches this runner's labels. It stays installed
+until that runner replaces it; `protect-main.sh` and `repository.sh` still
+apply to whichever runs.
+
+Until #964, `ci.yml` ran on this self-hosted runner, labelled
+`self-hosted, tarmar` (issue #576, PR #585). GitHub bills no minutes for a
+self-hosted runner, which is what let CI come back after it was disabled for
+billing on 2026-09-13. What follows describes that setup.
 
 ## One run of the test job, against the default canon
 
@@ -35,9 +40,16 @@ in its own group `tarmarci`, with no keys, no token and no login password
 anyone keeps, started by a LaunchDaemon.
 
 What that does and does not close. A job as `tarmarci` cannot read into
-`/Users/<developer>`: macOS makes a home `drwxr-x---` owned by the developer
-and `staff`, which is why the runner is not in `staff`, and the installer
-refuses to continue if the runner account can read the developer's home. What
+`/Users/<developer>` only once that home is `drwx------`. macOS creates a home
+`drwxr-x---`, owned by the developer and group `staff`, and it makes every
+local account a member of `staff` through `localaccounts`, whatever the
+account's primary group: `tarmarci`'s own group does not keep it out
+(`dsmemberutil checkmembership -U tarmarci -G staff` answers "user is a member
+of the group"; issue #946). So `chmod 700` on your home is required, and the
+installer checks for it before it creates the account and refuses until it is
+done. It checks again once the account exists, as `tarmarci`, in case an ACL
+still opens the home. `chmod 700` also ends guest access to `~/Public`, the
+folder macOS file sharing offers by default. What
 a job can still reach is every local network service, because they listen on
 loopback for any account: Ollama on `:11434` (the production Games Master
 model) and a local Postgres. Postgres is the one that matters: Homebrew's
@@ -46,12 +58,21 @@ developer, and that role is a superuser, so a job could connect without a
 password and run commands as the developer. The installer refuses while
 `pg_hba.conf` holds a `trust` line, and, once the account exists, while
 `tarmarci` can actually connect as you over TCP or the socket, whatever the
-file says. Change those lines to `scram-sha-256` (`peer` for the unix socket),
-give the role your `DATABASE_URL` uses a password, and reload Postgres first.
+file says. Each of those two attempts runs `psql -w`, so it fails rather than
+asking for a password a CI job would not have, and prints Postgres's own
+reason for refusing (issue #947). Change those lines to `scram-sha-256`
+(`peer` for the unix socket), give the role your `DATABASE_URL` uses a
+password, and reload Postgres first.
 Anything else you run on loopback (a `python -m http.server`, for instance) is
 reachable by a job too.
 
 ## Installing it
+
+Both scripts take the repository's name from `repository.sh`, and both refuse
+to act unless GitHub reports that repository as private. On 2026-10-09 the code
+repository became `smarks/tarmar-studio-private` and its old name went to a
+public snapshot; a runner registered on a public repository would run any
+fork's pull request on this Mac (issue #961).
 
 From your own account, in a checkout of the repository, once:
 
@@ -65,10 +86,11 @@ registration token comes from that login (through the keyring, so from a
 desktop session rather than over ssh). What it does, each step skipped when
 already done:
 
-0. Refuses if `pg_hba.conf` trusts local connections (above).
+0. Refuses unless your home is `drwx------` (`chmod 700 ~` first; above), and
+   if `pg_hba.conf` trusts local connections (above).
 1. Creates the group and the account `tarmarci` (hidden from the login
-   window, random password) and its home, then checks the account cannot read
-   your home.
+   window, random password) and its home, then checks, as that account, that
+   it cannot read your home or connect to Postgres as you.
 2. Downloads `actions/runner` **v2.337.0** for osx-arm64 into
    `/Users/tarmarci/actions-runner-tarmar` and checks the tarball against the
    SHA256 GitHub publishes in the release notes.
@@ -125,8 +147,8 @@ While the runner is down, nothing can merge to `main`, because admins are
 held to the check too. To lift that for an emergency merge and put it back:
 
 ```bash
-gh api -X DELETE repos/smarks/tarmar-studio/branches/main/protection/enforce_admins
-gh api -X POST   repos/smarks/tarmar-studio/branches/main/protection/enforce_admins
+gh api -X DELETE repos/smarks/tarmar-studio-private/branches/main/protection/enforce_admins
+gh api -X POST   repos/smarks/tarmar-studio-private/branches/main/protection/enforce_admins
 ```
 
 ## Not verified by the tests

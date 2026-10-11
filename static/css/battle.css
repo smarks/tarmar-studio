@@ -520,6 +520,48 @@
     background: var(--colour-highlight-target);
 }
 
+/* The engine refused a hex a person picked (#819, #866): kept in the log
+   like every line, and set apart so the reader finds it. */
+.battle-event.is-refused {
+    color: var(--colour-pool-death);
+    font-weight: 600;
+}
+
+/* The hex picker (#819, #866): every hex the selected option may move the
+   figure to, drawn over the board as buttons. The chosen one is filled and
+   dotted. */
+.arena-destination {
+    fill: var(--colour-accent-gold);
+    fill-opacity: 0.12;
+    stroke: var(--colour-accent-gold-strong);
+    stroke-width: 0.4;
+    cursor: pointer;
+}
+
+.arena-destination:hover,
+.arena-destination:focus-visible {
+    fill-opacity: 0.35;
+    stroke-width: 1.2;
+}
+
+.arena-destination.is-chosen {
+    fill-opacity: 0.55;
+    stroke-width: 1.2;
+}
+
+.arena-destination-mark {
+    fill: var(--colour-ink-deep);
+}
+
+.turn-destination {
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+}
+
+.turn-destination-line {
+    margin: 0 0 0.3rem;
+}
+
 /* --- Narrow viewports --------------------------------------------------- */
 
 /* One column, and nothing sticky: on a phone a pinned bar plus a pinned
@@ -1288,15 +1330,6 @@
 
 /* The saved-characters shelf: a ruled list, one line per character, with
    its two verbs on the line — Seat, and the round trip's Edit. */
-.setup-character-filter {
-    width: 100%;
-    font: inherit;
-    padding: 0.45rem 0.6rem;
-    margin-bottom: 0.4rem;
-    border: 1px solid var(--colour-border-breadcrumb-link);
-    border-radius: 4px;
-}
-
 .setup-character-list {
     margin: 0 0 0.8rem;
     padding: 0;
@@ -1718,6 +1751,23 @@
 
 .battle-control-panel {
     margin-bottom: 1rem;
+}
+
+/* A Game Master's "HTH by agreement" ruling (#867): the marked pairs, each
+   with its Lift, and the row a new pair is chosen in. */
+.battle-agreement-panel .agreement-pairs {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0;
+}
+
+.battle-agreement-panel .agreement-pair,
+.battle-agreement-panel .agreement-add-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.3rem 0;
 }
 
 .control-lede {

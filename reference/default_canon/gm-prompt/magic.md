@@ -24,4 +24,4 @@ A caster without enough mana may Borrow, drawing on reserves they may not have. 
 The spell feeds on the caster: first mana, then, once the pool is empty and the caster has fallen unconscious, Body. When the Body fails, the caster dies. Anchor: the caster rolls 3d6 ≤ WIS each round to regain control. Another mage may try to help; if the intervention fails, both are caught in the Runaway. Survivors often bear marks: white streaks in the hair, strange scars, a haunted look.
 
 ### Counterspell
-The defender commits mana and both make opposed INT rolls; the more mana committed, the better the defender's chance. Defender wins: spell countered. Caster wins: spell goes off, and only the caster can escalate on later turns; the defender gets one chance to stop each casting. A failed Control Roll during escalation can trigger Runaway.
+The defender commits mana and both make opposed INT rolls; the more mana committed, the better the defender's chance. Caster wins: spell goes off. Defender wins: spell countered, and only the caster can escalate on later turns; the defender gets one chance to stop each casting. A failed Control Roll during escalation can trigger Runaway.

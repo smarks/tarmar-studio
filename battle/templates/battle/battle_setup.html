@@ -85,7 +85,7 @@ whole flow works before any JavaScript runs.
                 Battle name <span class="setup-field-required" title="Required">*</span>
             </span>
             <input type="text" name="name" form="setup-start-form"
-                   maxlength="100" value="{{ draft.name }}" required
+                   maxlength="{{ battle_name_max_length }}" value="{{ draft.name }}" required
                    {% if error_field == "name" %}aria-invalid="true" aria-describedby="setup-name-error" autofocus{% endif %}
                    class="autosave" autocomplete="off">
             {% if error_field == "name" %}
@@ -208,45 +208,8 @@ whole flow works before any JavaScript runs.
                         aria-describedby="guest-limit-characters" disabled>
                     Seat a saved character
                 </button>
-                {% elif seatable_characters %}
-                <label class="setup-character-filter-label">
-                    <span class="sr-only">Filter characters by name</span>
-                    <input type="search" id="character-filter"
-                           class="setup-character-filter"
-                           data-filter-list="setup-character-list"
-                           placeholder="Filter by name or player&hellip;">
-                </label>
-                <ul class="setup-character-list" id="setup-character-list">
-                    {% for character in seatable_characters %}
-                    <li class="setup-character"
-                        data-filter-text="{{ character.name|lower }} {{ character.user.username|lower }}">
-                        <div class="setup-character-words">
-                            <strong>{{ character.name }}</strong>
-                            <span class="setup-character-owner">
-                                {% if character.user == user %}yours{% else %}{{ character.user.username }}'s{% endif %}
-                                — ST {{ character.effective_strength }},
-                                DX {{ character.effective_dexterity }}
-                            </span>
-                        </div>
-                        <div class="setup-character-actions">
-                            <a class="battle-button battle-button-quiet setup-character-edit"
-                               href="{% url 'characters:edit' character.pk %}?next={{ setup_url|urlencode }}">
-                                Edit
-                            </a>
-                            <form method="post" action="{% url 'battle:setup-add' draft.pk %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="kind" value="character">
-                                <input type="hidden" name="character_id" value="{{ character.pk }}">
-                                <button type="submit"
-                                        class="battle-button setup-add-button"
-                                        {% if muster_full %}disabled{% endif %}>
-                                    Seat
-                                </button>
-                            </form>
-                        </div>
-                    </li>
-                    {% endfor %}
-                </ul>
+                {% elif shelf_picker.total %}
+                {% include "_picker.html" with picker=shelf_picker %}
                 {% else %}
                 <p class="setup-source-hint setup-character-none">
                     No saved characters yet — make the first one and it will
@@ -278,22 +241,12 @@ whole flow works before any JavaScript runs.
                         aria-describedby="guest-limit-parties" disabled>
                     Import as a team
                 </button>
-                {% elif parties %}
+                {% elif party_picker.total %}
                 <form method="post"
                       action="{% url 'battle:setup-import-party' draft.pk %}"
                       class="setup-party-form">
                     {% csrf_token %}
-                    <label class="setup-field">
-                        <span class="setup-field-label">Party</span>
-                        <select name="party_id">
-                            {% for party in parties %}
-                            <option value="{{ party.pk }}">
-                                {{ party.name }} — {{ party.memberships.count }}
-                                member{{ party.memberships.count|pluralize }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    </label>
+                    {% include "_picker.html" with picker=party_picker %}
                     <button type="submit" class="battle-button setup-add-button"
                             {% if muster_full %}disabled{% endif %}>
                         Import as a team
@@ -313,7 +266,7 @@ whole flow works before any JavaScript runs.
                         <span class="setup-field-label">Or name an empty team</span>
                         {# team_name, not name: the battle-name terms input #}
                         {# already owns name on this page. #}
-                        <input type="text" name="team_name" maxlength="45"
+                        <input type="text" name="team_name" maxlength="{{ team_name_max_length }}"
                                placeholder="e.g. The Wolves" autocomplete="off">
                     </label>
                     <button type="submit" class="battle-button setup-add-button">
@@ -530,5 +483,6 @@ whole flow works before any JavaScript runs.
 {% block extra_js %}
 <script src="{% static 'js/autosave.js' %}"></script>
 <script src="{% static 'js/roster-filter.js' %}"></script>
+<script src="{% static 'js/picker.js' %}"></script>
 <script src="{% static 'js/battle-setup.js' %}"></script>
 {% endblock %}
