@@ -8,8 +8,8 @@ license = { text = "Proprietary" }
 authors = [{ name = "Spencer Marks" }]
 keywords = ["tarmar", "tabletop-rpg", "django", "ollama", "game-master"]
 dependencies = [
-    "bleach>=6.3.0",
-    "django>=6.0.1",
+    "bleach>=6.4.0",
+    "django>=6.0.8,<6.1",
     "speak-friend @ git+https://github.com/smarks/speak-friend.git",
     "origami-common @ git+https://github.com/smarks/origami-common.git",
     "origami-auth @ git+https://github.com/smarks/origami-auth.git",
@@ -43,7 +43,7 @@ dependencies = [
     # hexarena/tarmar-rules above. Local dev:
     # uv pip install -e ../tarmar-engine
     "tarmar-engine @ git+https://github.com/smarks/tarmar-engine.git@v0.9.11",
-    "weasyprint>=67.0",
+    "weasyprint>=70.0",
     "whitenoise>=6.11.0",
 ]
 
@@ -52,7 +52,7 @@ dev = [
     "django-stubs>=5.2.8",
     "pre-commit>=4.5.1",
     "pyright>=1.1.408",
-    "pytest>=9.0.2",
+    "pytest>=9.0.3",
     "pytest-cov>=7.0.0",
     "pytest-django>=4.11.1",
     "pytest-xdist>=3.8.0",

@@ -853,6 +853,24 @@ class ExportPdfViewTest(BaseTestCase):
         response = self.client.get("/tarmar/export/99999/pdf/")
         self.assertEqual(response.status_code, 404)
 
+    def test_the_export_renders_with_the_limited_fetcher(self):
+        """The view hands WeasyPrint the http(s)-only fetcher, not its default.
+
+        A fetcher that has lost its limit, or no fetcher at all, would let a
+        crafted resource reference read local files (issue #8).
+        """
+        from unittest.mock import patch
+
+        self.login_as(self.user)
+        with patch("weasyprint.HTML") as html:
+            html.return_value.write_pdf.return_value = b"%PDF-stand-in"
+            response = self.client.get(f"/tarmar/export/{self.character.id}/pdf/")
+
+        self.assertEqual(response.status_code, 200)
+        fetcher = html.call_args.kwargs["url_fetcher"]
+        with self.assertRaisesRegex(ValueError, "disallowed protocol"):
+            fetcher.fetch("file:///etc/hosts")
+
     @unittest.skipUnless(WEASYPRINT_AVAILABLE, "WeasyPrint not available")
     def test_response_content_is_valid_pdf(self):
         """Verify response body starts with PDF magic bytes."""
@@ -936,11 +954,18 @@ class ExportUrlPatternsTest(BaseTestCase):
 
 
 class SafeUrlFetcherTest(TestCase):
-    """The PDF export url-fetcher must block local-file / SSRF resource reads."""
+    """The PDF export's fetcher must block local-file / SSRF resource reads.
+
+    Exercised through WeasyPrint's real ``URLFetcher.fetch`` (issue #8), so a
+    change in how WeasyPrint gates schemes fails here rather than in
+    production. Deliberately not skipped without WeasyPrint's libraries: a
+    security check that quietly skips is no check.
+    """
 
     def test_blocks_non_http_schemes(self):
         from character_export.views import _safe_url_fetcher
 
+        fetcher = _safe_url_fetcher()
         for bad_url in (
             "file:///etc/passwd",
             "file://localhost/etc/hosts",
@@ -948,18 +973,23 @@ class SafeUrlFetcherTest(TestCase):
             "data:text/plain,hi",
             "gopher://example.com/",
         ):
-            with self.assertRaises(ValueError):
-                _safe_url_fetcher(bad_url)
+            with self.assertRaisesRegex(ValueError, "disallowed protocol"):
+                fetcher.fetch(bad_url)
 
     def test_allows_http_schemes(self):
-        # http(s) URLs must pass the scheme gate (delegating to WeasyPrint's
-        # fetcher). Patch the lazily-imported default fetcher so no network /
-        # weasyprint runtime is needed.
+        # An http(s) URL passes the scheme gate and reaches the point of
+        # opening a connection, which is stood in for so no network is used.
         from unittest.mock import patch
 
         from character_export.views import _safe_url_fetcher
 
-        with patch("weasyprint.default_url_fetcher", return_value={"ok": True}) as m:
-            result = _safe_url_fetcher("https://example.com/img.png")
-        self.assertEqual(result, {"ok": True})
-        m.assert_called_once()
+        class Opened(Exception):
+            pass
+
+        fetcher = _safe_url_fetcher()
+        for good_url in ("https://example.com/img.png", "http://example.com/a.css"):
+            # URLFetcher.fetch opens through its base class, urllib's
+            # OpenerDirector; standing that in keeps the test off the network.
+            with patch("urllib.request.OpenerDirector.open", side_effect=Opened):
+                with self.assertRaises(Opened):
+                    fetcher.fetch(good_url)
