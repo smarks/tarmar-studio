@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 # A newer push to the same branch or pull request supersedes the run in
-# progress: there is one runner, and a stale run only delays the current one.
+# progress: a stale run only spends minutes, or holds up the one self-hosted
+# runner, that the current run needs.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -24,12 +25,19 @@ jobs:
     # with the checkout's own canon; with none left in the checkout that entry
     # only repeated this one.
     name: test (default canon)
-    # The self-hosted runner on the Mac Studio (issue #576). GitHub does not
-    # bill self-hosted minutes, which is what let CI come back after it was
-    # disabled for billing. The runner persists between jobs, so the uv cache,
-    # ~/.npm and the Playwright browser in ~/Library/Caches/ms-playwright are
-    # reused rather than restored from actions/cache.
-    runs-on: [self-hosted, tarmar]
+    # Where the job runs is the repository variable CI_RUNNER (issue #964):
+    #   unset, or anything else  GitHub-hosted Ubuntu 24.04, billed minutes
+    #   datahorde                the self-hosted runner in a container on
+    #                            datahorde (the next change under #964)
+    # Switch with `gh variable set CI_RUNNER --body datahorde` and back with
+    # `gh variable delete CI_RUNNER`. The steps are the same in both: each
+    # sets up its own uv, Python, Node and Playwright browser, so neither mode
+    # depends on what a machine happens to hold. The required check keeps its
+    # name either way, so branch protection is unaffected. The image is
+    # pinned rather than ubuntu-latest, which GitHub moves to Ubuntu 26 on
+    # 2026-10-19; a cached browser skips --with-deps and relies on the
+    # image's own libraries, so the move is made on purpose, not by GitHub.
+    runs-on: ${{ vars.CI_RUNNER == 'datahorde' && fromJSON('["self-hosted", "Linux", "tarmar-datahorde"]') || 'ubuntu-24.04' }}
     timeout-minutes: 60
     env:
       # Clear of the main checkout's :8000 and the :82xx ports worktrees use by
@@ -42,8 +50,23 @@ jobs:
         with:
           clean: true
 
+      # Python 3.14, as the Mac, the gate and production run. Left to choose,
+      # uv takes the newest CPython, and on 2026-10-09 that was 3.15.0, for
+      # which Pillow (weasyprint's) has no wheel: the sync died compiling it.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
       - name: Sync Python dependencies
         run: uv sync --locked --group cli
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
 
       - name: Install npm dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
@@ -66,29 +89,46 @@ jobs:
       - name: Guides are current
         run: uv run python scripts/build_guides.py --check
 
-      # ./run puts /opt/homebrew/lib on DYLD_FALLBACK_LIBRARY_PATH for
-      # weasyprint; setting it in a step's env does not survive macOS SIP
-      # stripping DYLD_* when the step's /bin/bash starts. The threshold is
-      # fixed and changed by hand, never ratcheted here.
+      # The threshold is fixed and changed by hand, never ratcheted here.
       - name: Pytest
         run: ./run test -q --cov-fail-under=98
 
       - name: Jest
         run: npm test -- --coverage
 
-      # The browser is not installed here. `playwright install` hangs
-      # extracting under Node 26 on this Mac, and the persistent runner already
-      # holds the build @playwright/test needs. After a Playwright upgrade this
-      # step fails with "Executable doesn't exist"; install the new browser on
-      # the Mac by hand. --check judges coverage against package.json's
-      # jsCoverageThreshold and never rewrites it.
+      # The browser comes from actions/cache, keyed by the resolved
+      # @playwright/test version so an upgrade is never served a stale one.
+      # Restoring it skips `--with-deps`'s apt-get, whose third-party
+      # repositories once failed a hosted build before any of our code ran
+      # (2026-09-09). On datahorde the runner's image already holds the
+      # browser's system libraries and the job has no root, so it never asks
+      # for them. --only-shell: the suite runs headless with no `channel`.
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          version=$(node -p "require('./node_modules/@playwright/test/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-v1-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install ${{ runner.environment == 'github-hosted' && '--with-deps' || '' }} --only-shell chromium
+
+      # --check judges coverage against package.json's jsCoverageThreshold
+      # and never rewrites it.
       - name: Playwright with JS coverage
         run: uv run python scripts/update_js_coverage_threshold.py --check
 
   notify:
     needs: [test]
     if: always()
-    runs-on: [self-hosted, tarmar]
+    runs-on: ${{ vars.CI_RUNNER == 'datahorde' && fromJSON('["self-hosted", "Linux", "tarmar-datahorde"]') || 'ubuntu-24.04' }}
     steps:
       - name: Email on failure or green-after-red
         uses: smarks/base_repo_template/.github/actions/notify@main
