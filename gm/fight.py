@@ -192,11 +192,17 @@ FOE_REQUEST_PREAMBLE = (
     "party is about to fight, and nothing that is not hostile to them. "
 )
 
+# The foe text is the player's or the model's words, so each pattern below
+# matches in linear time. Wherever two repeated parts could take the same
+# characters (a run of spaces, say), a part only one of them can take sits
+# between them: the name starts or ends on a non-space (``\S``), and the count
+# is set off by an "x". There is then one way to divide the text, never a
+# quadratic search over how many spaces each side takes.
 _COUNT_PREFIX = re.compile(
-    r"^(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(.+)$",
+    r"^(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(\S.*)$",
     re.IGNORECASE,
 )
-_COUNT_SUFFIX = re.compile(r"^(.+?)\s*[x×]\s*(\d+)$", re.IGNORECASE)
+_COUNT_SUFFIX = re.compile(r"^(.*\S)\s*[x×]\s*(\d+)$", re.IGNORECASE)
 _NUMBER_WORDS = {
     "a": 1,
     "an": 1,
@@ -211,7 +217,10 @@ _NUMBER_WORDS = {
     "nine": 9,
     "ten": 10,
 }
-_FOE_SEPARATOR = re.compile(r"\s*,\s*|\s+and\s+|\s*;\s*", re.IGNORECASE)
+# The whitespace around a separator is not part of it: every entry is stripped
+# after the split. "and" still needs whitespace on both sides, so "sand" and
+# "Andrew" stay whole; the lookarounds check that without consuming it.
+_FOE_SEPARATOR = re.compile(r"[,;]|(?<=\s)and(?=\s)", re.IGNORECASE)
 
 
 class FightError(ValueError):

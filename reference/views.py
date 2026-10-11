@@ -7,7 +7,7 @@ from django.views.generic import TemplateView
 
 from common.breadcrumbs import BreadcrumbMixin, step, trail
 from common.mixins import ActivePageMixin
-from reference.paths import page_markdown_file
+from reference.paths import file_inside, page_markdown_file
 from reference.rendering import render_reference_markdown
 from reference.tables import annotate_tables
 from ruins.table_rolls import table_page_slug_for_reference_path
@@ -72,17 +72,14 @@ class ReferenceView(BreadcrumbMixin, ActivePageMixin, TemplateView):
         # Read and render markdown file. The dm-rules/ prefix maps to the canon
         # directory, which may live outside CONTENT_DIR (issue #917).
         # Path traversal protection: page_markdown_file refuses any ".."
-        # segment, and the resolved file (symlinks followed) must stay inside
-        # the root its prefix mapped to (the canon or the content directory).
+        # segment, and file_inside refuses a file whose real path (symlinks
+        # followed) leaves the root its prefix mapped to (the canon or the
+        # content directory). The URL path is the reader's to set, so it is
+        # held to that directory before anything reads the filesystem.
         try:
             unresolved_file, content_root = page_markdown_file(path)
+            md_file = file_inside(content_root, unresolved_file)
         except ValueError:
-            md_file = None
-        else:
-            md_file = unresolved_file.resolve()
-            if not md_file.is_relative_to(content_root.resolve()):
-                md_file = None
-        if md_file is None:
             logger.warning("Rejected reference path-traversal attempt: path=%r", path)
             context["content"] = "<p>Content not found.</p>"
             context["current_title"] = "Not Found"

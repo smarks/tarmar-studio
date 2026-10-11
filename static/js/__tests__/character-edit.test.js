@@ -2366,6 +2366,43 @@ describe('number bounds come from the server (issue #938)', () => {
     });
 });
 
+describe('equipment markup escapes what it is handed (CodeQL js/xss-through-dom)', () => {
+    // The config's limits and the stored items reach the row markup as data;
+    // a value that is not the number it should be must stay text, never
+    // become an element or an attribute.
+    const hostile = '"><img src=x id=injected>';
+
+    test('limits and item values that are not numbers stay inside their attributes', async () => {
+        await loadPage({
+            canSetItemModifiers: true,
+            textLimits: { ...CONFIG_DEFAULTS.textLimits, item_notes: hostile },
+            numberLimits: {
+                ...CONFIG_DEFAULTS.numberLimits,
+                equipment_quantity: hostile,
+                equipment_modifier: hostile,
+            },
+            initialEquipment: [{ item_id: 'dagger', quantity: hostile, to_hit_mod: hostile }],
+        });
+
+        const list = document.getElementById('equipment-list');
+        expect(list.querySelector('#injected')).toBeNull();
+        expect(list.querySelector('[data-field="notes"]').getAttribute('maxlength')).toBe(hostile);
+        expect(list.querySelector('[data-field="quantity"]').getAttribute('max')).toBe(hostile);
+        expect(list.querySelector('[data-field="to_hit_mod"]').getAttribute('max')).toBe(hostile);
+    });
+
+    test('a read-only row shows a quantity that is not a number as text', async () => {
+        await loadPage({
+            canEdit: false,
+            initialEquipment: [{ item_id: 'rope', quantity: hostile }],
+        });
+
+        const list = document.getElementById('equipment-list');
+        expect(list.querySelector('#injected')).toBeNull();
+        expect(list.textContent).toContain(`Qty: ${hostile}`);
+    });
+});
+
 describe('DM mark dead and revive', () => {
     test('mark dead prompts for a cause and posts it', async () => {
         global.prompt = jest.fn(() => '  Fell down a well  ');

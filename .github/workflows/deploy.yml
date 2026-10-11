@@ -29,6 +29,12 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# The token's least permissions. smarks/ops-workflows deploy-blue-green uses
+# no GitHub token at all (it reaches the host over SSH with DEPLOY_SSH_KEY),
+# so the deploy job needs nothing past the read every job here is held to.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     uses: smarks/ops-workflows/.github/workflows/deploy-blue-green.yml@main
@@ -41,6 +47,12 @@ jobs:
   notify:
     needs: [deploy]
     if: always()
+    # The notify action asks `gh run list` for this workflow's previous run,
+    # to tell a recovery from a first green; that read needs actions: read.
+    # Without it the lookup fails quietly and no recovery mail is ever sent.
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Email on failure or green-after-red

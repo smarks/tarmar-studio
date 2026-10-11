@@ -20,6 +20,7 @@ from common.breadcrumbs import BreadcrumbMixin, step, trail
 from common.mixins import DMToolsAccessMixin
 from common.pickers import asked_for, picker_body_response
 from common.seeds import InvalidSeed, parse_seed, roll_seed
+from reference.paths import PathOutsideRoot
 
 from .generation import DEFAULT_ROOMS, MAX_ROOMS, MIN_ROOMS, generate_ruin
 from .hook_generation import (
@@ -241,9 +242,10 @@ class RollTablePageView(GeneratorFormView):
         raw_seed = request.GET.get("seed", "").strip()
         try:
             page = load_table_page(slug)
-        except TablePageNotInCanon as missing:
-            # A canon that dropped or never had the page: the roller has
-            # nothing to roll, which is a missing page, not a server fault.
+        except (TablePageNotInCanon, PathOutsideRoot) as missing:
+            # A canon that dropped or never had the page, or whose page is a
+            # symlink out of the GM-tools directory: the roller has nothing it
+            # may roll, which is a missing page, not a server fault.
             logger.warning("Table roller for “%s”: %s", slug, missing)
             raise Http404(f"No table roller for “{slug}”") from missing
         form_state = {"page": page, "form_seed": raw_seed}

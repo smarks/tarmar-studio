@@ -124,6 +124,10 @@ CANON_JSON_FILE_NAMES: tuple[str, ...] = (
 )
 
 
+class PathOutsideRoot(ValueError):
+    """A requested file that resolves outside the directory it must stay in."""
+
+
 def canon_name_of(canon_directory: Path, fallback: str) -> str:
     """The name a canon directory gives itself in ``canon.json``.
 
@@ -341,9 +345,9 @@ def page_markdown_file(page_path: str) -> tuple[Path, Path]:
     the ``dm-rules`` landing page included, is ``<CONTENT_DIR>/<path>.md``.
     A ``..`` segment is refused before the prefix is read, so
     ``public-rules/../dm-rules/x`` cannot reach the in-repo ``dm-rules/`` by
-    way of the content root. The file is not resolved: a caller guarding
-    against traversal by symlink resolves it and checks it stays inside the
-    returned root.
+    way of the content root. The file is not resolved: a caller that reads
+    it passes it and the returned root to :func:`file_inside`, which follows
+    symlinks and refuses a file outside that root.
 
     Args:
         page_path: The page's slug path, as the reference URL carries it.
@@ -360,6 +364,34 @@ def page_markdown_file(page_path: str) -> tuple[Path, Path]:
     if prefix == CANON_URL_PREFIX and separator:
         return DM_RULES_DIR / f"{remainder}.md", DM_RULES_DIR
     return CONTENT_DIR / f"{page_path}.md", CONTENT_DIR
+
+
+def file_inside(root: Path, requested_file: str | Path) -> Path:
+    """``requested_file`` resolved, refused unless it stays inside ``root``.
+
+    The one containment check for a file named by a request: a reference page
+    path, a table roller's slug. Both paths are made real (symlinks followed,
+    ``..`` collapsed) with :func:`os.path.realpath`, and the file must then
+    sit below the real root, so neither a ``..`` segment, an absolute path nor
+    a symlink pointing out can reach a file elsewhere. The comparison is a
+    string prefix on the real paths with the separator appended, so a sibling
+    such as ``content-old`` does not pass for ``content``.
+
+    Args:
+        root: The directory the file must stay inside.
+        requested_file: The file, relative to ``root`` or absolute.
+
+    Returns:
+        The file's real path. It need not exist.
+
+    Raises:
+        PathOutsideRoot: The resolved file is not below ``root``.
+    """
+    real_root = os.path.realpath(root)
+    real_file = os.path.realpath(os.path.join(real_root, requested_file))
+    if not real_file.startswith(real_root + os.sep):
+        raise PathOutsideRoot(f"{requested_file!s} is outside {root}")
+    return Path(real_file)
 
 
 def iter_content_markdown(

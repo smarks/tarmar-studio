@@ -6,6 +6,9 @@
  * the control (no transient UI).
  */
 
+// The vendored build chat.js sanitizes with; the stand-in below uses it too.
+const DOMPurify = require('../dompurify.min.js');
+
 let history;
 
 function htmlResponse(body, { ok = true, status = 200, statusText = 'OK' } = {}) {
@@ -47,7 +50,9 @@ beforeEach(() => {
     jest.resetModules();
     global.fetch.mockReset();
     setUpDom();
-    window.renderMarkdown = (text) => `<p>${text.toUpperCase()}</p>`;
+    // Stands in for chat.js's renderMarkdown, keeping its contract: what it
+    // returns has been through DOMPurify, as the real one's always has.
+    window.renderMarkdown = (text) => DOMPurify.sanitize(`<p>${text.toUpperCase()}</p>`);
     history = require('../gm-history.js');
 });
 

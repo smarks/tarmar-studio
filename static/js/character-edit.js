@@ -1423,6 +1423,12 @@ async function renderEquipmentList(equipment) {
     }
 
     const annotated = applyEquipmentSort(annotateForSort(equipment, catalog));
+    // Every value written into this markup is escaped, the limits too: they
+    // come from the page's JSON config and the items from the stored sheet,
+    // and neither is markup this page may trust (CodeQL js/xss-through-dom).
+    const modifierBound = escapeHtml(NUMBER_LIMITS.equipment_modifier);
+    const quantityBound = escapeHtml(NUMBER_LIMITS.equipment_quantity);
+    const notesMaxLength = escapeHtml(TEXT_LIMITS.item_notes);
 
     list.innerHTML = annotated.map(({ item, originalIndex, name, weight: itemWeight, category }) => {
         const index = originalIndex;
@@ -1439,7 +1445,7 @@ async function renderEquipmentList(equipment) {
             const readOnlyBits = [
                 `<span class="item-name">${escapeHtml(name)}${isCustom ? ' <em>(custom)</em>' : ''}</span>`,
                 `<span class="item-weight">${weight.toFixed(1)} lbs</span>`,
-                `<span class="item-quantity">Qty: ${item.quantity || 1}</span>`,
+                `<span class="item-quantity">Qty: ${escapeHtml(item.quantity || 1)}</span>`,
                 item.in_pack ? '<span class="item-pack">In pack</span>' : '',
                 item.notes ? `<span class="item-notes">${escapeHtml(item.notes)}</span>` : '',
             ].filter(Boolean).join('\n                    ');
@@ -1465,15 +1471,15 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Hit:</label>
-                            <input type="number" value="${item.to_hit_mod || 0}" data-field="to_hit_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.to_hit_mod || 0)}" data-field="to_hit_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>Dmg:</label>
-                            <input type="number" value="${item.damage_mod || 0}" data-field="damage_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.damage_mod || 0)}" data-field="damage_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>Crit:</label>
-                            <input type="number" value="${item.critical_mod || 0}" data-field="critical_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.critical_mod || 0)}" data-field="critical_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                     </div>
                 `;
@@ -1487,11 +1493,11 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Stops:</label>
-                            <input type="number" value="${item.stops_mod || 0}" data-field="stops_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.stops_mod || 0)}" data-field="stops_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>DEX:</label>
-                            <input type="number" value="${item.dex_mod || 0}" data-field="dex_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.dex_mod || 0)}" data-field="dex_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                     </div>
                 `;
@@ -1500,11 +1506,11 @@ async function renderEquipmentList(equipment) {
                     <div class="item-mods">
                         <div class="mod-field">
                             <label>Stops:</label>
-                            <input type="number" value="${item.stops_mod || 0}" data-field="stops_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.stops_mod || 0)}" data-field="stops_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                         <div class="mod-field">
                             <label>DEX:</label>
-                            <input type="number" value="${item.dex_mod || 0}" data-field="dex_mod" min="-${NUMBER_LIMITS.equipment_modifier}" max="${NUMBER_LIMITS.equipment_modifier}">
+                            <input type="number" value="${escapeHtml(item.dex_mod || 0)}" data-field="dex_mod" min="-${modifierBound}" max="${modifierBound}">
                         </div>
                     </div>
                 `;
@@ -1517,14 +1523,14 @@ async function renderEquipmentList(equipment) {
                     <span class="item-weight">${weight.toFixed(1)} lbs</span>
                     <div class="item-quantity">
                         <label>Qty:</label>
-                        <input type="number" value="${item.quantity || 1}" min="1" max="${NUMBER_LIMITS.equipment_quantity}" data-field="quantity">
+                        <input type="number" value="${escapeHtml(item.quantity || 1)}" min="1" max="${quantityBound}" data-field="quantity">
                     </div>
                     <div class="item-pack">
                         <input type="checkbox" ${item.in_pack ? 'checked' : ''} data-field="in_pack">
                         <label>Pack</label>
                     </div>
                     <div class="item-notes">
-                        <input type="text" value="${escapeHtml(item.notes || '')}" placeholder="Notes..." maxlength="${TEXT_LIMITS.item_notes}" data-field="notes">
+                        <input type="text" value="${escapeHtml(item.notes || '')}" placeholder="Notes..." maxlength="${notesMaxLength}" data-field="notes">
                     </div>
                     ${modsHtml}
                     <button class="remove-btn" data-index="${index}">Remove</button>

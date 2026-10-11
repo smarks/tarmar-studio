@@ -8,6 +8,7 @@ its table names. Either way, a canon edit that drops, renames or resizes a
 table fails here rather than silently changing what the roller rolls.
 """
 
+import tempfile
 from pathlib import Path
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
@@ -21,7 +22,7 @@ from common.test_helpers import (
     BaseTestCase,
     skip_unless_canon_expects,
 )
-from reference.paths import DEFAULT_CANON_DIR, GM_TOOLS_DIR
+from reference.paths import DEFAULT_CANON_DIR, GM_TOOLS_DIR, PathOutsideRoot
 from ruins.table_rolls import (
     TABLE_PAGE_SLUGS,
     TablePage,
@@ -144,6 +145,19 @@ class TablePageServiceTests(SimpleTestCase):
         ):
             load_table_page("job-generator")
 
+    def test_a_page_that_is_a_symlink_out_of_gm_tools_is_refused(self):
+        temporary_directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        gm_tools = temporary_directory / "gm-tools"
+        gm_tools.mkdir()
+        outside_page = temporary_directory / "outside.md"
+        outside_page.write_text("# Outside\n", encoding="utf-8")
+        (gm_tools / "job-generator.md").symlink_to(outside_page)
+        with (
+            mock.patch("ruins.table_rolls.GM_TOOLS_DIR", gm_tools),
+            self.assertRaises(PathOutsideRoot),
+        ):
+            load_table_page("job-generator")
+
     def test_reference_paths_map_to_their_roller(self):
         self.assertEqual(
             table_page_slug_for_reference_path("dm-rules/gm-tools/npc-tables"),
@@ -237,6 +251,26 @@ class RollerViewMissingPageTests(BaseTestCase):
             )
         self.assertEqual(response.status_code, 404)
         self.assertIn("job-generator", captured.output[0])
+
+
+class RollerViewOutsidePageTests(BaseTestCase):
+    def test_a_page_symlinked_out_of_gm_tools_is_a_logged_404(self):
+        temporary_directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        gm_tools = temporary_directory / "gm-tools"
+        gm_tools.mkdir()
+        outside_page = temporary_directory / "outside.md"
+        outside_page.write_text("# Outside\n", encoding="utf-8")
+        (gm_tools / "job-generator.md").symlink_to(outside_page)
+        self.login_dm()
+        with (
+            mock.patch("ruins.table_rolls.GM_TOOLS_DIR", gm_tools),
+            self.assertLogs("ruins.views", level="WARNING") as captured,
+        ):
+            response = self.client.get(
+                reverse("table_rolls:roll", args=["job-generator"]), {"seed": "1"}
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("outside", captured.output[0])
 
 
 class RollerViewFlowTests(BaseTestCase):

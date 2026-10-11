@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from common.rolling import Roller
-from reference.paths import GM_TOOLS_DIR
+from reference.paths import GM_TOOLS_DIR, file_inside
 from ruins.generation import TableRoll, roll_table
 from ruins.tables import DiceTable, parse_tables
 
@@ -128,12 +128,22 @@ def load_table_page(slug: str) -> TablePage:
     Read on every call rather than cached, so a canon edit shows on the next
     roll without a restart.
 
+    The slug comes from the request, so the file it names is held to the
+    GM-tools directory by :func:`reference.paths.file_inside` as well as by
+    the slug list: a canon whose page is a symlink out of that directory is
+    refused rather than followed.
+
     Raises:
         UnknownTablePage: If ``slug`` is not a roller page.
         TablePageNotInCanon: If the loaded canon has no file for the page.
+        PathOutsideRoot: If the page's file resolves outside the GM-tools
+            directory.
         ValueError: If a dice table on the page is malformed.
     """
-    markdown_path = table_page_path(slug)
+    # The root is the GM-tools folder, not the whole canon the reference view
+    # holds pages to: a GM-tools page symlinked to another place inside the
+    # canon is refused here by design, as the roller reads only its own folder.
+    markdown_path = file_inside(GM_TOOLS_DIR, table_page_path(slug))
     if not markdown_path.is_file():
         raise TablePageNotInCanon(f"The loaded canon has no {markdown_path}")
     markdown_text = markdown_path.read_text(encoding="utf-8")

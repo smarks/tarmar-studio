@@ -13,6 +13,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The token's least permissions: every job reads the repository and nothing
+# more. A job that needs another scope names it in its own block.
+permissions:
+  contents: read
+
 jobs:
   test:
     # One run of the suite, against the generic default canon the repository
@@ -128,6 +133,12 @@ jobs:
   notify:
     needs: [test]
     if: always()
+    # The notify action asks `gh run list` for this workflow's previous run,
+    # to tell a recovery from a first green; that read needs actions: read.
+    # Without it the lookup fails quietly and no recovery mail is ever sent.
+    permissions:
+      actions: read
+      contents: read
     runs-on: ${{ vars.CI_RUNNER == 'datahorde' && fromJSON('["self-hosted", "Linux", "tarmar-datahorde"]') || 'ubuntu-24.04' }}
     steps:
       - name: Email on failure or green-after-red

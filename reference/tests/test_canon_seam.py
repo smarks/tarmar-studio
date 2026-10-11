@@ -39,6 +39,8 @@ from reference.paths import (
     DEFAULT_CANON_NAME,
     REPO_ROOT,
     TARMAR_CANON_NAME,
+    PathOutsideRoot,
+    file_inside,
     page_markdown_file,
     resolve_canon,
     resolve_canon_dir,
@@ -162,6 +164,46 @@ class PageMarkdownFileTest(SimpleTestCase):
         ):
             with self.subTest(page_path=page_path), self.assertRaises(ValueError):
                 page_markdown_file(page_path)
+
+
+class FileInsideTest(SimpleTestCase):
+    """A requested file resolves inside its root, or is refused."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        temporary_directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = temporary_directory / "content"
+        self.root.mkdir()
+        (self.root / "page.md").write_text("# Page\n", encoding="utf-8")
+        self.outside_file = temporary_directory / "outside.md"
+        self.outside_file.write_text("# Outside\n", encoding="utf-8")
+        # A sibling whose name starts with the root's: a bare prefix test on
+        # the strings would take it for a file inside the root.
+        (temporary_directory / "content-old").mkdir()
+
+    def test_a_file_inside_resolves_to_its_real_path(self) -> None:
+        for requested in ("page.md", self.root / "page.md", "missing.md"):
+            with self.subTest(requested=str(requested)):
+                self.assertEqual(
+                    file_inside(self.root, requested),
+                    self.root.resolve() / Path(requested).name,
+                )
+
+    def test_files_reaching_outside_the_root_are_refused(self) -> None:
+        (self.root / "escape.md").symlink_to(self.outside_file)
+        for requested in (
+            "../outside.md",
+            self.outside_file,
+            "escape.md",
+            "../content-old/page.md",
+            "",
+            ".",
+        ):
+            with (
+                self.subTest(requested=str(requested)),
+                self.assertRaises(PathOutsideRoot),
+            ):
+                file_inside(self.root, requested)
 
 
 class OutsideCanonReadersTest(BaseTestCase):

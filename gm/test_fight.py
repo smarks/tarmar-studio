@@ -116,6 +116,42 @@ class FoeTextTest(SimpleTestCase):
         with self.assertRaises(FightError):
             parse_foe_text("  , ; . ")
 
+    def test_and_after_a_comma_still_separates(self):
+        # The separator no longer swallows the space before "and", so an
+        # Oxford comma no longer leaves a foe named "and a bear".
+        requests = parse_foe_text("two wolves, and a bear")
+        self.assertEqual(
+            [(request.name, request.count) for request in requests],
+            [("wolves", 2), ("bear", 1)],
+        )
+
+    def test_and_inside_a_word_does_not_separate(self):
+        requests = parse_foe_text("sand wraith and Andrew")
+        self.assertEqual(
+            [request.name for request in requests], ["sand wraith", "Andrew"]
+        )
+
+    def test_long_runs_of_spaces_parse_without_backtracking(self):
+        # Each input is one of CodeQL's py/polynomial-redos witnesses for the
+        # patterns this module had before: thousands of spaces that the old
+        # separator, count prefix and "x N" suffix each split in every possible
+        # way before failing. The linear patterns parse them in one pass.
+        spaces = " " * 5000
+        cases = {
+            "separator": (f"wolf{spaces}bear", [(f"wolf{spaces}bear", 1)]),
+            # The newline stops ".", so the count prefix must fail.
+            "prefix": (f"a{spaces}b\nc", [(f"a{spaces}b\nc", 1)]),
+            "suffix": (f"rat{spaces}b", [(f"rat{spaces}b", 1)]),
+            "suffix with a count": (f"rat{spaces}x 2", [("rat", 2)]),
+        }
+        for label, (text, expected) in cases.items():
+            with self.subTest(label):
+                requests = parse_foe_text(text)
+                self.assertEqual(
+                    [(request.name, request.count) for request in requests],
+                    expected,
+                )
+
 
 class FoeResolutionTest(BaseTestCase):
     """Matching requests to the bestiary, and standing in for the unknown."""
