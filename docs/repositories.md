@@ -1,13 +1,16 @@
 # Tarmar Studio: its repositories, and the one command that deploys it
 
-Written 2026-10-10. Everything below is what a full deployment of Tarmar
-Studio at https://tarmar.origamisoftware.com depends on, what each piece is
-responsible for, and how a change in each one reaches production.
+Written 2026-10-10; brought up to date 2026-10-11, after development moved
+from the private repository to this public one. Everything below is what a
+full deployment of Tarmar Studio at https://tarmar.origamisoftware.com depends
+on, what each piece is responsible for, and how a change in each one reaches
+production.
 
 ## The one command
 
-After a change is merged to `main` of `smarks/tarmar-studio-private`, from any
-checkout of that repository on the Mac:
+After a change is merged to `main` of `smarks/tarmar-studio`, from any
+checkout of it on the Mac whose `origin` is this repository (ship fetches
+`main` from `origin`, and the gate pushes its record there):
 
 ```bash
 ./run ship
@@ -57,7 +60,7 @@ a gate that passed on the head of `main`.
 
 | The change is in | Ship it by |
 |---|---|
-| `tarmar-studio-private` | merge the PR, then `./run ship` |
+| `tarmar-studio` | merge the PR, then `./run ship` |
 | `tarmar-canon` | push to its `main`, then `./run ship`. `deploy.sh` fast-forwards the canon on datahorde, and a moved canon is itself a reason to deploy |
 | `tarmar-engine`, `tarmar-rules`, `hexarena` | tag a release there, raise the pin in `pyproject.toml` (and `uv.lock`) through a PR here, merge, then `./run ship` |
 | `speak-friend`, `origami-common`, `origami-auth` | push to their `main`, run `uv lock --upgrade-package <name>` here through a PR (the lock holds the exact commit), merge, then `./run ship` |
@@ -71,7 +74,7 @@ All are under `github.com/smarks`.
 
 | Repository | Visibility | Responsible for | How it reaches production |
 |---|---|---|---|
-| `tarmar-studio-private` | private | The application: the Django apps (characters, battle, Games Master, reference), templates, static files, migrations. Also `deploy.sh`, the gate (`scripts/gate.py`), `./run ship`, the CI and Deploy workflows, the Mac Studio's Ollama agents (`scripts/llm-host/`) and the CI runners (`scripts/ci-runner*/`) | `deploy.sh` checks the gated commit out into the idle colour on datahorde (`~/dev/tarmar-studio-blue` or `-green`), migrates, and switches nginx to it |
+| `tarmar-studio` | public | The application: the Django apps (characters, battle, Games Master, reference), templates, static files, migrations. Also `deploy.sh`, the gate (`scripts/gate.py`), `./run ship`, the CI and Deploy workflows, the Mac Studio's Ollama agents (`scripts/llm-host/`) and the CI runners (`scripts/ci-runner*/`) | `deploy.sh` checks the gated commit out into the idle colour on datahorde (`~/dev/tarmar-studio-blue` or `-green`), migrates, and switches nginx to it |
 | `tarmar-canon` | private | The Tarmar canon: the world, GM tools, magic mechanics and author notes the Games Master and the reference pages read | `deploy.sh` clones or fast-forwards it to `/home/sam/dev/tarmar-canon` on datahorde; both colours read it through `TARMAR_CANON_DIR` |
 | `tarmar-engine` | public | The turn engine: the six-phase battle loop, actions, combat math, spells, the AI policy | A Python dependency pinned to a tag (`v0.9.11`), installed by `uv sync` |
 | `tarmar-rules` | public | The d20 combat-resolution core: the weapon-against-armour matrix, modifiers, criticals | A Python dependency pinned to a tag (`v0.3.0`) |
@@ -85,13 +88,13 @@ All are under `github.com/smarks`.
 | Repository | Visibility | Responsible for |
 |---|---|---|
 | `ops-workflows` | public | `deploy-blue-green.yml`, the reusable workflow the Deploy workflow calls: it connects to datahorde with the `DEPLOY_SSH_KEY` secret and runs `./deploy.sh --expect <sha>` there |
-| `base_repo_template` | public | The `notify` action at the end of CI and Deploy, meant to email on failure or on the first green after a red. It sends nothing at present: `tarmar-studio-private`'s only secret is `DEPLOY_SSH_KEY`, with no `MAIL_PASSWORD`, so the notify step in both CI and Deploy does nothing. Failure emails that do arrive are presumably GitHub's own notifications (not checked) |
+| `base_repo_template` | public | The `notify` action at the end of CI and Deploy, meant to email on failure or on the first green after a red. It sends nothing at present: `tarmar-studio`'s only secret is `DEPLOY_SSH_KEY`, with no `MAIL_PASSWORD`, so the notify step in both CI and Deploy does nothing. Failure emails that do arrive are presumably GitHub's own notifications (not checked) |
 
 ### Not part of the deployment
 
 | Repository | Visibility | Responsible for |
 |---|---|---|
-| `tarmar-studio` | public | A public snapshot of the application, seeded 2026-10-09, and where players file issues: the home page's "Leave a comment" opens its issue forms (bug, feature request, general comment). Its CI runs on GitHub's machines (the private repository's workflow, brought over 2026-10-11). Nothing deploys from it, and nothing copies the private repository into it automatically, so files brought over by hand drift until someone brings them over again |
+| `tarmar-studio-private` | private, archived | Where the application was developed until 2026-10-10. Archived and read-only, and nothing deploys from it. Its closed issues and pull requests stay there; its open issues are being recreated in `tarmar-studio`, and three (#979, #981, #982) were still open there, not yet moved, on 2026-10-11 |
 | `tarmar-feedback` | public | Retired 2026-10-10, replaced by the public repository's issue forms. Still exists; deleting it is Spencer's to run (`gh repo delete smarks/tarmar-feedback --yes`) |
 
 ## The machines
@@ -99,17 +102,17 @@ All are under `github.com/smarks`.
 | Machine | Role |
 |---|---|
 | datahorde (192.168.4.163, `roots.origamisoftware.com`) | Production: nginx, Postgres, the blue and green app checkouts and their systemd units, the canon clone, nightly backups |
-| Mac Studio (192.168.4.158) | Serves the Games Master's model through Ollama, which datahorde reaches by the name `tarmar-llm`; the agents in `scripts/llm-host/` keep it warm. Where `./run ship` and the gate run. Also holds the self-hosted runner `mac-studio-tarmar`, registered and online but no longer chosen by any workflow |
-| GitHub Actions | CI, on GitHub's machines unless the repository variable `CI_RUNNER` is `datahorde`, which sends it to the container runner in `scripts/ci-runner-linux/`. No runner is registered for it yet, so with `CI_RUNNER=datahorde` CI would queue and nothing could merge. Also runs the Deploy workflow |
+| Mac Studio (192.168.4.158) | Serves the Games Master's model through Ollama, which datahorde reaches by the name `tarmar-llm`; the agents in `scripts/llm-host/` keep it warm. Where `./run ship` and the gate run. Also holds the self-hosted runner `mac-studio-tarmar`, registered to the archived private repository, so no workflow can use it |
+| GitHub Actions | CI, on GitHub's machines unless the repository variable `CI_RUNNER` is `datahorde`, which sends it to the container runner in `scripts/ci-runner-linux/`. No runner is registered for it yet, so with `CI_RUNNER=datahorde` CI would queue and nothing could merge. Because the repository is public, a self-hosted runner would run forks' pull requests on datahorde: `register-from-mac.sh` stops unless `CI_RUNNER` is set and the repository holds every outside contributor's workflow runs for approval (set as of 2026-10-11), and the runner's firewall keeps jobs off the LAN. Also runs the Deploy workflow |
 
 ## Rolling back, and checking what is live
 
 ```bash
-gh workflow run deploy.yml --repo smarks/tarmar-studio-private --ref main -f command=status
+gh workflow run deploy.yml --repo smarks/tarmar-studio --ref main -f command=status
 ```
 
 ```bash
-gh workflow run deploy.yml --repo smarks/tarmar-studio-private --ref main -f command=rollback
+gh workflow run deploy.yml --repo smarks/tarmar-studio --ref main -f command=rollback
 ```
 
 `status` reports which colour is live and the commit each runs; `rollback`
