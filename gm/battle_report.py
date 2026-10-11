@@ -144,9 +144,25 @@ def restarted_since(battle: Battle, position: FiledPosition) -> bool:
     return event is None or event_mark(event) != position.mark
 
 
+def event_lines(event: BattleEvent) -> list[str]:
+    """One event's lines as the model reads them.
+
+    The event's own message, and beneath a decision that withheld casts past
+    the caster's Channel (issue #960) each reason, in the engine's words, as
+    the battle log prints them (``battle/_event.html``). The casting success
+    tier and the Control Roll are events of their own, narrated by the
+    engine with the labels the canon's rules give them.
+
+    Args:
+        event: A battle log event.
+    """
+    withheld = (event.payload or {}).get("withheld", [])
+    return [f"- {event.message}", *(f"  - {reason}" for reason in withheld)]
+
+
 def turn_block(battle: Battle, turn: int, events: Sequence[BattleEvent]) -> str:
     """One turn's log lines as the model reads them."""
-    lines = "\n".join(f"- {event.message}" for event in events)
+    lines = "\n".join(line for event in events for line in event_lines(event))
     return f"{LOG_PREAMBLE} — {battle.name}, turn {turn}:\n{lines}"
 
 

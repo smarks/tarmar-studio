@@ -1880,6 +1880,207 @@ describe('the wizard cast flow (#250)', () => {
     });
 });
 
+describe('pushing mana into a cast (#960)', () => {
+    // A caster's menu as the engine builds it with Push rules: the plain
+    // Fire Missile (the AI's pick), then one pushed copy per amount the
+    // rules allow, last on the menu and never the AI's.
+    function pushPending() {
+        return {
+            combatant_id: 4,
+            turn: 2,
+            display_name: 'Ysolde Fenner',
+            player: 'playeruser',
+            is_you: true,
+            candidates: [
+                { letter: 'a', name: 'MOVE', score: 0.4,
+                  rationale: 'Close the gap', target_id: null, spell_key: '' },
+                { letter: 'h', name: 'CAST SPELL Fire Missile', score: 2.4,
+                  rationale: 'P(land) 61%', target_id: 9,
+                  spell_key: 'fire_missile', ai_choice: true },
+                { letter: 'h', name: 'CAST SPELL Shield', score: 0.9,
+                  rationale: 'buff', target_id: null, spell_key: 'shield' },
+                { letter: 'h', name: 'CAST SPELL Fire Missile (PUSH 1 MANA)',
+                  score: 0, rationale: 'Control Roll', target_id: 9,
+                  spell_key: 'fire_missile', push_mana: 1,
+                  cost: '2 mana (1 and 1 pushed)' },
+                { letter: 'h', name: 'CAST SPELL Fire Missile (PUSH 2 MANA)',
+                  score: 0, rationale: 'Control Roll', target_id: 9,
+                  spell_key: 'fire_missile', push_mana: 2,
+                  cost: '3 mana (1 and 2 pushed)' },
+            ],
+            magic: {
+                pool_label: 'Mana', pool: 4, max_pool: 10,
+                spells: [
+                    { key: 'fire_missile', target_id: 9, name: 'Fire Missile',
+                      cost: 'Elemental — 1 mana', note: '61% on 3d6',
+                      castable: true, reason: '', channel: 3 },
+                    { key: 'shield', target_id: null, name: 'Shield',
+                      cost: 'Protection — 1 mana', note: '84% on 3d6',
+                      castable: true, reason: '', channel: 2 },
+                ],
+            },
+        };
+    }
+
+    function panelNode() {
+        document.body.innerHTML = '<div id="turn-panel" hidden></div>';
+        return document.getElementById('turn-panel');
+    }
+
+    function amounts(panel) {
+        return Array.from(panel.querySelectorAll('.turn-push-amount'))
+            .map((button) => button.textContent.replace('AI pick', ''));
+    }
+
+    test('a pushed copy is no spell of its own: one row, one count', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: null, castOpen: true,
+        });
+        expect(panel.querySelectorAll('.turn-spell')).toHaveLength(2);
+        expect(panel.querySelector('.turn-option-cast').textContent)
+            .toContain('2 casts ready');
+    });
+
+    test('the push control offers exactly the amounts on the menu', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: null, castOpen: true,
+        });
+        // One control, beside the cast that has pushed copies; Shield has none.
+        expect(panel.querySelectorAll('.turn-push')).toHaveLength(1);
+        expect(amounts(panel)).toEqual(['None', '+1 mana', '+2 mana']);
+        expect(panel.querySelector('.turn-push-label').textContent)
+            .toBe('Push more mana (Channel 3):');
+    });
+
+    test('the AI pick stays on the plain cast the AI chose', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: null, castOpen: true,
+        });
+        const missile = panel.querySelectorAll('.turn-spell')[0];
+        expect(missile.querySelector('.turn-option-ai-pick')).not.toBeNull();
+        const tagged = Array.from(panel.querySelectorAll('.turn-push-amount'))
+            .filter((button) => button.querySelector('.turn-option-ai-pick'))
+            .map((button) => button.dataset.pushMana);
+        expect(tagged).toEqual(['0']);
+    });
+
+    test('an AI that picked a pushed copy is tagged on that amount', () => {
+        const pending = pushPending();
+        pending.candidates[1].ai_choice = false;
+        pending.candidates[4].ai_choice = true;
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pending, {
+            selectedIndex: null, castOpen: true,
+        });
+        const missile = panel.querySelectorAll('.turn-spell')[0];
+        expect(missile.querySelector('.turn-option-ai-pick')).toBeNull();
+        const tagged = Array.from(panel.querySelectorAll('.turn-push-amount'))
+            .filter((button) => button.querySelector('.turn-option-ai-pick'))
+            .map((button) => button.dataset.pushMana);
+        expect(tagged).toEqual(['2']);
+        // The CAST SPELL option still says the AI would cast.
+        expect(panel.querySelector('.turn-option-cast .turn-option-ai-pick'))
+            .not.toBeNull();
+    });
+
+    test('picking the spell selects the plain cast: no push by default', () => {
+        const panel = panelNode();
+        const onSelect = jest.fn();
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: null, castOpen: true, onSelect,
+        });
+        panel.querySelectorAll('.turn-spell')[0].click();
+        expect(onSelect).toHaveBeenCalledWith(1);
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: 1, castOpen: true,
+        });
+        const pressed = Array.from(panel.querySelectorAll('.turn-push-amount'))
+            .filter((button) => button.getAttribute('aria-pressed') === 'true')
+            .map((button) => button.dataset.pushMana);
+        expect(pressed).toEqual(['0']);
+        expect(panel.querySelector('.turn-push-cost')).toBeNull();
+    });
+
+    test('an amount selects its copy and shows what it costs', () => {
+        const panel = panelNode();
+        const onSelect = jest.fn();
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: 1, castOpen: true, onSelect,
+        });
+        panel.querySelectorAll('.turn-push-amount')[2].click();
+        expect(onSelect).toHaveBeenCalledWith(4);
+
+        battle.renderTurnPanel(panel, pushPending(), {
+            selectedIndex: 4, castOpen: true,
+        });
+        expect(panel.querySelectorAll('.turn-spell')[0]
+            .getAttribute('aria-pressed')).toBe('true');
+        expect(panel.querySelectorAll('.turn-push-amount')[2]
+            .getAttribute('aria-pressed')).toBe('true');
+        expect(panel.querySelector('.turn-push-cost').textContent)
+            .toBe('Costs 3 mana (1 and 2 pushed).');
+        expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
+    });
+
+    function mountPage(pending) {
+        document.body.innerHTML = `
+            <strong id="battle-status">Awaiting players</strong>
+            <span id="battle-turn">1</span>
+            <div id="battle-roster"></div>
+            <svg id="battle-arena"></svg>
+            <div id="battle-log"></div>
+            <div id="turn-panel" hidden
+                 data-act-url="/tarmar/battles/1/act/"
+                 data-state-url="/tarmar/battles/1/state/"
+                ></div>
+            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+            <script id="battle-seats" type="application/json">[]</script>
+            <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+        `;
+        battle.initBattlePage();
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: 'paused', turn: 2,
+                view: sampleState([sampleCombatant()]),
+                events: [], seats: [], pending: null,
+            }),
+        });
+        require('../api.js');
+        return document.getElementById('turn-panel');
+    }
+
+    test('confirming a pushed cast sends the amount picked', async () => {
+        const panel = mountPage(pushPending());
+        panel.querySelector('.turn-option-cast').click();
+        panel.querySelectorAll('.turn-spell')[0].click();
+        panel.querySelectorAll('.turn-push-amount')[1].click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 2, letter: 'h', target_id: 9,
+            spell_key: 'fire_missile', push_mana: 1,
+        });
+    });
+
+    test('a cast with no push picked sends no push_mana', async () => {
+        const panel = mountPage(pushPending());
+        panel.querySelector('.turn-option-cast').click();
+        panel.querySelectorAll('.turn-spell')[0].click();
+        panel.querySelectorAll('.turn-push-amount')[2].click();
+        panel.querySelectorAll('.turn-push-amount')[0].click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 2, letter: 'h', target_id: 9,
+            spell_key: 'fire_missile',
+        });
+    });
+});
+
 describe('teams (#275)', () => {
     test('teamOrderOf lists teams by first appearance, skipping the free pool', () => {
         const view = sampleState([

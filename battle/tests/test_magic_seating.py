@@ -300,6 +300,12 @@ class RecordPushedChoiceTest(BaseTestCase):
         self.assertEqual(chosen[0]["push_mana"], self.offered["push_mana"])
         self.assertTrue(chosen[0]["rationale"].startswith("chosen by"))
 
+    def test_a_pushed_copy_says_what_it_pushes_and_costs(self) -> None:
+        pushed = self.offered["push_mana"]
+        self.assertIn(f", pushing {pushed} more mana into it", self.offered["plain"])
+        self.assertIn(f"{pushed} pushed)", self.offered["cost"])
+        self.assertIn("a success makes a Control Roll", self.offered["cost"])
+
     def test_a_push_the_menu_did_not_offer_is_refused(self) -> None:
         most_offered = max(
             candidate.get("push_mana") or 0 for candidate in self.pending["candidates"]

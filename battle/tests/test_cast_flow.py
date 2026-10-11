@@ -14,6 +14,7 @@ them together the way ``test_rules_drift`` pins the rules docs.
 """
 
 import json
+from dataclasses import replace
 
 from django.test import SimpleTestCase
 from django.urls import reverse
@@ -36,7 +37,7 @@ from battle.services import (
 )
 from common.test_helpers import BaseTestCase
 
-from .magic_fixtures import seated_rules
+from .magic_fixtures import INVENTED_RULES, seated_rules
 from .test_classic_adaptation import snapshot as classic_snapshot
 from .test_state import make_combatant
 
@@ -149,6 +150,21 @@ class CasterMagicTest(SimpleTestCase):
 
     def test_a_dead_or_missing_combatant_has_no_magic(self):
         self.assertIsNone(caster_magic(wizard_state(), 99))
+
+    def test_each_row_carries_its_channel(self):
+        # The invented Channel is twice the recorded level.
+        magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        self.assertEqual(
+            {spell["key"]: spell["channel"] for spell in magic["spells"]},
+            {key: 2 * level for key, level in WIZARD_SPELL_LEVELS.items()},
+        )
+
+    def test_no_channel_rules_carry_no_channel(self):
+        with seated_rules(replace(INVENTED_RULES, channel=None)):
+            magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        self.assertEqual({spell["channel"] for spell in magic["spells"]}, {None})
 
     def test_a_spell_past_the_channel_says_so(self):
         # Level 1 in Lightning Bolt: the invented Channel is 2, its cost 3.

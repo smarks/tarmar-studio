@@ -3002,8 +3002,10 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
     return battle, events
 
 
-def _channel_refusal(channel: ChannelRules, actor: CombatantState, spell: Spell) -> str:
-    """Why the menu withholds a cast of ``spell`` for its Channel, or ``""``.
+def _channel_reading(
+    channel: ChannelRules | None, actor: CombatantState, spell: Spell
+) -> tuple[int | None, str]:
+    """The caster's Channel for ``spell``, and why the menu withholds it, if it does.
 
     The engine's own test (``tarmar_engine.policy._within_channel``): the
     spell's cost past the caster's Channel for it, or a spell the Channel
@@ -3012,20 +3014,24 @@ def _channel_refusal(channel: ChannelRules, actor: CombatantState, spell: Spell)
     the cast stage's.
 
     Args:
-        channel: The canon's Channel rules.
+        channel: The canon's Channel rules, or ``None`` when it has none.
         actor: The caster.
         spell: The spell offered.
 
     Returns:
-        The reason in the player's words, or ``""`` when the Channel allows it.
+        ``(channel, reason)``: the Channel, or ``None`` when no rules give the
+        spell one; and the reason in the player's words, or ``""`` when the
+        Channel allows the cast.
     """
+    if channel is None:
+        return None, ""
     try:
         limit = channel.channel_for(actor, spell)
     except ChannelUnclassifiedSpell:
-        return "the rules give it no kind of magic, so no Channel for it"
+        return None, "the rules give it no kind of magic, so no Channel for it"
     if spell.level > limit:
-        return f"costs {spell.level} mana, past a Channel of {limit} for it"
-    return ""
+        return limit, f"costs {spell.level} mana, past a Channel of {limit} for it"
+    return limit, ""
 
 
 def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
@@ -3052,7 +3058,7 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     The castability rules restate ``policy._cast_candidates``' filters —
     the engine drops the casts it will not offer, this says out loud why
     each was dropped — and then the menu's Channel filter (issue #960),
-    through :func:`_channel_refusal`, on the same magic rules the menu is
+    through :func:`_channel_reading`, on the same magic rules the menu is
     built with. ``battle.tests.test_cast_flow`` pins the two sets equal,
     against a menu built with those rules, so the explanation can never
     contradict the menu.
@@ -3073,15 +3079,15 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         spell = get_spell(key)
         aimed = spell.damage is not None and not spell.heals
         castable, reason = True, ""
+        spell_channel, channel_refusal = _channel_reading(channel, actor, spell)
         if spell.level > actor.mana:
             castable, reason = False, f"needs {spell.level} mana, {actor.mana} left"
         elif spell.continuing and key in actor.active_spells:
             castable, reason = False, "already up — renews itself"
         elif aimed and enemy is None:
             castable, reason = False, "nothing in reach to aim at"
-        elif channel is not None:
-            reason = _channel_refusal(channel, actor, spell)
-            castable = not reason
+        elif channel_refusal:
+            castable, reason = False, channel_refusal
         attribute = actor.intelligence if spell.attribute == "INT" else actor.wisdom
         chance = policy.three_d6_at_most(attribute)
         aim = ", then a DEX roll to land it" if spell.targeted else ""
@@ -3094,6 +3100,9 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                 "note": f"{chance:.0%} on 3d6 \u2264 {spell.attribute}{aim}",
                 "castable": castable,
                 "reason": reason,
+                # The most mana one casting may take, cost and push together
+                # (issue #960); None when the canon bounds no casting by it.
+                "channel": spell_channel,
             }
         )
     return {
