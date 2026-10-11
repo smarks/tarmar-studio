@@ -169,6 +169,37 @@ describe('play-with-gm.js', () => {
         expect(slot.querySelector('form').hidden).toBe(false);
     });
 
+    test('a revealed slot\'s session picker is wired by picker.js (#973)', () => {
+        require('../picker.js');
+        const slot = document.createElement('div');
+        slot.innerHTML = `
+            <form class="play-with-gm" hidden>
+                <div class="picker" data-picker data-picker-url="/tarmar/gm/sessions/play-picker/?character=7">
+                    <input type="search" data-picker-search>
+                    <div data-picker-body></div>
+                </div>
+            </form>`;
+        document.body.appendChild(slot);
+        const picker = slot.querySelector('[data-picker]');
+        expect(picker.dataset.pickerReady).toBeUndefined();
+
+        window.revealPlayWithGameMaster(slot);
+
+        expect(picker.dataset.pickerReady).toBe('yes');
+    });
+
+    test('a page without picker.js still reveals its forms', () => {
+        delete window.picker;
+        const slot = document.createElement('div');
+        slot.innerHTML = '<form class="play-with-gm" hidden><div data-picker></div></form>';
+        document.body.appendChild(slot);
+
+        window.revealPlayWithGameMaster(slot);
+
+        expect(slot.querySelector('form').hidden).toBe(false);
+        expect(slot.querySelector('[data-picker]').dataset.pickerReady).toBeUndefined();
+    });
+
     test('sessionUrl escapes the id', () => {
         expect(sessionUrl('/tarmar/gm/', 'a b')).toBe('/tarmar/gm/?session=a%20b');
     });

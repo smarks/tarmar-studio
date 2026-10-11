@@ -1,5 +1,6 @@
 /**
- * Rolled and awarded values on the character sheet (issues #748, #749, #752).
+ * Rolled and awarded values on the character sheet (issues #748, #749, #752,
+ * #948).
  *
  * The sheet's auto-save let a player type over anything rolled or awarded:
  * the Fatigue roll after the roll button had refused a second one, any
@@ -58,9 +59,27 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
             'Rolled (3d6) or bought (65 points); only a Game Master can change a recorded score.'
         );
         // What the rules let a player choose stays an input.
-        for (const field of ['name', 'height_roll', 'weight_roll', 'location']) {
-            await expect(page.locator(`[data-field="${field}"]`), field).toHaveCount(1);
-        }
+        await expect(page.locator('[data-field="name"]')).toHaveCount(1);
+        // The Origin is "roll or choose", and creation rolled it: a roll is
+        // final for a player (Spencer's ruling on #970). This asserted an
+        // input before, which was the bug.
+        await expect(page.locator('[data-field="location"]')).toHaveCount(0);
+        await expect(page.locator('[data-locked-field="location"]')).toHaveText(
+            'The Origin was rolled, and a roll is final; only a Game Master can change it.'
+        );
+        // Height and weight are "choose or roll", and creation rolled them:
+        // a roll is final for a player (Spencer's ruling on #948). This
+        // asserted an input before, which was the bug.
+        await expect(page.locator('[data-locked-field="height_roll"]')).toHaveText(
+            'Height was rolled, and a roll is final; only a Game Master can change it.'
+        );
+        await expect(page.locator('[data-field="weight_roll"]')).toHaveCount(0);
+        await expect(page.locator('[data-locked-field="weight_roll"]')).toBeVisible();
+        const height = await postFieldUpdate(page, id, 'height_roll', '6');
+        expect(height).toEqual({
+            status: 400,
+            body: { error: 'Height was rolled, and a roll is final; only a Game Master can change it.' },
+        });
         // The Fatigue roll was made at creation: no second roll offered.
         await expect(page.locator('#roll-fatigue-btn')).toHaveCount(0);
 
@@ -244,6 +263,26 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         await expect(page.locator('.history-table')).toContainText('appearance_roll');
         const row = page.locator('.history-table tr', { hasText: 'appearance_roll' }).first();
         await expect(row).toContainText(before);
+    });
+
+    test("a player's rolled height is fixed; a Game Master changes it on the sheet (#948)", async ({ page }) => {
+        await loginAs(page, TEST_USER);
+        await createCharacter(page);
+        const id = characterId(page);
+        await expect(page.locator('[data-locked-field="height_roll"]')).toBeVisible();
+
+        await logout(page);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${id}/`);
+        await expect(page.locator('[data-locked-field="height_roll"]')).toHaveCount(0);
+        const input = page.locator('[data-field="height_roll"] input');
+        await input.fill('6.6.3');
+        await input.blur();
+        await expect(page.locator('[data-field="height_roll"]')).toHaveClass(/saved/);
+        const stored = readDjangoShell(
+            `from characters.models import Character; print(Character.objects.get(pk=${id}).height_roll)`
+        );
+        expect(stored.trim().split('\n').pop()).toBe('6.6.3');
     });
 
     test('only a Game Master grants an item modifier, and the grant names them', async ({ page }) => {

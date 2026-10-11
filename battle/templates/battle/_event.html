@@ -7,7 +7,7 @@ rationale was written to (#301); decisions logged before that field existed
 fall back to the raw score.
 {% endcomment %}
 <li id="event-{{ event.sequence }}"
-    class="battle-event event-{{ event.event_type }}">
+    class="battle-event event-{{ event.event_type }}{% if event.payload.destination_refused %} is-refused{% endif %}">
     {% if event.event_type == "decision" %}
     <details>
         <summary>{{ event.message }}</summary>

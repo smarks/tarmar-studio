@@ -4,6 +4,7 @@ Imports kept broad to match the original module — the legacy file did
 most of its imports inline inside test methods.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -20,6 +21,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # read it while pytest runs, and a staged DATABASE_URL there sent them down the
 # production branch mid-run (issue #471).
 CHECKOUT_DOTENV_PATH = BASE_DIR / ".env"
+
+# Every variable the mail settings read (issue #929). A subprocess that checks
+# what settings make of the environment starts without any of them, so a
+# developer's shell cannot decide the answer.
+MAIL_ENVIRONMENT_KEYS = (
+    "EMAIL_BACKEND",
+    "EMAIL_HOST",
+    "EMAIL_PORT",
+    "EMAIL_HOST_USER",
+    "EMAIL_HOST_PASSWORD",
+    "EMAIL_USE_TLS",
+    "EMAIL_FILE_PATH",
+    "DEFAULT_FROM_EMAIL",
+    "SITE_BASE_URL",
+)
+# The sender DEPLOY.md documents for the host.
+PRODUCTION_SENDER = "tarmar@roots.origamisoftware.com"
 
 
 def read_checkout_dotenv():
@@ -252,7 +270,7 @@ class ProductionSettingsFailFastTest(DotenvStagingMixin, TestCase):
         see :meth:`stage_empty_dotenv_unless_staged`.
         """
         env = self.subprocess_environment()
-        for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG"):
+        for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG", *MAIL_ENVIRONMENT_KEYS):
             env.pop(key, None)
         env.update(env_overrides)
 
@@ -289,12 +307,26 @@ class ProductionSettingsFailFastTest(DotenvStagingMixin, TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ALLOWED_HOSTS", result.stderr)
 
+    def test_fails_when_default_from_email_missing_in_production(self):
+        # Issue #929: without a sender, a reset message is refused or goes
+        # out from webmaster@localhost, and the failure is only logged.
+        result = self._import_settings(
+            {
+                "DEBUG": "False",
+                "SECRET_KEY": "real-prod-key-12345",
+                "ALLOWED_HOSTS": "example.com",
+            }
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DEFAULT_FROM_EMAIL must be set", result.stderr)
+
     def test_passes_with_real_secret_key_and_hosts_in_production(self):
         result = self._import_settings(
             {
                 "DEBUG": "False",
                 "SECRET_KEY": "real-prod-key-12345",
                 "ALLOWED_HOSTS": "example.com",
+                "DEFAULT_FROM_EMAIL": PRODUCTION_SENDER,
             }
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -308,6 +340,7 @@ class ProductionSettingsFailFastTest(DotenvStagingMixin, TestCase):
                 "DEBUG": "False",
                 "SECRET_KEY": "real-prod-key-12345",
                 "ALLOWED_HOSTS": "example.com",
+                "DEFAULT_FROM_EMAIL": PRODUCTION_SENDER,
                 "TARMAR_CANON_DIR": str(default_canon),
             }
         )
@@ -324,6 +357,7 @@ class ProductionSettingsFailFastTest(DotenvStagingMixin, TestCase):
                 "DEBUG": "False",
                 "SECRET_KEY": "real-prod-key-12345",
                 "ALLOWED_HOSTS": "example.com",
+                "DEFAULT_FROM_EMAIL": PRODUCTION_SENDER,
                 "TARMAR_CANON_DIR": str(canon_directory),
             }
         )
@@ -413,6 +447,7 @@ class ProductionSettingsFailFastTest(DotenvStagingMixin, TestCase):
         # protect it from (issue #298).
         self.stage_dotenv(
             "SECRET_KEY=from-the-dotenv-file-12345\nALLOWED_HOSTS=example.test\n"
+            f"DEFAULT_FROM_EMAIL={PRODUCTION_SENDER}\n"
         )
 
         # Nothing is passed in the environment, so settings can only satisfy
@@ -551,3 +586,306 @@ class GMStreamBudgetSettingTest(DotenvStagingMixin, TestCase):
         env["GM_STREAM_BUDGET_SECONDS"] = "420"
 
         self.assertEqual(self._budget(env), 420.0)
+
+
+class PinnedDiceSettingTest(DotenvStagingMixin, TestCase):
+    """E2E_DICE_SEEDING, the browser tests' pinned dice (issue #959).
+
+    It lets a request choose its own dice, so a process without DEBUG must not
+    load with it, and only a process with it carries the middleware.
+    """
+
+    PRODUCTION = {
+        "DEBUG": "False",
+        "SECRET_KEY": "real-prod-key-12345",
+        "ALLOWED_HOSTS": "example.com",
+        "DEFAULT_FROM_EMAIL": PRODUCTION_SENDER,
+    }
+
+    def import_settings(
+        self, env_overrides: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        """Import settings in a clean subprocess; print whether it pins dice."""
+        env = self.subprocess_environment()
+        for key in (
+            "SECRET_KEY",
+            "ALLOWED_HOSTS",
+            "DEBUG",
+            "E2E_DICE_SEEDING",
+            *MAIL_ENVIRONMENT_KEYS,
+        ):
+            env.pop(key, None)
+        env.update(env_overrides)
+        program = (
+            "import tarmar_studio.settings as s\n"
+            "print('PINNED', 'common.middleware.PinnedDiceMiddleware' in s.MIDDLEWARE)\n"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=BASE_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_production_refuses_to_start_with_it(self):
+        for spelling in ("true", "True", "TRUE"):
+            with self.subTest(spelling=spelling):
+                result = self.import_settings(
+                    {**self.PRODUCTION, "E2E_DICE_SEEDING": spelling}
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("E2E_DICE_SEEDING", result.stderr)
+                self.assertIn("refused unless DEBUG=true", result.stderr)
+
+    def test_production_without_it_carries_no_middleware(self):
+        result = self.import_settings(self.PRODUCTION)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("PINNED False", result.stdout)
+
+    def test_debug_without_it_carries_no_middleware(self):
+        result = self.import_settings({"DEBUG": "true"})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("PINNED False", result.stdout)
+
+    def test_debug_with_it_installs_the_middleware(self):
+        result = self.import_settings({"DEBUG": "true", "E2E_DICE_SEEDING": "true"})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("PINNED True", result.stdout)
+
+
+class MailSettingsTest(DotenvStagingMixin, TestCase):
+    """What settings make of the mail variables (issue #929)."""
+
+    PRODUCTION = {
+        "DEBUG": "False",
+        "SECRET_KEY": "real-prod-key-12345",
+        "ALLOWED_HOSTS": "example.com",
+        "DEFAULT_FROM_EMAIL": PRODUCTION_SENDER,
+    }
+
+    def resolved_mail_settings(
+        self, env_overrides: dict[str, str]
+    ) -> dict[str, object]:
+        """Import settings in a clean subprocess; return its mail values."""
+        env = self.subprocess_environment()
+        for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG", *MAIL_ENVIRONMENT_KEYS):
+            env.pop(key, None)
+        env.update(env_overrides)
+        program = (
+            "import json\n"
+            "import tarmar_studio.settings as s\n"
+            "print(json.dumps({name: getattr(s, name, None) for name in ("
+            "'EMAIL_BACKEND', 'EMAIL_HOST', 'EMAIL_PORT', 'EMAIL_HOST_USER', "
+            "'EMAIL_HOST_PASSWORD', 'EMAIL_USE_TLS', 'EMAIL_TIMEOUT', "
+            "'EMAIL_FILE_PATH', 'DEFAULT_FROM_EMAIL', 'SITE_BASE_URL')}))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=BASE_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_production_defaults_to_smtp_on_the_local_postfix(self):
+        resolved = self.resolved_mail_settings(self.PRODUCTION)
+        self.assertEqual(
+            resolved["EMAIL_BACKEND"], "django.core.mail.backends.smtp.EmailBackend"
+        )
+        self.assertEqual(resolved["EMAIL_HOST"], "localhost")
+        self.assertEqual(resolved["EMAIL_PORT"], 25)
+        self.assertEqual(resolved["EMAIL_HOST_USER"], "")
+        self.assertEqual(resolved["EMAIL_HOST_PASSWORD"], "")
+        self.assertIs(resolved["EMAIL_USE_TLS"], False)
+        self.assertEqual(resolved["EMAIL_TIMEOUT"], 10)
+        self.assertEqual(resolved["DEFAULT_FROM_EMAIL"], PRODUCTION_SENDER)
+        self.assertEqual(resolved["SITE_BASE_URL"], "")
+        self.assertIsNone(resolved["EMAIL_FILE_PATH"])
+
+    def test_debug_defaults_to_the_console_and_a_local_sender(self):
+        resolved = self.resolved_mail_settings({"DEBUG": "true"})
+        self.assertEqual(
+            resolved["EMAIL_BACKEND"],
+            "django.core.mail.backends.console.EmailBackend",
+        )
+        self.assertEqual(resolved["DEFAULT_FROM_EMAIL"], "tarmar@localhost")
+
+    def test_every_value_comes_from_the_environment(self):
+        resolved = self.resolved_mail_settings(
+            {
+                **self.PRODUCTION,
+                "EMAIL_HOST": "smtp.example.com",
+                "EMAIL_PORT": "587",
+                "EMAIL_HOST_USER": "relay-user",
+                "EMAIL_HOST_PASSWORD": "relay-secret",
+                "EMAIL_USE_TLS": "true",
+                "SITE_BASE_URL": "https://tarmar.example/",
+            }
+        )
+        self.assertEqual(resolved["EMAIL_HOST"], "smtp.example.com")
+        self.assertEqual(resolved["EMAIL_PORT"], 587)
+        self.assertEqual(resolved["EMAIL_HOST_USER"], "relay-user")
+        self.assertEqual(resolved["EMAIL_HOST_PASSWORD"], "relay-secret")
+        self.assertIs(resolved["EMAIL_USE_TLS"], True)
+        self.assertEqual(resolved["SITE_BASE_URL"], "https://tarmar.example")
+
+    def test_an_explicit_backend_wins_in_either_mode(self):
+        file_backend = "django.core.mail.backends.filebased.EmailBackend"
+        for mode in (self.PRODUCTION, {"DEBUG": "true"}):
+            with self.subTest(debug=mode["DEBUG"]):
+                resolved = self.resolved_mail_settings(
+                    {
+                        **mode,
+                        "EMAIL_BACKEND": file_backend,
+                        "EMAIL_FILE_PATH": "/tmp/tarmar-mail",
+                    }
+                )
+                self.assertEqual(resolved["EMAIL_BACKEND"], file_backend)
+                self.assertEqual(resolved["EMAIL_FILE_PATH"], "/tmp/tarmar-mail")
+
+    def test_a_malformed_site_base_url_refuses_to_start(self):
+        for bad in (
+            "tarmar.example",
+            "ftp://tarmar.example",
+            "https://",
+            "https://tarmar.example/tarmar",
+            "https://tarmar.example?x=1",
+            "https://tarmar.example#top",
+        ):
+            for mode in (self.PRODUCTION, {"DEBUG": "true"}):
+                with self.subTest(site_base_url=bad, debug=mode["DEBUG"]):
+                    env = self.subprocess_environment()
+                    for key in (
+                        "SECRET_KEY",
+                        "ALLOWED_HOSTS",
+                        "DEBUG",
+                        *MAIL_ENVIRONMENT_KEYS,
+                    ):
+                        env.pop(key, None)
+                    env.update({**mode, "SITE_BASE_URL": bad})
+                    result = subprocess.run(
+                        [sys.executable, "-c", "import tarmar_studio.settings"],
+                        cwd=BASE_DIR,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"SITE_BASE_URL is {bad!r}", result.stderr)
+                    self.assertIn("no path, query or fragment", result.stderr)
+
+    def test_a_trailing_slash_on_site_base_url_is_accepted(self):
+        resolved = self.resolved_mail_settings(
+            {**self.PRODUCTION, "SITE_BASE_URL": "http://tarmar.example:8000/"}
+        )
+        self.assertEqual(resolved["SITE_BASE_URL"], "http://tarmar.example:8000")
+
+    def test_env_example_documents_every_mail_variable(self):
+        documented = (BASE_DIR / ".env.example").read_text()
+        for key in MAIL_ENVIRONMENT_KEYS:
+            with self.subTest(key=key):
+                self.assertIn(f"{key}=", documented)
+
+
+class RepositoryUrlSettingsTest(DotenvStagingMixin, TestCase):
+    """What settings make of the footer's repository addresses (issue #914)."""
+
+    def resolved_repository_urls(self, env_overrides: dict[str, str]) -> list[str]:
+        """Import settings in a clean subprocess; return the two addresses."""
+        env = self.subprocess_environment()
+        for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG"):
+            env.pop(key, None)
+        for key in ("REPOSITORY_PUBLIC_URL", "REPOSITORY_PRIVATE_URL"):
+            env.pop(key, None)
+        env.update({**MailSettingsTest.PRODUCTION, **env_overrides})
+        program = (
+            "import tarmar_studio.settings as s\n"
+            "print(s.REPOSITORY_PUBLIC_URL)\n"
+            "print(s.REPOSITORY_PRIVATE_URL)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=BASE_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        return result.stdout.strip().splitlines()[-2:]
+
+    def test_the_defaults_are_the_public_snapshot_and_the_private_history(self):
+        self.assertEqual(
+            self.resolved_repository_urls({}),
+            [
+                "https://github.com/smarks/tarmar-studio",
+                "https://github.com/smarks/tarmar-studio-private",
+            ],
+        )
+
+    def test_the_environment_overrides_both_and_trailing_slashes_drop(self):
+        self.assertEqual(
+            self.resolved_repository_urls(
+                {
+                    "REPOSITORY_PUBLIC_URL": "https://example.test/public/",
+                    "REPOSITORY_PRIVATE_URL": "https://example.test/private/",
+                }
+            ),
+            ["https://example.test/public", "https://example.test/private"],
+        )
+
+    def test_a_malformed_address_refuses_to_start(self):
+        for variable in ("REPOSITORY_PUBLIC_URL", "REPOSITORY_PRIVATE_URL"):
+            for bad in (
+                "github.com/smarks/tarmar-studio",
+                "ftp://github.com/smarks/tarmar-studio",
+                "https://",
+                "https://github.com/smarks/tarmar-studio?tab=readme",
+                "https://github.com/smarks/tarmar-studio#top",
+                "",
+            ):
+                with self.subTest(variable=variable, value=bad):
+                    env = self.subprocess_environment()
+                    for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG"):
+                        env.pop(key, None)
+                    env.update({**MailSettingsTest.PRODUCTION, variable: bad})
+                    result = subprocess.run(
+                        [sys.executable, "-c", "import tarmar_studio.settings"],
+                        cwd=BASE_DIR,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"{variable} is {bad!r}", result.stderr)
+                    self.assertIn("with no query or fragment", result.stderr)
+
+    def test_an_address_with_a_path_is_accepted(self):
+        self.assertEqual(
+            self.resolved_repository_urls(
+                {
+                    "REPOSITORY_PUBLIC_URL": "https://git.example.test/team/repo",
+                    "REPOSITORY_PRIVATE_URL": "http://git.example.test:3000/a/b/",
+                }
+            ),
+            ["https://git.example.test/team/repo", "http://git.example.test:3000/a/b"],
+        )
+
+    def test_env_example_documents_both_with_the_defaults(self):
+        documented = (BASE_DIR / ".env.example").read_text()
+        self.assertIn(
+            "# REPOSITORY_PUBLIC_URL=https://github.com/smarks/tarmar-studio\n",
+            documented,
+        )
+        self.assertIn(
+            "# REPOSITORY_PRIVATE_URL="
+            "https://github.com/smarks/tarmar-studio-private\n",
+            documented,
+        )

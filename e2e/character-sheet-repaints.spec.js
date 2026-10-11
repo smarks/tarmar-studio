@@ -2,6 +2,10 @@
  * The sheet repaints what a change moves, without a reload (issues #763,
  * #764, #765, #766, #792, #797, #798, #804, #805, #846, #851).
  *
+ * #903 adds the states a fatal run, a completion and a rename move: the
+ * living and dead controls, the "Play with the Game Master" slot, and the name
+ * in every place the sheet prints it.
+ *
  * Each case makes one change on the sheet and asserts on the page it was
  * made on: the server's response carries what changed and one painter in
  * character-edit.js writes it. A reload used to be the only way to see it.
@@ -9,6 +13,7 @@
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { pinDice } = require('./dice');
 
 /**
  * Seed a character for the test user and return its id.
@@ -56,8 +61,13 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#max-unencumbered')).toHaveText('—');
         await expect(page.locator('#recent-changes')).toBeHidden();
 
+        // Nowhere to take an incomplete character yet (#903).
+        const playForm = page.locator(`#play-with-gm-${characterId} form.play-with-gm`);
+        await expect(playForm).toHaveCount(0);
+
         await saveCell(page, 'strength', 14);
 
+        await expect(playForm).toBeVisible();
         await expect(page.getByRole('link', { name: 'Export PDF' })).toBeVisible();
         await expect(page.locator('#incomplete-marks')).toHaveCount(0);
         await expect(page.locator('#attack-incomplete')).toBeHidden();
@@ -281,6 +291,95 @@ test.describe('The sheet repaints without a reload', () => {
         await page.locator('.equipment-row[data-index="0"] [data-field="equipped"]').check();
         await expect(page.locator('#armor-stops')).toHaveText('3');
         await expect(page.locator('.equipment-row[data-index="0"] [data-field="in_pack"]')).not.toBeChecked();
+    });
+
+    test('a fatal run of years leaves the dead character\'s controls, then a rename names the death card (#903)', async ({ page }, testInfo) => {
+        // Every score 3 is a best modifier of -5 against the Campaigner's 9.
+        // The year's dice are pinned (issue #959): seed 3 rolls a d20 of 8,
+        // then 3d6 of [5, 5, 2], and 12 - 5 = 7 misses the 9, so the first
+        // year kills -- no longer a bet that twenty real years cannot all pass.
+        const characterId = seedCharacter(uniqueName('Doomed', testInfo),
+            'strength=3, dexterity=3, intelligence=3, wisdom=3, constitution=3, charisma=3');
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        const playForm = page.locator(`#play-with-gm-${characterId} form.play-with-gm`);
+        await expect(page.locator('#mark-dead-btn')).toBeVisible();
+        await expect(page.locator('#revive-btn')).toBeHidden();
+        await expect(page.locator('#magic-controls')).toBeVisible();
+        await expect(playForm).toBeVisible();
+        await page.evaluate(() => { window.notReloaded = true; });
+
+        await pinDice(page, '**/add-years/', 3);
+        await page.locator('#track-select').selectOption('campaigner');
+        await page.locator('#roll-years-btn').click();
+
+        const deathCard = page.locator('#workbench-card .death-card');
+        await expect(deathCard).toBeVisible();
+        const yearEntries = page.locator('#experience-log .term-entry');
+        await expect(yearEntries).toHaveCount(1);
+        await expect(yearEntries.first()).toContainText(
+            '(rolled 8) — survival 3d6 [5, 5, 2] - 5 = 7 vs 9: died'
+        );
+        await expect(page.locator('#mark-dead-btn')).toBeHidden();
+        await expect(page.locator('#revive-btn')).toBeVisible();
+        await expect(page.locator('#magic-controls')).toBeHidden();
+        await expect(playForm).toHaveCount(0);
+        expect(await page.evaluate(() => window.notReloaded)).toBe(true);
+
+        const newName = uniqueName('Late', testInfo);
+        await saveCell(page, 'name', newName);
+        await expect(deathCard.locator('h3')).toHaveText(`${newName} died`);
+        await expect(page).toHaveTitle(newName);
+        expect(await page.evaluate(() => window.notReloaded)).toBe(true);
+    });
+
+    test('a rename names the character in every place the sheet prints it (#903)', async ({ page }, testInfo) => {
+        // The player's own character, dying (the survival save offered) and
+        // held at a Game Master's table (the sessions holding it listed).
+        const output = readDjangoShell(`
+from django.contrib.auth import get_user_model
+from characters.models import Character
+from common.test_helpers import CHARACTER_DEFAULTS
+from gm.models import GMSession
+users = get_user_model().objects
+values = dict(CHARACTER_DEFAULTS, name='${uniqueName('Wounded', testInfo)}')
+character = Character.objects.create(user=users.get(username='${TEST_USER.username}'), **values)
+character.body_damage = character.body + (character.body + 1) // 2
+character.save()
+session = GMSession.objects.create(user=users.get(username='${TEST_ADMIN.username}'), name='Kell table')
+session.characters.add(character)
+print('CHARACTER', character.pk)
+`.trim().replace(/\n/g, '; '));
+        const match = output.match(/CHARACTER (\d+)/);
+        expect(match, `no character id in: ${output}`).not.toBeNull();
+        const characterId = match[1];
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await expect(page.locator('#roll-survival-save-btn')).toBeVisible();
+        await expect(page.locator('#sessions-holding')).toBeVisible();
+        await page.evaluate(() => { window.notReloaded = true; });
+
+        // A save that leaves the slot as it was leaves the element itself,
+        // with whatever the viewer had chosen in it (#903 review).
+        const slotSelector = `#play-with-gm-${characterId}`;
+        await page.evaluate((selector) => { document.querySelector(selector).kept = true; }, slotSelector);
+        await saveCell(page, 'height_roll', 5);
+        expect(await page.evaluate((selector) => document.querySelector(selector).kept, slotSelector)).toBe(true);
+
+        const newName = uniqueName('Renamed', testInfo);
+        await saveCell(page, 'name', newName);
+
+        await expect(page).toHaveTitle(newName);
+        await expect(page.locator('.breadcrumb [aria-current="page"]')).toHaveText(newName);
+        await expect(page.locator('#roll-survival-save-btn')).toHaveAttribute(
+            'data-confirm', new RegExp(`^Roll ${newName}'s survival save\\?`));
+        await expect(page.locator('#sessions-holding [data-name-chrome]').first()).toHaveText(newName);
+        // The slot's own label; the session picker's search box carries a
+        // second, screen-reader label beside it (#973).
+        await expect(page.locator(`#play-with-gm-${characterId} label[for="play-with-gm-session-${characterId}"]`))
+            .toHaveText(`Take ${newName} to`);
+        await expect(page.locator(`#play-with-gm-${characterId} form.play-with-gm`)).toBeVisible();
+        expect(await page.evaluate(() => window.notReloaded)).toBe(true);
     });
 
     test('a player cannot start a skill no rule names (#862)', async ({ page }, testInfo) => {

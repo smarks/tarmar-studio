@@ -262,7 +262,8 @@ class DeathCardTest(BaseTestCase):
             self.user, is_alive=False, death_cause="Eaten by a dragon"
         )
         html = self.client.get(f"/tarmar/characters/{character.pk}/").content.decode()
-        self.assertIn(f"{character.name} died", html)
+        # The name is marked for a rename to repaint it (issue #903).
+        self.assertIn(f"<span data-name-chrome>{character.name}</span> died", html)
         self.assertIn("Eaten by a dragon", html)
         self.assertIn("A DM can resurrect this character.", html)
         self.assertNotIn("Roll 1 year", html)

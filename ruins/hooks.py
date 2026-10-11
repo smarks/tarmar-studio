@@ -31,7 +31,11 @@ from reference.paths import GM_TOOLS_DIR
 HOOKS_MARKDOWN_PATH = GM_TOOLS_DIR / "low-experience-hooks.md"
 
 _INDEX_ROW_PATTERN = re.compile(r"^\[(?P<title>[^\]]+)\]\(#(?P<anchor>[^)]+)\)$")
-_LEVEL_BAND_PATTERN = re.compile(r"^(?P<low>\d+)(?:\s*[–-]\s*(?P<high>\d+))?$")
+# Bands are written with a hyphen, an en dash or the minus sign (U+2212), as
+# the dice-table ranges in ruins.tables are.
+_LEVEL_BAND_PATTERN = re.compile(
+    r"^(?P<low>\d+)(?:\s*[-\u2013\u2212]\s*(?P<high>\d+))?$"
+)
 _MARKDOWN_LINK_PATTERN = re.compile(r"\[(?P<label>[^\]]+)\]\((?P<url>[^)]+)\)")
 _REGION_MARKER = "**Region:**"
 _LEVELS_MARKER = "**Levels:**"

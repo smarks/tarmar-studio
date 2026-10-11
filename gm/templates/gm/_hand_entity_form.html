@@ -10,11 +10,11 @@ Every field is sent as it stands, so a wrong detail can be cleared.
     <form class="gm-hand-form" data-url="{{ entities_url }}" data-change="save">
         <input type="hidden" name="kind" value="{{ kind }}">
         {% if entity %}<input type="hidden" name="entity_id" value="{{ entity.pk }}">{% endif %}
-        <label>Name <input type="text" name="name" value="{{ entity.name|default:'' }}" maxlength="80" required></label>
-        <label>Where <input type="text" name="where" value="{{ entity.where|default:'' }}" maxlength="200"></label>
-        {% if kind == "person" %}<label>Wants <input type="text" name="wants" value="{{ entity.wants|default:'' }}" maxlength="200"></label>{% endif %}
-        <label>{% if kind == "person" %}Attitude{% else %}State{% endif %} <input type="text" name="condition" value="{{ entity.condition|default:'' }}" maxlength="200"></label>
-        <label>Notes <input type="text" name="notes" value="{{ entity.notes|default:'' }}" maxlength="200"></label>
+        <label>Name <input type="text" name="name" value="{{ entity.name|default:'' }}" maxlength="{{ gm_text_limits.entity_name }}" required></label>
+        <label>Where <input type="text" name="where" value="{{ entity.where|default:'' }}" maxlength="{{ gm_text_limits.entity_where }}"></label>
+        {% if kind == "person" %}<label>Wants <input type="text" name="wants" value="{{ entity.wants|default:'' }}" maxlength="{{ gm_text_limits.entity_wants }}"></label>{% endif %}
+        <label>{% if kind == "person" %}Attitude{% else %}State{% endif %} <input type="text" name="condition" value="{{ entity.condition|default:'' }}" maxlength="{{ gm_text_limits.entity_condition }}"></label>
+        <label>Notes <input type="text" name="notes" value="{{ entity.notes|default:'' }}" maxlength="{{ gm_text_limits.entity_notes }}"></label>
         <button type="submit" class="btn btn-sm">{% if entity %}Save{% else %}Record{% endif %}</button>
     </form>
 </details>

@@ -253,10 +253,19 @@ class GoldenSeedsStillFinishTest(BaseTestCase):
         # (The first draft of the rule, armour before weapon, dealt cloth and
         # the mace and ended at 32; the two first part at turn 8, Harar
         # Redfen striking Yaria with ATTACK where he struck Ulfan in close.)
+        #
+        # Re-pinned for tarmar-engine v0.9.10 (#867, #819, #866; engine #19,
+        # #20, #36). No decision and no die changed: every choice, roll and
+        # line of the 824 is as it was, and Yaria still wins at 37. Three
+        # forecast lines changed wording only, each a DISENGAGE whose forecast
+        # now names the hex the engine expects to step to. The first is turn
+        # 28's: "Dorra Redfen chooses DISENGAGE (n): Step away toward (1, 4)
+        # instead of attacking". Nobody in this seed enters hand-to-hand, so
+        # the HTH table (engine #19) never comes up.
         self.assertEqual(battle.turn_number, 37)
         self.assertEqual(
             stream_hash(battle),
-            "86f0cf45f8450d6642c3f97bf91b11a1dfef8be69dc80ff30280e9d7867ff1e6",
+            "4bdec802864787e417b4dd397edad94519172929bdd119f744f963352cb83f4c",
         )
 
     def test_classic_golden_seed_unchanged(self):
@@ -267,13 +276,29 @@ class GoldenSeedsStillFinishTest(BaseTestCase):
         battle = advance_until_over(battle, cap=300)
         self.assertEqual(battle.status, Battle.STATUS_FINISHED)
         self.assertEqual(battle.turn_number, 37)
-        # Every event after the crossing note is exactly as it was on
-        # tarmar-engine 0.9.4 (this hash is unchanged since then): the classic
-        # profile plays the seed the same way.
+        # Every event after the crossing note plays as it did on
+        # tarmar-engine 0.9.4: the classic profile plays the seed the same way.
+        # Re-pinned for #909, which changed wording only: 170 of the 294
+        # lines named a figure "Yaria Hawkridge (2)" and the win "The 2 hold
+        # the field", the 2 being a BattleCombatant row pk. Every turn, phase,
+        # sequence, type and actor is unchanged, and each changed message is
+        # the old one with " (<pk>)" dropped and the win given the figure's
+        # name. The stream no longer depends on which row ids the test
+        # database hands out.
         lines = ["|".join(str(field) for field in row) for row in event_stream(battle)]
         self.assertEqual(
             hashlib.sha256("\n".join(lines[1:]).encode()).hexdigest(),
-            "e742d602e931fa9ae65b7b708a3a581662d4e4cbdfda2d4b1652e64f8e12fb8d",
+            "420517451bfcdd92bd081e6eda984c11db8729cca5f5eb6e6fb16a500b4e2751",
+        )
+        # The ending, checked as text and not only hashed (#909): the engine's
+        # victory line names the winning figure, then the app's own.
+        self.assertEqual(
+            lines[-3:],
+            [
+                "37|0|291|info||🏆 Yaria Hawkridge holds the field — victory!",
+                "37|0|292|info||— Turn 38 —",
+                "37|6|293|info|Yaria Hawkridge|Yaria Hawkridge stands victorious",
+            ],
         )
         # The crossing note alone changed, for #867: the brawler now brings
         # a dagger the classic table has by name, so it is no longer among
@@ -285,7 +310,7 @@ class GoldenSeedsStillFinishTest(BaseTestCase):
         )
         self.assertEqual(
             stream_hash(battle),
-            "547d04249ba0f9985658e4b1f0d3754d69da32815245bc7cbc8ceeb7bd3439ce",
+            "7d4f6ae6e5477d315c240fe6e9eb453fea983b44cf288d23c6a0bc501cbaf2cb",
         )
 
 

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from common.rolling import Roller, RollRecord, parse_dice_specification
+from common.rolling import Roller, RollRecord, parse_dice_specification, pinned_dice
 
 
 class ParseDiceSpecificationTest(SimpleTestCase):
@@ -123,3 +123,35 @@ class RollerTest(SimpleTestCase):
         with patch.object(random, "randint", side_effect=AssertionError):
             record = Roller(seed=11).roll("2d6", purpose="check")
         self.assertEqual(record.faces, expected)
+
+
+class PinnedDiceTest(SimpleTestCase):
+    """``pinned_dice``: the browser tests' seed for one request (issue #959)."""
+
+    def test_an_unseeded_roll_inside_the_block_draws_from_the_seed(self):
+        seeded = random.Random(3)
+        expected = tuple(seeded.randint(1, 6) for _ in range(3))
+        with pinned_dice(3):
+            record = Roller().roll("3d6", purpose="survival")
+        self.assertEqual(record.faces, expected)
+
+    def test_each_block_starts_the_seed_afresh(self):
+        with pinned_dice(3):
+            first = Roller().roll("3d6", purpose="survival").faces
+        with pinned_dice(3):
+            second = Roller().roll("3d6", purpose="survival").faces
+        self.assertEqual(first, second)
+
+    def test_a_roller_with_its_own_seed_keeps_it(self):
+        expected = Roller(seed=11).roll("2d6", purpose="check").faces
+        with pinned_dice(3):
+            record = Roller(seed=11).roll("2d6", purpose="check")
+        self.assertEqual(record.faces, expected)
+
+    def test_the_pin_ends_with_the_block_even_when_it_raises(self):
+        with self.assertRaises(RuntimeError):
+            with pinned_dice(3):
+                raise RuntimeError("the view failed")
+        with patch.object(random, "randint", side_effect=[4, 5]):
+            record = Roller().roll("2d6", purpose="check")
+        self.assertEqual(record.faces, (4, 5))

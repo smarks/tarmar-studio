@@ -733,12 +733,20 @@ class EquipmentViewsTest(BaseTestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_add_custom_item_weight_too_high_fails(self):
-        """Custom item weight cannot exceed 1000 lbs."""
+        """Custom item weight cannot exceed MAX_EQUIPMENT_WEIGHT_LBS (#938)."""
+        from characters.constants import MAX_EQUIPMENT_WEIGHT_LBS
+
         response = self.post_json(
             f"/tarmar/characters/{self.character.pk}/equipment/add/",
-            {"is_custom": True, "name": "Test", "category": "gear", "weight": 1001},
+            {
+                "is_custom": True,
+                "name": "Test",
+                "category": "gear",
+                "weight": MAX_EQUIPMENT_WEIGHT_LBS + 1,
+            },
         )
         self.assertEqual(response.status_code, 400)
+        self.assertIn(str(MAX_EQUIPMENT_WEIGHT_LBS), response.json()["error"])
 
     def test_add_custom_item_invalid_cost_fails(self):
         """Custom item cost must be valid."""
@@ -956,10 +964,12 @@ class EquipmentViewsTest(BaseTestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_add_catalog_item_quantity_too_high_fails(self):
-        """Catalog item quantity cannot exceed 999."""
+        """Catalog item quantity cannot exceed MAX_EQUIPMENT_QUANTITY (#938)."""
+        from characters.constants import MAX_EQUIPMENT_QUANTITY
+
         response = self.post_json(
             f"/tarmar/characters/{self.character.pk}/equipment/add/",
-            {"item_id": "torch", "quantity": 1000},
+            {"item_id": "torch", "quantity": MAX_EQUIPMENT_QUANTITY + 1},
         )
         self.assertEqual(response.status_code, 400)
 

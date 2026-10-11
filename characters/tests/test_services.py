@@ -185,8 +185,25 @@ class LockedCallsTest(BaseTestCase):
         services.add_equipment(self.character.pk, "Rope", 1)
         result = services.add_equipment(self.character.pk, "rope", 2)
 
-        self.assertEqual(result.character.equipment, [{"name": "Rope", "quantity": 3}])
-        self.assertEqual(result.note, "now carrying 3 × Rope")
+        # The sheet's custom item (#927), and a Game Master's gift says so.
+        self.assertEqual(
+            result.character.equipment,
+            [
+                {
+                    "item_id": "custom",
+                    "name": "Rope",
+                    "category": "gear",
+                    "weight": 0.0,
+                    "cost": 0.0,
+                    "quantity": 3,
+                    "in_pack": False,
+                    "notes": "",
+                }
+            ],
+        )
+        self.assertEqual(
+            result.note, "now carrying 3 × Rope; 2 × Rope given by a Game Master"
+        )
 
     def test_add_equipment_refuses_nothing(self):
         with self.assertRaises(CharacterChangeError):
@@ -195,18 +212,18 @@ class LockedCallsTest(BaseTestCase):
     def test_allocate_skill_points_spends_free_points(self):
         Character.objects.filter(pk=self.character.pk).update(free_skill_points=3)
 
-        result = services.allocate_skill_points(self.character.pk, "sword", 2)
+        result = services.allocate_skill_points(self.character.pk, "broadsword", 2)
 
         self.assertEqual(result.character.free_skill_points, 1)
-        self.assertEqual(result.character.skills[normalize_skill_name("sword")], 2)
+        self.assertEqual(result.character.skills[normalize_skill_name("broadsword")], 2)
 
     def test_a_player_cannot_overspend(self):
         with self.assertRaisesMessage(CharacterChangeError, "free skill point(s)"):
-            services.allocate_skill_points(self.character.pk, "sword", 2)
+            services.allocate_skill_points(self.character.pk, "broadsword", 2)
 
     def test_a_game_master_overspend_is_granted(self):
         result = services.allocate_skill_points(
-            self.character.pk, "sword", 2, is_game_master=True
+            self.character.pk, "broadsword", 2, is_game_master=True
         )
 
         self.assertEqual(result.granted, 2)
@@ -214,16 +231,16 @@ class LockedCallsTest(BaseTestCase):
 
     def test_a_skill_purchase_is_at_least_one_point(self):
         with self.assertRaises(CharacterChangeError):
-            services.allocate_skill_points(self.character.pk, "sword", 0)
+            services.allocate_skill_points(self.character.pk, "broadsword", 0)
 
     def test_a_skill_cannot_pass_the_storage_ceiling(self):
         Character.objects.filter(pk=self.character.pk).update(
             free_skill_points=5,
-            skills={normalize_skill_name("sword"): services.MAX_SKILL_POINTS},
+            skills={normalize_skill_name("broadsword"): services.MAX_SKILL_POINTS},
         )
 
         with self.assertRaisesMessage(CharacterChangeError, "maximum storable"):
-            services.allocate_skill_points(self.character.pk, "sword", 1)
+            services.allocate_skill_points(self.character.pk, "broadsword", 1)
 
     @SURVIVE
     def test_add_experience_years_plays_the_run(self, _survive):
@@ -362,9 +379,9 @@ class RecordAndRollAttributesTest(BaseTestCase):
         self.character.free_skill_points = 2
         self.character.save(update_fields=["free_skill_points"])
 
-        note, _granted = services.apply_skill_points(self.character, "Sword", 1)
+        note, _granted = services.apply_skill_points(self.character, "Broadsword", 1)
 
-        self.assertIn("sword is now", note.casefold())
+        self.assertIn("broadsword is now", note.casefold())
         self.assertIn("1 free skill point left", note)
         self.assertNotIn("pts)", note)
 
@@ -372,7 +389,7 @@ class RecordAndRollAttributesTest(BaseTestCase):
         self.character.free_skill_points = 3
         self.character.save(update_fields=["free_skill_points"])
 
-        note, _granted = services.apply_skill_points(self.character, "Sword", 1)
+        note, _granted = services.apply_skill_points(self.character, "Broadsword", 1)
 
         self.assertIn("2 free skill points left", note)
 

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Change email address{% endblock %}
+
+{% block content %}
+<h1>Change email address</h1>
+
+{% comment %}Issue #931: the address is where a password-reset link goes, so
+changing it takes the password, and the new address must answer a link before
+it replaces the old one.{% endcomment %}
+<p class="account-note" id="email-change-explained">The address on your account is where a password-reset link is sent, so it changes only once you have proved the new one. We will send a link to the new address; your address stays {% if user.email %}<strong>{{ user.email }}</strong>{% else %}empty{% endif %} until that link is opened. {% if user.email %}We will also tell {{ user.email }} that a change was asked for.{% endif %}</p>
+
+{% include "accounts/partials/form_errors.html" %}
+
+<form method="post" id="email-change-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="id_new_email">New email address</label>
+        <input type="email" name="new_email" id="id_new_email" maxlength="{{ account_text_limits.email }}" autocomplete="email" required value="{{ form.new_email.value|default:'' }}">
+        {% include "_field_error.html" with field=form.new_email %}
+    </div>
+
+    <div class="field">
+        <label for="id_current_password">Your password</label>
+        <input type="password" name="current_password" id="id_current_password" autocomplete="current-password" required>
+        {% include "_field_error.html" with field=form.current_password %}
+    </div>
+
+    <button type="submit">Send the confirmation link</button>
+</form>
+
+<div class="links">
+    <a href="{% url 'profile' %}">Back to your profile</a>
+</div>
+{% endblock %}

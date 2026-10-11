@@ -7,27 +7,52 @@
  * among the active ones afterwards.
  */
 
-const { test, expect, loginAs, TEST_USER } = require('./fixtures');
-const { readDjangoShell } = require('./django');
+const { test, expect, loginAs } = require('./fixtures');
+const { readDjangoShell, runDjangoShell } = require('./django');
+const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 
-function seedDeletedCharacter(name) {
+// The player's own account, named for the worker and the repeat (issue #889).
+// Not the shared testuser: the list pages at 50 with deleted rows last, and a
+// single-worker run has every battle spec give testuser characters first, so
+// its deleted rows fell to page 2 and this test found nothing (issue #949).
+// Other accounts' public characters still list ahead of the deleted row; few
+// specs make one, and none before this file in a single-worker run.
+const restorerFor = (testInfo) => specAccount('restorer', 'restorer-pass-949', testInfo);
+
+/**
+ * Create the player's account afresh with one deleted character.
+ * @param {{username: string, password: string}} player
+ * @param {string} name
+ * @returns {string} the character's id
+ */
+function seedDeletedCharacter(player, name) {
     const output = readDjangoShell(`
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from characters.models import Character
-user = get_user_model().objects.get(username='${TEST_USER.username}')
-character = Character.objects.create(user=user, name='${name}', strength=10, dexterity=10, intelligence=10, wisdom=10, constitution=10, charisma=10, appearance_roll='3', height_roll='4', weight_roll='3', fatigue_roll=7, is_deleted=True, deleted_at=timezone.now())
+from common.test_helpers import create_character
+User = get_user_model()
+User.objects.filter(username=${JSON.stringify(player.username)}).delete()
+user = User.objects.create_user(username=${JSON.stringify(player.username)}, password=${JSON.stringify(player.password)})
+character = create_character(user, name=${JSON.stringify(name)})
+character.is_deleted = True
+character.deleted_at = timezone.now()
+character.save()
 print('CHARACTER', character.pk)
-`.trim().replace(/\n/g, '; '));
+`);
     const match = output.match(/CHARACTER (\d+)/);
     expect(match, `no character id in: ${output}`).not.toBeNull();
     return match[1];
 }
 
-test('a player restores their own deleted character from the list', async ({ page }) => {
+test.afterAll(({}, testInfo) => {
+    runDjangoShell(deleteSpecAccountsScript([restorerFor(testInfo)]));
+});
+
+test('a player restores their own deleted character from the list', async ({ page }, testInfo) => {
+    const player = restorerFor(testInfo);
     const name = `Restore Own ${Date.now()}`;
-    const characterId = seedDeletedCharacter(name);
-    await loginAs(page, TEST_USER);
+    const characterId = seedDeletedCharacter(player, name);
+    await loginAs(page, player);
 
     await page.goto('/tarmar/characters/?show_deleted=1');
     const row = page.locator('tr', { hasText: name });

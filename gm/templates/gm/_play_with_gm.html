@@ -9,6 +9,10 @@ session it answers with. The form is an endpoint that speaks JSON only, so it
 renders hidden and the script reveals it: without the script there is no
 control to press rather than one that silently reloads the page. A refusal is
 written into the form's own error line and stays until the next attempt.
+
+The sheet's session choice is a searchable picker (issue #973,
+gm.pickers.play_session_picker): one page of the viewer's sessions, and a
+search box with no name, so the form posts only the select's choice.
 {% endcomment %}
 <div class="play-with-gm-slot" id="play-with-gm-{{ character.pk }}">
 {% if offered %}
@@ -18,12 +22,7 @@ written into the form's own error line and stays until the next attempt.
       data-chat-url="{% url 'gm:chat' %}" hidden>
     {% if choose_session %}
     <label for="play-with-gm-session-{{ character.pk }}">Take {{ character.name }} to</label>
-    <select id="play-with-gm-session-{{ character.pk }}" name="session_id">
-        <option value="">A new session</option>
-        {% for session in sessions %}
-        <option value="{{ session.pk }}">{{ session.name }}{% if session.holds %} (already playing here){% endif %}</option>
-        {% endfor %}
-    </select>
+    {% include "_picker.html" with picker=picker %}
     <button type="submit" class="button">Play with the Game Master</button>
     {% else %}
     <button type="submit" class="button" aria-label="Play {{ character.name }} with the Game Master">Play</button>

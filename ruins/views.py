@@ -8,14 +8,17 @@ specified URL. Errors render back into the same form with the entered values
 kept (the #192 no-dead-ends standard); nothing transient, no modals (#190).
 """
 
+import logging
 from urllib.parse import urlencode
 
+from django.http import Http404
 from django.shortcuts import redirect
 from django.urls import reverse
-from django.views.generic import TemplateView
+from django.views.generic import TemplateView, View
 
-from common.breadcrumbs import BreadcrumbMixin
+from common.breadcrumbs import BreadcrumbMixin, step, trail
 from common.mixins import DMToolsAccessMixin
+from common.pickers import asked_for, picker_body_response
 from common.seeds import InvalidSeed, parse_seed, roll_seed
 
 from .generation import DEFAULT_ROOMS, MAX_ROOMS, MIN_ROOMS, generate_ruin
@@ -25,6 +28,16 @@ from .hook_generation import (
     matched_level,
     published_levels,
 )
+from .pickers import hook_party_picker
+from .table_rolls import (
+    TABLE_PAGE_SLUGS,
+    TablePage,
+    TablePageNotInCanon,
+    load_table_page,
+    roll_table_page,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class GeneratorFormView(BreadcrumbMixin, DMToolsAccessMixin, TemplateView):
@@ -96,17 +109,15 @@ class GenerateHookView(GeneratorFormView):
     template_name = "ruins/hook_generator.html"
 
     def get(self, request, *args, **kwargs):
-        from parties.models import Party
+        from parties.models import Party, disbanded_refusal
 
         raw_party = request.GET.get("party", "").strip()
         raw_level = request.GET.get("level", "").strip()
         raw_seed = request.GET.get("seed", "").strip()
-        parties = [
-            {"pk": party.pk, "name": party.name, "summary": party.experience_summary}
-            for party in Party.objects.all().order_by("name")
-        ]
         form_state = {
-            "parties": parties,
+            # A page of parties, newest first, with a search that reaches
+            # every page; the chosen one stays selectable (#864).
+            "party_picker": hook_party_picker(raw_party),
             "levels": published_levels(),
             "form_party": raw_party,
             "form_level": raw_level,
@@ -121,6 +132,10 @@ class GenerateHookView(GeneratorFormView):
                 party = Party.objects.get(pk=int(raw_party))
             except (ValueError, Party.DoesNotExist):
                 return self.render_error("That party does not exist.", form_state)
+            if party.is_deleted:
+                # The picker offers no disbanded party; one named in the
+                # address is refused and says why (#971).
+                return self.render_error(f"{disbanded_refusal(party)}.", form_state)
             summary = party.experience_summary
             if summary is None:
                 return self.render_error(
@@ -177,3 +192,73 @@ class GenerateHookView(GeneratorFormView):
             **form_state,
         )
         return self.render_to_response(context)
+
+
+class HookPartyPickerView(DMToolsAccessMixin, View):
+    """One page of the hook generator's party picker (issue #864).
+
+    What ``picker.js`` asks for as a Game Master types or turns a page;
+    gated as the generator is. ``?party=`` keeps the chosen party selected.
+    """
+
+    def get(self, request, *args, **kwargs):
+        raw_party = request.GET.get("party", "").strip()
+        query, page_number = asked_for(request)
+        picker = hook_party_picker(raw_party, query=query, page_number=page_number)
+        return picker_body_response(request, picker, {"form_party": raw_party})
+
+
+class RollTablePageView(GeneratorFormView):
+    """DM-gated roller for one GM-tools table page (issue #809).
+
+    Same state-driven shape as the ruin generator and the seed-in-URL
+    semantics of the encounter generator: the URL carries the seed, so the
+    rolls it shows can be reloaded, shared and reproduced. A request without
+    a seed gets one rolled and is redirected to the seeded URL; a seed that
+    does not parse renders back into the form with the value kept. Only the
+    pages in :data:`ruins.table_rolls.TABLE_PAGE_SLUGS` exist here; any other
+    slug is a 404.
+    """
+
+    # No menu entry marks this value, so the Reference link stays live here
+    # for the walk back (the breadcrumb also links the table page).
+    active_page = "table_rolls"
+    template_name = "ruins/table_roller.html"
+
+    def get_breadcrumb(self, context: dict) -> list[dict[str, str]]:
+        """Reference › the table page › Roll."""
+        page: TablePage = context["page"]
+        return trail(
+            step("Reference", reverse("reference:index")),
+            step(page.title, reverse("reference:view", args=[page.reference_path])),
+            step("Roll"),
+        )
+
+    def get(self, request, *args, **kwargs):
+        slug = kwargs["page"]
+        if slug not in TABLE_PAGE_SLUGS:
+            raise Http404(f"No table roller for “{slug}”")
+        raw_seed = request.GET.get("seed", "").strip()
+        try:
+            page = load_table_page(slug)
+        except TablePageNotInCanon as missing:
+            # A canon that dropped or never had the page: the roller has
+            # nothing to roll, which is a missing page, not a server fault.
+            logger.warning("Table roller for “%s”: %s", slug, missing)
+            raise Http404(f"No table roller for “{slug}”") from missing
+        form_state = {"page": page, "form_seed": raw_seed}
+        try:
+            seed = parse_seed(raw_seed)
+        except InvalidSeed as invalid:
+            return self.render_error(str(invalid), form_state)
+        if seed is None:
+            # No seed given: roll one and put it in the URL, so the page the
+            # DM lands on names the exact rolls it shows.
+            query = urlencode({"seed": roll_seed()})
+            return redirect(f"{reverse('table_rolls:roll', args=[slug])}?{query}")
+        rolled = roll_table_page(page, seed=seed)
+        # The seed shows beside the result; the box starts empty so that
+        # "Roll again" rolls a fresh seed rather than repeating this one.
+        return self.render_to_response(
+            self.get_context_data(rolled=rolled, page=page, form_seed="")
+        )

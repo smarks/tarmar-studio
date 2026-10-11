@@ -457,6 +457,11 @@ input[readonly] {
 .links a {
     color: var(--colour-ink);
 }
+/* Explanatory paragraphs on the account pages (password reset, #929). */
+.account-note {
+    margin-bottom: 1rem;
+    line-height: 1.6;
+}
 /* Table styles */
 table {
     border-collapse: collapse;
@@ -787,17 +792,53 @@ hr {
     font-size: 0.95rem;
 }
 .pagination a,
+.pagination button,
 .pagination .page-current {
     padding: 0.3rem 0.6rem;
     border-radius: 3px;
     text-decoration: none;
 }
-.pagination a {
+/* A picker's pager turns pages with buttons, not links (issue #864): the
+   page it turns to is fetched into the picker, not navigated to. */
+.pagination a,
+.pagination button {
     background: var(--colour-surface-tint);
     color: var(--colour-ink);
 }
-.pagination a:hover {
+.pagination button {
+    border: none;
+    font: inherit;
+    cursor: pointer;
+}
+.pagination button:disabled {
+    color: var(--colour-ink-muted);
+    cursor: default;
+}
+.pagination a:hover,
+.pagination button:not(:disabled):hover {
     background: var(--colour-border-card);
+}
+
+/* A searchable picker (templates/_picker.html, issue #864): the box that
+   asks the server, the rows it answers with, and how many matched. Every
+   picker shares these, so the shelves and the selects read alike. */
+.picker-search {
+    width: 100%;
+    max-width: 24rem;
+    font: inherit;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.4rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 4px;
+}
+.picker-status {
+    margin: 0.3rem 0;
+    color: var(--colour-ink-muted);
+    font-size: 0.9em;
+}
+.picker .pagination {
+    margin-top: 0.3rem;
+    justify-content: flex-start;
 }
 /* The teal darkened in #732 so white on this fill clears 4.5:1; the chip is
    15.2px regular, which is not the large text WCAG allows 3:1 for. */
@@ -1049,6 +1090,17 @@ footer .footer-content {
     max-width: 100%;
     min-width: 0;
     flex: 0 1 18rem;
+}
+/* Since #973 the select sits in a searchable picker, and the picker is the
+   flex child: it shrinks as the select did, or a long session name widens
+   it past a phone's width (#985). */
+.play-with-gm .picker {
+    max-width: 100%;
+    min-width: 0;
+    flex: 0 1 18rem;
+}
+.play-with-gm .picker select {
+    width: 100%;
 }
 .play-with-gm .button {
     margin: 0;

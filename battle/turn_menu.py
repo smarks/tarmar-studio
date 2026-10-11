@@ -44,7 +44,7 @@ import itertools
 import re
 from dataclasses import dataclass, replace
 
-from tarmar_engine import actions, combat_math
+from tarmar_engine import actions, combat_math, movement
 from tarmar_engine.classic import ai as classic_ai
 from tarmar_engine.classic import policy as classic_policy
 from tarmar_engine.classic.data import DamageDice, WeaponKind
@@ -110,10 +110,13 @@ def _legal_targets(
             enemy for enemy in enemies if combat_math.figures_adjacent(actor, enemy)
         ]
     if option == "b":
+        # The reach the policy prices a charge by, through the engine's one
+        # jog rule (a barred jog charges at the walk, tarmar-engine #17).
+        reach = movement.gait_allowance(actor, "jog") + 1
         return [
             enemy
             for enemy in enemies
-            if combat_math.figure_distance(actor, enemy) <= actor.move_jog + 1
+            if combat_math.figure_distance(actor, enemy) <= reach
         ]
     if option == "f":
         return list(enemies)
@@ -267,6 +270,12 @@ def _weapon_phrase(actor: CombatantState) -> str:
     return f"the {actor.weapon.name}" if actor.weapon.item_id else "bare hands"
 
 
+def _close_weapon_phrase(actor: CombatantState) -> str:
+    """What an HTH strike (t) is made with: "Bare hands or dagger", so a
+    sword in hand strikes with bare hands (tarmar-engine #19)."""
+    return f"the {actor.weapon.name}" if actor.weapon.hth_usable else "bare hands"
+
+
 def _with_odds(sentence: str, rationale: str) -> str:
     odds = _odds(rationale)
     return f"{sentence}: {odds}" if odds else sentence
@@ -302,7 +311,8 @@ def _plain_line(
         cost = f"{SPRINT_FATIGUE_COST} Fatigue"
     elif option == "b":
         plain = _with_odds(
-            f"Charge {aimed}: jog up to {actor.move_jog} hexes and attack "
+            f"Charge {aimed}: jog up to {movement.gait_allowance(actor, 'jog')} "
+            f"hexes and attack "
             f"with {weapon}",
             rationale,
         )
@@ -311,7 +321,10 @@ def _plain_line(
         if aimed:
             plain += f", jogging toward {aimed}"
     elif option == "d":
-        plain = "Drop prone where you stand"
+        plain = (
+            "Drop prone where you stand, or first jog up to "
+            f"{movement.gait_allowance(actor, 'jog')} hexes to a hex you pick"
+        )
     elif option == "e":
         spares = [spare for spare in actor.spare_weapons if spare.item_id]
         choice = best_weapon(actor, spares)
@@ -355,9 +368,16 @@ def _plain_line(
         if actor.weapon.item_id:
             cost = f"the {actor.weapon.name} is dropped"
     elif option == "t":
-        plain = _with_odds(f"Strike {aimed} in close with {weapon}", rationale)
+        plain = _with_odds(
+            f"Strike {aimed} in close with {_close_weapon_phrase(actor)}", rationale
+        )
     elif option == "u":
         plain = "Try to draw your dagger: 3d6 at or under your DEX"
+    elif option == "v" and actor.grappled_by is None:
+        plain = (
+            "Break away from hand-to-hand: 4d6 at or under your DEX, then stand "
+            "in a hex next to you"
+        )
     elif option == "v":
         plain = f"Struggle free of {aimed}: 4d6 at or under your DEX"
     elif option == "hold_still":
@@ -394,6 +414,10 @@ class DescribedCandidate(Candidate):
             written (a Tarmar figure's option, or a classic one read from
             its ``GameState``, #890); otherwise it carries the AI's mark
             alone.
+        destinations: The hexes this option may place the figure at, from
+            ``tarmar_engine.movement.legal_destinations`` on the live state
+            (#819, #866); empty for an option that takes none and for a
+            classic figure's.
     """
 
     ai_choice: bool = False
@@ -401,6 +425,7 @@ class DescribedCandidate(Candidate):
     cost: str = ""
     target_name: str = ""
     described: bool = False
+    destinations: tuple[tuple[int, int], ...] = ()
 
     def to_payload(self) -> dict:
         payload = super().to_payload()
@@ -410,6 +435,26 @@ class DescribedCandidate(Candidate):
             payload["cost"] = self.cost
             payload["target_name"] = self.target_name
         return payload
+
+    def menu_payload(self) -> dict:
+        """The payload the pending menu stores: :meth:`to_payload` plus the
+        hexes this option may place the figure at (#819, #866), for the
+        arena's picker and for checking a submitted hex. Only an option that
+        takes one carries the key, and the decision the log records does
+        not: the hex chosen is on its ``chosen``, and the board's every legal
+        hex would swell each manual decision by hundreds of entries."""
+        payload = self.to_payload()
+        if self.destinations:
+            payload["destinations"] = [list(cell) for cell in self.destinations]
+        return payload
+
+
+def menu_payload(candidate: Candidate) -> dict:
+    """A pending menu entry: a described option's :meth:`DescribedCandidate.
+    menu_payload`, any other candidate's own payload."""
+    if isinstance(candidate, DescribedCandidate):
+        return candidate.menu_payload()
+    return candidate.to_payload()
 
 
 def _base_fields(candidate: Candidate) -> dict:
@@ -421,6 +466,7 @@ def _base_fields(candidate: Candidate) -> dict:
         "rationale": candidate.rationale,
         "target_id": candidate.target_id,
         "spell_key": candidate.spell_key,
+        "destination": candidate.destination,
     }
 
 
@@ -448,6 +494,12 @@ def describe(
         cost=cost,
         target_name=target.name if target is not None else "",
         described=True,
+        # Every hex the engine would take for this option, from the engine's
+        # own rule (tarmar_engine.movement), so the picker offers nothing the
+        # engine refuses on this board.
+        destinations=tuple(
+            sorted(movement.legal_destinations(state, actor, candidate.letter))
+        ),
     )
 
 

@@ -11,7 +11,9 @@
  * and this reveals it: a browser without the script shows no control rather
  * than one that silently reloads the page. A repaint that swaps in a fresh
  * slot (gm/_play_with_gm.html, id "play-with-gm-<character id>") calls
- * window.revealPlayWithGameMaster on it.
+ * window.revealPlayWithGameMaster on it, which also wires the slot's session
+ * picker (issue #973): a search box that asks the server for a page of the
+ * viewer's sessions, so the select holds one page rather than every session.
  *
  * A refusal or a lost request is written into the form's own error line and
  * stays there until the next attempt: nothing here appears or goes away on a
@@ -93,13 +95,17 @@
 
     /**
      * Show the play-with-gm forms under `container`, now that the script
-     * that drives them is here.
+     * that drives them is here, and wire the sheet's session picker in them
+     * (issue #973; picker.js, which the sheet loads beside this).
      * @param {ParentNode} container - The document, or a repainted slot.
      */
     function revealPlayWithGameMaster(container) {
         container.querySelectorAll('form.play-with-gm').forEach((form) => {
             form.hidden = false;
         });
+        if (root.picker) {
+            root.picker.initPickers(container);
+        }
     }
 
     /**

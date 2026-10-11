@@ -1,0 +1,41 @@
+# The GitHub Actions runner for smarks/tarmar-studio-private on datahorde, in
+# a container, one job per container (issue #964). install.sh copies this to
+# /etc/systemd/system/tarmar-ci-runner.service.
+#
+# Before each start: the firewall is (re)applied and a one-job registration is
+# minted (jit-config.sh). The container takes one job and exits; --rm deletes
+# it and Restart=always starts the next. Nothing survives a job.
+#
+# What the container is denied, deliberately: the Docker socket (root on the
+# host); every host path (no mounts at all); the host's network (it joins its
+# own bridge, which firewall.sh walls off from the host and the private
+# networks); IPv6; Linux capabilities; privilege escalation. It runs as the
+# image's non-root account. CPU, memory (no swap beyond it), processes and
+# block I/O weight are capped so a job cannot starve the site.
+
+[Unit]
+Description=GitHub Actions runner for tarmar-studio CI (one-job container)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+# A container that fails at once would otherwise restart every few seconds,
+# minting and deleting a registration each time. Twenty starts in five
+# minutes is far above a normal run's rate; past it the unit stops until
+# `systemctl reset-failed tarmar-ci-runner && systemctl start tarmar-ci-runner`.
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Restart=always
+RestartSec=5
+# jit-config.sh waits a minute before failing; this covers that wait.
+TimeoutStartSec=300
+ExecStartPre=/usr/local/lib/tarmar-ci-runner/firewall.sh
+ExecStartPre=/usr/local/lib/tarmar-ci-runner/jit-config.sh
+ExecStartPre=-/usr/bin/docker rm --force tarmar-ci-runner
+ExecStart=/usr/bin/docker run --rm --name tarmar-ci-runner --network tarmar-ci --sysctl net.ipv6.conf.all.disable_ipv6=1 --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096 --cpus 4 --memory 16g --memory-swap 16g --blkio-weight 100 --env-file /run/tarmar-ci-runner/jit.env tarmar-ci-runner:latest
+ExecStopPost=/usr/bin/rm -f /run/tarmar-ci-runner/jit.env
+ExecStop=/usr/bin/docker stop --time 30 tarmar-ci-runner
+
+[Install]
+WantedBy=multi-user.target

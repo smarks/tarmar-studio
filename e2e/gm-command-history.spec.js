@@ -48,6 +48,10 @@ GMSession.objects.filter(user=user).delete()
         await expect(replies).toHaveCount(before + 1);
         await expect(replies.last()).toContainText('The crypt is quiet', { timeout: 30000 });
         await expect(page).toHaveURL(/session=\d+/);
+        // The words stream before the turn is saved; Send comes back only once
+        // the stream has closed, after the done frame the server sends once the
+        // turn is saved (issue #910).
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
     }
 
     test('/rules and /state read back as the commands after a reload', async ({ page }) => {

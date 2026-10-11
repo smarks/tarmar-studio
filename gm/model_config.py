@@ -33,8 +33,60 @@ GM_NUM_CTX_ENV = "GM_NUM_CTX"
 GM_TEMPERATURE_ENV = "GM_TEMPERATURE"
 
 DEFAULT_GM_MODEL = "qwen3:32b"
-DEFAULT_GM_NUM_CTX = 32768
+# Production's window (issue #907). The default was 32768 while the prompt was
+# under 7k tokens; at about 12k tokens for the longest of the four prompts, a
+# 32k window would give the prompt over a third of the context, and a quarter
+# of it (SYSTEM_PROMPT_CONTEXT_SHARE) is less than either canon's prompt.
+DEFAULT_GM_NUM_CTX = 65536
 DEFAULT_GM_TEMPERATURE = 0.8
+
+#: The largest share of ``GM_NUM_CTX`` the GM system prompt may take (issue
+#: #907). The ceiling is in estimated tokens -- characters divided by four,
+#: plus the per-message framing, by :func:`gm.retrieval.estimate_message_tokens`
+#: -- which run about 6% under Ollama's own count. It replaced a 40,000-character cap that was raised by hand three
+#: times, each time a batch needed room, and that a batch near the line was
+#: tempted to meet by cutting content.
+#:
+#: What the share protects is the rest of the window. The system prompt goes
+#: first on every call; behind it come the conversation (player and GM turns,
+#: the recap, canon excerpt blocks of at most ``GM_RETRIEVAL_MAX_TOKENS`` --
+#: 900 by default -- and the state block), and at the end
+#: :data:`gm.retrieval.REPLY_RESERVE_TOKENS` (2,048) is kept for the reply.
+#: A session's history, system prompt included, is folded into a recap once it
+#: passes :data:`gm.summary.FOLD_AT_FRACTION` (0.6) of the window less that
+#: reserve: 38,093 tokens at production's 65,536. A quarter of the window is
+#: 16,384 tokens, so the prompt plus one turn's excerpts (17,284) stays under
+#: half of the history a session may carry before it folds, and more than half
+#: of it is always conversation. The fold runs between turns. What keeps
+#: prompt, excerpts and conversation inside the window on each call is the
+#: context guard (:func:`gm.retrieval.model_messages`): it drops the oldest
+#: excerpt blocks whenever what is sent would pass the window less the reply
+#: reserve (63,488 tokens at 65,536), and logs a warning when only player and
+#: GM turns are left. Much past a quarter, the conversation a session may
+#: carry before it folds becomes smaller than the prompt itself (at 0.3,
+#: 18,432 tokens against a 19,660-token prompt), and the fold comes round
+#: sooner each time the prompt grows.
+#:
+#: Reference figures, 2026-10-09: under the Tarmar canon the shortest prompt
+#: (``SYSTEM_PROMPT``) estimates at 9,685 tokens, and the deploy warm-up's
+#: probe, which sends it with a one-line question, measured 10,280 prompt
+#: tokens from Ollama -- the four-characters-per-token estimate runs about 6%
+#: under the model's tokenizer. The longest of the four prompts (a DM consulting
+#: the aide) estimates at 11,985 tokens under the Tarmar canon and 11,124 under
+#: the default one: 73% of the ceiling at 65,536.
+SYSTEM_PROMPT_CONTEXT_SHARE = 0.25
+
+
+def system_prompt_token_ceiling(num_ctx: int) -> int:
+    """The most tokens the GM system prompt may take in a ``num_ctx`` window.
+
+    Args:
+        num_ctx: The model's context window in tokens (``GM_NUM_CTX``).
+
+    Returns:
+        :data:`SYSTEM_PROMPT_CONTEXT_SHARE` of ``num_ctx``, rounded down.
+    """
+    return int(num_ctx * SYSTEM_PROMPT_CONTEXT_SHARE)
 
 
 @dataclass(frozen=True)

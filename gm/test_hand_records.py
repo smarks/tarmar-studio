@@ -108,7 +108,9 @@ class HandRecordsTest(BaseTestCase):
             retire_ruling(self.session, self.game_master, ruling_id)
 
     def test_a_ruling_is_held_to_the_limits_a_plan_is(self):
-        with self.assertRaisesMessage(HandEditError, "longer than 60"):
+        with self.assertRaisesMessage(
+            HandEditError, "The topic must be 60 characters or fewer"
+        ):
             add_ruling(self.session, self.game_master, "x" * 61, "rule")
         with self.assertRaisesMessage(HandEditError, "The rule is needed"):
             add_ruling(self.session, self.game_master, "crits", "   ")

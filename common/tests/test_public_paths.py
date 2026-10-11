@@ -34,6 +34,11 @@ class PublicPathRuleTest(TestCase):
             "/tarmar/accounts/login/",
             "/tarmar/accounts/logout/",
             "/tarmar/accounts/register/",
+            # Password reset, every step (issue #929).
+            "/tarmar/accounts/password_reset/",
+            "/tarmar/accounts/password_reset/done/",
+            "/tarmar/accounts/password_reset/MQ/set-password/",
+            "/tarmar/accounts/password_reset/complete/",
         ):
             self.assertTrue(is_public_path(path), path)
 

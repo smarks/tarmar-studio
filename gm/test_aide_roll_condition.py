@@ -6,6 +6,12 @@ past minus half a pool makes a survival save each turn. The sheet's attack
 panel and skill check took the penalty; the aide's ``roll`` action rolled a
 wounded character's dice as if unhurt, and the aide could not roll a
 survival save at all.
+
+#911 then took the injury penalty off the free-form roll again: it was
+applied in a direction the model named, and a backwards one made it a bonus.
+A check against a score is ``skill_check``, ``survival_save`` or
+``attribute_check`` (gm/test_injured_roll_direction.py); the tests below that
+pinned the direction now pin that no direction is read.
 """
 
 import json
@@ -21,7 +27,7 @@ from .engine import MODE_AIDE, MODE_PLAY
 from .roll_service import RollRequest, RollResolution, dice_line, roll_frame_payload
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .turn_engine import events
-from .turn_engine.plan import PLAYER_INJURED_ROLL_ERROR, read_plan
+from .turn_engine.plan import read_plan
 from .turn_engine.policy import ACTION_NAMES, AIDE_UNASKED_ROLL_REFUSAL, TurnPolicy
 
 
@@ -57,38 +63,19 @@ def rolled(total: int, request: RollRequest) -> RollResolution:
     )
 
 
-class TheLineNamesThePenaltyTest(ExecutorTestCase):
-    """What an injured character's dice line says, each way it can be read."""
+class TheLineCarriesNoPenaltyTest(ExecutorTestCase):
+    """A free-form roll's dice line is the dice alone (#911)."""
 
-    def test_over_loses_the_point_and_under_counts_it_higher(self):
-        for direction, counted in (("over", 9), ("under", 11)):
-            with self.subTest(direction=direction):
-                request = RollRequest(
-                    "3d6", roller="Dain", injury_penalty=-1, direction=direction
-                )
-                line = dice_line(rolled(10, request))
-                self.assertTrue(
-                    line.endswith(
-                        f", -1 injured on a roll {direction}: counts as {counted}"
-                    ),
-                    line,
-                )
-                payload = roll_frame_payload(rolled(10, request))
-                self.assertEqual(
-                    (payload["total"], payload["injury_penalty"], payload["counts_as"]),
-                    (10, -1, counted),
-                )
-
-    def test_no_direction_names_the_penalty_and_applies_nothing(self):
-        request = RollRequest("3d6", roller="Dain", injury_penalty=-2)
+    def test_the_line_and_frame_are_the_dice_total(self):
+        request = RollRequest("3d6", roller="Dain")
         line = dice_line(rolled(10, request))
-        self.assertIn("= 10; injured, -2 to all rolls, not applied", line)
+        self.assertNotIn("injured", line)
         payload = roll_frame_payload(rolled(10, request))
         self.assertNotIn("counts_as", payload)
         self.assertEqual(payload["total"], 10)
 
     def test_an_unhurt_roll_is_unchanged(self):
-        request = RollRequest("3d6", roller="Dain", direction="under")
+        request = RollRequest("3d6", roller="Dain")
         self.assertEqual(dice_line(rolled(10, request)), "🎲 Dain rolls 3d6: [10] = 10")
         self.assertNotIn("injury_penalty", roll_frame_payload(rolled(10, request)))
 
@@ -101,20 +88,24 @@ class ThePlanSaysWhichWayTest(ExecutorTestCase):
             policy=TurnPolicy.for_turn(MODE_PLAY, is_game_master=False),
         )
 
-    def test_direction_is_over_or_under(self):
-        reading = self.read(
-            {"action": "roll", "dice": "3d6", "character_id": 41, "direction": "Under"}
-        )
-        self.assertEqual(reading.errors, ())
-        self.assertEqual(reading.actions[0].direction, "under")
-        self.assertEqual(reading.actions[0].as_payload()["direction"], "under")
-        refused = self.read(
-            {"action": "roll", "dice": "3d6", "character_id": 41, "direction": "up"}
-        )
-        self.assertTrue(refused.errors)
+    def test_a_direction_on_a_roll_is_not_read(self):
+        # #911: the server cannot tell a right direction from a wrong one,
+        # so it reads none, whatever the model writes.
+        for said in ("Under", "up"):
+            with self.subTest(direction=said):
+                reading = self.read(
+                    {
+                        "action": "roll",
+                        "dice": "3d6",
+                        "character_id": 41,
+                        "direction": said,
+                    }
+                )
+                self.assertEqual(reading.errors, ())
+                self.assertNotIn("direction", reading.actions[0].as_payload())
 
     def test_survival_save_is_an_action_on_a_listed_character(self):
-        self.assertEqual(ACTION_NAMES[-1], "survival_save")
+        self.assertEqual(ACTION_NAMES[-2:], ("survival_save", "attribute_check"))
         reading = self.read({"action": "survival_save", "character_id": 41})
         self.assertEqual(reading.errors, ())
         self.assertFalse(reading.actions[0].refused)
@@ -143,42 +134,32 @@ class PlayersRollTest(ExecutorTestCase):
         )
         return outcome.results[0]
 
-    def test_an_injured_characters_roll_takes_the_penalty(self):
+    def test_an_injured_characters_roll_takes_no_penalty(self):
+        # #911: the penalty is the check actions' to apply, the rule's way.
         fatigue = self.dain.fatigue
         assert fatigue is not None
         hurt_to(self.dain, fatigue_left=fatigue // 2)
         result = self.roll(direction="under")
         self.assertTrue(result.ran, result.error)
         (frame,) = result.rolls
-        self.assertEqual(frame["injury_penalty"], -1)
-        self.assertEqual(frame["counts_as"], frame["total"] + 1)
-        self.assertIn("counts as", result.result)
+        self.assertNotIn("injury_penalty", frame)
+        self.assertNotIn("counts_as", frame)
+        self.assertNotIn("counts as", result.result)
 
-    def test_a_players_injured_roll_with_no_direction_is_planned_again(self):
-        # The #886 review: with no direction the penalty was only named, so an
-        # injured player's roll escaped it. The model is asked again.
+    def test_a_players_injured_roll_with_no_direction_runs_first_time(self):
+        # The #886 review asked again for a direction; #911 reads none, so
+        # there is nothing to ask for.
         fatigue = self.dain.fatigue
         assert fatigue is not None
         hurt_to(self.dain, fatigue_left=fatigue // 2)
-        outcome, yielded, model, _turn = self.play(
-            plan({"action": "roll", "dice": "3d6", "character_id": self.dain.pk}),
-            replan=plan(
-                {
-                    "action": "roll",
-                    "dice": "3d6",
-                    "character_id": self.dain.pk,
-                    "direction": "under",
-                }
-            ),
+        outcome, yielded, _model, _turn = self.play(
+            plan({"action": "roll", "dice": "3d6", "character_id": self.dain.pk})
         )
         rejected = [event for event in yielded if event.kind == events.PLAN_REJECTED]
-        self.assertEqual(len(rejected), 1)
-        self.assertIn(
-            PLAYER_INJURED_ROLL_ERROR.format(index=1), rejected[0].payload["errors"]
-        )
+        self.assertEqual(rejected, [])
         (result,) = outcome.results
         self.assertTrue(result.ran, result.error)
-        self.assertEqual(result.rolls[0]["counts_as"], result.rolls[0]["total"] + 1)
+        self.assertNotIn("counts_as", result.rolls[0])
 
     def test_an_unhurt_players_roll_needs_no_direction(self):
         result = self.roll()
@@ -187,7 +168,7 @@ class PlayersRollTest(ExecutorTestCase):
 
     def test_an_unconscious_characters_roll_is_refused_for_a_player(self):
         hurt_to(self.dain, fatigue_left=0)
-        result = self.roll(direction="over")
+        result = self.roll()
         self.assertFalse(result.ran)
         self.assertIn("unconscious", result.error)
 
@@ -233,7 +214,7 @@ class GameMastersRollTest(ExecutorTestCase):
         self.assertTrue(result.ran, result.error)
         self.assertIn("called by the Game Master: unconscious", result.result)
 
-    def test_a_game_masters_roll_with_no_direction_runs_and_names_the_penalty(self):
+    def test_a_game_masters_injured_roll_runs_and_takes_no_penalty(self):
         fatigue = self.dain.fatigue
         assert fatigue is not None
         hurt_to(self.dain, fatigue_left=fatigue // 2)
@@ -245,7 +226,8 @@ class GameMastersRollTest(ExecutorTestCase):
         )
         result = outcome.results[0]
         self.assertTrue(result.ran, result.error)
-        self.assertIn("-1 to all rolls, not applied", result.result)
+        self.assertNotIn("injured", result.result)
+        self.assertNotIn("injury_penalty", result.rolls[0])
 
     def test_the_dead_roll_nothing_for_anyone(self):
         self.dain.is_alive = False
@@ -305,10 +287,15 @@ class AnAideRollsNoDiceUnaskedTest(ExecutorTestCase):
                 },
                 {"action": "survival_save", "character_id": self.gorn.pk},
                 {"action": "roll", "dice": "3d6", "character_id": self.gorn.pk},
+                {
+                    "action": "attribute_check",
+                    "character_id": self.gorn.pk,
+                    "attribute": "strength",
+                },
             )
         )
         self.assertEqual(
             [(result.ran, result.error) for result in outcome.results],
-            [(False, AIDE_UNASKED_ROLL_REFUSAL)] * 3,
+            [(False, AIDE_UNASKED_ROLL_REFUSAL)] * 4,
         )
         self.assertEqual(len(Character.objects.get(pk=self.gorn.pk).history), before)

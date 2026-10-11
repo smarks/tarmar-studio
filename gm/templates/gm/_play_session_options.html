@@ -1,0 +1,7 @@
+{% comment %}The sheet's "Take <name> to" select (issue #973): "A new session", then one page of the viewer's own sessions, most recently played first, rendered by common.pickers for the sheet and for each search. play-with-gm.js reads the choice by its name; the label outside the picker points at its id.{% endcomment %}
+<select id="play-with-gm-session-{{ character.pk }}" name="session_id">
+    <option value="">A new session</option>
+    {% for session in picker.rows %}
+    <option value="{{ session.pk }}">{{ session.name }}{% if session.pk in holding %} (already playing here){% endif %}</option>
+    {% endfor %}
+</select>

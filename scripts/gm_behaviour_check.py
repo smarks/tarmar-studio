@@ -5985,7 +5985,7 @@ def build_scenarios() -> tuple[Scenario, ...]:
             turns=(
                 CREATE_WREN,
                 take_safe_years,
-                Turn("Wren spends one skill point on sword."),
+                Turn("Wren spends one skill point on broadsword."),
                 Turn(
                     "How many skill points does Wren have available to spend right now?"
                 ),

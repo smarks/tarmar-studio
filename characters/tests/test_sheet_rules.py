@@ -6,6 +6,7 @@ Issues #768, #769, #770, #772, #773, #801, #803, #806, #808, #810.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -510,7 +511,11 @@ class PriorExperienceInPlayTest(BaseTestCase):
         turn("roll_fatigue")
         turn("roll_background", "spend_skill_points")
         turn()  # "Which track should I take?": a question, not play
-        services.add_experience_years(built.pk, "merchant", 1, actor=self.player)
+        # The year survives (#945): this test is about when play begins, and a
+        # live 3d6 kills one year in 216, after which the last call below is
+        # refused as dead (#932) before it is ever asked about play.
+        with patch("characters.skills.roll_survival_dice", return_value=(6, 6, 6, 18)):
+            services.add_experience_years(built.pk, "merchant", 1, actor=self.player)
         turn("play_years")
         self.assertFalse(character_in_play(built))
         # A refused campaign action is not play either.

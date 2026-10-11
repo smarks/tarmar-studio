@@ -1,0 +1,76 @@
+/* The journal (issues #827, #924, #952): what belongs to the signed-in
+   player, on its own page since #924 moved it off the front page, named the
+   journal since #952. Three parts side by side where they fit, stacked where
+   they do not. */
+.journal h1 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+}
+.journal-parts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem;
+}
+.journal-part {
+    border: 1px solid var(--colour-hairline);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+}
+.journal-part h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem;
+}
+.journal-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.journal-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem 0.75rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--colour-hairline);
+}
+.journal-list li:last-child {
+    border-bottom: none;
+}
+/* A character's row keeps its Play button on the right; a long name wraps
+   inside its own cell rather than pushing the button onto a line of its own. */
+.journal-list .journal-character {
+    flex-wrap: nowrap;
+}
+.journal-character .play-with-gm-slot {
+    flex: none;
+}
+.journal-name {
+    display: inline-flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.journal a:not(.button) {
+    color: var(--colour-ink);
+}
+.journal-when {
+    font-size: 0.875rem;
+    color: var(--colour-ink-muted);
+}
+.journal-more {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+    margin: 0.75rem 0 0;
+    font-size: 0.95rem;
+}
+.journal-empty {
+    margin: 0 0 0.75rem;
+    color: var(--colour-ink-secondary);
+}

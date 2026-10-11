@@ -44,12 +44,9 @@ only known in the browser.
        address (issue #339, item 16).{% endcomment %}
     <a href="{% url 'characters:deleted' %}" class="filter-link">Deleted characters</a>
     <label for="user-filter">Filter by user:</label>
-    <select id="user-filter">
-        <option value="">All Users</option>
-        {% for u in all_users %}
-        <option value="{{ u.pk }}"{% if filter_user_id == u.pk|stringformat:"s" %} selected{% endif %}>{{ u.username }}</option>
-        {% endfor %}
-    </select>
+    {% comment %}A page of accounts with a search that reaches every page
+       (issue #973); the list used to carry every active account.{% endcomment %}
+    {% include "_picker.html" with picker=owner_picker %}
     {% endif %}
 </div>
 
@@ -146,4 +143,5 @@ only known in the browser.
 {% block extra_js %}
 <script src="{% static 'js/character-management.js' %}"></script>
 <script src="{% static 'js/character-list.js' %}"></script>
+{% if is_manager %}<script src="{% static 'js/picker.js' %}"></script>{% endif %}
 {% endblock %}

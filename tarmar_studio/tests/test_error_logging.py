@@ -116,7 +116,8 @@ class ServerErrorLoggingTest(TestCase):
 
     def test_error_loggers_do_not_fall_through_to_djangos_console(self) -> None:
         """Handled here, not re-emitted by Django's DEBUG-only console handler."""
-        for logger_name in ("django.request", "django.security"):
+        # django.contrib.auth carries a failed password-reset send (#929).
+        for logger_name in ("django.request", "django.security", "django.contrib.auth"):
             with self.subTest(logger=logger_name):
                 logger = logging.getLogger(logger_name)
                 self.assertFalse(logger.propagate)

@@ -1,0 +1,6 @@
+{% comment %}The hook generator's party select (issue #864): "No party", the party the form chose (pinned, whatever page it is on), then one page of parties, newest first.{% endcomment %}
+<select name="party" aria-labelledby="hook-party-label">
+    <option value="">No party — pick a level</option>
+    {% for party in picker.pinned %}{% include "ruins/_hook_party_option.html" %}{% endfor %}
+    {% for party in picker.rows %}{% include "ruins/_hook_party_option.html" %}{% endfor %}
+</select>

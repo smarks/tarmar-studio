@@ -72,6 +72,25 @@ class ManaTest(BaseTestCase):
         with self.assertRaises(CharacterChangeError):
             grant_mana(character, -6, is_game_master=True)
 
+    def test_the_pool_is_never_lowered_below_the_mana_spent(self):
+        """Issue #940: Mana below 0 is refused here as by the pools setting."""
+        character = create_character(
+            self.create_user("drained"),
+            name="Drained",
+            free_spell_points=6,
+            mana_spent=4,
+        )
+        with self.assertRaises(CharacterChangeError) as refused:
+            grant_mana(character, -3, is_game_master=True)
+        self.assertEqual(
+            str(refused.exception),
+            "The Mana Pool holds 6 with 4 spent; it cannot go to 3, below the "
+            "mana spent",
+        )
+        self.assertEqual(character.free_spell_points, 6)
+        grant_mana(character, -2, is_game_master=True)
+        self.assertEqual(character.free_spell_points, 4)
+
     def test_current_mana_is_the_pool_less_what_fights_spent(self):
         """The pools batch keeps ``mana_spent``; until it lands, none is spent."""
         character = create_character(

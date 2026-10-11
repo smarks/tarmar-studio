@@ -47,8 +47,8 @@ number, which is how the model and the Game Master name it to each other.
                     <summary>Correct</summary>
                     <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="edit">
                         <input type="hidden" name="ruling_id" value="{{ ruling.pk }}">
-                        <label>Topic <input type="text" name="topic" value="{{ ruling.topic }}" maxlength="60" required></label>
-                        <label>Rule <textarea name="text" rows="2" maxlength="400" required>{{ ruling.text }}</textarea></label>
+                        <label>Topic <input type="text" name="topic" value="{{ ruling.topic }}" maxlength="{{ gm_text_limits.ruling_topic }}" required></label>
+                        <label>Rule <textarea name="text" rows="2" maxlength="{{ gm_text_limits.ruling_text }}" required>{{ ruling.text }}</textarea></label>
                         <button type="submit" class="btn btn-sm">Save the ruling</button>
                     </form>
                 </details>
@@ -65,8 +65,8 @@ number, which is how the model and the Game Master name it to each other.
     <details class="gm-hand-edit gm-hand-add" id="gm-add-ruling">
         <summary>Add a ruling</summary>
         <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="add">
-            <label>Topic <input type="text" name="topic" maxlength="60" required placeholder="critical hits"></label>
-            <label>Rule <textarea name="text" rows="2" maxlength="400" required placeholder="a natural 20 just crits"></textarea></label>
+            <label>Topic <input type="text" name="topic" maxlength="{{ gm_text_limits.ruling_topic }}" required placeholder="critical hits"></label>
+            <label>Rule <textarea name="text" rows="2" maxlength="{{ gm_text_limits.ruling_text }}" required placeholder="a natural 20 just crits"></textarea></label>
             <button type="submit" class="btn btn-sm">Record the ruling</button>
         </form>
     </details>
@@ -148,7 +148,7 @@ number, which is how the model and the Game Master name it to each other.
                     <summary>Correct</summary>
                     <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="edit">
                         <input type="hidden" name="thread_id" value="{{ thread.pk }}">
-                        <label>Thread <textarea name="text" rows="2" maxlength="300" required>{{ thread.text }}</textarea></label>
+                        <label>Thread <textarea name="text" rows="2" maxlength="{{ gm_text_limits.thread_text }}" required>{{ thread.text }}</textarea></label>
                         <button type="submit" class="btn btn-sm">Save the thread</button>
                     </form>
                 </details>
@@ -156,7 +156,7 @@ number, which is how the model and the Game Master name it to each other.
                     <summary>Resolve</summary>
                     <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="resolve">
                         <input type="hidden" name="thread_id" value="{{ thread.pk }}">
-                        <label>How it ended <input type="text" name="resolution" maxlength="300"></label>
+                        <label>How it ended <input type="text" name="resolution" maxlength="{{ gm_text_limits.thread_resolution }}"></label>
                         <button type="submit" class="btn btn-sm">Close the thread</button>
                     </form>
                 </details>
@@ -171,24 +171,17 @@ number, which is how the model and the Game Master name it to each other.
         <details class="gm-hand-edit gm-hand-add" id="gm-open-thread">
             <summary>Open a thread</summary>
             <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="open">
-                <label>Thread <textarea name="text" rows="2" maxlength="300" required></textarea></label>
+                <label>Thread <textarea name="text" rows="2" maxlength="{{ gm_text_limits.thread_text }}" required></textarea></label>
                 <button type="submit" class="btn btn-sm">Open the thread</button>
             </form>
         </details>
         {% endif %}
         {% if campaign_resolved %}
         <details class="gm-campaign-resolved">
-            <summary>{{ campaign_resolved|length }} resolved</summary>
+            {% comment %}Every resolved thread is counted; the latest page of them is listed, with a control for the page above (issue #972).{% endcomment %}
+            <summary>{{ campaign_resolved_page.total }} resolved</summary>
             <ul class="gm-campaign-list">
-                {% for thread in campaign_resolved %}
-                <li data-thread-id="{{ thread.pk }}">
-                    <span class="gm-campaign-detail gm-thread-number">thread {{ thread.pk }}</span>
-                    <span class="gm-campaign-name">{{ thread.text }}</span>
-                    {% if thread.resolution %}<span class="gm-campaign-detail">{{ thread.resolution }}</span>{% endif %}
-                    {% if thread.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ thread.hand_mark }}</span>{% endif %}
-                    {% if can_edit_records %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ threads_url }}" data-change="reopen" data-thread-id="{{ thread.pk }}">Reopen</button>{% endif %}
-                </li>
-                {% endfor %}
+                {% include "gm/_resolved_threads.html" %}
             </ul>
         </details>
         {% endif %}

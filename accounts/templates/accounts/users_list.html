@@ -32,7 +32,7 @@
         <tr data-user-id="{{ u.pk }}">
             <td class="cell-name" data-label="Username"><a href="{% url 'user_profile' u.pk %}">{{ u.username }}</a></td>
             <td data-label="Real Name">{{ u.real_name|default:"-" }}</td>
-            <td data-label="Email">{{ u.email|default:"-" }}</td>
+            <td data-label="Email">{{ u.email|default:"-" }}{% if u.email and not u.email_verified %} <span class="email-unconfirmed">(not confirmed)</span>{% endif %}</td>
             <td class="roles" data-label="Roles">{% display_roles u %}</td>
             <td class="last-login" data-label="Last login">{% if u.last_login %}{% local_time u.last_login "M d, Y H:i" %}{% else %}—{% endif %}</td>
             <td class="cell-actions">

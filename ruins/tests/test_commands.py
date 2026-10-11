@@ -116,3 +116,21 @@ class GenerateHookPartyCommandTests(BaseTestCase):
         empty = Party.objects.create(name="The Unmanned", owner=self.owner)
         with self.assertRaisesRegex(CommandError, "no members"):
             self.run_command("--party", str(empty.pk))
+
+    def test_a_disbanded_party_is_refused_with_the_reason(self):
+        """Issue #971: the command read every party, disbanded or not."""
+        Party.objects.filter(pk=self.party.pk).update(is_deleted=True)
+        for argument in ("The Torchbearers", str(self.party.pk)):
+            with self.subTest(argument=argument):
+                with self.assertRaisesRegex(CommandError, "was disbanded"):
+                    self.run_command("--party", argument, "--seed", "9")
+
+    def test_a_live_party_wins_over_a_disbanded_one_by_the_same_name(self):
+        Party.objects.create(name="The Torchbearers", owner=self.owner, is_deleted=True)
+        output = self.run_command("--party", "The Torchbearers", "--seed", "9")
+        self.assertIn("rolls as level 2", output)
+
+    def test_two_live_parties_by_one_name_ask_for_the_id(self):
+        Party.objects.create(name="The Torchbearers", owner=self.owner)
+        with self.assertRaisesRegex(CommandError, "pass the party's id"):
+            self.run_command("--party", "The Torchbearers")

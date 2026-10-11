@@ -221,7 +221,20 @@ if (typeof module !== 'undefined' && module.exports) {
             tab.errorId,
           );
         } else {
+          // A search typed into the attach picker survives the refresh
+          // (issue #864): the fresh picker is wired and asked again.
+          const typed = container.querySelector('[data-picker-search]');
+          const query = typed ? typed.value : '';
           container.innerHTML = await response.text();
+          if (root.picker) {
+            root.picker.initPickers(container);
+            const fresh = container.querySelector('[data-picker]');
+            const search = fresh && fresh.querySelector('[data-picker-search]');
+            if (search && query) {
+              search.value = query;
+              root.picker.loadPage(fresh, 1);
+            }
+          }
           replaced = true;
         }
       } catch (error) {

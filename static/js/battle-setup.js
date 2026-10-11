@@ -4,10 +4,11 @@
  * Thin on purpose: the setup's state lives on the server-side draft, so the
  * page's JavaScript only wires the shared autosave onto the terms fields —
  * the draft saves on blur, and the round trip through the character editor
- * loses nothing. The saved-character shelf filters as you type through
- * roster-filter.js, which wires its input from data-filter-list exactly as it
- * does the parties page's (issue #338 item 16). Roster changes are plain form
- * posts the server re-renders; nothing here holds state a reload would lose.
+ * loses nothing. The saved-character shelf and the party select are
+ * searchable pickers (picker.js, issue #864): typing asks the server, and
+ * roster-filter.js narrows the rows on screen meanwhile. Roster changes are
+ * plain form posts the server re-renders; nothing here holds state a reload
+ * would lose.
  *
  * initAutosave comes from autosave.js, which the template loads ahead of
  * this file (base.html already loads api.js in <head>). Node/Jest has no

@@ -13,6 +13,7 @@
 const {
     test, expect, loginAs, TEST_USER, TEST_ADMIN, createCharacter,
 } = require('./fixtures');
+const { runDjangoShell } = require('./django');
 
 /**
  * Export the character the page is on, then import the file through the list
@@ -126,6 +127,52 @@ test.describe('Character export round trip', () => {
         await expect(page.locator('.editable-field[data-field="strength"] input')).toHaveValue(strength);
         await expect(page.locator('#import-notice')).toHaveCount(0);
         await expect(page.locator('#incomplete-marks')).toHaveCount(0);
+    });
+
+    test('a player\'s own rolled height chain comes back, and a blank one is rolled (#941)', async ({ page }) => {
+        await loginAs(page, TEST_USER);
+        await createCharacter(page);
+        const id = page.url().match(/\/characters\/(\d+)\//)[1];
+        // A chain the site rolled, as creation records one: the value and
+        // its dice-log line.
+        runDjangoShell(
+            'from characters.models import Character; '
+            + `c = Character.objects.get(pk=${id}); c.height_roll = "6.6.2"; `
+            + 'c.dice_log = "\\n".join("Height: Demon d6: 6 -> explode -> 6 -> explode -> 2 = 6.6.2" '
+            + 'if line.startswith("Height: ") else line for line in c.dice_log.splitlines()); c.save()'
+        );
+        await page.reload();
+
+        await exportAndImport(page);
+
+        // The kept chain is the site's roll, so it is fixed for the player
+        // (Spencer's ruling on #948): text, not an input.
+        const heightLocked = page.locator('[data-locked-field="height_roll"]');
+        const rolledHeight = page.locator('td', { has: heightLocked });
+        await expect(heightLocked).toBeVisible();
+        await expect(rolledHeight).toContainText('6.6.2');
+        await expect(page.locator('#import-notice')).toContainText('Kept, since this file is an export of your own character');
+        await expect(page.locator('#roll-height-btn')).toBeHidden();
+        // The single weight face creation rolled is final on the copy too
+        // (coordinator's ruling on #948): it arrives fixed, not retypable.
+        await expect(page.locator('[data-locked-field="weight_roll"]')).toBeVisible();
+        await expect(page.locator('#dice-log')).toContainText('Weight: kept from your character');
+
+        // An edited chain is no roll of the site's: blank, and rolled here.
+        // Edited from the original, since the copy is not complete until its
+        // attributes are rolled, and an incomplete character does not export.
+        await page.goto(`/tarmar/characters/${id}/`);
+        await exportAndImport(page, (payload) => { payload.data.height_roll = '6.6.6.5'; });
+
+        const height = page.locator('.editable-field[data-field="height_roll"] input');
+        await expect(height).toHaveValue('');
+        await expect(page.locator('#import-notice')).toContainText('no character of yours is the record this file came from');
+        await page.locator('#roll-height-btn').click();
+        // Rolled, it is fixed for the player (#948): the reloaded sheet shows
+        // the roll as text with the reason.
+        await expect(heightLocked).toBeVisible();
+        await expect(rolledHeight).toContainText(/(?:^|\s)(?:[16]\.)*[1-6]\s/);
+        await expect(page.locator('#roll-height-btn')).toBeHidden();
     });
 
     test('the Markdown export names catalog equipment', async ({ adminPage: page }) => {

@@ -19,7 +19,8 @@
  * <name> <n> gold", "check <name>'s <skill> against <n>" and "<name> fell from
  * the tower" plan a Game Master's records and a skill check (issues #802,
  * #843), "<name> tests her nerve" and "roll <name>'s survival save" plan a
- * character's roll and survival save (issue #886), "twins in brackets"
+ * character's roll and survival save (issue #886), "<name> makes a
+ * <attribute> check" plans an attribute check (issue #911), "twins in brackets"
  * names a character the name rule refuses (issue #908), and anything else
  * plans nothing. A structured call asking for a
  * player's foes is answered with set_foes: gray wolves (dire wolves when the
@@ -86,8 +87,9 @@ function recordsPlanFor(latest, said) {
             }],
         };
     }
-    // A listed character's roll read under a score, and a survival save
-    // (issue #886): the server applies the injury penalty and rolls the save.
+    // A listed character's free-form roll, planned with a backwards
+    // direction the server must not read (issue #911), an attribute check
+    // whose injury penalty the rule applies, and a survival save (#886).
     const nerve = latest.match(/(\w+) tests (?:her|his|their) nerve/i);
     if (nerve) {
         return {
@@ -96,7 +98,17 @@ function recordsPlanFor(latest, said) {
                 dice: '3d6',
                 purpose: 'a test of nerve',
                 character_id: listedId(said, nerve[1]),
-                direction: 'under',
+                direction: 'over',
+            }],
+        };
+    }
+    const attributeCheck = latest.match(/(\w+) makes an? (\w+) check/i);
+    if (attributeCheck) {
+        return {
+            actions: [{
+                action: 'attribute_check',
+                character_id: listedId(said, attributeCheck[1]),
+                attribute: attributeCheck[2].toLowerCase(),
             }],
         };
     }
@@ -165,9 +177,14 @@ function planFor(latest, said) {
     // and a later turn may ask for it again (issue #754).
     const rolledUp = latest.match(/roll up (\w+)/i);
     if (rolledUp) {
-        return {
-            actions: [{ action: 'roll_attributes', new_character: { name: rolledUp[1], label: '' } }],
-        };
+        const actions = [{ action: 'roll_attributes', new_character: { name: rolledUp[1], label: '' } }];
+        // An Origin the message states is recorded with set_background, as
+        // the prompt teaches (#754); the server leaves it unrolled (#970).
+        const grewUp = latest.match(/grew up in (?:a |the )?(city|village|rural)/i);
+        if (grewUp) {
+            actions.push({ action: 'set_background', new_character_ref: rolledUp[1], location: grewUp[1] });
+        }
+        return { actions };
     }
     const reroll = latest.match(/reroll (\w+)'s background/i);
     if (reroll) {

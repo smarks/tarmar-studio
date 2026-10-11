@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{% if confirmed %}Email address confirmed{% elif validlink %}Confirm your email address{% else %}Confirmation link not valid{% endif %}{% endblock %}
+
+{% block content %}
+{% if confirmed %}
+<h1>Email address confirmed</h1>
+
+<p class="account-note" id="email-confirmed">The account "{{ account_username }}" now uses <strong>{{ confirmed_email }}</strong>. A password-reset link will be sent there if one is asked for.</p>
+
+<div class="links">
+    {% if user.is_authenticated %}<a href="{% url 'profile' %}">Back to your profile</a>{% else %}<a href="{% url 'login' %}">Login</a>{% endif %}
+</div>
+{% elif validlink %}
+<h1>Confirm your email address</h1>
+
+{% comment %}Opening the link changes nothing; the button does (issue #931).
+Mail scanners fetch links, and one that spent this link would leave its owner
+holding a dead one.{% endcomment %}
+<p class="account-note" id="email-confirm-pending">Make <strong>{{ pending_email }}</strong> the email address of the account "{{ account_username }}"?</p>
+
+<form method="post" id="email-confirm-form">
+    {% csrf_token %}
+    <button type="submit">Confirm this address</button>
+</form>
+{% else %}
+<h1>Confirmation link not valid</h1>
+
+<p class="account-note" id="email-confirm-invalid">This link cannot be used. It may have been used already, or a newer link has replaced it, or it is more than a few days old, or it was copied incompletely from the email.</p>
+
+<div class="links">
+    {% if user.is_authenticated %}<a href="{% url 'email_change' %}">Ask for a new link</a>{% else %}<a href="{% url 'login' %}">Login</a> to ask for a new link{% endif %}
+</div>
+{% endif %}
+{% endblock %}

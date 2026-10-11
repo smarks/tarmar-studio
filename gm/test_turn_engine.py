@@ -3,13 +3,20 @@
 import json
 import time
 from dataclasses import dataclass, field
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from characters.magic import known_spells, learnable_spells
 from characters.purse import format_purse
-from common.test_helpers import BaseTestCase
+from common.services import ollama_client
+from common.test_helpers import (
+    ACT_ONCE_SET_SECONDS,
+    STAND_IN_TIMEOUT,
+    BaseTestCase,
+    HandFiredDeadlines,
+    StallingOllama,
+)
 
 from . import engine as prompts
 from .models import GMEvent, GMSession, GMTurnRecord
@@ -49,6 +56,10 @@ PREFIX = [
     {"role": "assistant", "content": "reply"},
 ]
 TWAIN = RosterLine(character_id=41, name="Twain", label="the brother", figures="STR 18")
+# The suite's conftest replaces ollama_client.open_stream for every test; the
+# stalled-stream tests need a real socket (issue #904), so they take the real
+# one, captured at import, before any fixture runs.
+REAL_OPEN_STREAM = ollama_client.open_stream
 
 
 @dataclass
@@ -61,6 +72,7 @@ class ScriptedExecutor:
     campaign_block: CampaignBlock = field(default_factory=CampaignBlock)
     refusal_lines_seen: list[str] = field(default_factory=list)
     settled_refusals_seen: dict[str, str] = field(default_factory=dict)
+    begun: list[list[str]] = field(default_factory=list)
 
     def label(self, action: PlannedAction) -> str:
         return f"running {action.action}"
@@ -73,6 +85,10 @@ class ScriptedExecutor:
             )
         record(events.TurnEvent(events.ACTION, {"action": action.action}, visible=True))
         return ActionResult(result=f"{action.action} ran", ran=True, note="ran")
+
+    def begin(self, actions) -> None:
+        # Each plan as it was handed over, and how many actions had run then.
+        self.begun.append([action.action for action in actions] + [len(self.ran)])
 
     def roster(self) -> list[RosterLine]:
         return list(self.lines)
@@ -190,6 +206,17 @@ class TurnEngineTest(SimpleTestCase):
         self.assertIn(events.ACTION, sink.kinds())
         self.assertNotIn(
             events.TOKEN, [event.kind for event in sink.events if event.persist]
+        )
+
+    def test_the_executor_reads_the_whole_plan_before_its_first_action(self):
+        """#970: a plan that states a new character's Origin starts it with
+        the Origin unrolled, which the executor can know only from the plan."""
+        executor = ScriptedExecutor()
+
+        run_turn(engine_for(FakeModel([TWINS_PLAN, "Done."]), executor), request())
+
+        self.assertEqual(
+            executor.begun, [["record_attributes", "record_attributes", 0]]
         )
 
     def test_plan_and_narrate_calls_share_the_prefix_byte_for_byte(self):
@@ -437,9 +464,14 @@ class OllamaModelTest(SimpleTestCase):
     @patch("gm.turn_engine.model.ollama_client.stream_chat", return_value=iter(["hi"]))
     def test_streams_with_thinking_off(self, stream):
         model = OllamaModel(name="qwen", options={"num_ctx": 4})
-        self.assertEqual(list(model.stream([SYSTEM])), ["hi"])
+        self.assertEqual(list(model.stream([SYSTEM], stop_at=12.5)), ["hi"])
         stream.assert_called_once_with(
-            "qwen", [SYSTEM], options={"num_ctx": 4}, think=False
+            "qwen",
+            [SYSTEM],
+            options={"num_ctx": 4},
+            think=False,
+            stop_at=12.5,
+            hang_up=ANY,
         )
 
 
@@ -448,6 +480,145 @@ class KeepAliveTokensTest(SimpleTestCase):
         self.assertEqual(
             list(KeepAliveTokens(iter(["a", "b"]), interval=1.0)), ["a", "b"]
         )
+
+    def test_a_stream_that_fails_to_close_still_ends_and_says_so(self):
+        class Unclosable:
+            def __iter__(self):
+                return iter(["a"])
+
+            def close(self):
+                raise RuntimeError("cannot close")
+
+        seen = []
+        with (
+            self.assertLogs("gm.turn_engine.model", level="ERROR") as logged,
+            self.assertRaisesMessage(RuntimeError, "cannot close"),
+        ):
+            for item in KeepAliveTokens(Unclosable(), interval=1.0):
+                seen.append(item)
+        self.assertEqual(seen, ["a"])
+        # Logged too: after close() nobody may be reading the queue.
+        self.assertIn("failed to close", logged.output[0])
+
+    @patch("gm.turn_engine.model.ollama_client.stream_chat", return_value=["a", "b"])
+    def test_a_stand_in_with_nothing_to_close_ends(self, _stream):
+        # A stand-in for stream_chat may give a plain list; closing it must
+        # not stop the reader handing over the end (issue #904).
+        tokens = KeepAliveTokens(OllamaModel(name="m").stream([]), interval=1.0)
+        self.assertEqual(list(tokens), ["a", "b"])
+        tokens.close()
+
+
+class TurnDeadlineReachesTheModelTest(SimpleTestCase):
+    def test_every_call_is_bounded_by_the_turn_deadline(self):
+        model = FakeModel([TWINS_PLAN, "Done."])
+        engine = engine_for(model)
+
+        run_turn(engine, request())
+
+        self.assertEqual(model.stops, [engine.deadline, engine.deadline])
+
+    def test_a_call_cut_off_at_the_deadline_is_the_budget_running_out(self):
+        cut = ollama_client.StreamDeadlinePassed("cut off at the deadline")
+        model = FakeModel([cut])
+        engine = engine_for(model)
+
+        with self.assertRaises(TurnBudgetExceeded) as raised:
+            run_turn(engine, request())
+
+        self.assertIs(raised.exception.__cause__, cut)
+        self.assertEqual(engine.state, TurnState.FAILED)
+
+
+def _stalled_reader(tokens: KeepAliveTokens) -> list[str]:
+    """Read until the stream stalls after its first token, as a turn does.
+
+    The consumer keeps asking, so the reader thread is left blocked in a read
+    on the stalled stream when this returns.
+    """
+    seen: list[str] = []
+    gaps = 0
+    for item in tokens:
+        if item is not None:
+            seen.append(item)
+        elif seen:
+            gaps += 1
+            if gaps == 3:
+                break
+    return seen
+
+
+class StalledStreamReleasesTheModelTest(SimpleTestCase):
+    """A turn that gives up on a stalled stream hangs it up (issue #904).
+
+    These run a real local stand-in for Ollama, because only a real socket
+    shows the hang-up. The stand-in holds its response until it is hung up
+    on, and the read outlasts that hold, so before #904 the server saw no
+    hang-up at all; nothing here waits on the clock (issue #955).
+    """
+
+    def test_closing_the_tokens_hangs_up_a_stalled_stream(self):
+        with (
+            patch.object(ollama_client, "open_stream", REAL_OPEN_STREAM),
+            patch.object(ollama_client, "CHAT_TIMEOUT", STAND_IN_TIMEOUT),
+            StallingOllama(["A "]) as server,
+            override_settings(OLLAMA_BASE_URL=server.base_url),
+        ):
+            tokens = KeepAliveTokens(OllamaModel(name="m").stream([]), interval=0.05)
+            self.assertEqual(_stalled_reader(tokens), ["A "])
+            tokens.close()
+            self.assertTrue(server.closed.wait(5))
+
+        # Before #904: close() gave up on its join with the reader still
+        # blocked in the read, and the server saw no hang-up.
+        tokens._reader.join(ACT_ONCE_SET_SECONDS)
+        self.assertFalse(tokens._reader.is_alive())
+        self.assertEqual(server.hang_ups, ["stall"])
+
+    def test_closing_the_tokens_during_the_prefill_hangs_up_at_once(self):
+        # Issue #935: Ollama sends its headers with the first token, so a
+        # hang-up that waited for them held the model through the prefill.
+        with (
+            patch.object(ollama_client, "open_stream", REAL_OPEN_STREAM),
+            patch.object(ollama_client, "CHAT_TIMEOUT", STAND_IN_TIMEOUT),
+            StallingOllama(["A "], prefill=True) as server,
+            override_settings(OLLAMA_BASE_URL=server.base_url),
+        ):
+            tokens = KeepAliveTokens(OllamaModel(name="m").stream([]), interval=0.05)
+            waiting = iter(tokens)
+            # Keep-alives only: the reader is blocked in the prefill.
+            self.assertIsNone(next(waiting))
+            self.assertTrue(server.requested.wait(5))
+            self.assertIsNone(next(waiting))
+            tokens.close()
+            self.assertTrue(server.closed.wait(5))
+
+        # Before #935: the hang-up waited for the headers, which the
+        # stand-in holds back until it is hung up on.
+        tokens._reader.join(ACT_ONCE_SET_SECONDS)
+        self.assertFalse(tokens._reader.is_alive())
+        self.assertEqual(server.hang_ups, ["prefill"])
+        self.assertFalse(server.responding.is_set())
+
+    def test_a_turn_out_of_time_hangs_up_at_its_deadline(self):
+        with (
+            patch.object(ollama_client, "open_stream", REAL_OPEN_STREAM),
+            patch.object(ollama_client, "CHAT_TIMEOUT", STAND_IN_TIMEOUT),
+            StallingOllama(["A "]) as server,
+            override_settings(OLLAMA_BASE_URL=server.base_url),
+            HandFiredDeadlines() as deadlines,
+        ):
+            engine = engine_for(OllamaModel(name="m"), keepalive_seconds=0.05)
+            deadlines.pass_deadline_once(server.responding)
+            with self.assertRaises(TurnBudgetExceeded):
+                run_turn(engine, request())
+            self.assertTrue(server.closed.wait(5))
+
+        self.assertEqual(engine.state, TurnState.FAILED)
+        # The call's deadline is the turn's.
+        (timer,) = deadlines.timers
+        self.assertAlmostEqual(timer.due, engine.deadline, delta=1.0)
+        self.assertEqual(server.hang_ups, ["stall"])
 
 
 class StateBlockTest(SimpleTestCase):

@@ -2325,3 +2325,181 @@ describe('seat hand-offs on the roster (issue #853)', () => {
         expect(button(3)).toBeNull();
     });
 });
+
+describe('the hex picker (#819, #866)', () => {
+    const MOVE_WITH_HEXES = {
+        letter: 'd', name: 'DROP', score: 0, rationale: 'advice',
+        target_id: null, spell_key: '', plain: 'Drop prone', cost: '',
+        destinations: [[1, 0], [0, 1], [-1, 0]],
+    };
+
+    function mountAwaitingPage(pending, seats = []) {
+        document.body.innerHTML = `
+            <strong id="battle-status">Awaiting players</strong>
+            <span id="battle-turn">0</span>
+            <div id="battle-roster"></div>
+            <svg id="battle-arena"></svg>
+            <div id="battle-log"></div>
+            <div id="turn-panel" hidden
+                 data-act-url="/tarmar/battles/1/act/"
+                 data-state-url="/tarmar/battles/1/state/"
+                ></div>
+            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+            <script id="battle-seats" type="application/json">${JSON.stringify(seats)}</script>
+            <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+        `;
+    }
+
+    function pendingWith(candidates) {
+        return {
+            combatant_id: 1, turn: 1, display_name: 'Duel 1 Armoured Fighter',
+            player: 'playeruser', is_you: true, candidates,
+        };
+    }
+
+    test('the hex helpers', () => {
+        expect(battle.sameHex([1, 2], [1, 2])).toBe(true);
+        expect(battle.sameHex([1, 2], [2, 1])).toBe(false);
+        expect(battle.sameHex([1, 2], null)).toBe(false);
+        expect(battle.hexLabel([-1, 3])).toBe('(-1, 3)');
+    });
+
+    test('renderArena draws a button per hex, the chosen one marked', () => {
+        document.body.innerHTML = '<svg id="arena"></svg>';
+        const svg = document.getElementById('arena');
+        const onPick = jest.fn();
+        battle.renderArena(svg, sampleState([sampleCombatant()]), {
+            hexes: [[1, 0], [0, 1]], chosen: [0, 1], onPick,
+        });
+        const cells = svg.querySelectorAll('.arena-destination');
+        expect(cells).toHaveLength(2);
+        expect(cells[0].getAttribute('aria-label')).toBe('Move to hex (1, 0)');
+        expect(cells[1].classList.contains('is-chosen')).toBe(true);
+        expect(cells[1].getAttribute('aria-pressed')).toBe('true');
+        expect(svg.querySelectorAll('.arena-destination-mark')).toHaveLength(1);
+        cells[0].dispatchEvent(new Event('click'));
+        cells[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        cells[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
+        expect(onPick.mock.calls).toEqual([[[1, 0]], [[0, 1]]]);
+    });
+
+    test('no picker, no hexes', () => {
+        document.body.innerHTML = '<svg id="arena"></svg>';
+        const svg = document.getElementById('arena');
+        battle.renderArena(svg, sampleState([sampleCombatant()]));
+        expect(svg.querySelector('.arena-destinations')).toBeNull();
+    });
+
+    test('selecting a placing option offers its hexes; picking one sends it', async () => {
+        mountAwaitingPage(pendingWith([MOVE_WITH_HEXES]));
+        battle.initBattlePage();
+        const arena = document.getElementById('battle-arena');
+        const panel = document.getElementById('turn-panel');
+        expect(arena.querySelector('.arena-destination')).toBeNull();
+        panel.querySelector('.turn-option').click();
+        expect(arena.querySelectorAll('.arena-destination')).toHaveLength(3);
+        expect(panel.querySelector('.turn-destination-line').textContent)
+            .toContain('Pick one of the 3 marked hexes');
+        arena.querySelector('[data-hex="0,1"]').dispatchEvent(new Event('click'));
+        expect(panel.querySelector('.turn-destination-line').textContent)
+            .toBe('Moving to hex (0, 1).');
+        expect(arena.querySelector('.is-chosen').getAttribute('data-hex')).toBe('0,1');
+        // Clearing leaves the option making its own move.
+        panel.querySelector('.turn-destination-clear').click();
+        expect(arena.querySelector('.is-chosen')).toBeNull();
+        arena.querySelector('[data-hex="-1,0"]').dispatchEvent(new Event('click'));
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: 'paused', turn: 1, view: sampleState([sampleCombatant()]),
+                events: [], turns_html: [], seats: [], pending: null,
+            }),
+        });
+        require('../api.js');
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        const sent = JSON.parse(global.fetch.mock.calls[0][1].body);
+        expect(sent.destination).toEqual([-1, 0]);
+        expect(arena.querySelector('.arena-destination')).toBeNull();
+    });
+
+    test('a picked hex keeps keyboard focus through the repaint (#646)', () => {
+        mountAwaitingPage(pendingWith([MOVE_WITH_HEXES]));
+        battle.initBattlePage();
+        document.querySelector('#turn-panel .turn-option').click();
+        const cell = document.querySelector('[data-hex="0,1"]');
+        cell.focus();
+        cell.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+        const picked = document.querySelector('[data-hex="0,1"]');
+        expect(picked).not.toBe(cell); // the board was repainted
+        expect(picked.classList.contains('is-chosen')).toBe(true);
+        expect(document.activeElement).toBe(picked);
+        // Picking it again unpicks it, and focus still stays on the board.
+        picked.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        expect(document.activeElement.getAttribute('data-hex')).toBe('0,1');
+        expect(document.querySelector('.is-chosen')).toBeNull();
+    });
+
+    test('changing the option drops the picked hex', () => {
+        mountAwaitingPage(pendingWith([
+            MOVE_WITH_HEXES,
+            { letter: 'k', name: 'DEFEND', score: 0.3, rationale: 'advice',
+              target_id: null, spell_key: '' },
+        ]));
+        battle.initBattlePage();
+        const panel = document.getElementById('turn-panel');
+        const arena = document.getElementById('battle-arena');
+        panel.querySelectorAll('.turn-option')[0].click();
+        arena.querySelector('[data-hex="1,0"]').dispatchEvent(new Event('click'));
+        panel.querySelectorAll('.turn-option')[1].click();
+        expect(arena.querySelector('.arena-destination')).toBeNull();
+        expect(panel.querySelector('.turn-destination')).toBeNull();
+        panel.querySelectorAll('.turn-option')[0].click();
+        expect(arena.querySelector('.is-chosen')).toBeNull();
+    });
+
+    test('a hex the engine refused is a notice for whoever chose it', () => {
+        const events = [
+            { actor: 'Mine', payload: { destination_refused: [1, 0] },
+              message: 'Mine cannot move to (1, 0): (1, 0) is not clear' },
+            { actor: 'Theirs', payload: { destination_refused: [2, 0] }, message: 'no' },
+            { actor: 'Mine', payload: {}, message: 'Mine attacks' },
+        ];
+        const seats = [
+            { display_name: 'Mine', you_decide: true },
+            { display_name: 'Theirs', you_decide: false },
+        ];
+        expect(battle.refusedMoveNotices(events, seats))
+            .toEqual(['Mine cannot move to (1, 0): (1, 0) is not clear']);
+        expect(battle.refusedMoveNotices(undefined, undefined)).toEqual([]);
+    });
+
+    test('the page posts the refusal as a notice that stays', async () => {
+        mountAwaitingPage(pendingWith([MOVE_WITH_HEXES]), [
+            { combatant_id: 1, display_name: 'Duel 1 Armoured Fighter', you_decide: true },
+        ]);
+        require('../notify.js');
+        battle.initBattlePage();
+        const panel = document.getElementById('turn-panel');
+        panel.querySelector('.turn-option').click();
+        document.querySelector('[data-hex="1,0"]').dispatchEvent(new Event('click'));
+        const refusal = 'Duel 1 Armoured Fighter cannot move to (1, 0): (1, 0) is not clear';
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: 'paused', turn: 1, view: sampleState([sampleCombatant()]),
+                events: [{ turn: 1, phase: 3, sequence: 4, event_type: 'info',
+                           actor: 'Duel 1 Armoured Fighter',
+                           payload: { destination_refused: [1, 0] }, message: refusal }],
+                turns_html: [],
+                seats: [{ combatant_id: 1, display_name: 'Duel 1 Armoured Fighter',
+                          you_decide: true }],
+                pending: null,
+            }),
+        });
+        require('../api.js');
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(document.querySelector('.notice-text').textContent).toBe(refusal);
+    });
+});

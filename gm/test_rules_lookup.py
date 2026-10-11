@@ -151,3 +151,48 @@ class SkillCheckRuleTest(SimpleTestCase):
             if attribute is not None:
                 with self.subTest(skill=skill):
                     self.assertIn(f"{skill} {attribute}", said)
+
+
+class AttributeCheckRuleTest(SimpleTestCase):
+    """The attribute check is a subject the Games Master can look up (#911)."""
+
+    def test_the_answer_says_which_way_the_roll_goes(self):
+        said = rules_lookup.look_up("attribute check")
+
+        self.assertIn("3d6", said)
+        self.assertIn("at or under the attribute's aged score", said)
+
+    def test_the_injury_bands_lower_the_target_as_the_action_does(self):
+        from characters.constants import (
+            MINOR_INJURY_ROLL_PENALTY,
+            SEVERE_INJURY_BAND_TOP,
+            SEVERE_INJURY_ROLL_PENALTY,
+        )
+
+        said = rules_lookup.look_up("attribute_check")
+
+        self.assertIn("is lowered", said)
+        self.assertIn(
+            f"{rules_lookup.signed(MINOR_INJURY_ROLL_PENALTY)} with a pool down "
+            f"to half (but above {SEVERE_INJURY_BAND_TOP})",
+            said,
+        )
+        self.assertIn(
+            f"{rules_lookup.signed(SEVERE_INJURY_ROLL_PENALTY)} with a pool at 1 "
+            f"to {SEVERE_INJURY_BAND_TOP}",
+            said,
+        )
+
+    def test_a_game_master_may_state_a_total_3d6_can_make(self):
+        from characters.skill_checks import (
+            ATTRIBUTE_CHECK_MAXIMUM,
+            ATTRIBUTE_CHECK_MINIMUM,
+        )
+
+        said = rules_lookup.look_up("attribute_check")
+
+        self.assertIn(
+            f"Game Master may state a total ({ATTRIBUTE_CHECK_MINIMUM} to "
+            f"{ATTRIBUTE_CHECK_MAXIMUM})",
+            said,
+        )

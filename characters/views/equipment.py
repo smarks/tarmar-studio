@@ -3,8 +3,8 @@
 Split out of the monolithic ``characters/views.py`` (issue #90). Item
 building/validation and the "only one armor equipped" rule live in
 ``characters/equipment_service.py``; these views stay thin: parse the
-request, call the service, persist via ``Character.save_equipment``
-(issue #91), and shape the response.
+request, make the change through ``characters.services.changing`` (one
+locked row, one history line), and shape the response.
 """
 
 from collections.abc import Callable
@@ -27,6 +27,7 @@ from ..constants import (
     MAX_EQUIPMENT_NOTES_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
     strip_control_characters,
+    too_long,
 )
 from ..equipment import CATALOG_BY_GROUP, get_item, settle_worn_armour
 from ..equipment_service import (
@@ -44,10 +45,11 @@ from ..purse import (
     PurseError,
     catalog_price,
     charge_for_catalog_item,
+    charge_for_custom_item,
+    charge_for_more_of_custom_item,
     format_coin,
     format_purse,
     hold_purchase_to_wealth,
-    move_coin,
     purchase_before_wealth_note,
 )
 from .access import ChangeRefused, answer_change, may_edit
@@ -64,42 +66,31 @@ def _log_equipment_change(request, character, action: str) -> None:
     _log_character_event(request, character, "EQUIPMENT_" + action)
 
 
-#: Custom items whose numbers reach combat: a weapon's damage, armour's and a
-#: shield's Stops and DEX penalty.
-_COMBAT_CATEGORIES = ("weapons", "armor", "shield")
-
-#: Why a player cannot add one (coordinator's ruling on the #757 review, #845).
-CUSTOM_COMBAT_ITEM_REFUSAL = (
-    "A custom weapon, armour or shield is a Game Master's to add: the catalog "
-    "publishes every item's numbers, and nothing lets a player invent better ones"
-)
-
-
 def _charge_for_custom_item(
     request, character: Character, equipment_item: dict
 ) -> list[str]:
     """Hold a player's custom item to the rules; a Game Master's is free.
 
-    A custom item carrying combat numbers is the Game Master's to add (#845);
-    any other custom item a player adds is bought at the cost they state for
-    it (coordinator's rulings on the #757 review, marked for Spencer).
+    The rule is :func:`characters.purse.charge_for_custom_item`, which the
+    Games Master chat's ``add_equipment`` is held to as well (#927). The
+    sheet's form always states a cost, 0 when left blank.
 
     Returns:
         The history lines for the purse.
 
     Raises:
-        ChangeRefused: A player adding a combat item.
-        PurseError: The purse cannot cover the stated cost.
+        PurseError: A player adding a combat item, or a purse that cannot
+            cover the stated cost.
     """
-    if request.user.can_manage_users:
-        return []
-    if equipment_item.get("category") in _COMBAT_CATEGORIES:
-        raise ChangeRefused(_json_error(CUSTOM_COMBAT_ITEM_REFUSAL))
-    cost = Decimal(str(equipment_item.get("cost", 0) or 0))
-    if cost <= 0:
-        return []
-    hold_purchase_to_wealth(character, is_game_master=False)
-    return [move_coin(character, -cost, reason=f"1 × {equipment_item['name']}")]
+    line = charge_for_custom_item(
+        character,
+        equipment_item["name"],
+        str(equipment_item.get("category", "")),
+        Decimal(str(equipment_item.get("cost", 0) or 0)),
+        1,
+        is_game_master=request.user.can_manage_users,
+    )
+    return [line] if line else []
 
 
 def _note_purchase_before_wealth(
@@ -118,14 +109,22 @@ def _note_purchase_before_wealth(
         notices.append(note)
 
 
-def _get_equipment_response(character):
+def _get_equipment_response(character: Character) -> dict:
     """Build standard equipment response with encumbrance data.
 
     It also carries the Attack Resolution panel's weapon choices, so an
     equipment change refreshes that select without a reload (issue #339,
-    item 24); the encumbrance, movement and combat tiles
-    (:func:`~characters.views.characters.movement_response`); and what any
-    change moves elsewhere on the sheet (:func:`sheet_repaint`, issue #792).
+    item 24); and the encumbrance, movement and combat tiles
+    (:func:`~characters.views.characters.movement_response`).
+
+    What any change moves elsewhere on the sheet (:func:`sheet_repaint`,
+    issue #792) is not in it: the view adds that once, at the top of its
+    response. A run of years nests this payload under ``movement``, and a
+    copy here rendered the "Play with the Game Master" slot, its session
+    queries and every partial beside it twice (issue #933).
+
+    Args:
+        character: The saved character.
     """
     attack_weapons, gm_adjudicated = attack_weapon_choices(character)
     return {
@@ -146,7 +145,6 @@ def _get_equipment_response(character):
         # table's Spent / granted line a purchase moves with it.
         "purse": format_purse(character),
         "coin_adjustment": format_coin(character.coin_adjustment),
-        **sheet_repaint(character),
     }
 
 
@@ -228,7 +226,10 @@ def _change_equipment(
                 change.note("purse", "", line)
         if action:
             _log_equipment_change(request, change.character, logged)
-        response = _get_equipment_response(change.character)
+        response = {
+            **_get_equipment_response(change.character),
+            **sheet_repaint(change.character, request.user),
+        }
         if extra is not None:
             response.update(extra(logged))
         return JsonResponse(response)
@@ -396,18 +397,15 @@ def equipment_update(request, pk):
                     _note_purchase_before_wealth(
                         request, character, coin_lines, notices
                     )
-            elif quantity > held and not request.user.can_manage_users:
-                # A player's custom item is bought at its stated cost, each.
-                cost = Decimal(str(item.get("cost", 0) or 0)) * (quantity - held)
-                if cost > 0:
-                    hold_purchase_to_wealth(character, is_game_master=False)
-                    coin_lines.append(
-                        move_coin(
-                            character,
-                            -cost,
-                            reason=f"{quantity - held} × {item.get('name', 'item')}",
-                        )
-                    )
+            elif quantity > held:
+                # More of a custom item is held to the chat's stacking rule
+                # (#927): bought at its stored cost, and a Game Master's to
+                # give when it has none or carries combat numbers (#845).
+                line = charge_for_more_of_custom_item(
+                    character, item, quantity - held, is_game_master=is_game_master
+                )
+                if line:
+                    coin_lines.append(line)
             item["quantity"] = quantity
 
         # Update in_pack if provided. A weapon or shield slung into the pack
@@ -421,13 +419,9 @@ def equipment_update(request, pk):
         # Update notes if provided
         if "notes" in data:
             notes = strip_control_characters(str(data["notes"]))
-            if len(notes) > MAX_EQUIPMENT_NOTES_LENGTH:
-                raise ChangeRefused(
-                    _json_error(
-                        f"Notes must be {MAX_EQUIPMENT_NOTES_LENGTH} characters "
-                        "or fewer"
-                    )
-                )
+            refusal = too_long("Notes", notes, MAX_EQUIPMENT_NOTES_LENGTH)
+            if refusal:
+                raise ChangeRefused(_json_error(refusal))
             item["notes"] = notes
 
         # Update weapon modifiers

@@ -1,0 +1,24 @@
+{% comment %}
+A searchable picker (issue #864): the search box, and the body that holds one
+page of results. common/pickers.py renders the body for the page's first load
+and for every search, and static/js/picker.js asks picker.url for the body that
+matches what was typed (or for another page) and puts it in place, so a row on
+any page can be found by typing.
+
+Include it with ``picker`` (a common.pickers.PickerPage) and, where one page
+holds several pickers of one kind, ``instance`` to keep their ids apart. The
+search box has no name, so a picker inside a form submits only what its rows
+submit.
+{% endcomment %}
+<div class="picker" id="{{ picker.element_id }}{% if instance %}-{{ instance }}{% endif %}"
+     data-picker data-picker-url="{{ picker.url }}">
+    <label class="picker-search-label" for="{{ picker.search_id }}{% if instance %}-{{ instance }}{% endif %}">
+        <span class="sr-only">{{ picker.source.search_label }}</span>
+        <input type="search" id="{{ picker.search_id }}{% if instance %}-{{ instance }}{% endif %}"
+               class="picker-search" data-picker-search autocomplete="off"
+               value="{{ picker.query }}" placeholder="{{ picker.source.placeholder }}">
+    </label>
+    <div class="picker-body" data-picker-body>
+        {% include "_picker_body.html" %}
+    </div>
+</div>

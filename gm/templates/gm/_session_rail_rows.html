@@ -1,0 +1,12 @@
+{% load local_time %}{% comment %}
+The sidebar's session rail (issue #864): the open session (pinned, whatever
+page it is on), then one page of the viewer's sessions, most recently played
+first. Every entry carries its date (issues #705 and #712): two sessions
+opened with the same first line were otherwise two entries reading alike.
+chat.js adds a session the current turn made, and renames and recounts
+entries, by these classes and data-id.
+{% endcomment %}
+<ul class="session-list" id="session-list">
+    {% for s in picker.pinned %}{% include "gm/_session_rail_row.html" %}{% endfor %}
+    {% for s in picker.rows %}{% include "gm/_session_rail_row.html" %}{% endfor %}
+</ul>

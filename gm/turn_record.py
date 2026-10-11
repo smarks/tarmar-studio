@@ -256,8 +256,17 @@ STALE_RUNNING_TURN_ERROR = "the server stopped before this turn finished"
 
 
 def expire_stale_running_turns() -> None:
-    """Mark running turns that can no longer be running as failed (issue #515)."""
-    limit = float(settings.GM_STREAM_BUDGET_SECONDS) + RUNNING_TURN_GRACE_SECONDS
+    """Mark running turns that can no longer be running as failed (issue #515).
+
+    A continued session's first turn writes its recap, within
+    ``GM_RECAP_BUDGET_SECONDS``, before its own budget starts (issue #936),
+    so a turn is given both before it is taken to have died.
+    """
+    limit = (
+        float(settings.GM_RECAP_BUDGET_SECONDS)
+        + float(settings.GM_STREAM_BUDGET_SECONDS)
+        + RUNNING_TURN_GRACE_SECONDS
+    )
     GMTurnRecord.objects.filter(
         outcome=GMTurnRecord.OUTCOME_RUNNING,
         started_at__lt=timezone.now() - timedelta(seconds=limit),

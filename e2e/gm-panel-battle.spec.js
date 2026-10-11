@@ -10,7 +10,7 @@
  * turn panel offers his options.
  */
 
-const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const { test, expect, loginAs, TEST_USER, chooseToAttach } = require('./fixtures');
 const { runDjangoShell } = require('./django');
 
 /**
@@ -45,7 +45,7 @@ test.describe('GM panel — Battle tab', () => {
 
     test('/fight puts the board beside the chat and the player moves their character', async ({ page }, testInfo) => {
         // Attach Aldwin; the attach creates the session and reloads on it.
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         const sessionUrl = page.url();
@@ -119,7 +119,7 @@ test.describe('GM panel — Battle tab', () => {
         const name = `Dain ${testInfo.workerIndex}-${Date.now() % 100000}`;
         seedDyingCharacter(name);
         await page.goto('/tarmar/gm/');
-        await page.selectOption('#gm-character-select', { label: name });
+        await chooseToAttach(page, name);
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 
@@ -157,7 +157,7 @@ test.describe('GM panel — Battle tab', () => {
     });
 
     test('a fight is refused while the Game Master is still answering (#836)', async ({ page }) => {
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
 

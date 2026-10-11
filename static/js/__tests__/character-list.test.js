@@ -61,6 +61,41 @@ describe('filters', () => {
     });
 });
 
+describe('the owner filter is a searchable picker (#973)', () => {
+    test('a select a search swapped in still filters the list', () => {
+        document.body.innerHTML = `
+            <div data-picker><div data-picker-body>
+                <select id="user-filter"><option value="">All</option><option value="4">bo</option></select>
+            </div></div>
+        `;
+        setHref('http://testserver/tarmar/characters/');
+        initCharacterList(document);
+        // What picker.js does with a search's answer: a new body, a new select.
+        document.querySelector('[data-picker-body]').innerHTML =
+            '<select id="user-filter"><option value="">All</option><option value="9">cy</option></select>';
+
+        const select = document.getElementById('user-filter');
+        select.value = '9';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=9');
+    });
+
+    test('wiring the page twice reloads once per choice', () => {
+        document.body.innerHTML = '<select id="user-filter"><option value="">All</option><option value="4">bo</option></select>';
+        setHref('http://testserver/tarmar/characters/');
+        initCharacterList(document);
+        initCharacterList(document);
+        const select = document.getElementById('user-filter');
+        select.value = '4';
+        // reloadWithParam builds the new address once per reload.
+        const built = jest.spyOn(URL.prototype, 'toString');
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        expect(built).toHaveBeenCalledTimes(1);
+        built.mockRestore();
+        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=4');
+    });
+});
+
 describe('importing a character', () => {
     function mountImport() {
         document.body.innerHTML = `

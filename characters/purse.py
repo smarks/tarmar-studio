@@ -8,9 +8,10 @@ thing that changes it. Its callers:
 
 * the sheet's catalog purchase and a raised quantity, which pay the catalog
   price (:func:`charge_for_catalog_item`);
-* a custom item a player adds, which pays its stated cost;
+* a custom item a player adds, which pays its stated cost
+  (:func:`charge_for_custom_item`);
 * a player's Games Master session adding an item, which is a purchase
-  (``services.apply_equipment``);
+  (``services.apply_equipment``), held to the same two charges;
 * a Game Master's grant or removal of coin on the sheet.
 
 Removing an item, or lowering its quantity, returns nothing (coordinator's
@@ -19,8 +20,12 @@ a Game Master may give coin back. A Game Master's gifts, on the sheet or in
 the Games Master chat, are free.
 """
 
+import math
+from collections.abc import Mapping
 from decimal import Decimal
+from typing import Any
 
+from .constants import MAX_COIN_REASON_LENGTH, too_long
 from .equipment import get_item
 from .models import Character
 
@@ -33,7 +38,7 @@ MAX_COIN_MOVEMENT = Decimal(1_000_000)
 
 
 class PurseError(ValueError):
-    """A coin movement the rules refuse; ``str()`` says why, for the player."""
+    """A coin movement or purchase the rules refuse; ``str()`` says why."""
 
 
 def _money(value: object) -> Decimal:
@@ -119,6 +124,32 @@ def move_coin(character: Character, amount: Decimal, *, reason: str) -> str:
     )
 
 
+def move_coin_for_reason(character: Character, amount: Decimal, *, reason: str) -> str:
+    """A Game Master's coin given or taken for a stated reason.
+
+    The sheet's coin control and the Games Master chat's ``set_coin`` both
+    move coin through here, so the reason is held to its one limit on both,
+    a refusal rather than a cut (issue #928). Who may call it is the
+    caller's to decide, as for :func:`move_coin`.
+
+    Args:
+        character: The character, changed in memory and not saved.
+        amount: Coin in MU; positive adds, negative takes.
+        reason: What the Game Master gave or took it for.
+
+    Returns:
+        The history line.
+
+    Raises:
+        PurseError: A reason past :data:`MAX_COIN_REASON_LENGTH`, or a purse
+            that cannot cover a take.
+    """
+    refusal = too_long("Reason", reason, MAX_COIN_REASON_LENGTH)
+    if refusal:
+        raise PurseError(refusal)
+    return move_coin(character, amount, reason=reason)
+
+
 #: Why a player cannot buy before the wealth roll (issue #851).
 WEALTH_FIRST_REFUSAL = (
     "Roll wealth first: nothing is bought before the starting coin is rolled, "
@@ -173,6 +204,10 @@ def catalog_price(item_id: str) -> Decimal:
     return _money(cost)
 
 
+#: How a Game Master's gift of an item reads in the history.
+GAME_MASTER_GIFT = "given by a Game Master"
+
+
 def charge_for_catalog_item(
     character: Character, item_id: str, quantity: int, *, free: bool = False
 ) -> str:
@@ -192,7 +227,128 @@ def charge_for_catalog_item(
     """
     name = (get_item(item_id) or {}).get("name", item_id)
     if free:
-        return f"{quantity} × {name} given by a Game Master"
+        return f"{quantity} × {name} {GAME_MASTER_GIFT}"
     return move_coin(
         character, -catalog_price(item_id) * quantity, reason=f"{quantity} × {name}"
+    )
+
+
+#: Custom items whose numbers reach combat: a weapon's damage, armour's and a
+#: shield's Stops and DEX penalty (#845).
+CUSTOM_COMBAT_CATEGORIES: tuple[str, ...] = ("weapons", "armor", "shield")
+
+#: Why a player cannot add one (coordinator's ruling on the #757 review, #845).
+CUSTOM_COMBAT_ITEM_REFUSAL = (
+    "A custom weapon, armour or shield is a Game Master's to add: the catalog "
+    "publishes every item's numbers, and nothing lets a player invent better ones"
+)
+
+#: Why a player's Games Master session cannot add a custom item it names no
+#: price for (#927). The sheet's form always states one; a plan may not.
+CUSTOM_ITEM_PRICE_REFUSAL = (
+    "An item the catalog does not sell is bought at the price stated for it, "
+    "and none was stated; only a Game Master gives one for nothing"
+)
+
+#: Why a player cannot make more of a custom item carried at no cost: a Game
+#: Master's gift, or an item stored before items kept their cost (#927).
+CUSTOM_ITEM_MORE_REFUSAL = (
+    "This item is carried at no cost, so more of it is a Game Master's to give"
+)
+
+
+def charge_for_custom_item(
+    character: Character,
+    name: str,
+    category: str,
+    price: Decimal | None,
+    quantity: int,
+    *,
+    is_game_master: bool,
+    unpriced_refusal: str = CUSTOM_ITEM_PRICE_REFUSAL,
+) -> str:
+    """Hold a player's custom item to the rules; a Game Master's is free.
+
+    The one rule for an item the catalog does not sell, on the sheet and in
+    the Games Master chat (#927). A custom item carrying combat numbers is
+    the Game Master's to add (#845); any other custom item a player adds is
+    bought at the price stated for it (coordinator's rulings on the #757
+    review), and a player buys nothing before the wealth roll (#851).
+
+    Args:
+        character: The buyer, changed in memory and not saved.
+        name: The item's name, for the history line.
+        category: The item's category; one of
+            :data:`CUSTOM_COMBAT_CATEGORIES` carries combat numbers.
+        price: The price of one in MU as stated, or None when none was.
+        quantity: How many.
+        is_game_master: Whether a Game Master is adding it.
+        unpriced_refusal: What a player is told when ``price`` is None.
+
+    Returns:
+        The history line: what was paid, the Game Master's gift, or ``""``
+        for a player's item stated to cost nothing.
+
+    Raises:
+        PurseError: A player's combat item, a player's item with no stated
+            price, a purchase before the wealth roll, or a purse that cannot
+            cover it.
+    """
+    if is_game_master:
+        return f"{quantity} × {name} {GAME_MASTER_GIFT}"
+    if category in CUSTOM_COMBAT_CATEGORIES:
+        raise PurseError(CUSTOM_COMBAT_ITEM_REFUSAL)
+    if price is None:
+        raise PurseError(unpriced_refusal)
+    cost = _money(price) * quantity
+    if cost <= 0:
+        return ""
+    hold_purchase_to_wealth(character, is_game_master=False)
+    return move_coin(character, -cost, reason=f"{quantity} × {name}")
+
+
+def charge_for_more_of_custom_item(
+    character: Character,
+    item: Mapping[str, Any],
+    quantity: int,
+    *,
+    is_game_master: bool,
+) -> str:
+    """Hold more of a custom item already carried to the rules (#927 review).
+
+    More is bought at the cost the item is stored at, whatever price is
+    stated for the new ones, as the sheet's quantity raise has always bought
+    it. An item stored at no cost -- a Game Master's gift, or one stored
+    before custom items kept their cost -- has nothing to buy more at, so
+    more of it is the Game Master's to give; so is more of one carrying
+    combat numbers (#845).
+
+    Args:
+        character: The buyer, changed in memory and not saved.
+        item: The carried item, as stored.
+        quantity: How many more.
+        is_game_master: Whether a Game Master is adding them.
+
+    Returns:
+        The history line, as :func:`charge_for_custom_item` gives it.
+
+    Raises:
+        PurseError: Whatever :func:`charge_for_custom_item` refuses.
+    """
+    stored = item.get("cost")
+    cost = (
+        _money(stored)
+        if isinstance(stored, int | float)
+        and not isinstance(stored, bool)
+        and math.isfinite(stored)
+        else Decimal(0)
+    )
+    return charge_for_custom_item(
+        character,
+        str(item.get("name", "item")),
+        str(item.get("category", "")),
+        cost if cost > 0 else None,
+        quantity,
+        is_game_master=is_game_master,
+        unpriced_refusal=CUSTOM_ITEM_MORE_REFUSAL,
     )

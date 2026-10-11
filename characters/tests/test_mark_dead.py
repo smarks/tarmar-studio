@@ -108,8 +108,14 @@ class MarkDeadAndReviveTest(BaseTestCase):
     def test_mark_dead_button_appears_for_dm_when_alive(self):
         self.login_as(self.dm)
         response = self.client.get(f"/tarmar/characters/{self.character.pk}/")
-        self.assertContains(response, 'id="mark-dead-btn"')
-        self.assertNotContains(response, 'id="revive-btn"')
+        # Both render, the dead character's hidden, so a death made without a
+        # reload can show it (issue #903).
+        self.assertContains(
+            response, 'id="mark-dead-btn" class="button danger" data-alive-only>'
+        )
+        self.assertContains(
+            response, 'id="revive-btn" class="button" data-dead-only hidden>'
+        )
 
     def test_revive_button_appears_for_dm_when_dead(self):
         self.character.is_alive = False
@@ -117,8 +123,11 @@ class MarkDeadAndReviveTest(BaseTestCase):
         self.character.save()
         self.login_as(self.dm)
         response = self.client.get(f"/tarmar/characters/{self.character.pk}/")
-        self.assertContains(response, 'id="revive-btn"')
-        self.assertNotContains(response, 'id="mark-dead-btn"')
+        self.assertContains(response, 'id="revive-btn" class="button" data-dead-only>')
+        self.assertContains(
+            response,
+            'id="mark-dead-btn" class="button danger" data-alive-only hidden>',
+        )
 
     def test_owner_does_not_see_dm_buttons(self):
         self.login_as(self.owner)

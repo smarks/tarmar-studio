@@ -11,6 +11,15 @@
 {% block main_attrs %}class="chat-main chat-page page-width-none"{% endblock %}
 
 {% block content %}
+{% comment %}The small screen's session switcher (the sidebar is hidden there).
+It sits above the chat layout rather than inside it, so the phone panel,
+placed against the layout, opens under the whole bar however many rows its
+session picker takes (issues #431, #864).{% endcomment %}
+<div class="mobile-session-bar">
+    {% include "_picker.html" with picker=session_menu_picker %}
+    <button type="button" class="btn btn-sm" onclick="newSession()">+ New</button>
+    <button type="button" class="btn btn-sm" id="gm-panel-toggle" aria-controls="gm-panel" aria-expanded="false">Panel</button>
+</div>
 <div class="chat-layout">
     <!-- Sidebar: sessions -->
     <aside class="sidebar" id="sidebar">
@@ -29,37 +38,11 @@
         is the app's own helper, so this reads in the viewer's zone like the
         header and the character list.
         {% endcomment %}
-        <ul class="session-list" id="session-list">
-            {% for s in sessions %}
-            <li class="session-item {% if active_session and active_session.pk == s.pk %}active{% endif %}"
-                data-id="{{ s.pk }}">
-                <a href="?session={{ s.pk }}">
-                    <span class="session-name">{{ s.name }}</span>
-                    <span class="session-meta">{% local_time s.created_at "M d, Y" style="date" %} &middot; <span class="session-count">{{ s.message_count }} msg{{ s.message_count|pluralize }}</span></span>
-                </a>
-                <button type="button" class="session-delete-btn"
-                        aria-label="Delete session {{ s.name }}, started {{ s.created_at|date:'M d, Y' }}" title="Delete session"
-                        onclick="deleteSession({{ s.pk }}, '{{ s.name|escapejs }}', '{{ s.created_at|date:'M d, Y'|escapejs }}')">&times;</button>
-            </li>
-            {% endfor %}
-        </ul>
+        {% include "_picker.html" with picker=session_rail_picker %}
     </aside>
 
     <!-- Chat area -->
     <div class="chat-container">
-        <!-- Mobile-only session switcher (the sidebar is hidden on small screens) -->
-        <div class="mobile-session-bar">
-            <label class="sr-only" for="mobile-session-select">Session</label>
-            <select id="mobile-session-select"
-                    onchange="if (this.value) window.location.href = '?session=' + this.value;">
-                <option value="">Sessions…</option>
-                {% for s in sessions %}
-                <option value="{{ s.pk }}" data-message-count="{{ s.message_count }}" data-name="{{ s.name }}" data-started="{{ s.created_at|date:"M d, Y" }}"{% if active_session and active_session.pk == s.pk %} selected{% endif %}>{{ s.name }} &mdash; {{ s.created_at|date:"M d, Y" }} ({{ s.message_count }})</option>
-                {% endfor %}
-            </select>
-            <button type="button" class="btn btn-sm" onclick="newSession()">+ New</button>
-            <button type="button" class="btn btn-sm" id="gm-panel-toggle" aria-controls="gm-panel" aria-expanded="false">Panel</button>
-        </div>
         {% comment %}Mode indicator and mode control (issues #353, #372). It
         names the mode this session is in and changes it, in the same place:
         the badge that only reported the mode was, for a Game Master, a label
@@ -140,45 +123,7 @@
                 {% endif %}
             </div>
             {% endif %}
-            {% for msg in history %}
-            {% comment %}A die the GM asked the server to roll (issue #363) comes
-            back as the same chip the live turn showed, built server-side so the
-            page never formats or recomputes a roll.{% endcomment %}
-            {% if msg.kind == 'dice' %}
-            <div class="message assistant">
-                <div class="dice-roll">{{ msg.content }}</div>
-            </div>
-            {% elif msg.kind == 'fold_recap' %}
-            {% comment %}Where a long session was folded (issue #791): the entries above
-            are what the model now reads as this recap. A Game Master may correct
-            it; the server checks the account too.{% endcomment %}
-            <section class="message gm-fold-recap" id="gm-fold-recap" aria-labelledby="gm-fold-recap-heading">
-                <h3 class="message-role" id="gm-fold-recap-heading">Recap so far</h3>
-                <p class="gm-fold-note">The {{ msg.covers }} message{{ msg.covers|pluralize }} above {{ msg.covers|pluralize:"is,are" }} now read by the Game Master as this recap, not word for word.</p>
-                <div class="message-content" id="gm-fold-recap-text">{{ msg.content }}</div>
-                <p class="gm-panel-status" id="gm-fold-recap-status" role="status"{% if not msg.set_by %} hidden{% endif %}>{{ msg.set_by|default:"" }}</p>
-                {% if is_game_master %}
-                <details class="gm-hand-edit">
-                    <summary>Correct the recap</summary>
-                    <form class="gm-hand-form" id="gm-fold-recap-form" data-url="{% url 'gm:recap' active_session.pk %}" data-change="edit">
-                        <label class="sr-only" for="gm-fold-recap-input">Recap</label>
-                        <textarea id="gm-fold-recap-input" name="text" rows="5" maxlength="2000" required>{{ msg.content }}</textarea>
-                        <button type="submit" class="btn btn-sm">Save the recap</button>
-                    </form>
-                    <p class="gm-panel-error" id="gm-fold-recap-error" role="alert" hidden></p>
-                </details>
-                {% endif %}
-            </section>
-            {% else %}
-            {% comment %}A kind on a visible entry marks a notice (issue #344: the
-            /character save report) -- shown as text, never markdown.{% endcomment %}
-            <div class="message {{ msg.role }}{% if msg.kind %} notice{% endif %}"{% if msg.kind == 'fight_verdict' %} data-battle-verdict="{{ msg.battle_id }}:{{ msg.battle_ending }}"{% endif %}>
-                {% comment %}A notice is the app speaking, not the Game Master (issue #339, item 11; #785).{% endcomment %}
-                <div class="message-role">{% if msg.role == 'user' %}You{% elif msg.kind %}Notice{% else %}GM{% endif %}</div>
-                <div class="message-content" {% if msg.role == 'assistant' and not msg.kind %}data-markdown{% endif %}>{{ msg.content }}</div>
-            </div>
-            {% endif %}
-            {% endfor %}
+            {% include "gm/_history_entries.html" %}
         </div>
 
         <!-- Command bar -->
@@ -275,7 +220,9 @@ gm-panel-characters.js (issue #341).
 <script src="{% static 'js/marked.min.js' %}"></script>
 <script src="{% static 'js/dompurify.min.js' %}"></script>
 <script src="{% static 'js/autosave.js' %}"></script>
+<script src="{% static 'js/picker.js' %}"></script>
 <script src="{% static 'js/chat.js' %}"></script>
+<script src="{% static 'js/gm-history.js' %}"></script>
 <script src="{% static 'js/gm-panel-layout.js' %}"></script>
 <script src="{% static 'js/gm-panel.js' %}"></script>
 <script src="{% static 'js/gm-panel-characters.js' %}"></script>

@@ -1,0 +1,1 @@
+<option value="{{ s.pk }}" data-message-count="{{ s.message_count }}" data-name="{{ s.name }}" data-started="{{ s.created_at|date:"M d, Y" }}"{% if active_session and active_session.pk == s.pk %} selected{% endif %}>{{ s.name }} &mdash; {{ s.created_at|date:"M d, Y" }} ({{ s.message_count }})</option>

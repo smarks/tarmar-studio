@@ -968,6 +968,10 @@ def _plan_schema_section() -> str:
         "rolls a skill check when the message asks for one. Only the Game "
         'Master\'s carries a "difficulty": 12, an "attribute": "wisdom" or a '
         '"total": 9 rolled at his table.\n'
+        '- {"action": "attribute_check", "character_id": 41, "attribute": '
+        '"constitution"} rolls 3d6 against an attribute with no skill. Only '
+        'the Game Master\'s carries a "total": 11 rolled at his table or a '
+        '"modifier": -5 on the attribute.\n'
         '- {"action": "roll_literacy", "character_id": 41} rolls the 3d6 '
         "literacy check against the character's Origin. The list gives a "
         "character's literacy once it is rolled or ruled; a character with no "
@@ -985,13 +989,20 @@ def _plan_schema_section() -> str:
         '"years": 5} plays 1 to 20 years of prior experience. Tracks: '
         f"{tracks}.\n"
         '- {"action": "spend_skill_points", "character_id": 41, "skill": '
-        '"Sword", "points": 2} spends free skill points.\n'
-        '- {"action": "add_equipment", "character_id": 41, "item": "rope", '
-        '"quantity": 1} adds carried equipment.\n'
+        '"Broadsword", "points": 2} spends free skill points: a player\'s go '
+        "into a skill the skills glossary names or one the character holds; "
+        "the Game Master may name any.\n"
+        '- {"action": "add_equipment", "character_id": 41, "item": "Torch", '
+        '"quantity": 1} adds carried equipment. An item the catalog does not '
+        'sell needs "price", the gold pieces one costs; a player pays it from '
+        "the purse. Only the Game Master gives an item with combat numbers: "
+        '"category" (weapons, armor or shield) with "damage" ("1d8"), or '
+        '"stops" and "dex_penalty".\n'
         '- {"action": "roll", "dice": "3d6", "purpose": "a test of nerve", '
         '"character_id": null} rolls dice: NdM, NdM+K or NdM-K, with " x3" on '
-        "the end for three separate rolls (up to x6). A listed character's "
-        'roll takes "direction": "over", or "under" for at or under a score.\n'
+        "the end for three separate rolls (up to x6). A check a listed "
+        "character makes is never a roll: plan skill_check, attribute_check "
+        "or survival_save.\n"
         '- {"action": "survival_save", "character_id": 41} rolls a dying '
         "character's survival save.\n"
         '- {"action": "rename_character", "character_id": 41, "name": '

@@ -68,11 +68,13 @@ class AidePromptShapeTest(BaseTestCase):
         )
 
     def test_the_addendum_costs_a_readable_amount_of_context(self):
-        """Roughly 1.2k tokens at ~4 chars/token, on top of the ~7k prompt.
+        """Roughly 1.5k tokens at ~4 chars/token, on top of a ~9-10k prompt.
 
         Long enough to say all of it concretely -- the live model needed the
-        named examples, not a summary -- and far short of crowding the 32k
-        window the conversation and the canon excerpts share.
+        named examples, not a summary -- and far short of crowding the window
+        the conversation and the canon excerpts share. The whole prompt with
+        it is held to its share of GM_NUM_CTX by
+        ``test_prompt_size_stays_within_the_context_budget`` (issue #907).
         """
         self.assertLess(len(SECTION_DM_AIDE), 6_000)
 

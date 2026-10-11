@@ -306,6 +306,32 @@ function characterIdFromUrl(page) {
     return page.url().match(/\/characters\/(\d+)\//)[1];
 }
 
+/**
+ * Type into a searchable picker (issue #864) and wait for the server's
+ * answer to land, so what the spec does next acts on the rows that match
+ * rather than on the page the search is about to replace.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} searchSelector - the picker's search box
+ * @param {string} text - what to search for
+ */
+async function searchPicker(page, searchSelector, text) {
+    const box = page.locator(searchSelector);
+    await box.fill(text);
+    const picker = page.locator('[data-picker]', { has: box });
+    await expect(picker.locator('[data-picker-status]')).toContainText(`\u201c${text}\u201d`);
+}
+
+/**
+ * Choose a character in the GM panel's attach picker by name: search for it,
+ * then select it, as a reader with more characters than one page would.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} name
+ */
+async function chooseToAttach(page, name) {
+    await searchPicker(page, '#gm-attach-picker-search', name);
+    await page.selectOption('#gm-character-select', { label: name });
+}
+
 module.exports = {
     ARENA_ORIGIN,
     battleRowOnList,
@@ -324,5 +350,7 @@ module.exports = {
     seedCharacterFromExport,
     submitPassphrase,
     postAsGameMaster,
-    characterIdFromUrl
+    characterIdFromUrl,
+    searchPicker,
+    chooseToAttach,
 };

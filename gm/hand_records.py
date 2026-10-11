@@ -35,6 +35,7 @@ from django.forms.models import model_to_dict
 from django.utils import timezone
 
 from battle.access import is_dm
+from characters.constants import too_long
 
 from .models import GMRecordEdit, GMSession, SceneEntity, StoryThread, TableRuling
 from .summary import MAX_SUMMARY_CHARS
@@ -130,8 +131,10 @@ def _clean_text(
         cleaned = " ".join(value.split())
     if required and not cleaned:
         raise HandEditError(f"{label} is needed")
-    if len(cleaned) > limit:
-        raise HandEditError(f"{label} is longer than {limit} characters")
+    # The one wording every path gives past a limit (#928, #938).
+    refusal = too_long(label, cleaned, limit)
+    if refusal:
+        raise HandEditError(refusal)
     return cleaned
 
 

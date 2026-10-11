@@ -7,7 +7,9 @@
  * 7, so Fatigue = 12 + 12 + 12 + 12 + 7 = 55 and Body = ceil(55 * 2/3) = 37.
  */
 
-const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const {
+    test, expect, loginAs, TEST_USER, chooseToAttach, searchPicker,
+} = require('./fixtures');
 
 test.describe('GM panel — Characters tab', () => {
     test.beforeEach(async ({ page }) => {
@@ -22,7 +24,7 @@ test.describe('GM panel — Characters tab', () => {
         await expect(page.locator('#gm-panel-characters')).toBeVisible();
         await expect(page.locator('#gm-sheets-empty')).toBeVisible();
 
-        await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
+        await chooseToAttach(page, 'Aldwin the Bold');
         await page.click('#gm-character-attach');
 
         // The attach created a session; the page reloads on it.
@@ -37,13 +39,17 @@ test.describe('GM panel — Characters tab', () => {
         await expect(sheet.locator('.gm-sheet-pools')).toContainText('37');
         await expect(sheet.locator('.gm-sheet-attributes')).toContainText('STR');
 
-        // The attached character has left the picker.
+        // The attached character has left the picker; a search finds the
+        // other, whatever page it is on (#864).
+        await searchPicker(page, '#gm-attach-picker-search', 'Aldwin the Bold');
         await expect(page.locator('#gm-character-select option', { hasText: 'Aldwin the Bold' })).toHaveCount(0);
+        await searchPicker(page, '#gm-attach-picker-search', 'Mira Quickhand');
         await expect(page.locator('#gm-character-select option', { hasText: 'Mira Quickhand' })).toHaveCount(1);
 
         await sheet.locator('.gm-sheet-detach').click();
         await expect(page.locator('.gm-sheet')).toHaveCount(0);
         await expect(page.locator('#gm-sheets-empty')).toBeVisible();
+        await searchPicker(page, '#gm-attach-picker-search', 'Aldwin the Bold');
         await expect(page.locator('#gm-character-select option', { hasText: 'Aldwin the Bold' })).toHaveCount(1);
     });
 

@@ -177,6 +177,15 @@ class AccountStylesheetTest(BaseTestCase):
             ["/static/css/base.css", "/static/css/home.css"],
         )
 
+    def test_journal_links_its_sheet(self):
+        user = self.create_player(username="journalplayer")
+        self.login_as(user)
+        response = self.client.get("/tarmar/journal/")
+        self.assertEqual(
+            stylesheet_hrefs(response),
+            ["/static/css/base.css", "/static/css/journal.css"],
+        )
+
     def test_profile_links_its_sheet(self):
         user = self.create_player(username="profileplayer")
         self.login_as(user)
@@ -198,6 +207,7 @@ class StylesheetFilesExistTest(TestCase):
             "character-edit.css",
             "character-list.css",
             "home.css",
+            "journal.css",
             "profile.css",
             "reference-search.css",
             "reference-shared.css",

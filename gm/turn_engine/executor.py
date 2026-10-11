@@ -14,7 +14,7 @@ what was not done and why.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any
@@ -27,8 +27,12 @@ from django.utils import timezone
 from battle.access import is_dm
 from characters import services
 from characters.models import Character
-from characters.purse import PurseError, format_purse, move_coin
-from characters.skill_checks import injury_penalty, skill_check, unconscious_refusal
+from characters.purse import PurseError, format_purse, move_coin_for_reason
+from characters.skill_checks import (
+    attribute_check,
+    skill_check,
+    unconscious_refusal,
+)
 from characters.skills import normalize_skill_name
 from common.helpers import is_owner_or_manager
 
@@ -100,6 +104,7 @@ ACTION_STATUS: dict[str, str] = {
     "set_coin": "changing the purse",
     "skill_check": "rolling a skill check",
     "survival_save": "rolling a survival save",
+    "attribute_check": "rolling an attribute check",
 }
 
 
@@ -164,6 +169,8 @@ class RecordsExecutor:
         self.turn_id = turn_id
         # Characters this plan started, by every name a later action may use.
         self._started: dict[str, int] = {}
+        # The Origin a plan's set_background states, by character name (#970).
+        self._stated_origins: dict[str, str] = {}
         # Those whose creation Fatigue roll a plan has already been told of.
         self._fatigue_reported: set[int] = set()
         # The Game Master authority the running action has (#837): the
@@ -171,6 +178,32 @@ class RecordsExecutor:
         self._is_game_master = policy.is_game_master
 
     # -- the engine's port -------------------------------------------------
+
+    def begin(self, actions: Sequence[PlannedAction]) -> None:
+        """Note the Origin the plan states for each character it starts.
+
+        A ``set_background`` naming a ``location`` for a character the same
+        plan starts (``new_character_ref``) states its Origin, which is
+        recorded as a choice, not rolled (#860, #970): starting that character
+        records it (``roster.start_character``), and the ``set_background``
+        then restates it. A plan that states none, or names no Origin the
+        table has, rolls it as the creation page does, and the roll is final
+        for a player. A ``set_background`` the plan reader already refused
+        states nothing: it will not run.
+        """
+        origins = dict(Character._meta.get_field("location").choices or ())
+        self._stated_origins = {}
+        for action in actions:
+            if (
+                action.action != "set_background"
+                or action.refused
+                or not action.new_character_ref
+            ):
+                continue
+            for field_name, value in action.background:
+                origin = _choice(field_name, value)
+                if field_name == "location" and origin in origins:
+                    self._stated_origins[action.new_character_ref.casefold()] = origin
 
     def roster(self) -> list[RosterLine]:
         return roster_lines(self.session)
@@ -270,7 +303,14 @@ class RecordsExecutor:
                         "a second one needs a name of its own"
                     )
             session = self._session()
-            character = roster.start_character(session, new.label, name=new.name)
+            stated = [
+                self._stated_origins[key]
+                for key in new.keys
+                if key in self._stated_origins
+            ]
+            character = roster.start_character(
+                session, new.label, name=new.name, origin=stated[0] if stated else ""
+            )
             return roster.RosterEntry(character=character, label=new.label), True
         if action.new_character_ref:
             character_id = self._started.get(action.new_character_ref.casefold())
@@ -422,6 +462,8 @@ class RecordsExecutor:
             changed = self._set_coin(action, character_id)
         elif name == "skill_check":
             changed = self._skill_check(action, character_id)
+        elif name == "attribute_check":
+            changed = self._attribute_check(action, character_id)
         elif name == "survival_save":
             # The sheet's own save (#839, #886): code rolls it once into the
             # dice log; a player gets one for each state of the wounds and a
@@ -488,13 +530,16 @@ class RecordsExecutor:
                     self._session(), changed.character, changed.granted
                 )
         elif name == "add_equipment":
-            # A player's session buys catalog gear from the purse; a Game
-            # Master's gives it (coordinator's ruling on the #757 review).
+            # A player's session buys gear from the purse, a custom item at
+            # its stated price and never with combat numbers; a Game Master's
+            # gives it (the #757 review, #845, #927).
             changed = services.add_equipment(
                 character_id,
                 action.item,
                 action.quantity,
                 purchase=not is_game_master,
+                price=Decimal(action.price) if action.price else None,
+                combat=dict(action.combat),
                 **common,
             )
         elif name == "rename_character":
@@ -512,6 +557,15 @@ class RecordsExecutor:
                 is_game_master=is_game_master,
                 **common,
             )
+            if not changed.note:
+                # Every part it names was already on the record: the Origin a
+                # plan states for a character it starts is recorded as the
+                # character is made (#970). Said, rather than an empty note.
+                changed = services.ChangeResult(
+                    changed.character,
+                    "background already recorded as stated: "
+                    + changed.character.background_summary,
+                )
         elif name == "revive_character":
             changed = services.revive(character_id, **common)
         else:  # remove_character
@@ -525,10 +579,16 @@ class RecordsExecutor:
             for key in action.new_character.keys:
                 self._started[key] = character_id
             # What start_character rolled for it (#754), so the narration
-            # has the dice's answer rather than a guess.
+            # has the dice's answer rather than a guess. An Origin the plan
+            # states is left for its set_background to record (#970).
+            rolled = (
+                "a rolled background"
+                if services.field_rolled(changed.character, "location")
+                else "the Origin the plan states, and a rolled provenance and wealth"
+            )
             introduced = (
-                f"{who} is a new character, id {character_id}, with a rolled "
-                f"background: {changed.character.background_summary}. "
+                f"{who} is a new character, id {character_id}, with {rolled}: "
+                f"{changed.character.background_summary}. "
             )
         return self._ran(action, who, changed.note, lines, details, introduced)
 
@@ -537,13 +597,16 @@ class RecordsExecutor:
     ) -> services.ChangeResult:
         """Give or take coin, or leave the purse at a figure (issue #802).
 
-        Through :func:`characters.purse.move_coin`, the one thing that
-        changes a purse, as the sheet's Game Master control does. A purse
+        Through :func:`characters.purse.move_coin_for_reason`, as the
+        sheet's Game Master control is, which holds the reason to its limit
+        (#928) and moves the coin with ``move_coin``, the one thing that
+        changes a purse. A purse
         stated as a total is moved by the difference, worked out here from
         the record rather than by the model.
 
         Raises:
-            _Refused: A player asking, or a purse that cannot cover a take.
+            _Refused: A player asking, a reason past its limit, or a purse
+                that cannot cover a take.
         """
         if not self._is_game_master:  # pragma: no cover - refused before it runs
             raise _Refused(GAME_MASTER_RECORDS_REFUSAL)
@@ -562,7 +625,7 @@ class RecordsExecutor:
                     character, f"the purse already holds {format_purse(character)}"
                 )
             try:
-                note = move_coin(
+                note = move_coin_for_reason(
                     character, amount, reason=action.reason or "Game Master"
                 )
             except PurseError as refusal:
@@ -593,6 +656,31 @@ class RecordsExecutor:
                 is_game_master=self._is_game_master,
             )
             change.note("skill_check", "", check.line)
+        return services.ChangeResult(change.character, check.line)
+
+    def _attribute_check(
+        self, action: PlannedAction, character_id: int
+    ) -> services.ChangeResult:
+        """Roll 3d6 ≤ an attribute through the sheet's own rule (issue #911).
+
+        :func:`characters.skill_checks.attribute_check` reads the aged score
+        and lowers the target by the injury table's penalty, so no direction
+        the model writes can turn the penalty into a bonus. Only a Game
+        Master states the dice, sets a modifier on the target (#953) or calls
+        a check for an unconscious character. Kept in the character's
+        history, as a skill check is.
+        """
+        with services.changing(
+            character_id, actor=self.actor, authorize=self._authorize
+        ) as change:
+            check = attribute_check(
+                change.character,
+                action.attribute,
+                stated_total=action.stated_total,
+                modifier=action.modifier,
+                is_game_master=self._is_game_master,
+            )
+            change.note("attribute_check", "", check.line)
         return services.ChangeResult(change.character, check.line)
 
     def _rules_lookup(self, action: PlannedAction) -> ActionResult:
@@ -851,16 +939,17 @@ class RecordsExecutor:
         """Roll the dice a plan asked for; nothing about a character changes.
 
         A character's roll is held to their condition as the sheet's rolls
-        are (#886): the dead roll nothing, an unconscious character rolls
-        only when a Game Master calls it (named on the line), and the injury
-        table's -1 or -2 is applied in the direction the plan gives, or
-        named as not applied when it gives none.
+        are (#886): the dead roll nothing, and an unconscious character
+        rolls only when a Game Master calls it (named on the line). It takes
+        no injury penalty (#911): nothing says which way a free-form roll is
+        read, so the -1 or -2 could only be applied in a direction the model
+        chose, and a backwards one made it a bonus. A roll against a score
+        is a ``skill_check``, ``survival_save`` or ``attribute_check``.
 
         Raises:
             _Refused: A dead character, or a player's unconscious one.
         """
         roller = ""
-        injured = 0
         called_past = ""
         if action.character_id is not None:
             entry = self._entry(action.character_id)
@@ -870,7 +959,6 @@ class RecordsExecutor:
                 if not self._is_game_master or not entry.character.is_alive:
                     raise _Refused(unconscious)
                 called_past = "unconscious"
-            injured = injury_penalty(entry.character)
         # A roll is kept if the turn breaks off afterwards (issue #410), and
         # keeping it needs a session the page knows about.
         self._session()
@@ -879,8 +967,6 @@ class RecordsExecutor:
             purpose=action.purpose,
             roller=roller,
             times=action.times,
-            injury_penalty=injured,
-            direction=action.direction,
             game_master_call=called_past,
         )
         frames = []

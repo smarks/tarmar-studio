@@ -11,8 +11,10 @@ gh issue view <num>                    # View issue details
 gh issue edit <num> --add-assignee @me # Claim work
 gh issue comment <num> --body "..."    # Add progress notes
 gh issue close <num>                   # Complete work
-gh issue create --title "..." --body "..." --label enhancement
+gh issue create --title "..." --body "..." --label bug --label filed-by-claude
 ```
+
+Labels and body sections for a new issue: see "Filing an issue" in CLAUDE.md.
 
 > The legacy `bd` (beads) tracker and the on-disk `.beads/` directory may still
 > be present in the repo for historical reasons, but GitHub issues are now the

@@ -5,22 +5,7 @@ from gm:characters_panel while a turn runs, so the section itself -- and
 whether it is shown -- stays put.
 {% endcomment %}
     <form class="gm-panel-picker" id="gm-character-picker">
-        <label class="sr-only" for="gm-character-select">Character to attach</label>
-        <select id="gm-character-select" {% if not attachable_characters %}disabled{% endif %}>
-            {% if attachable_characters %}
-            <option value="">Pick a character…</option>
-            {% comment %}A Game Master's picker carries his players' characters, one group per owner (issue #759); a player's has one owner and no group label.{% endcomment %}
-            {% for group in attachable_groups %}
-            {% if group.owner %}<optgroup label="{{ group.owner }}">{% endif %}
-            {% for character in group.characters %}
-            <option value="{{ character.pk }}">{{ character.name }}</option>
-            {% endfor %}
-            {% if group.owner %}</optgroup>{% endif %}
-            {% endfor %}
-            {% else %}
-            <option value="">No characters to attach</option>
-            {% endif %}
-        </select>
+        {% include "_picker.html" with picker=attachable_picker %}
         <button type="submit" class="btn btn-sm" id="gm-character-attach" {% if not attachable_characters %}disabled{% endif %}>Attach</button>
     </form>
     <p class="gm-panel-error" id="gm-panel-characters-error" role="alert" hidden></p>

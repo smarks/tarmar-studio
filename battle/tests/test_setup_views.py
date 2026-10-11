@@ -607,3 +607,32 @@ class StaleAutosaveTest(BaseTestCase):
         ):
             response = self.post_update()
         self.assert_refused_as_gone(response)
+
+
+class SetupTextLimitsTest(BaseTestCase):
+    """The terms and team-name inputs stop at the server's limits (#938)."""
+
+    def test_each_text_inputs_maxlength_is_the_servers(self):
+        from battle import views
+        from battle.services import MAX_TEAM_NAME
+
+        dm = self.create_dm()
+        draft = make_draft(dm)
+        self.login_as(dm)
+        self.assertEqual(
+            views.BATTLE_NAME_MAX_LENGTH, Battle._meta.get_field("name").max_length
+        )
+        odd = {"BATTLE_NAME_MAX_LENGTH": 101, "MAX_TEAM_NAME": 46}
+        for battle_name, team_name in (
+            (views.BATTLE_NAME_MAX_LENGTH, MAX_TEAM_NAME),
+            (odd["BATTLE_NAME_MAX_LENGTH"], odd["MAX_TEAM_NAME"]),
+        ):
+            with self.subTest(battle_name=battle_name, team_name=team_name):
+                with (
+                    mock.patch.object(views, "BATTLE_NAME_MAX_LENGTH", battle_name),
+                    mock.patch.object(views, "MAX_TEAM_NAME", team_name),
+                ):
+                    page = self.client.get(reverse("battle:setup", args=[draft.pk]))
+                html = page.content.decode()
+                self.assertIn(f'maxlength="{battle_name}" value=', html)
+                self.assertIn(f'name="team_name" maxlength="{team_name}"', html)

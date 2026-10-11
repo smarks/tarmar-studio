@@ -14,13 +14,16 @@ from urllib.parse import quote
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.http import HttpResponse, JsonResponse
+from django.db.models import F
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.views import View
 from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView
 
@@ -40,17 +43,27 @@ from common.helpers import (
 )
 from common.mixins import ActivePageMixin, AdminOrDMRequiredMixin
 from common.pagination import PAGE_SIZE, query_without
+from common.pickers import asked_for, picker_body_response
+from gm.templatetags.gm_play import play_with_game_master
 
 from .. import attack, services
 from ..combat import ARMOUR_TIERS
 from ..constants import (
+    CHARACTER_TEXT_LIMITS,
     CORE_ATTRIBUTE_FIELDS,
+    MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
+    MAX_ARMOR_STOPS,
     MAX_CHARACTER_NAME_LENGTH,
+    MAX_DEATH_CAUSE_LENGTH,
+    MAX_EQUIPMENT_MODIFIER,
+    MAX_EQUIPMENT_QUANTITY,
+    MAX_EQUIPMENT_WEIGHT_LBS,
     POINT_BUY_MAX_ATTRIBUTE,
     POINT_BUY_MIN_ATTRIBUTE,
     POINT_BUY_TOTAL,
     UNNAMED_CHARACTER,
     name_within_rule,
+    too_long,
 )
 from ..dice import build_point_buy_character_stats, roll_all_character_stats
 from ..equipment import CATALOG_GROUPS, ITEM_CATEGORIES, SHIELDS, get_item
@@ -61,22 +74,27 @@ from ..import_service import (
     save_imported_character,
     validate_import_payload,
 )
-from ..magic import current_mana, known_spells, learnable_spells
+from ..magic import MAX_MANA_GRANT, current_mana, known_spells, learnable_spells
 from ..models import (
     CHARACTER_FIELDS,
     MAX_COMBAT_LOG_ENTRIES,
+    MAX_EXPERIENCE_LOG_ENTRIES,
     SHEET_RULES_CELL_FIELDS,
     Character,
     HistoryEntry,
     character_has_field,
     characters_visible_to,
 )
+from ..pickers import owner_filter_picker
 from ..purse import format_coin, format_purse
 from ..services import CharacterChangeError
 from ..skill_checks import (
     ATTRIBUTES,
     GOVERNING_ATTRIBUTES,
     LITERACY_SKILL,
+    MAX_DIFFICULTY,
+    SKILL_CHECK_MAXIMUM,
+    SKILL_CHECK_MINIMUM,
     governing_attribute,
     literacy_refusal,
 )
@@ -93,6 +111,25 @@ from ..skills import (
 )
 from ..weapon_skill import UNRECORDED_WEAPON_SKILL, weapon_choices
 from .access import answer_change, edit_denied, locked_character_or_404, may_edit
+
+#: Each number input's bound on the sheet, by the name the template reads it
+#: under (``number_limits.<field>``) and the script under the page config's
+#: ``numberLimits``: the constant its endpoint refuses by, never a copy of it
+#: (issue #938). A range symmetric about zero is given by its magnitude, and
+#: a floor of 0 or 1 (no negative weight, no empty row) is not a limit here.
+CHARACTER_NUMBER_LIMITS: dict[str, int] = {
+    "equipment_quantity": MAX_EQUIPMENT_QUANTITY,
+    "equipment_weight": MAX_EQUIPMENT_WEIGHT_LBS,
+    "equipment_modifier": MAX_EQUIPMENT_MODIFIER,
+    "armor_stops": MAX_ARMOR_STOPS,
+    "armor_dex_penalty": MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
+    "check_difficulty": MAX_DIFFICULTY,
+    "check_total_minimum": SKILL_CHECK_MINIMUM,
+    "check_total_maximum": SKILL_CHECK_MAXIMUM,
+    "mana_grant": MAX_MANA_GRANT,
+    "defender_dodge": attack.MAX_DEFENDER_DODGE,
+    "situational": attack.MAX_SITUATIONAL,
+}
 
 #: What the Location section's literacy row is painted from (issues #740,
 #: #741, #743). The field-update response for ``location`` and
@@ -240,7 +277,7 @@ class CharacterListView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, Li
         if user.can_manage_users:
             # DM/Admin: show all characters, optionally filtered by user
             qs = Character.objects.select_related("user").order_by(
-                "is_deleted", "-created_at"
+                "is_deleted", "-created_at", "-pk"
             )
             # ?user= comes straight off the URL bar, so it need not be a
             # number: filtering on a non-numeric value raised ValueError out
@@ -260,7 +297,8 @@ class CharacterListView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, Li
         qs = characters_visible_to(user)
         if show_deleted:
             qs = qs | Character.objects.filter(user=user, is_deleted=True)
-        return qs.select_related("user").order_by("is_deleted", "-created_at")
+        # The pk breaks a tie in created_at, so a row stays on one page (#950).
+        return qs.select_related("user").order_by("is_deleted", "-created_at", "-pk")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -270,11 +308,34 @@ class CharacterListView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, Li
         context["preserved_query"] = query_without(self.request, "page")
         if user.can_manage_users:
             context["is_manager"] = True
-            context["all_users"] = User.objects.filter(is_active=True).order_by(
-                "username"
-            )
-            context["filter_user_id"] = self.request.GET.get("user", "")
+            filter_user_id = self.request.GET.get("user", "")
+            # A page of accounts, newest first, with a search that reaches
+            # every page; the one the list is filtered by stays chosen (#973).
+            context["owner_picker"] = owner_filter_picker(filter_user_id)
+            context["filter_user_id"] = filter_user_id
         return context
+
+
+class OwnerFilterPickerView(LoginRequiredMixin, AdminOrDMRequiredMixin, View):
+    """One page of the character list's owner filter (issue #973).
+
+    What ``picker.js`` asks for as a Game Master types or turns a page; gated
+    as the filter is, which ``CharacterListView`` applies for an account with
+    ``can_manage_users`` only. ``?user=`` keeps the chosen owner chosen.
+    """
+
+    login_url = "login"
+
+    def get(
+        self, request: HttpRequest, *args: object, **kwargs: object
+    ) -> HttpResponse:
+        """The body ``picker.js`` puts in place for this query and page."""
+        filter_user_id = request.GET.get("user", "").strip()
+        query, page_number = asked_for(request)
+        picker = owner_filter_picker(
+            filter_user_id, query=query, page_number=page_number
+        )
+        return picker_body_response(request, picker, {"filter_user_id": filter_user_id})
 
 
 CHARACTER_CREATE_TEMPLATE = "characters/character_create.html"
@@ -616,6 +677,8 @@ def character_import(request):
         imported = held_to_player(
             validate_import_payload(payload),
             is_game_master=request.user.can_manage_users,
+            # A chain on the character this file exports is kept (#941).
+            importer=request.user,
         )
         character = save_imported_character(request.user, imported)
     except CharacterImportError as error:
@@ -814,6 +877,12 @@ class CharacterEditView(
             self.object, is_game_master=self.request.user.can_manage_users
         )
         context["origin_fixed_reason"] = services.ORIGIN_FIXED_REASON
+        # A rolled Origin is fixed for a player outright (#970): the cell is
+        # text with its own reason (services.can_set_field), so the literacy
+        # note, which belongs to the select, is not rendered beside it.
+        context["origin_settable"] = services.can_set_field(
+            self.object, "location", is_game_master=self.request.user.can_manage_users
+        )
         # Who may set what (issue #748): the cell tags read this and
         # services.update_fields_for, the same answer the field update gives,
         # so a player sees a rolled or awarded value read-only with its reason
@@ -874,9 +943,7 @@ class CharacterEditView(
         # skills (which can include a freely-typed name off no track at all).
         # A native <datalist> reads this list but never restricts the input
         # to it, so an unlisted skill stays typeable (issue #224).
-        context["skill_name_suggestions"] = sorted(
-            set(granted_skill_names()) | set((self.object.skills or {}).keys())
-        )
+        context["skill_name_suggestions"] = skill_name_suggestions(self.object)
         context.update(
             mechanics_context(self.object, self.request.user.can_manage_users)
         )
@@ -898,6 +965,10 @@ class CharacterEditView(
         # The equipment pickers' options, from characters/equipment.py rather
         # than typed into the template a second time (issue #338 item 21).
         context["equipment_catalog_groups"] = CATALOG_GROUPS
+        # Each text input's maxlength, the server's own limit (issue #928).
+        context["text_limits"] = CHARACTER_TEXT_LIMITS
+        # Each number input's bound, the server's own (issue #938).
+        context["number_limits"] = CHARACTER_NUMBER_LIMITS
         context["equipment_item_categories"] = ITEM_CATEGORIES
         # When the next aging hit lands, and what it costs -- the workbench
         # says so in as many words ("STR -1, DEX -1 at age 36") rather than
@@ -952,6 +1023,9 @@ class CharacterEditView(
             "trackLabels": TRACK_LABELS,
             "agingByAge": aging_by_age,
             "agingHorizonAge": AGING_PREVIEW_HORIZON_AGE,
+            # The record keeps the latest runs only; so does the page's
+            # Experience History when a run joins it (issue #903).
+            "maxExperienceLogEntries": MAX_EXPERIENCE_LOG_ENTRIES,
             # Equipment
             "catalogUrl": reverse("characters:equipment_catalog"),
             "equipmentAddUrl": reverse(
@@ -978,6 +1052,11 @@ class CharacterEditView(
             # DM-only actions. The URLs are always emitted; the handlers bind
             # only when the buttons exist, and those render for DMs alone.
             "markDeadUrl": reverse("characters:mark_dead", args=[self.object.pk]),
+            # Each text field's limit, for the inputs the script builds
+            # (issue #928): the server's number, not a copy of it.
+            "textLimits": CHARACTER_TEXT_LIMITS,
+            # And each number input's bound (issue #938).
+            "numberLimits": CHARACTER_NUMBER_LIMITS,
             "reviveUrl": reverse("characters:revive", args=[self.object.pk]),
             # The Fatigue roll's own control (issue #636); the handler binds
             # only when the button renders, which is for an editor alone.
@@ -1182,11 +1261,6 @@ def restore_character(request, pk):
     return JsonResponse({"success": True, "character_id": character.pk})
 
 
-# Max length matches Character.death_cause max_length to avoid a server-side
-# truncation surprise on the way to the DB.
-MARK_DEAD_CAUSE_MAX_LENGTH = 200
-
-
 @login_required
 @require_POST
 @rate_limit("set_visibility", max_requests=20, window_seconds=60)
@@ -1267,7 +1341,7 @@ def character_roll_fatigue(request, pk):
                 # than offering a second the server would refuse.
                 "can_roll_fatigue": is_game_master,
                 # The roll can complete the character (issue #764).
-                **sheet_repaint(character),
+                **sheet_repaint(character, request.user),
             }
         )
 
@@ -1291,7 +1365,9 @@ def character_dismiss_import_notice(request, pk):
         )
         # The dismissal is a history line; Recent Changes shows it without a
         # reload (#792 sweep).
-        return JsonResponse({"success": True, **sheet_repaint(result.character)})
+        return JsonResponse(
+            {"success": True, **sheet_repaint(result.character, request.user)}
+        )
 
     return answer_change(run, json_not_found=False)
 
@@ -1331,7 +1407,7 @@ def character_rule_literacy(request, pk):
                 "success": True,
                 "note": result.note,
                 **literacy_response(character, is_game_master=is_game_master),
-                **sheet_repaint(character),
+                **sheet_repaint(character, request.user),
             }
         )
 
@@ -1367,7 +1443,7 @@ def character_roll_literacy(request, pk):
                 "success": True,
                 "note": result.note,
                 **literacy_response(character, is_game_master=is_game_master),
-                **sheet_repaint(character),
+                **sheet_repaint(character, request.user),
             }
         )
 
@@ -1378,8 +1454,9 @@ def character_roll_literacy(request, pk):
 @require_POST
 @rate_limit("roll_sheet", max_requests=20, window_seconds=60)
 def character_roll(request, pk, kind: str) -> HttpResponse:
-    """Make one of the sheet's rolls: attributes, appearance, provenance,
-    wealth, or a Game Master's coin reroll (issues #748, #749).
+    """Make one of the sheet's rolls: attributes, appearance, a blank height
+    or weight (#941), provenance, wealth, or a Game Master's coin reroll
+    (issues #748, #749).
 
     Thin over ``services.roll_on_sheet``, as the Fatigue and literacy rolls
     are over theirs: the server rolls, a player rolls each once, a Game
@@ -1432,16 +1509,20 @@ def character_mark_dead(request, pk):
     cause = cause.strip()
     if not cause:
         return _json_error("Cause of death is required")
-    if len(cause) > MARK_DEAD_CAUSE_MAX_LENGTH:
-        return _json_error(
-            f"Cause must be {MARK_DEAD_CAUSE_MAX_LENGTH} characters or fewer"
-        )
+    refusal = too_long("Cause", cause, MAX_DEATH_CAUSE_LENGTH)
+    if refusal:
+        return _json_error(refusal)
 
     def mark_dead(character: Character) -> None:
         services.apply_death(character, cause)
 
     def run() -> HttpResponse:
-        with services.changing(pk, actor=request.user, mark_played=False) as change:
+        with services.changing(
+            pk,
+            actor=request.user,
+            mark_played=False,
+            dead=services.DeadCharacterWrite.DEATH_AND_REVIVAL,
+        ) as change:
             mark_dead(change.character)
             change.note("is_alive", True, False)
         _log_character_event(
@@ -1467,7 +1548,12 @@ def character_revive(request, pk):
         return _permission_denied()
 
     def run() -> HttpResponse:
-        with services.changing(pk, actor=request.user, mark_played=False) as change:
+        with services.changing(
+            pk,
+            actor=request.user,
+            mark_played=False,
+            dead=services.DeadCharacterWrite.DEATH_AND_REVIVAL,
+        ) as change:
             if change.character.is_alive:
                 raise CharacterChangeError("Character is already alive")
             services.apply_revive(change.character)
@@ -1534,7 +1620,7 @@ def character_set_pools(request, pk):
                 # The Magic section prints the Mana in hand too; it repaints
                 # from this rather than waiting for a reload.
                 "current_mana": current_mana(character),
-                **sheet_repaint(character),
+                **sheet_repaint(character, request.user),
             }
         )
 
@@ -1566,7 +1652,14 @@ class DeletedCharactersView(
     paginate_by = PAGE_SIZE
 
     def get_queryset(self):
-        return Character.objects.filter(is_deleted=True).select_related("user")
+        # Most recently deleted first, the pk breaking ties, so a row stays on
+        # one page from request to request (issue #950). A row deleted before
+        # deleted_at was recorded has none and goes last.
+        return (
+            Character.objects.filter(is_deleted=True)
+            .select_related("user")
+            .order_by(F("deleted_at").desc(nulls_last=True), "-pk")
+        )
 
 
 #: Whether the allocate endpoint grants a Game Master a point past the free
@@ -1689,7 +1782,19 @@ def movement_response(character: Character) -> dict:
     }
 
 
-def sheet_repaint(character: Character) -> dict:
+def skill_name_suggestions(character: Character) -> list[str]:
+    """The add-skill input's type-ahead, for the page and for a repaint.
+
+    Every real skill any track's d20 table can grant, plus this character's
+    own skills (which can include a freely-typed name off no track at all).
+    A native <datalist> reads this list but never restricts the input to it,
+    so an unlisted skill stays typeable (issue #224). A skill allocated in
+    place joins it without a reload (issue #903).
+    """
+    return sorted(set(granted_skill_names()) | set((character.skills or {}).keys()))
+
+
+def sheet_repaint(character: Character, viewer: User | AnonymousUser) -> dict:
     """The parts of the sheet any change can move, for the page to repaint.
 
     Every response to a change made without a reload carries these, and
@@ -1697,9 +1802,23 @@ def sheet_repaint(character: Character) -> dict:
     still needs and whether it can be exported (issue #764), the free points
     and the controls that spend them (#792), the skill check's options
     (#765), and the Recent Changes rows and the dice log (#792). They were
-    rendered once, at load, and nothing wrote them again.
+    rendered once, at load, and nothing wrote them again. Issue #903 swept
+    the same class again: whether the character lives, which the alive-only
+    and dead-only controls are hidden by; the saved name, which every place
+    the sheet prints it is painted from; the "Play with the Game Master"
+    slot, which completing, killing or renaming the character changes; and
+    the add-skill type-ahead, which a skill allocated in place joins.
+
+    Args:
+        character: The saved character.
+        viewer: Who made the change; the "Play with the Game Master" slot
+            offers that viewer's own sessions.
+
+    Returns:
+        The keys ``paintSheet`` reads.
     """
     return {
+        "name": character.name,
         "is_complete": character.is_complete,
         # Every change answered here was one its viewer could make, so the
         # partial renders for an editor (the gear step's link, #844 review).
@@ -1710,6 +1829,15 @@ def sheet_repaint(character: Character) -> dict:
             "characters/_incomplete_marks.html", {"character": character}
         ),
         "is_alive": character.is_alive,
+        # The slot renders empty where the attach would be refused (dead or
+        # incomplete), and names the character in its label (#903).
+        "play_with_gm_html": render_to_string(
+            "gm/_play_with_gm.html", play_with_game_master(character, viewer)
+        ),
+        "skill_name_suggestions_html": render_to_string(
+            "characters/_skill_name_suggestions.html",
+            {"skill_name_suggestions": skill_name_suggestions(character)},
+        ),
         "free_skill_points": character.free_skill_points,
         "free_spell_points": character.free_spell_points,
         # The Magic section's Mana in hand rides on the spell points, which a
@@ -1727,8 +1855,17 @@ def sheet_repaint(character: Character) -> dict:
     }
 
 
-def _build_field_update_response(character, field, *, is_game_master: bool):
-    """Return the derived values that change when `field` is edited."""
+def _build_field_update_response(
+    character: Character, field: str, *, viewer: User | AnonymousUser
+) -> JsonResponse:
+    """Return the derived values that change when `field` is edited.
+
+    Args:
+        character: The saved character.
+        field: The field the edit saved.
+        viewer: Who saved it; a Game Master's readouts offer his controls.
+    """
+    is_game_master = isinstance(viewer, User) and viewer.can_manage_users
     response_data: dict[str, bool | int | str | dict | None] = {"success": True}
     if field in {
         "constitution",
@@ -1742,6 +1879,13 @@ def _build_field_update_response(character, field, *, is_game_master: bool):
         response_data["body"] = character.body
         # Injury breakpoints derive from the pool maxima (and CON), so they move
         # whenever these fields do -- keep the sheet's readout in step.
+        response_data["injury_thresholds_html"] = render_injury_thresholds(
+            character, is_game_master=is_game_master
+        )
+    if field == "name":
+        # The survival save's confirm names the character, in an attribute
+        # no text painter reaches; the readout is re-rendered from the saved
+        # name instead (issue #903).
         response_data["injury_thresholds_html"] = render_injury_thresholds(
             character, is_game_master=is_game_master
         )
@@ -1809,7 +1953,7 @@ def _build_field_update_response(character, field, *, is_game_master: bool):
         response_data["locked_reason"] = services.field_refusal(field)
     # The last score recorded completes the character and closes the point
     # buy; any edit adds a line to Recent Changes (issues #764, #792).
-    response_data.update(sheet_repaint(character))
+    response_data.update(sheet_repaint(character, viewer))
     response_data["point_buy_open"] = not is_game_master and not (
         services.attributes_known(character)
     )
@@ -1866,7 +2010,7 @@ def character_update_field(request, pk):
             detail=result.note if field == "location" else "",
         )
         return _build_field_update_response(
-            result.character, field, is_game_master=request.user.can_manage_users
+            result.character, field, viewer=request.user
         )
 
     return answer_change(run, json_not_found=False)

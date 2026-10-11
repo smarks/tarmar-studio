@@ -10,7 +10,7 @@ so the line always shows what is recorded.
 <form class="gm-luck-form" data-luck-url="{{ url }}" data-character-id="{{ character_id }}">
     <span class="gm-luck-count">Luck +{{ account.level }}: {{ account.spent }} of {{ account.level }} used this session</span>
     <label class="sr-only" for="gm-luck-roll-{{ character_id }}">Roll the Luck is added to</label>
-    <input type="text" id="gm-luck-roll-{{ character_id }}" class="gm-luck-roll" maxlength="120" placeholder="Added to which roll?" autocomplete="off">
+    <input type="text" id="gm-luck-roll-{{ character_id }}" class="gm-luck-roll" maxlength="{{ gm_text_limits.luck_roll }}" placeholder="Added to which roll?" autocomplete="off">
     <button type="submit" class="btn btn-sm gm-luck-spend">Spend Luck</button>
 </form>
 {% endif %}

@@ -18,9 +18,16 @@
     margin-bottom: 1.5rem;
 }
 
-.generator-form label {
+.generator-form label,
+.generator-field {
     display: block;
     font-size: 0.85rem;
+}
+
+/* The hook generator's party picker (issue #864): its label above the
+   search box and the select, as a plain label sits above its control. */
+.generator-field-label {
+    display: block;
 }
 
 .generator-seed-note {

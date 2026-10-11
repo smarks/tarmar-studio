@@ -21,7 +21,12 @@ so an answer cannot drift from the code the way the model's memory did.
 from collections.abc import Callable
 
 from characters.combat import MATRIX
-from characters.constants import CORE_ATTRIBUTE_FIELDS
+from characters.constants import (
+    CORE_ATTRIBUTE_FIELDS,
+    MINOR_INJURY_ROLL_PENALTY,
+    SEVERE_INJURY_BAND_TOP,
+    SEVERE_INJURY_ROLL_PENALTY,
+)
 from characters.dice import (
     LOCATION_LITERACY_MODIFIER,
     LOCATION_SKILL_CHOICES,
@@ -41,6 +46,12 @@ from characters.skills import (
 
 #: The longest a subject may be, so a plan cannot smuggle prose in here.
 MAX_SUBJECT_CHARS = 60
+
+#: The longest the track a lookup narrows to may be (issue #938). No column
+#: holds it: it is read against the survival tracks' names and, when it names
+#: none, the general answer is given (#605), so it only needs room for a
+#: track named loosely ("the campaigner track") and none for prose.
+MAX_TRACK_CHARS = 40
 
 
 class UnknownRule(LookupError):
@@ -190,6 +201,7 @@ def _skill_check(skill: str = "") -> str:
     # module needs for the character model.
     from characters.skill_checks import (
         GOVERNING_ATTRIBUTES,
+        MAX_DIFFICULTY,
         NATURAL_FAILURE,
         NATURAL_SUCCESS,
         governing_attribute,
@@ -198,7 +210,8 @@ def _skill_check(skill: str = "") -> str:
     general = (
         "Skill check: roll 2d6, add the governing attribute's modifier (from "
         "its aged score) and the skill level, against a difficulty the Game "
-        f"Master sets. A natural {NATURAL_SUCCESS} always succeeds and a "
+        f"Master sets (0 to {MAX_DIFFICULTY}); a player sets none. A natural "
+        f"{NATURAL_SUCCESS} always succeeds and a "
         f"natural {NATURAL_FAILURE} always fails; untrained, the modifier "
         "alone. Luck is not rolled as a check."
     )
@@ -214,6 +227,37 @@ def _skill_check(skill: str = "") -> str:
     return f"{general} Governing attributes: {listed}."
 
 
+def _attribute_check(_narrowing: str = "") -> str:
+    """The attribute check with no skill, 3d6 ≤ the attribute (#911).
+
+    Built from :func:`characters.skill_checks.attribute_check`'s bounds and
+    the injury table's bands, so the direction and the penalty are stated
+    the way the action rolls them.
+    """
+    # Imported here for the reason _skill_check gives.
+    from characters.skill_checks import (
+        ATTRIBUTE_CHECK_MAXIMUM,
+        ATTRIBUTE_CHECK_MINIMUM,
+        MAX_ATTRIBUTE_CHECK_MODIFIER,
+    )
+
+    return (
+        "Attribute check with no skill: roll 3d6; it passes when the total is "
+        "at or under the attribute's aged score. Injured, the score the dice "
+        f"must come in under is lowered: {signed(MINOR_INJURY_ROLL_PENALTY)} "
+        f"with a pool down to half (but above {SEVERE_INJURY_BAND_TOP}), "
+        f"{signed(SEVERE_INJURY_ROLL_PENALTY)} with a pool at 1 to "
+        f"{SEVERE_INJURY_BAND_TOP}, the worse pool governing. The Game Master "
+        f"may state a total ({ATTRIBUTE_CHECK_MINIMUM} to "
+        f"{ATTRIBUTE_CHECK_MAXIMUM}) rolled at his table, and set a modifier "
+        f"({signed(-MAX_ATTRIBUTE_CHECK_MODIFIER)} to "
+        f"{signed(MAX_ATTRIBUTE_CHECK_MODIFIER)}) on the score after any injury "
+        "for the situation; a player sets neither. That modifier is not a "
+        "survival save's penalty: a dying character's save is survival_save, "
+        "which applies its own penalty."
+    )
+
+
 #: Subject to the function that answers it. The keys are what a plan may ask
 #: for, and what the schema lists.
 RULES: dict[str, Callable[[str], str]] = {
@@ -221,6 +265,7 @@ RULES: dict[str, Callable[[str], str]] = {
     "survival_targets": _survival_targets,
     "combat": _combat,
     "skill_check": _skill_check,
+    "attribute_check": _attribute_check,
     "aging": _aging,
     "origins": _origins,
     "starting_coin": _starting_coin,

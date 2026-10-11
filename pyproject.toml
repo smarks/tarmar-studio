@@ -42,7 +42,7 @@ dependencies = [
     # battle/policy.py are thin re-exports of it. Same tag-pin rules as
     # hexarena/tarmar-rules above. Local dev:
     # uv pip install -e ../tarmar-engine
-    "tarmar-engine @ git+https://github.com/smarks/tarmar-engine.git@v0.9.6",
+    "tarmar-engine @ git+https://github.com/smarks/tarmar-engine.git@v0.9.11",
     "weasyprint>=67.0",
     "whitenoise>=6.11.0",
 ]
@@ -85,7 +85,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tarmar_studio.settings"
 python_files = ["test_*.py", "tests.py"]
-# -n auto spreads ~3,000 tests over the machine's cores (4 on the CI runner).
+# -n auto spreads the tests over the machine's cores.
 # --dist loadgroup keeps the default load balancing but honours
 # @pytest.mark.xdist_group for any tests that must share one worker. (The
 # dotenv tests used to; since #471 they stage private temp files.) Living in addopts

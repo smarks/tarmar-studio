@@ -65,15 +65,27 @@ class Command(BaseCommand):
 
     def level_for_party(self, party_argument: str) -> int:
         """Resolve --party (id or exact name) to the level it rolls as."""
-        from parties.models import Party
+        from parties.models import Party, disbanded_refusal, live_parties
 
-        try:
-            if party_argument.isdigit():
-                party = Party.objects.get(pk=int(party_argument))
-            else:
-                party = Party.objects.get(name=party_argument)
-        except Party.DoesNotExist as missing:
-            raise CommandError(f"No party matches “{party_argument}”.") from missing
+        lookup = (
+            {"pk": int(party_argument)}
+            if party_argument.isdigit()
+            else {"name": party_argument}
+        )
+        # A disbanded party rolls no hook until it is restored (#971); a
+        # live one by the same name is the one meant.
+        live = list(live_parties().filter(**lookup))
+        if len(live) > 1:
+            raise CommandError(
+                f"{len(live)} parties are named “{party_argument}”; "
+                "pass the party's id instead."
+            )
+        if not live:
+            disbanded = Party.objects.filter(**lookup).first()
+            if disbanded is not None:
+                raise CommandError(f"{disbanded_refusal(disbanded)}.")
+            raise CommandError(f"No party matches “{party_argument}”.")
+        party = live[0]
         summary = party.experience_summary
         if summary is None:
             raise CommandError(

@@ -172,3 +172,23 @@ def addable_characters(user):
     # A party musters into battle, so an incomplete character -- one still
     # missing attributes or its Fatigue roll -- cannot join (issue #571).
     return characters_visible_to(user).playable()
+
+
+def live_parties():
+    """Every party not disbanded (issue #971).
+
+    What any list outside the parties pages offers, and what the endpoint
+    behind it takes: battle setup's party picker and its import, and the hook
+    generator's picker, page and command. A disbanded party is on none of
+    them until it is restored; only its owner or a Game Master sees it, on the
+    party list, to restore it.
+    """
+    return Party.objects.filter(is_deleted=False)
+
+
+def disbanded_refusal(party: Party) -> str:
+    """Why a disbanded party chosen by hand (a crafted id) is refused (#971)."""
+    return (
+        f"{party.name} was disbanded; its owner or a Game Master can restore "
+        "it from the Parties page"
+    )

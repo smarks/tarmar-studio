@@ -36,7 +36,7 @@ from characters.models import (
 from characters.services import FightReport, record_entry_into_play
 from characters.weapon_skill import resolve_weapon_skill
 
-from . import control, policy, profiles, turn_menu
+from . import agreement, control, policy, profiles, turn_menu
 from .access import Actor, claimed_seat_q, commands_foes, decides_for, is_dm
 from .adaptation import snapshot_beast
 from .classic_adaptation import classic_state
@@ -612,6 +612,32 @@ def _playable_state(battle: Battle, state: BattleState):
     return playable
 
 
+def standing_sides(
+    profile: profiles.BattleProfile, survivors: list
+) -> set[tuple[str, str]]:
+    """The sides still standing, for the last-team-standing check (#275).
+
+    A teamless combatant is its own team of one, so a free-for-all battle
+    ends exactly where it always did — one survivor left. A team and a
+    combatant of one are told apart by the key's kind, not by its text
+    (#930): a team's name is free text, so a team named ``"solo:7"`` or
+    ``"7"`` must never be the same side as the teamless combatant in row 7.
+
+    Args:
+        profile: The battle's rules profile, which reads each actor's team
+            and row id.
+        survivors: The actors still able to fight.
+
+    Returns:
+        One ``("team", name)`` or ``("solo", row id)`` key per side standing.
+    """
+    sides: set[tuple[str, str]] = set()
+    for actor in survivors:
+        team = profile.actor_team(actor)
+        sides.add(("team", team) if team else ("solo", str(profile.actor_id(actor))))
+    return sides
+
+
 def _team_at(teams: tuple[str, ...], index: int) -> str:
     """The team tag for slot ``index`` — empty (free-for-all) past the end."""
     return teams[index] if index < len(teams) else ""
@@ -1006,16 +1032,21 @@ def import_party_into_draft(draft: BattleDraft, user, party_id: int) -> dict:
         ``{"team", "imported", "hidden", "fallen", "already_mustered"}``.
 
     Raises:
-        ValueError: for an unknown party, a party with no members, a party
+        ValueError: for an unknown party, a disbanded one (#971), a party
+            with no members, a party
             with no importable members (nothing would join, so no team is
             created), or more importable members than the muster has room
             for.
     """
-    from parties.models import Party
+    from parties.models import Party, disbanded_refusal
 
     party = Party.objects.filter(pk=party_id).first()
     if party is None:
         raise ValueError("No such party")
+    if party.is_deleted:
+        # The picker offers no disbanded party; one named by hand is refused
+        # and says why (#971).
+        raise ValueError(disbanded_refusal(party))
     member_ids = list(
         party.memberships.order_by("added_at").values_list("character_id", flat=True)
     )
@@ -2157,6 +2188,113 @@ def set_battle_control_mode(
     return battle, event
 
 
+def set_hth_agreement(
+    battle_id: int,
+    actor: Actor,
+    *,
+    agreed: bool,
+    whole_battle: bool = False,
+    pair: tuple[int, int] | None = None,
+) -> tuple[Battle, BattleEvent | None]:
+    """Mark, or unmark, the whole battle or one pair "HTH by agreement" (#867).
+
+    Spencer's ruling of 2026-10-09: "a Game Master marks a battle, or a
+    pair, as 'HTH by agreement'; players alone still need the engine's
+    entry condition." The Game Master is the fight's runner
+    (:func:`runs_the_seats`: a session fight's owner, any other battle's
+    maker, while a Game Master account), as for a seat hand-off; another Game
+    Master is a spectator here, and a player's own practice battle has no
+    Game Master to mark it (coordinator's ruling under the standing rule;
+    Spencer may overrule). This path is the only one that changes the record
+    (the admin shows the field read-only). The
+    ruling is the battle's (``Battle.hth_agreement_json``); the Tarmar
+    profile writes it onto the engine state every turn
+    (:func:`battle.agreement.fill`). Each change files one line in the log.
+
+    A change made while a person's move is awaited changes that person's
+    menu, so the pause is cleared and the next advance replays the turn
+    under the new ruling; a recorded choice no longer on the menu is asked
+    again (the replay's stale check).
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        agreed: Mark (True) or unmark (False).
+        whole_battle: The change is to the whole battle.
+        pair: Otherwise, the two ``BattleCombatant`` pks the change is to.
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        ValueError: not the fight's Game Master, a classic battle, neither or both of
+            ``whole_battle`` and ``pair``, or a pair that is not two enemies
+            in this battle.
+    """
+    if whole_battle == (pair is not None):
+        raise ValueError("Name the whole battle or one pair")
+    with transaction.atomic():
+        battle = Battle.objects.select_for_update().get(pk=battle_id)
+        if not runs_the_seats(battle, actor.user):
+            raise ValueError(agreement.GAME_MASTER_ONLY)
+        if battle.rules_profile != TARMAR_PROFILE:
+            raise ValueError(
+                "Hand-to-hand by agreement is a Tarmar ruling; a classic "
+                "battle plays Melee's own hand-to-hand"
+            )
+        rows = {row.pk: row for row in battle.combatants.all()}
+        names = {pk: row.display_name for pk, row in rows.items()}
+        current = agreement.Agreement.of(battle)
+        key = None
+        if pair is not None:
+            first, second = pair
+            if first == second or first not in rows or second not in rows:
+                raise ValueError("Name two different combatants in this battle")
+            if rows[first].team and rows[first].team == rows[second].team:
+                raise ValueError(
+                    f"{names[first]} and {names[second]} are on the same side"
+                )
+            key = agreement.pair_key(first, second)
+            pairs = set(current.pairs)
+            if agreed:
+                pairs.add(key)
+            else:
+                pairs.discard(key)
+            updated = agreement.Agreement(current.whole_battle, frozenset(pairs))
+        else:
+            updated = agreement.Agreement(agreed, current.pairs)
+        if updated == current:
+            return battle, None
+        battle.hth_agreement_json = updated.to_json()
+        if battle.status == Battle.STATUS_AWAITING:
+            battle.pending_input_json = {}
+            battle.status = Battle.STATUS_PAUSED
+        by = (
+            f"Game Master {actor.user.username}"
+            if actor.user is not None
+            else "A Game Master"
+        )
+        event = _control_event(
+            battle,
+            agreement.change_message(
+                whole_battle=agreed if whole_battle else None,
+                pair=key,
+                agreed=agreed,
+                names=names,
+                by=by,
+            ),
+            {
+                "hth_agreement": updated.to_json(),
+                "scope": "battle" if whole_battle else "pair",
+                "pair": list(key) if key is not None else None,
+                "agreed": agreed,
+            },
+        )
+        battle.save()
+    return battle, event
+
+
 def set_combatant_control_mode(
     battle_id: int, combatant_id: int, mode: str
 ) -> tuple[Battle, BattleCombatant, BattleEvent | None]:
@@ -2576,7 +2714,17 @@ def _human_decider(profile, controllers: dict, inputs: dict):
         chosen = _match_candidate(menu, recorded)
         if chosen is None:
             raise PlayerInputNeeded(combatant_id, menu, stale=True)
-        picked = replace(chosen, rationale=f"chosen by {owner} — {chosen.rationale}")
+        # The hex the person picked (#819, #866), checked against the menu
+        # when it was recorded; the engine checks it again on the board as
+        # it stands when the move is made, and logs a refusal. None when no
+        # hex was picked: the option makes its own move, whatever hex the
+        # AI's forecast had in mind.
+        destination = recorded.get("destination")
+        picked = replace(
+            chosen,
+            rationale=f"chosen by {owner} — {chosen.rationale}",
+            destination=tuple(destination) if destination is not None else None,
+        )
         return policy.Decision(chosen=picked, candidates=menu)
 
     return decide
@@ -2607,8 +2755,9 @@ def advance_turn(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
             battle.pending_input_json = {
                 "combatant_id": needed.combatant_id,
                 "turn": battle.turn_number + 1,
+                # The menu keeps the hexes each option may take (#819, #866).
                 "candidates": [
-                    candidate.to_payload() for candidate in needed.candidates
+                    turn_menu.menu_payload(candidate) for candidate in needed.candidates
                 ],
             }
             if needed.stale:
@@ -2675,14 +2824,7 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
         raw_events = profile.run_turn(state, profile.roller(), decide)
 
         survivors = profile.survivors(state)
-        # Victory is last TEAM standing (#275): a teamless combatant is its
-        # own team of one, so a free-for-all battle ends exactly where it
-        # always did — one survivor left — and its victory line is unchanged.
-        standing_teams = {
-            profile.actor_team(actor) or f"solo:{profile.actor_id(actor)}"
-            for actor in survivors
-        }
-        if len(standing_teams) <= 1:
+        if len(standing_sides(profile, survivors)) <= 1:
             battle.status = Battle.STATUS_FINISHED
             if survivors:
                 winning_team = profile.actor_team(survivors[0])
@@ -2901,6 +3043,7 @@ def record_player_action(
     letter: str,
     target_id: int | None = None,
     spell_key: str = "",
+    destination: tuple[int, int] | None = None,
     as_ai: bool = False,
 ) -> tuple[Battle, list[BattleEvent]]:
     """Record the awaited player's choice, then resume the paused turn.
@@ -2922,13 +3065,19 @@ def record_player_action(
     ``target_id``/``spell_key`` arguments are ignored then, but the binding
     is not: an AI hand-off is a choice for one named figure too).
 
+    ``destination`` is the hex the player picked for an option that places
+    the figure (#819, #866). It must be one of that option's
+    ``destinations`` on the pending menu, which the engine's own rule
+    produced on the same board; the engine checks it again when the move is
+    made.
+
     Returns ``advance_turn``'s shape: the battle plus any events the resumed
     turn committed (empty when it paused again on another player).
 
     Raises:
         ValueError: nothing pending, a choice composed for a different
-            combatant or turn, not your combatant, or an option that is not
-            on the pending menu.
+            combatant or turn, not your combatant, an option that is not
+            on the pending menu, or a hex that option cannot take.
     """
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
@@ -2974,6 +3123,11 @@ def record_player_action(
             letter = top["letter"]
             target_id = top.get("target_id")
             spell_key = top.get("spell_key") or ""
+            # The AI's own hex, if it named one. On tarmar-engine 0.9.10 the AI
+            # names none (house ruling ai_destinations), so this is None and
+            # the option makes its own move; kept so a hand-off carries the
+            # AI's hex if a later engine names one.
+            destination = top.get("destination")
         else:
             if not decides_for(actor, battle, seat):
                 raise ValueError("That is not your combatant")
@@ -2982,18 +3136,32 @@ def record_player_action(
                 "target_id": target_id,
                 "spell_key": spell_key or "",
             }
-            if not any(
-                candidate.get("letter") == recorded["letter"]
-                and same_target(candidate.get("target_id"), recorded["target_id"])
-                and (candidate.get("spell_key") or "") == recorded["spell_key"]
-                for candidate in candidates
-            ):
+            matched = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if candidate.get("letter") == recorded["letter"]
+                    and same_target(candidate.get("target_id"), recorded["target_id"])
+                    and (candidate.get("spell_key") or "") == recorded["spell_key"]
+                ),
+                None,
+            )
+            if matched is None:
                 raise ValueError("That option is not on the pending menu")
+            if destination is not None and list(destination) not in matched.get(
+                "destinations", []
+            ):
+                raise ValueError(
+                    f"{matched.get('name', 'That option')} cannot move "
+                    f"{seat.display_name} to hex {tuple(destination)}: pick one "
+                    "of the marked hexes, or none"
+                )
         inputs = dict(battle.turn_inputs_json or {})
         inputs[str(combatant_id)] = {
             "letter": letter,
             "target_id": target_id,
             "spell_key": spell_key or "",
+            "destination": list(destination) if destination is not None else None,
         }
         battle.turn_inputs_json = inputs
         battle.save(update_fields=["turn_inputs_json", "updated_at"])

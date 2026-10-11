@@ -67,6 +67,10 @@ print('RECORD', c.total_xp, format_purse(c), c.is_alive, c.death_cause)
 `);
         expect(record).toContain('RECORD 500 130 gp False fell from the tower');
 
+        // The words stream before the turn is saved; Send comes back only once
+        // the stream has closed, after the done frame the server sends once the
+        // turn is saved (issue #910).
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
         // The Characters pane says so without a reload of anything but the page.
         await page.reload();
         await page.click('#gm-panel-tab-characters');
@@ -104,6 +108,10 @@ test.describe('GM chat — a refused name on a first message (issue #908)', () =
         await expect(page.locator('.chat-messages .dice-roll').last())
             .toContainText('Name may contain letters, numbers');
         await expect(page).toHaveURL(/session=\d+/);
+        // The words stream before the turn is saved; Send comes back only once
+        // the stream has closed, after the done frame the server sends once the
+        // turn is saved (issue #910).
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
         await page.reload();
         await expect(page.locator('.message.user .message-content').last())
             .toHaveText('Make the twins in brackets, all 18s');

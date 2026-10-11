@@ -6,7 +6,8 @@ his session; this is how the owner sees that and takes it back. Each
 withdraw is a plain form post that comes back to this sheet, which renders
 the list from the links as they stand, so nothing here is transient. While a
 session's fight is on the board with the character in it, the line names the
-fight and links the owner to their seat (#853).
+fight and links the owner to their seat (#853). Each place the name shows is
+marked data-name-chrome, so a rename on the sheet repaints it (#903).
 {% endcomment %}
 {% if holding %}
 <section class="sessions-holding" id="sessions-holding" aria-labelledby="sessions-holding-heading">
@@ -14,9 +15,9 @@ fight and links the owner to their seat (#853).
     <ul class="sessions-holding-list">
         {% for entry in holding %}
         <li class="sessions-holding-entry" data-session-id="{{ entry.session.pk }}">
-            <span>{{ character.name }} is in <strong>{{ entry.session.name }}</strong>, run by {{ entry.session.user.username }}.</span>
+            <span><span data-name-chrome>{{ character.name }}</span> is in <strong>{{ entry.session.name }}</strong>, run by {{ entry.session.user.username }}.</span>
             {% if entry.battle %}
-            <a class="sessions-holding-fight" href="{% url 'battle:detail' entry.battle.pk %}">The fight is on the board: play {{ character.name }}'s turns</a>
+            <a class="sessions-holding-fight" href="{% url 'battle:detail' entry.battle.pk %}">The fight is on the board: play <span data-name-chrome>{{ character.name }}</span>'s turns</a>
             {% endif %}
             <form method="post" action="{% url 'gm:character_withdraw' character.pk %}" class="sessions-holding-withdraw">
                 {% csrf_token %}

@@ -150,6 +150,41 @@ describe('startFight', () => {
         expect(document.getElementById('gm-panel-battle-error').textContent).toBe('Request failed: offline');
     });
 
+    test('a proxy timeout page is reported in words with its status (issue #936)', async () => {
+        setUpDom({ sessionId: 12 });
+        loadTab();
+        global.fetch.mockReturnValue(Promise.resolve({
+            ok: false,
+            status: 504,
+            statusText: 'Gateway Time-out',
+            json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+        }));
+        expect(await panelBattle.startFight('wolf')).toBe(false);
+        const error = document.getElementById('gm-panel-battle-error');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toBe(
+            'The server took too long to answer (HTTP 504). Try the fight again in a moment.',
+        );
+        expect(document.getElementById('gm-panel-battle-status').hidden).toBe(true);
+        expect(document.getElementById('gm-fight-start').disabled).toBe(false);
+        expect(window.location.href).toBe('');
+    });
+
+    test('any other answer that is not JSON names its status', async () => {
+        setUpDom({ sessionId: 12 });
+        loadTab();
+        global.fetch.mockReturnValue(Promise.resolve({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway',
+            json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+        }));
+        expect(await panelBattle.startFight('wolf')).toBe(false);
+        expect(document.getElementById('gm-panel-battle-error').textContent).toBe(
+            'The server answered with an error (HTTP 502). Try the fight again in a moment.',
+        );
+    });
+
     test('a page without the fight form cannot post', async () => {
         setUpDom({ sessionId: 12, withForm: false });
         loadTab();

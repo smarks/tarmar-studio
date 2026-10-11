@@ -5,8 +5,10 @@ from .views import (
     BattleListView,
     battle_act,
     battle_advance,
+    battle_claim_picker,
     battle_control,
     battle_delete,
+    battle_hth_agreement,
     battle_rename,
     battle_resnapshot,
     battle_restart,
@@ -17,6 +19,7 @@ from .views import (
     battle_setup_discard,
     battle_setup_entry_team,
     battle_setup_import_party,
+    battle_setup_picker,
     battle_setup_remove,
     battle_setup_start,
     battle_setup_team_add,
@@ -42,6 +45,12 @@ urlpatterns = [
     path("setup/<int:pk>/", battle_setup, name="setup"),
     path("setup/<int:pk>/update/", battle_setup_update, name="setup-update"),
     path("setup/<int:pk>/add/", battle_setup_add, name="setup-add"),
+    # The shelf's and the party select's search (#864).
+    path(
+        "setup/<int:pk>/pickers/<str:kind>/",
+        battle_setup_picker,
+        name="setup-picker",
+    ),
     path("setup/<int:pk>/remove/", battle_setup_remove, name="setup-remove"),
     # Teams on the muster (#275): import a party as one, name or disband
     # one, move an entry between them.
@@ -65,6 +74,8 @@ urlpatterns = [
     path("setup/<int:pk>/discard/", battle_setup_discard, name="setup-discard"),
     path("<int:pk>/", BattleDetailView.as_view(), name="detail"),
     path("<int:pk>/advance/", battle_advance, name="advance"),
+    # A lobby seat's claim picker's search (#864).
+    path("<int:pk>/claim-picker/", battle_claim_picker, name="claim-picker"),
     path("<int:pk>/rename/", battle_rename, name="rename"),
     path("<int:pk>/restart/", battle_restart, name="restart"),
     path("<int:pk>/resnapshot/", battle_resnapshot, name="resnapshot"),
@@ -77,6 +88,8 @@ urlpatterns = [
     path("<int:pk>/state/", battle_state, name="state"),
     # Who decides (#308): the battle's default, and one combatant's override.
     path("<int:pk>/control/", battle_control, name="control"),
+    # A Game Master's "HTH by agreement" ruling (#867).
+    path("<int:pk>/hth-agreement/", battle_hth_agreement, name="hth-agreement"),
     path(
         "<int:pk>/combatants/<int:combatant_id>/control/",
         combatant_control,

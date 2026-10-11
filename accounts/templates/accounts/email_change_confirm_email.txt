@@ -1,0 +1,18 @@
+{% autoescape off %}{% if set_by_admin %}An Admin at {{ site_name }} made {{ new_email }} the email address of the account "{{ username }}".
+
+To confirm it, open this link and press the button on the page:
+
+{{ protocol }}://{{ domain }}{{ confirm_path }}
+
+Until you do, password-reset links for the account are not sent to this address. The link works once, and only for a few days.
+
+If this account is not yours, you can ignore this message.{% else %}Someone asked to make {{ new_email }} the email address of the account "{{ username }}" at {{ site_name }}.
+
+To confirm it, open this link and press the button on the page:
+
+{{ protocol }}://{{ domain }}{{ confirm_path }}
+
+The address on the account changes only when you do. The link works once, and only for a few days.
+
+If you did not ask for this, you can ignore this message. Nothing changes.{% endif %}
+{% endautoescape %}

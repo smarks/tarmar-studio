@@ -5,6 +5,7 @@ most of its imports inline inside test methods.
 """
 
 from accounts.models import User
+from accounts.views import EMAIL_FIELD_REFUSAL
 from common.test_helpers import BaseTestCase
 
 
@@ -94,16 +95,23 @@ class ProfileAutoSaveTest(BaseTestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.real_name, "New Name")
 
-    def test_autosave_updates_email(self):
-        """Auto-save endpoint updates email field."""
+    def test_autosave_refuses_email(self):
+        """Auto-save no longer writes the email address (issue #931).
+
+        It changes only on its own page, with the password and a link to the
+        new address; a plain POST from a signed-in browser must not be enough.
+        """
+        self.user.email = "original@example.com"
+        self.user.save()
         self.login_as(self.user)
         response = self.post_json(
             "/tarmar/accounts/profile/update-field/",
             {"field": "email", "value": "new@example.com"},
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("its own page", response.json()["error"])
         self.user.refresh_from_db()
-        self.assertEqual(self.user.email, "new@example.com")
+        self.assertEqual(self.user.email, "original@example.com")
 
     def test_autosave_rejects_invalid_phone(self):
         """Profile validators run on the AJAX edit path (phone regex)."""
@@ -117,13 +125,29 @@ class ProfileAutoSaveTest(BaseTestCase):
         self.assertNotEqual(self.user.phone, "not-a-phone!!")
 
     def test_autosave_rejects_invalid_email(self):
-        """Email format is validated on the AJAX edit path."""
+        """The address is refused before its format is looked at (#931).
+
+        Format validation on this path is pinned on the fields it still
+        writes: phone above, Discord below.
+        """
         self.login_as(self.user)
         response = self.post_json(
             "/tarmar/accounts/profile/update-field/",
             {"field": "email", "value": "not-an-email"},
         )
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], EMAIL_FIELD_REFUSAL)
+
+    def test_autosave_rejects_invalid_discord(self):
+        """Profile validators run on the AJAX edit path (Discord regex)."""
+        self.login_as(self.user)
+        response = self.post_json(
+            "/tarmar/accounts/profile/update-field/",
+            {"field": "discord", "value": "no spaces allowed!"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertNotEqual(self.user.discord, "no spaces allowed!")
 
     def test_autosave_rejects_invalid_field(self):
         """Auto-save endpoint rejects invalid field names."""

@@ -41,6 +41,10 @@ test.describe('GM chat — the plan turn engine', () => {
         await expect(drafts.nth(0).locator('.gm-sheet-attributes')).toContainText('18');
         expect(reloaded).toBe(false);
 
+        // The words stream before the turn is saved; Send comes back only once
+        // the stream has closed, after the done frame the server sends once the
+        // turn is saved (issue #910).
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
         // A reload renders the same chips from the stored session.
         await page.reload();
         await expect(page.locator('.dice-roll').filter({ hasText: 'all six attributes recorded as 18' })).toHaveCount(2);

@@ -1,0 +1,23 @@
+{% comment %}
+The Characters tab's attach select (issue #864): one page of the characters
+the viewer may attach, newest first. A Game Master's carries his players'
+characters, one group per owner (issue #759); a player's has one owner and no
+group label. gm-panel-characters.js reads the choice by this id.
+{% endcomment %}
+<label class="sr-only" for="gm-character-select">Character to attach</label>
+<select id="gm-character-select" {% if not attachable_characters %}disabled{% endif %}>
+    {% if attachable_characters %}
+    <option value="">Pick a character…</option>
+    {% for group in attachable_groups %}
+    {% if group.owner %}<optgroup label="{{ group.owner }}">{% endif %}
+    {% for character in group.characters %}
+    <option value="{{ character.pk }}">{{ character.name }}</option>
+    {% endfor %}
+    {% if group.owner %}</optgroup>{% endif %}
+    {% endfor %}
+    {% elif picker.query %}
+    <option value="">No character matches</option>
+    {% else %}
+    <option value="">No characters to attach</option>
+    {% endif %}
+</select>

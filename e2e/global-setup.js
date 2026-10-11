@@ -86,18 +86,15 @@ print(f'Cleared {deleted} rate-limit counter(s) and the cache')
     }
 }
 
-// Seed characters owned by a worker's copy of `testuser`. Without these,
-// every character-dependent spec hits its `if (!hasCharacters) test.skip()`
-// guard and silently passes while asserting nothing. We seed two living
-// characters and one soft-deleted one (so the deleted-row tests run too), and
-// assert the count so a seeding failure breaks the run loudly instead of
-// reviving the silent skips.
+// Seed two living characters for a worker's copy of `testuser`, which the GM
+// specs pick by name ("Aldwin the Bold"), and assert the count so a seeding
+// failure breaks the run loudly. Deleted rows are seeded by the specs that
+// read them, under accounts of their own (issue #949).
 function seedCharacters(ownerUsername) {
     console.log(`[E2E Setup] Seeding characters for ${ownerUsername}...`);
 
     const script = `
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 from characters.models import Character
 
 User = get_user_model()
@@ -112,13 +109,8 @@ common = dict(
 for character_name in ['Aldwin the Bold', 'Mira Quickhand']:
     Character.objects.create(user=owner, name=character_name, **common)
 
-deleted = Character.objects.create(user=owner, name='Old Ghost', **common)
-deleted.is_deleted = True
-deleted.deleted_at = timezone.now()
-deleted.save()
-
 count = Character.objects.filter(user=owner).count()
-assert count == 3, f'expected 3 seeded characters, got {count}'
+assert count == 2, f'expected 2 seeded characters, got {count}'
 print(f'Seeded {count} characters for ${ownerUsername}')
 `;
 
