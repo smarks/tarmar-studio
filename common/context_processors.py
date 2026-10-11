@@ -44,10 +44,10 @@ def project_links(request) -> dict[str, str]:
     """Add the project's GitHub addresses to template context.
 
     ``repository_url`` is the public repository's root, shown to everyone.
-    ``version_commit_url`` is the running commit in the private repository
-    (issue #914), and is set only for a Game Master or admin: anyone else
-    gets GitHub's 404 there, and the public repository does not hold the
-    deployed commit. It is empty when the checkout has no commit to name.
+    ``version_commit_url`` is the running commit in that same repository
+    (issues #914, #997), and is set only for a Game Master or admin; everyone
+    else sees the id as text. It is empty when the checkout has no commit to
+    name.
 
     Args:
         request: The current request; its user decides ``version_commit_url``.
@@ -60,16 +60,15 @@ def project_links(request) -> dict[str, str]:
     # ``getattr`` on the request too: the passphrase gate renders this footer
     # before the authentication middleware has set ``request.user``.
     request_user = getattr(request, "user", None)
-    may_open_private_repository = bool(getattr(request_user, "can_manage_users", False))
+    may_open_commit_page = bool(getattr(request_user, "can_manage_users", False))
     version_commit_url = ""
-    if commit_sha and may_open_private_repository:
-        version_commit_url = f"{settings.REPOSITORY_PRIVATE_URL}/commit/{commit_sha}"
+    if commit_sha and may_open_commit_page:
+        version_commit_url = f"{settings.REPOSITORY_PUBLIC_URL}/commit/{commit_sha}"
     return {
         "repository_url": settings.REPOSITORY_PUBLIC_URL,
         "version_commit_url": version_commit_url,
-        # "Leave a comment" opens the public repository's issue forms (bug,
-        # feature request, general comment); the code repository is private
-        # and its issues are a 404 to players.
+        # "Leave a comment" opens the repository's issue forms (bug, feature
+        # request, general comment).
         "feedback_url": f"{settings.REPOSITORY_PUBLIC_URL}/issues/new/choose",
     }
 

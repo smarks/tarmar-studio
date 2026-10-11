@@ -4,7 +4,8 @@
 #
 #     scripts/ci-runner-linux/register-from-mac.sh
 #
-# It checks the repository is private, then asks for the fine-grained token
+# It checks the repository opts in to the self-hosted runner (CI_RUNNER) and
+# holds fork workflows for approval, then asks for the fine-grained token
 # (this repository only, Administration: read and write). Press Return without
 # one to keep the token datahorde already holds. It copies this directory and
 # repository.sh to a fresh directory on datahorde and runs install.sh there
@@ -23,7 +24,7 @@ source "${SCRIPT_DIR}/../ci-runner/repository.sh"
 
 DEPLOY_HOST="sam@192.168.4.163"
 
-require_private_repository gh
+require_self_hosted_runner_opt_in gh
 
 read -rsp "Fine-grained token for ${REPOSITORY} (Return to keep the current one): " token
 echo

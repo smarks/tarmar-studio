@@ -56,7 +56,7 @@ graph TB
         review["tarmar-gm-review agent<br/>scripts/llm-host/"]
     end
 
-    gh["GitHub smarks/tarmar-studio-private<br/>origin/main + refs/notes/gate"]
+    gh["GitHub smarks/tarmar-studio<br/>origin/main + refs/notes/gate"]
 
     player --> browser
     gm --> browser

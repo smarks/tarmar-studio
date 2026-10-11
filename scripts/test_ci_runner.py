@@ -17,6 +17,7 @@ job that never starts.
 import json
 import plistlib
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -93,14 +94,15 @@ def test_the_sourced_repository_file_parses():
     subprocess.run(["bash", "-n", str(REPOSITORY_PATH)], check=True)
 
 
-def test_installer_refuses_to_run_without_root():
-    # Not root, no --dry-run: it must stop before touching anything, and say
-    # how it wants to be run.
+def test_installer_refuses_outright_because_the_mac_runner_path_is_retired():
+    # No --dry-run: it must stop before touching anything, whatever the
+    # repository's settings, and say where the self-hosted runner went.
     completed = subprocess.run(
         ["bash", str(INSTALLER_PATH)], capture_output=True, text=True, check=False
     )
     assert completed.returncode == 1
-    assert "sudo" in completed.stderr
+    assert "retired on 2026-10-10" in completed.stderr
+    assert "datahorde" in completed.stderr
     assert "would run" not in completed.stdout
 
 
@@ -122,7 +124,6 @@ def test_dry_run_changes_nothing_but_shows_every_step(
     runner_name = shell_constant(installer_source, "RUNNER_NAME")
     runner_group = shell_constant(installer_source, "RUNNER_GROUP")
     for step in (
-        f"would check that {repository} is private",
         f"dseditgroup -o create -r Tarmar CI {runner_group}",
         "sysadminctl -addUser",
         "cannot read",
@@ -413,10 +414,20 @@ def test_readme_names_the_same_release(installer_source: str):
     assert version in README_PATH.read_text()
 
 
-def require_private_with_stand_in_gh(tmp_path: Path, stand_in_body: str):
-    """Run require_private_repository as the scripts do, under their shell
-    options and through a shell function as the installer's gh_as_invoker is,
-    against a stand-in gh, and return the finished process."""
+VARIABLES_QUESTION = (
+    "api --paginate repos/smarks/tarmar-studio/actions/variables?per_page=100"
+    ' --jq .variables[] | select(.name == "CI_RUNNER") | .value'
+)
+APPROVAL_QUESTION = (
+    "api repos/smarks/tarmar-studio/actions/permissions/fork-pr-contributor-approval"
+    " --jq .approval_policy"
+)
+
+
+def opt_in_check_with_stand_in_gh(tmp_path: Path, stand_in_body: str):
+    """Run require_self_hosted_runner_opt_in as register-from-mac.sh does, under
+    its shell options and through a shell function, against a stand-in gh, and
+    return the finished process."""
     stand_in = tmp_path / "gh"
     stand_in.write_text(f"#!/bin/bash\n{stand_in_body}\n")
     stand_in.chmod(0o755)
@@ -427,7 +438,7 @@ def require_private_with_stand_in_gh(tmp_path: Path, stand_in_body: str):
             "set -euo pipefail; "
             f'source "{REPOSITORY_PATH}"; '
             f'wrapped_gh() {{ "{stand_in}" "$@"; }}; '
-            "require_private_repository wrapped_gh; "
+            "require_self_hosted_runner_opt_in wrapped_gh; "
             'echo "went on"',
         ],
         capture_output=True,
@@ -436,39 +447,80 @@ def require_private_with_stand_in_gh(tmp_path: Path, stand_in_body: str):
     )
 
 
-def answers_visibility(visibility: str) -> str:
-    """A stand-in gh body that answers only the question the scripts must ask."""
-    question = (
-        "repo view smarks/tarmar-studio-private --json visibility --jq .visibility"
+def answers_settings(ci_runner: str, approval_policy: str) -> str:
+    """A stand-in gh body that answers only the two questions the scripts must
+    ask: the CI_RUNNER variable's value, and the fork approval policy."""
+    return (
+        f'case "$*" in\n'
+        f"  {shlex.quote(VARIABLES_QUESTION)}) echo {shlex.quote(ci_runner)} ;;\n"
+        f"  {shlex.quote(APPROVAL_QUESTION)}) echo {shlex.quote(approval_policy)} ;;\n"
+        f"  *) exit 1 ;;\n"
+        f"esac"
     )
-    return f'[ "$*" = "{question}" ] || exit 1\necho "{visibility}"'
 
 
-def test_a_private_repository_lets_the_scripts_go_on(tmp_path: Path):
-    completed = require_private_with_stand_in_gh(
-        tmp_path, answers_visibility("PRIVATE")
+def test_an_opted_in_repository_with_approval_required_lets_the_scripts_go_on(
+    tmp_path: Path,
+):
+    completed = opt_in_check_with_stand_in_gh(
+        tmp_path, answers_settings("datahorde", "all_external_contributors")
     )
     assert completed.returncode == 0, completed.stderr
     assert "went on" in completed.stdout
 
 
-@pytest.mark.parametrize("visibility", ["PUBLIC", "INTERNAL", ""])
-def test_any_other_visibility_stops_the_scripts(tmp_path: Path, visibility: str):
-    # Issue #961: the old name went to a public repository, and the scripts
-    # would have protected it and could have put this Mac's runner on it.
-    completed = require_private_with_stand_in_gh(
-        tmp_path, answers_visibility(visibility)
+@pytest.mark.parametrize("ci_runner", ["", "github", "Datahorde"])
+def test_a_repository_that_has_not_opted_in_stops_the_scripts(
+    tmp_path: Path, ci_runner: str
+):
+    # Issue #961: a runner on a public repository runs any fork's pull request
+    # on the host. CI_RUNNER unset (the default) means GitHub's machines.
+    completed = opt_in_check_with_stand_in_gh(
+        tmp_path, answers_settings(ci_runner, "all_external_contributors")
     )
     assert completed.returncode != 0
     assert "went on" not in completed.stdout
     assert "refusing" in completed.stderr
+    assert "CI_RUNNER" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    "approval_policy",
+    ["first_time_contributors", "first_time_contributors_new_to_github", ""],
+)
+def test_a_repository_that_runs_fork_workflows_unapproved_stops_the_scripts(
+    tmp_path: Path, approval_policy: str
+):
+    completed = opt_in_check_with_stand_in_gh(
+        tmp_path, answers_settings("datahorde", approval_policy)
+    )
+    assert completed.returncode != 0
+    assert "went on" not in completed.stdout
+    assert "refusing" in completed.stderr
+    assert "outside collaborators" in completed.stderr
 
 
 def test_a_gh_that_cannot_answer_stops_the_scripts(tmp_path: Path):
-    completed = require_private_with_stand_in_gh(tmp_path, "exit 1")
+    completed = opt_in_check_with_stand_in_gh(tmp_path, "exit 1")
     assert completed.returncode != 0
     assert "went on" not in completed.stdout
     assert "could not read" in completed.stderr
+
+
+def test_a_gh_that_cannot_read_the_approval_policy_stops_the_scripts(tmp_path: Path):
+    completed = opt_in_check_with_stand_in_gh(
+        tmp_path,
+        f'[ "$*" = {shlex.quote(VARIABLES_QUESTION)} ] || exit 1\necho datahorde',
+    )
+    assert completed.returncode != 0
+    assert "went on" not in completed.stdout
+    assert "could not read the fork pull request approval policy" in completed.stderr
+
+
+def test_the_opt_in_value_is_the_one_ci_yml_switches_on():
+    workflow = WORKFLOW_PATH.read_text()
+    value = shell_constant(REPOSITORY_PATH.read_text(), "SELF_HOSTED_CI_RUNNER")
+    assert f"vars.CI_RUNNER == '{value}'" in workflow
 
 
 def first_line_matching(source: str, pattern: str) -> int:
@@ -483,25 +535,33 @@ def test_the_repository_is_named_once_and_checked_before_either_script_acts(
 ):
     protect_source = PROTECT_PATH.read_text()
     assert shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY") == (
-        "smarks/tarmar-studio-private"
+        "smarks/tarmar-studio"
     )
     for source, first_action in (
         (installer_source, r"^\s*act dseditgroup -o create"),
         (protect_source, r"^gh api -X PUT"),
     ):
         assert not re.search(r"^REPOSITORY=", source, re.MULTILINE)
-        sourced = first_line_matching(source, r'^source ".*repository\.sh"')
-        check = first_line_matching(source, r"^\s*require_private_repository\s")
-        assert sourced < check < first_line_matching(source, first_action)
+        assert re.search(r'^source ".*repository\.sh"', source, re.MULTILINE)
+    sourced = first_line_matching(installer_source, r'^source ".*repository\.sh"')
+    refusal = first_line_matching(installer_source, r'^\s*fail "\$RETIRED_MESSAGE"')
+    assert (
+        sourced
+        < refusal
+        < first_line_matching(installer_source, r"^\s*act dseditgroup -o create")
+    )
+    # The opt-in rule guards the datahorde registration; neither Mac script
+    # runs it. Branch protection suits a public repository.
+    assert "require_" not in installer_source
+    assert "require_" not in protect_source
 
 
-def test_the_dry_run_checks_the_repository_before_it_plans_any_change(
+def test_the_dry_run_says_the_path_is_retired_before_it_plans_any_change(
     dry_run_output: str,
 ):
-    repository = shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY")
-    assert dry_run_output.index(
-        f"would check that {repository} is private"
-    ) < dry_run_output.index("dseditgroup -o create")
+    assert dry_run_output.index("retired") < dry_run_output.index(
+        "dseditgroup -o create"
+    )
 
 
 def test_readme_names_the_same_repository():

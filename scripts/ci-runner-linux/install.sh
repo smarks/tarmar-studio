@@ -18,7 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# REPOSITORY (issue #961). The private check needs gh, which runs on the Mac
+# REPOSITORY (issue #961). The opt-in check needs gh, which runs on the Mac
 # before this (register-from-mac.sh).
 # shellcheck source=../ci-runner/repository.sh
 source "${SCRIPT_DIR}/repository.sh"
