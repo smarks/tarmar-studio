@@ -42,27 +42,25 @@ describe('play-with-gm.js', () => {
     test('a new session is asked for with no session id, then opened', async () => {
         const form = renderForm();
         global.fetch.mockReturnValue(resolvedJsonResponse({ ok: true, session_id: 42, characters: [] }));
-        const navigate = jest.fn();
 
-        const reached = await takeToTable(form, { navigate });
+        const reached = await takeToTable(form);
 
         expect(reached).toBe(true);
         const [url, options] = global.fetch.mock.calls[0];
         expect(url).toBe('/tarmar/gm/characters/attach/');
         expect(JSON.parse(options.body)).toEqual({ session_id: null, character_id: 7 });
-        expect(navigate).toHaveBeenCalledWith('/tarmar/gm/?session=42');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=42');
     });
 
     test('a chosen session is sent by its id', async () => {
         const form = renderForm({ sessions: [3, 5] });
         form.querySelector('select').value = '5';
         global.fetch.mockReturnValue(resolvedJsonResponse({ ok: true, session_id: 5, characters: [] }));
-        const navigate = jest.fn();
 
-        await takeToTable(form, { navigate });
+        await takeToTable(form);
 
         expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ session_id: 5, character_id: 7 });
-        expect(navigate).toHaveBeenCalledWith('/tarmar/gm/?session=5');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=5');
     });
 
     test('a refusal stays on the form in the server\'s words and nothing opens', async () => {
@@ -70,12 +68,11 @@ describe('play-with-gm.js', () => {
         global.fetch.mockReturnValue(resolvedJsonResponse(
             { error: 'Character is dead' }, { ok: false, status: 400, statusText: 'Bad Request' }
         ));
-        const navigate = jest.fn();
 
-        const reached = await takeToTable(form, { navigate });
+        const reached = await takeToTable(form);
 
         expect(reached).toBe(false);
-        expect(navigate).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
         expect(errorLine().hidden).toBe(false);
         expect(errorLine().textContent).toBe('The Game Master could not take this character: Character is dead.');
         expect(button().disabled).toBe(false);
@@ -91,7 +88,7 @@ describe('play-with-gm.js', () => {
             json: () => Promise.reject(new Error('not JSON')),
         }));
 
-        await takeToTable(form, { navigate: jest.fn() });
+        await takeToTable(form);
 
         expect(errorLine().textContent).toBe('The server did not take the request (502 Bad Gateway).');
     });
@@ -100,7 +97,7 @@ describe('play-with-gm.js', () => {
         const form = renderForm();
         global.fetch.mockReturnValue(Promise.reject(new TypeError('Failed to fetch')));
 
-        const reached = await takeToTable(form, { navigate: jest.fn() });
+        const reached = await takeToTable(form);
 
         expect(reached).toBe(false);
         expect(errorLine().textContent).toBe(NETWORK_ERROR);
@@ -110,11 +107,11 @@ describe('play-with-gm.js', () => {
     test('the next attempt clears the last refusal first', async () => {
         const form = renderForm();
         global.fetch.mockReturnValueOnce(Promise.reject(new TypeError('Failed to fetch')));
-        await takeToTable(form, { navigate: jest.fn() });
+        await takeToTable(form);
         let settle;
         global.fetch.mockReturnValueOnce(new Promise((resolve) => { settle = resolve; }));
 
-        const second = takeToTable(form, { navigate: jest.fn() });
+        const second = takeToTable(form);
 
         expect(errorLine().hidden).toBe(true);
         expect(errorLine().textContent).toBe('');

@@ -198,7 +198,7 @@ if (typeof module !== 'undefined' && module.exports) {
       return false;
     }
     show('status', `The board is set: ${data.battle_name}. Loading…`);
-    root.location.href = `${root.location.pathname}?session=${data.session_id}`;
+    root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
     return true;
   }
 

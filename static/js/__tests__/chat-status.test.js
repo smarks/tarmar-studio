@@ -106,8 +106,7 @@ function statusLine() {
 beforeEach(() => {
     fetch.mockReset();
     alert.mockClear();
-    window.location.pathname = '/tarmar/gm/';
-    window.location.href = undefined;
+    window.history.replaceState(null, '', '/tarmar/gm/');
 });
 
 describe('the working line through one turn', () => {

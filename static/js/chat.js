@@ -689,9 +689,9 @@ function setTurnRunning(text) {
 /** Show the session a finished turn saved into, from the server's own history. */
 function showFinishedTurn(finishedSessionId) {
   const target = finishedSessionId || sessionId;
-  window.location.href = target
+  pageNavigation.go(target
     ? `${window.location.pathname}?session=${encodeURIComponent(target)}`
-    : window.location.pathname;
+    : window.location.pathname);
 }
 
 // Where this tab remembers a turn it started before there was a session to
@@ -1482,7 +1482,7 @@ if (sessionNameField && typeof initAutosave === 'function') {
 }
 
 function newSession() {
-  window.location.href = window.location.pathname;
+  pageNavigation.go(window.location.pathname);
 }
 
 /**
@@ -1515,9 +1515,9 @@ async function deleteSession(id, name, started) {
     }
     if (id === sessionId) {
       // Deleted the active session — drop back to a blank chat.
-      window.location.href = window.location.pathname;
+      pageNavigation.go(window.location.pathname);
     } else {
-      location.reload();
+      pageNavigation.reload();
     }
   } catch (err) {
     uiNotify(`Delete failed: ${err.message}`);

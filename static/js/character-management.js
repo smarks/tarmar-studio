@@ -22,7 +22,7 @@ function removeRowAndCheckEmpty(id, rowSelector = 'tr[data-id]') {
 
     // If no more rows, reload to show empty message
     if (document.querySelectorAll(`tbody ${rowSelector}`).length === 0) {
-        location.reload();
+        pageNavigation.reload();
     }
 }
 
@@ -44,7 +44,7 @@ async function deleteCharacter(id, url, name, csrfToken, reload = true, anchor) 
         const response = await postWithCsrf(url, csrfToken);
         if (response.redirected || response.ok) {
             if (reload) {
-                location.reload();
+                pageNavigation.reload();
             } else {
                 removeRowAndCheckEmpty(id);
             }
@@ -98,7 +98,7 @@ async function restoreCharacter(id, url, csrfToken, reload = true, anchor) {
         const data = await response.json();
         if (data.success) {
             if (reload) {
-                location.reload();
+                pageNavigation.reload();
             } else {
                 removeRowAndCheckEmpty(id);
             }

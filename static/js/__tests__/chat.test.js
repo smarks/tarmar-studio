@@ -168,9 +168,7 @@ describe('deleteSession', () => {
         confirm.mockClear();
         confirm.mockReturnValue(true);
         alert.mockClear();
-        window.location.reload.mockClear();
-        window.location.pathname = '/tarmar/gm/';
-        window.location.href = undefined;
+        window.history.replaceState(null, '', '/tarmar/gm/');
     });
 
     test('does nothing when the user cancels the confirmation', async () => {
@@ -195,14 +193,14 @@ describe('deleteSession', () => {
     test('redirects to the base chat URL when the active session is deleted', async () => {
         fetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true }) });
         await deleteSession(42, 'Test Session'); // 42 is the config's sessionId
-        expect(window.location.href).toBe('/tarmar/gm/');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/');
     });
 
     test('reloads instead of redirecting when a non-active session is deleted', async () => {
         fetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true }) });
         await deleteSession(99, 'Other Session'); // not the config's sessionId
-        expect(window.location.reload).toHaveBeenCalled();
-        expect(window.location.href).not.toBe('/tarmar/gm/');
+        expect(pageNavigation.reload).toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('shows an error notice and does not navigate when the server rejects the delete', async () => {
@@ -213,7 +211,7 @@ describe('deleteSession', () => {
         });
         await deleteSession(42, 'Test Session');
         expect(alert).toHaveBeenCalledWith('Delete failed: No session_id');
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('shows an error notice on network failure', async () => {
@@ -578,11 +576,7 @@ describe('streamMessage', () => {
     });
 
     test('updates sessionId and the URL when the final frame carries one', async () => {
-        // `new URL(window.location)` needs a location that stringifies to a
-        // real URL; jest.setup.js's window.location mock is a plain object
-        // without one, so give it a toString() for this test only.
-        window.location.href = 'http://localhost/tarmar/gm/';
-        window.location.toString = () => window.location.href;
+        window.history.replaceState(null, '', '/tarmar/gm/');
         const replaceStateSpy = jest.spyOn(window.history, 'replaceState').mockImplementation(() => {});
 
         fetch.mockResolvedValue(streamResponse([
@@ -1232,9 +1226,7 @@ describe('No /character command (issue #571)', () => {
         global.DOMPurify = require('../dompurify.min.js');
         chatModule = require('../chat.js');
         fetch.mockClear();
-        window.location.href = 'http://localhost/tarmar/gm/?session=5';
-        window.location.pathname = '/tarmar/gm/';
-        window.location.toString = () => window.location.href;
+        window.history.replaceState(null, '', '/tarmar/gm/?session=5');
         jest.spyOn(window.history, 'replaceState').mockImplementation(() => {});
     });
 
@@ -1252,7 +1244,7 @@ describe('No /character command (issue #571)', () => {
         const message = document.querySelector('.message.assistant');
         expect(message.classList.contains('notice')).toBe(false);
         expect(message.querySelector('strong')).not.toBeNull();
-        expect(window.location.href).toBe('http://localhost/tarmar/gm/?session=5');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('an error frame is a notice and reloads nothing', async () => {
@@ -1266,8 +1258,8 @@ describe('No /character command (issue #571)', () => {
         // and the transcript is the Game Master's.
         expect(document.querySelector('.message.assistant')).toBeNull();
         expect(alert.mock.calls[0][0]).toContain('Name cannot be empty');
-        expect(window.location.href).toBe('http://localhost/tarmar/gm/?session=5');
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('an ordinary done frame still renders markdown', async () => {
@@ -1278,7 +1270,7 @@ describe('No /character command (issue #571)', () => {
         const message = document.querySelector('.message.assistant');
         expect(message.classList.contains('notice')).toBe(false);
         expect(message.querySelector('strong')).not.toBeNull();
-        expect(window.location.href).toBe('http://localhost/tarmar/gm/?session=5');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('/help no longer lists it: every change is saved as it happens', () => {
@@ -1343,7 +1335,6 @@ describe('session name', () => {
         chatModule = require('../chat.js');
         fetch.mockClear();
         alert.mockClear();
-        window.location.reload.mockClear();
     });
 
     test('a rename shows everywhere the name is shown, without a reload', async () => {
@@ -1359,7 +1350,7 @@ describe('session name', () => {
         expect(document.querySelector('#mobile-session-select option').textContent)
             .toBe('The Salt Road (4)');
         expect(document.getElementById('session-name').value).toBe('The Salt Road');
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('a finished turn shows the name and count the server now holds (#829)', () => {

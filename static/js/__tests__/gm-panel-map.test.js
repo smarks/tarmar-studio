@@ -15,7 +15,7 @@ const MAPS = [
 ];
 
 function setUpDom({ config = { sessionId: null, storyMap: null }, search = '' } = {}) {
-    window.location.search = search;
+    window.history.replaceState(null, '', `/tarmar/gm/${search}`);
     const options = MAPS.map(
         (map) =>
             `<option value="${map.slug}" data-title="${map.title}" data-image-url="${map.image}">${map.title}</option>`,

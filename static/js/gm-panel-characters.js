@@ -117,7 +117,7 @@ if (typeof module !== 'undefined' && module.exports) {
       character_id: Number(characterId),
     });
     if (!data) return false;
-    root.location.href = `${root.location.pathname}?session=${data.session_id}`;
+    root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
     return true;
   }
 
@@ -136,7 +136,7 @@ if (typeof module !== 'undefined' && module.exports) {
       character_id: Number(characterId),
     });
     if (!data) return false;
-    root.location.reload();
+    root.pageNavigation.reload();
     return true;
   }
 

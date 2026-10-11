@@ -52,11 +52,9 @@
      * Attach the form's character to the chosen session, or a new one, and
      * open it.
      * @param {HTMLFormElement} form - A form.play-with-gm.
-     * @param {{navigate?: function(string): void}} [options] - Where to go
-     *   once attached; the browser's own navigation unless a test says.
      * @returns {Promise<boolean>} Whether the character reached a session.
      */
-    async function takeToTable(form, { navigate = (url) => root.location.assign(url) } = {}) {
+    async function takeToTable(form) {
         const button = form.querySelector('button[type="submit"]');
         const choice = form.querySelector('select[name="session_id"]');
         const line = form.querySelector('.play-with-gm-error');
@@ -85,7 +83,7 @@
             );
             return false;
         }
-        navigate(sessionUrl(form.dataset.chatUrl, answer.data.session_id));
+        root.pageNavigation.go(sessionUrl(form.dataset.chatUrl, answer.data.session_id));
         return true;
     }
 

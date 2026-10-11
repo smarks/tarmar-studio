@@ -189,11 +189,11 @@ describe('currentSessionId', () => {
     test('reads the session from the URL ahead of the page id', () => {
         setUpDom();
         loadPanel();
-        window.location.search = '?session=42';
+        window.history.replaceState(null, '', '?session=42');
         expect(gmPanel.currentSessionId(7)).toBe(42);
-        window.location.search = '?session=abc';
+        window.history.replaceState(null, '', '?session=abc');
         expect(gmPanel.currentSessionId(7)).toBe(7);
-        window.location.search = '';
+        window.history.replaceState(null, '', window.location.pathname);
         expect(gmPanel.currentSessionId(null)).toBeNull();
     });
 });

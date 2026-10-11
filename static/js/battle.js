@@ -1743,7 +1743,7 @@ if (typeof module !== 'undefined' && module.exports) {
             const data = await response.json();
             const nextSequence = (data.view.next_sequence || 1) - 1;
             if (data.turn < currentTurn || nextSequence < lastSequence) {
-                window.location.reload();
+                pageNavigation.reload();
                 return;
             }
             const changed = data.status !== currentStatus
@@ -1911,7 +1911,7 @@ if (typeof module !== 'undefined' && module.exports) {
             const data = await response.json();
             if (data.status !== 'lobby'
                     || JSON.stringify(data.seats) !== baseline) {
-                window.location.reload();
+                pageNavigation.reload();
             }
         }, POLL_INTERVAL_MS);
     }

@@ -52,9 +52,7 @@ function flushPromises() {
 
 beforeEach(() => {
     global.fetch.mockReset();
-    window.location.pathname = '/tarmar/gm/';
-    window.location.search = '';
-    window.location.href = '';
+    window.history.replaceState(null, '', '/tarmar/gm/');
     window.gmPanel = {
         activate: jest.fn(),
         setOpen: jest.fn(),
@@ -92,12 +90,12 @@ describe('startFight', () => {
         expect(options.headers['X-CSRFToken']).toBe('test-token');
         expect(JSON.parse(options.body)).toEqual({ session_id: 12, foes: 'two gray wolves' });
         expect(document.getElementById('gm-panel-battle-status').textContent).toContain('Quest: fight');
-        expect(window.location.href).toBe('/tarmar/gm/?session=12');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=12');
     });
 
     test('the session in the URL wins over the one the page loaded with', async () => {
         setUpDom({ sessionId: null });
-        window.location.search = '?session=31';
+        window.history.replaceState(null, '', '?session=31');
         loadTab();
         global.fetch.mockReturnValue(jsonResponse({ ok: true, session_id: 31, battle_id: 1, battle_name: 'x' }));
         await panelBattle.startFight('rat');
@@ -122,7 +120,7 @@ describe('startFight', () => {
         const error = document.getElementById('gm-panel-battle-error');
         expect(error.hidden).toBe(false);
         expect(error.textContent).toBe('Attach a character or send a message first.');
-        expect(window.location.href).toBe('');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('a refusal stays in the tab and the controls come back', async () => {
@@ -139,7 +137,7 @@ describe('startFight', () => {
         expect(document.getElementById('gm-panel-battle-status').hidden).toBe(true);
         expect(document.getElementById('gm-fight-start').disabled).toBe(false);
         expect(document.getElementById('gm-fight-foes').disabled).toBe(false);
-        expect(window.location.href).toBe('');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('a network failure is reported the same way', async () => {
@@ -167,7 +165,7 @@ describe('startFight', () => {
         );
         expect(document.getElementById('gm-panel-battle-status').hidden).toBe(true);
         expect(document.getElementById('gm-fight-start').disabled).toBe(false);
-        expect(window.location.href).toBe('');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('any other answer that is not JSON names its status', async () => {

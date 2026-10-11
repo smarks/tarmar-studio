@@ -356,7 +356,6 @@ beforeEach(() => {
     alert.mockClear();
     confirm.mockClear();
     confirm.mockReturnValue(true);
-    window.location.reload.mockClear();
     localStorage.clear();
 });
 
@@ -2023,7 +2022,7 @@ describe('the experience workbench', () => {
         await loadPage({}, [jsonResponse({ success: true, run_result: TERM, run_html: RUN_HTML, character: CHARACTER })]);
         await rollTerm();
 
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('a term with no aging leaves the penalties line out', async () => {
@@ -2151,7 +2150,7 @@ describe('death', () => {
             await loadPage({}, [jsonResponse({ success: true, run_result: FATAL_TERM, run_html: entryHtml('Merchant, Age 21–22', ['Year 5: haggling (rolled 4) — survival 3d6 [2, 3, 1] + 1 = 7 vs 4: survived', 'Year 6: sword (rolled 6) — survival 2d6 [1, 2] + 1 = 4 vs 6: died']), character: DEAD_CHARACTER, name: 'Aldwin', is_alive: false })]);
             await rollTerm();
 
-            expect(window.location.reload).not.toHaveBeenCalled();
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
         });
     });
 });
@@ -2242,7 +2241,7 @@ describe('the visibility toggle (issue #273)', () => {
         expect(badge.classList.contains('visibility-public')).toBe(true);
         expect(badge.classList.contains('visibility-private')).toBe(false);
         // State-driven update, not a reload.
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
         expect(toggle.disabled).toBe(false);
     });
 
@@ -2415,7 +2414,7 @@ describe('DM mark dead and revive', () => {
             headers: { 'X-CSRFToken': 'test-token', 'Content-Type': 'application/json' },
             body: JSON.stringify({ cause: 'Fell down a well' }),
         });
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('a cancelled prompt posts nothing', async () => {
@@ -2473,7 +2472,7 @@ describe('DM mark dead and revive', () => {
             headers: { 'X-CSRFToken': 'test-token', 'Content-Type': 'application/json' },
             body: JSON.stringify({}),
         });
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('a network failure on revive re-enables the button and says so (#643)', async () => {
@@ -2485,7 +2484,7 @@ describe('DM mark dead and revive', () => {
 
         expect(alert).toHaveBeenCalledWith('Network error — try again');
         expect(btn.disabled).toBe(false);
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('a declined revive posts nothing', async () => {
@@ -2810,7 +2809,7 @@ describe('the literacy row (#740, #741)', () => {
         expect(document.getElementById('literacy-check').textContent).toBe('3d6 ≤ INT − 4');
         expect(document.getElementById('literacy-result').textContent).toBe('Not rolled');
         expect(document.getElementById('roll-literacy-btn').hidden).toBe(false);
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('Consult GM hides the control, and another origin brings it back', async () => {
@@ -3181,7 +3180,7 @@ describe("a player's sheet: rolled and awarded values (issues #748, #749, #752)"
         const [url, init] = fetch.mock.calls.find(([called]) => called.includes('/roll/'));
         expect(url).toBe('/tarmar/characters/7/roll/wealth/');
         expect(init.method).toBe('POST');
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('a Game Master is asked before a roll replaces a recorded value', async () => {
@@ -3198,7 +3197,7 @@ describe("a player's sheet: rolled and awarded values (issues #748, #749, #752)"
 
         button.click();
         await flush();
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('a network failure on a roll says so and leaves the control usable', async () => {
@@ -3212,7 +3211,7 @@ describe("a player's sheet: rolled and awarded values (issues #748, #749, #752)"
         await flush();
 
         expect(button.disabled).toBe(false);
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('the roll controls follow the offers a field update returns', async () => {
@@ -3267,7 +3266,7 @@ describe("a player's sheet: rolled and awarded values (issues #748, #749, #752)"
         expect(confirm).toHaveBeenCalledWith('Roll the save?');
         expect(fetch.mock.calls.some(([url]) => url === '/tarmar/characters/7/survival-save/'))
             .toBe(true);
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('a refused roll says why and leaves the control usable', async () => {
@@ -3279,7 +3278,7 @@ describe("a player's sheet: rolled and awarded values (issues #748, #749, #752)"
         button.click();
         await flush();
 
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
         expect(button.disabled).toBe(false);
     });
 });
@@ -3739,7 +3738,7 @@ describe('the states a reload used to be needed for (#903)', () => {
         expect(document.getElementById('magic-controls').hidden).toBe(true);
         expect(document.querySelector('#play-with-gm-7 form')).toBeNull();
         expect(document.querySelector('#workbench-card .death-card h3').textContent).toBe('Aldwin died');
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('the death card names the saved character, not the text in the name input', async () => {

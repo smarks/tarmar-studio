@@ -70,8 +70,7 @@ async function settle() {
 beforeEach(() => {
     fetch.mockReset();
     alert.mockClear();
-    window.location.pathname = '/tarmar/gm/';
-    window.location.href = undefined;
+    window.history.replaceState(null, '', '/tarmar/gm/');
 });
 
 describe('a stream lost after the turn started', () => {
@@ -99,10 +98,12 @@ describe('a stream lost after the turn started', () => {
         // Nothing can be sent into the session while the turn runs.
         expect(document.getElementById('send-btn').disabled).toBe(true);
         expect(fetch.mock.calls[1][0]).toBe('/tarmar/gm/turns/41/');
+        // The page stays while the turn is still running.
+        expect(pageNavigation.go).not.toHaveBeenCalled();
 
         finished = true;
         await settle();
-        expect(window.location.href).toBe('/tarmar/gm/?session=7');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
     });
 
     test('shows the session once the turn has finished', async () => {
@@ -114,7 +115,7 @@ describe('a stream lost after the turn started', () => {
         await chat.streamMessage({ session_id: 7, message: 'I search the crypt' });
         await settle();
 
-        expect(window.location.href).toBe('/tarmar/gm/?session=7');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
         expect(document.getElementById('gm-turn-running').hidden).toBe(true);
     });
 
@@ -159,7 +160,7 @@ describe('a page loaded while its turn runs', () => {
         await settle();
 
         expect(fetch.mock.calls[0][0]).toBe('/tarmar/gm/turns/52/');
-        expect(window.location.href).toBe('/tarmar/gm/?session=7');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
     });
 
     test('keeps asking when the network is still down', async () => {
@@ -172,7 +173,7 @@ describe('a page loaded while its turn runs', () => {
         await settle();
 
         expect(warn).toHaveBeenCalledTimes(2);
-        expect(window.location.href).toBe('/tarmar/gm/?session=7');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
         warn.mockRestore();
     });
 });
@@ -221,7 +222,7 @@ describe('a blank page and a session-less turn (issue #650)', () => {
         await settle();
 
         expect(document.getElementById('send-btn').disabled).toBe(false);
-        expect(window.location.href).toBeUndefined();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('a tab coming back to a turn that already landed is taken to its session', async () => {
@@ -231,7 +232,7 @@ describe('a blank page and a session-less turn (issue #650)', () => {
         loadChat({ sessionId: null, runningTurn: null });
         await settle();
 
-        expect(window.location.href).toBe('/tarmar/gm/?session=12');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=12');
         expect(window.sessionStorage.getItem('gmOwnSessionlessTurn')).toBeNull();
     });
 
@@ -244,7 +245,7 @@ describe('a blank page and a session-less turn (issue #650)', () => {
 
         expect(document.getElementById('send-btn').disabled).toBe(false);
         expect(window.sessionStorage.getItem('gmOwnSessionlessTurn')).toBeNull();
-        expect(window.location.href).toBeUndefined();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('a turn that has made its session is the server\'s to resume, not the tab\'s', async () => {

@@ -303,6 +303,23 @@
     // callers said this sentence; they say it from here now.
     const FIELD_NETWORK_ERROR = 'Network error — try again';
 
+    /**
+     * Every page leaves or reloads itself through these two calls, never by
+     * touching window.location directly.
+     *
+     * The jsdom that Jest 30 ships (26) will not let a test replace
+     * window.location or its methods, and it does not implement navigation, so
+     * a script that sets location.href cannot be tested at all (#23).
+     * jest.setup.js installs mocks under this name before any script loads;
+     * that is why an existing pageNavigation is kept rather than replaced.
+     */
+    const pageNavigation = root.pageNavigation || {
+        /** Reload the current page. */
+        reload() { root.location.reload(); },
+        /** Go to url, as a link would. @param {string} url */
+        go(url) { root.location.assign(url); },
+    };
+
     root.csrfToken = csrfToken;
     root.showFieldError = showFieldError;
     root.clearFieldError = clearFieldError;
@@ -316,12 +333,13 @@
     root.uiConfirm = uiConfirm;
     root.uiPrompt = uiPrompt;
     root.paintNameChrome = paintNameChrome;
+    root.pageNavigation = pageNavigation;
 
     // Export for testing (Node.js environment)
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
             csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, formatSigned,
-            uiNotify, uiConfirm, uiPrompt, paintNameChrome,
+            uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation,
             showFieldError, clearFieldError, FIELD_NETWORK_ERROR
         };
     }

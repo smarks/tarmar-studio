@@ -1975,7 +1975,7 @@ document.getElementById('mark-dead-btn')?.addEventListener('click', async functi
             { cause: trimmed }
         );
         if (ok && data.success) {
-            location.reload();
+            pageNavigation.reload();
         } else {
             uiNotify(data.error || 'Failed to mark character dead');
             this.disabled = false;
@@ -2117,7 +2117,7 @@ function bindSheetRoll(button) {
         try {
             const { ok, data } = await postJson(this.dataset.rollUrl, {});
             if (ok && data.success) {
-                location.reload();
+                pageNavigation.reload();
                 return;
             }
             uiNotify(data.error || 'The roll failed');
@@ -2223,7 +2223,7 @@ document.getElementById('revive-btn')?.addEventListener('click', async function 
             {}
         );
         if (ok && data.success) {
-            location.reload();
+            pageNavigation.reload();
         } else {
             uiNotify(data.error || 'Failed to revive character');
             this.disabled = false;

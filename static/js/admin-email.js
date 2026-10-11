@@ -12,14 +12,12 @@
  * @param {object} options
  * @param {function(string, string): Promise<void>} options.saveField - From initAutosave.
  * @param {function(string, string): void} options.updateOriginalValue - From initAutosave.
- * @param {function(): void} [options.reload] - Reloads the page; replaced in tests.
  */
-function initAdminEmail({ saveField, updateOriginalValue, reload }) {
+function initAdminEmail({ saveField, updateOriginalValue }) {
     const input = document.getElementById('id_email');
     const button = document.getElementById('email-set-button');
     const container = input && input.closest('[data-field="email"]');
     if (!input || !button || !container) return;
-    const reloadPage = reload || (() => window.location.reload());
 
     // A refusal puts the field back to this, the address the page was drawn with.
     updateOriginalValue('email', input.value);
@@ -30,7 +28,7 @@ function initAdminEmail({ saveField, updateOriginalValue, reload }) {
         button.disabled = true;
         await saveField('email', input.value.trim());
         if (container.classList.contains('saved')) {
-            reloadPage();
+            pageNavigation.reload();
         } else {
             button.disabled = false;
         }
