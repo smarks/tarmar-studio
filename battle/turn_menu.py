@@ -338,10 +338,18 @@ def _plain_line(
     elif option in ("h", "r") and candidate.spell_key:
         spell = get_spell(candidate.spell_key)
         plain = f"Cast {spell.name}" + (f" at {aimed}" if aimed else "")
-        cost = (
-            f"{spell.level} mana, paid only if it succeeds or the roll is "
-            f"{' or '.join(str(roll) for roll in sorted(CASTING_MANA_LOST_ROLLS))}"
-        )
+        lost_rolls = " or ".join(str(roll) for roll in sorted(CASTING_MANA_LOST_ROLLS))
+        if candidate.push_mana:
+            # A pushed copy of the cast (issue #960): the engine's menu offers
+            # it, with the Control Roll's working in its rationale.
+            plain += f", pushing {candidate.push_mana} more mana into it"
+            cost = (
+                f"{spell.level + candidate.push_mana} mana ({spell.level} and "
+                f"{candidate.push_mana} pushed), paid only if it succeeds or the "
+                f"roll is {lost_rolls}; a success makes a Control Roll"
+            )
+        else:
+            cost = f"{spell.level} mana, paid only if it succeeds or the roll is {lost_rolls}"
     elif option == "j":
         plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
     elif option == "k":
@@ -466,6 +474,7 @@ def _base_fields(candidate: Candidate) -> dict:
         "rationale": candidate.rationale,
         "target_id": candidate.target_id,
         "spell_key": candidate.spell_key,
+        "push_mana": candidate.push_mana,
         "destination": candidate.destination,
     }
 

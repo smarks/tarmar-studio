@@ -1,6 +1,7 @@
-# Every Tarmar repository carries these same forms (tarmar-studio-private,
-# tarmar-studio, tarmar-canon, tarmar-engine, tarmar-rules); change them all
-# together. Players file in the public tarmar-studio.
+# Every Tarmar repository carries these same forms (tarmar-studio,
+# tarmar-canon, tarmar-engine, tarmar-rules; the archived
+# tarmar-studio-private keeps a copy); change them all together. Players
+# and sessions both file in the public tarmar-studio.
 name: Bug
 description: Something in Tarmar Studio is broken or wrong.
 labels: [bug]

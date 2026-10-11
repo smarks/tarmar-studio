@@ -8,9 +8,10 @@ logger = logging.getLogger(__name__)
 def watch_canon_files(sender: object, **kwargs: object) -> None:
     """Have ``runserver`` restart when the canon's import-time files change.
 
-    ``nav.json``, ``maps.json`` and ``canon.json`` (issue #918) and the GM's
-    world digest under ``gm-prompt/`` (issue #919) are read once at import,
-    so an edit to one reaches the site only through a restart. Connected to
+    ``nav.json``, ``maps.json`` and ``canon.json`` (issue #918), the GM's
+    world digest under ``gm-prompt/`` (issue #919) and ``magic-rules.json``
+    (issue #960) are read once per process, so an edit to one reaches the
+    site only through a restart. Connected to
     ``autoreload_started``, whose sender is the reloader.
 
     Args:

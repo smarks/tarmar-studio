@@ -1,5 +1,15 @@
 # The CI runner on the Mac Studio
 
+**Retired 2026-10-10.** The code repository became
+`smarks/tarmar-studio-private` on 2026-10-09 (its old name went to a public
+snapshot), and on 2026-10-10 development moved to the public
+`smarks/tarmar-studio`; the private one became the archive. A runner on a
+public repository would run any fork's pull request on this Mac (issue #961),
+so CI is GitHub-hosted by default and the one self-hosted option is the runner
+on datahorde (`scripts/ci-runner-linux/`). `install-runner.sh` now refuses
+outright, naming that; `--dry-run` still prints the old plan. The scripts stay
+for the record and are not deleted.
+
 **Since #964 no CI job is sent here.** `ci.yml` runs on GitHub's machines
 unless the repository variable `CI_RUNNER` is `datahorde`, which selects a
 runner on datahorde; neither matches this runner's labels. It stays installed
@@ -68,11 +78,17 @@ reachable by a job too.
 
 ## Installing it
 
-Both scripts take the repository's name from `repository.sh`, and both refuse
-to act unless GitHub reports that repository as private. On 2026-10-09 the code
-repository became `smarks/tarmar-studio-private` and its old name went to a
-public snapshot; a runner registered on a public repository would run any
-fork's pull request on this Mac (issue #961).
+Both scripts take the repository's name from `repository.sh`. As the note at
+the top says, `install-runner.sh` refuses to install on this Mac. The opt-in
+rule in `repository.sh` (`require_self_hosted_runner_opt_in`) now guards the
+datahorde registration, `scripts/ci-runner-linux/register-from-mac.sh`: it
+stops unless GitHub reports both that the repository variable `CI_RUNNER` is
+`datahorde` (the opt-in to a self-hosted runner; `ci.yml` uses GitHub's
+machines otherwise) and that the repository's fork-workflow approval policy
+is `all_external_contributors` ("Require approval for all outside
+collaborators", Settings > Actions > General; read from
+`repos/<repository>/actions/permissions/fork-pr-contributor-approval`).
+`protect-main.sh` needs neither: branch protection suits a public repository.
 
 From your own account, in a checkout of the repository, once:
 
@@ -147,8 +163,8 @@ While the runner is down, nothing can merge to `main`, because admins are
 held to the check too. To lift that for an emergency merge and put it back:
 
 ```bash
-gh api -X DELETE repos/smarks/tarmar-studio-private/branches/main/protection/enforce_admins
-gh api -X POST   repos/smarks/tarmar-studio-private/branches/main/protection/enforce_admins
+gh api -X DELETE repos/smarks/tarmar-studio/branches/main/protection/enforce_admins
+gh api -X POST   repos/smarks/tarmar-studio/branches/main/protection/enforce_admins
 ```
 
 ## Not verified by the tests

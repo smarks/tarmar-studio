@@ -65,6 +65,19 @@ class ParseJsonTextTest(SimpleTestCase):
         with self.assertRaises(ValueError):
             parse_json_text(("1" * 5000).encode())
 
+    def test_an_object_pairs_hook_builds_and_may_refuse_each_object(self):
+        def refuse_a_second_key(pairs: list[tuple[str, object]]) -> dict:
+            if len(pairs) > 1:
+                raise ValueError("one key per object")
+            return dict(pairs)
+
+        self.assertEqual(
+            parse_json_text(b'{"a": 1}', object_pairs_hook=refuse_a_second_key),
+            {"a": 1},
+        )
+        with self.assertRaises(ValueError):
+            parse_json_text(b'{"a": 1, "b": 2}', object_pairs_hook=refuse_a_second_key)
+
 
 class ParseJsonBodyTest(SimpleTestCase):
     """``_parse_json_body`` answers 400 "Invalid JSON" to every bad body."""

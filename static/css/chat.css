@@ -1080,6 +1080,9 @@ body.gm-panel-resizing, body.gm-panel-resizing-rows { user-select: none; }
     }
     .chat-messages { padding: 1rem; }
     .command-bar, .chat-input { padding-left: 1rem; padding-right: 1rem; }
+    /* The command buttons wrap onto further rows rather than run off the edge
+       (issue #981: a Game Master's two review controls did). */
+    .command-bar { flex-wrap: wrap; }
     /* Wide markdown tables in GM replies scroll instead of breaking the page. */
     .message-content table {
         display: block;

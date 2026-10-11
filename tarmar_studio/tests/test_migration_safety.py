@@ -19,15 +19,16 @@ the reason as the value.
 
 import json
 import sys
+import types
 from collections.abc import Iterable, Iterator
-from pathlib import Path
 
 import pytest
 from django.db import migrations, models
 from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.operations.base import Operation
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from tarmar_studio.tests.repository_apps import REPO_ROOT, is_this_repositorys_app
+
 BASELINE_FILE = REPO_ROOT / "tarmar_studio" / "migration_baseline.json"
 
 UNSAFE_OPERATIONS = (
@@ -99,13 +100,8 @@ def load_baseline() -> dict:
 
 
 def local_nodes(loader: MigrationLoader) -> set[Node]:
-    """Migrations that live in this repository rather than in site-packages."""
-    nodes = set()
-    for node, migration in loader.disk_migrations.items():
-        module_file = Path(str(sys.modules[type(migration).__module__].__file__))
-        if REPO_ROOT in module_file.resolve().parents:
-            nodes.add(node)
-    return nodes
+    """Migrations of this repository's own apps, not Django's or a package's."""
+    return {node for node in loader.disk_migrations if is_this_repositorys_app(node[0])}
 
 
 def new_migrations(loader: MigrationLoader, baseline: dict[str, str]) -> set[Node]:
@@ -141,6 +137,39 @@ def test_new_migrations_keep_the_previous_release_working(loader) -> None:
         "or a rollback (issue #575). Make them expand-only, or list them in "
         f"{BASELINE_FILE.name} 'allowed' with the reason:\n" + "\n".join(failures)
     )
+
+
+LOCAL_APPS = {"accounts", "battle", "bestiary", "characters", "common", "gm", "parties"}
+DJANGO_APPS = {"admin", "auth", "contenttypes", "sessions"}
+
+
+def test_local_nodes_holds_this_repositorys_apps_and_not_djangos(loader) -> None:
+    app_labels = {app_label for app_label, _ in local_nodes(loader)}
+    assert LOCAL_APPS <= app_labels
+    assert not DJANGO_APPS & app_labels
+
+
+def test_local_nodes_skips_a_migration_whose_file_sits_in_the_checkout_venv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worktree's ``.venv`` is inside the checkout, so file location misleads (#979)."""
+
+    class VirtualenvMigration(migrations.Migration):
+        pass
+
+    module_name = "tarmar_studio_test_virtualenv_migration"
+    VirtualenvMigration.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.__file__ = str(
+        REPO_ROOT
+        / ".venv/lib/python3/site-packages/django/contrib/auth/migrations/0001.py"
+    )
+    monkeypatch.setitem(sys.modules, module_name, module)
+    loader = MigrationLoader(None, load=False)
+    loader.disk_migrations = {
+        ("auth", "0001_initial"): VirtualenvMigration("0001_initial", "auth")
+    }
+    assert local_nodes(loader) == set()
 
 
 def test_baseline_names_real_migrations(loader) -> None:

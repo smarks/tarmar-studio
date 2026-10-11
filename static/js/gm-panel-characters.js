@@ -169,12 +169,42 @@ if (typeof module !== 'undefined' && module.exports) {
     }
   }
 
+  /** A tab with nothing the refetch needs to carry over. */
+  const NO_VIEW = { query: '', open: false };
+
+  /**
+   * What the Campaign tab's resolved threads show now, so the refetched tab
+   * shows the same (issue #982): the first thread listed, which is the
+   * earliest page the reader has loaded, as the query that asks the server
+   * for every thread from it on, and whether the list is open. Read when the
+   * request is sent and again just before the answer replaces the tab, since
+   * the reader can load a page or fold the list while it is on its way.
+   * @param {Element} container - The Campaign tab's section.
+   * @returns {{query: string, open: boolean}}
+   */
+  function readResolvedView(container) {
+    const resolved = container.querySelector('.gm-campaign-resolved');
+    const first = resolved && resolved.querySelector('li[data-thread-id]');
+    if (!first) return NO_VIEW;
+    return {
+      query: `?resolved_from=${encodeURIComponent(first.dataset.threadId)}`,
+      open: resolved.open,
+    };
+  }
+
+  /** Put the list back as the reader had it, open or folded. */
+  function restoreResolvedView(container, view) {
+    const reloaded = container.querySelector('.gm-campaign-resolved');
+    if (reloaded) reloaded.open = view.open;
+  }
+
   /**
    * The tabs that refetch themselves while a turn runs: the element whose
    * contents are replaced, the config key holding its URL template, and what
    * to call it when a refresh fails. The Campaign tab joined the Characters
    * tab here (issue #579) -- where the party is and what state a thing is in
-   * change mid-turn exactly as a character does.
+   * change mid-turn exactly as a character does. ``keepView`` is what a tab
+   * carries through its own refetch (issue #982).
    */
   const REFRESHABLE = [
     {
@@ -188,6 +218,7 @@ if (typeof module !== 'undefined' && module.exports) {
       urlKey: 'campaignPanelUrlTemplate',
       called: 'campaign',
       errorId: 'gm-panel-campaign-error',
+      keepView: { read: readResolvedView, restore: restoreResolvedView },
     },
   ];
 
@@ -199,7 +230,7 @@ if (typeof module !== 'undefined' && module.exports) {
    * Refreshes asked for while one is in flight collapse into one more, so the
    * last frame of a turn is always reflected. A failure leaves the tab as it
    * was and says so in the tab (no transient UI).
-   * @param {{containerId: string, urlKey: string, called: string, errorId: string}} tab
+   * @param {{containerId: string, urlKey: string, called: string, errorId: string, keepView: ({read: function(Element): {query: string, open: boolean}, restore: function(Element, {query: string, open: boolean}): void})|undefined}} tab
    * @returns {Promise<boolean>} Whether the contents were replaced.
    */
   async function refreshOne(tab) {
@@ -210,7 +241,10 @@ if (typeof module !== 'undefined' && module.exports) {
       refreshAgain.add(tab.containerId);
       return refreshing.get(tab.containerId);
     }
-    const url = config[tab.urlKey].replace('{session_id}', String(sessionId));
+    // What the reader has opened in the tab is asked for again and put back.
+    const readView = tab.keepView ? tab.keepView.read : () => NO_VIEW;
+    const sentView = readView(container);
+    const url = config[tab.urlKey].replace('{session_id}', String(sessionId)) + sentView.query;
     const inFlight = (async () => {
       let replaced = false;
       try {
@@ -225,17 +259,28 @@ if (typeof module !== 'undefined' && module.exports) {
           // (issue #864): the fresh picker is wired and asked again.
           const typed = container.querySelector('[data-picker-search]');
           const query = typed ? typed.value : '';
-          container.innerHTML = await response.text();
-          if (root.picker) {
-            root.picker.initPickers(container);
-            const fresh = container.querySelector('[data-picker]');
-            const search = fresh && fresh.querySelector('[data-picker-search]');
-            if (search && query) {
-              search.value = query;
-              root.picker.loadPage(fresh, 1);
+          const body = await response.text();
+          // The reader may have loaded a page or folded the list while the
+          // answer was on its way: read the tab as it is now. An answer to a
+          // cursor that has since moved is not applied, it would take the
+          // newly loaded page away; the tab is asked again instead.
+          const liveView = readView(container);
+          if (liveView.query !== sentView.query) {
+            refreshAgain.add(tab.containerId);
+          } else {
+            container.innerHTML = body;
+            if (tab.keepView) tab.keepView.restore(container, liveView);
+            if (root.picker) {
+              root.picker.initPickers(container);
+              const fresh = container.querySelector('[data-picker]');
+              const search = fresh && fresh.querySelector('[data-picker-search]');
+              if (search && query) {
+                search.value = query;
+                root.picker.loadPage(fresh, 1);
+              }
             }
+            replaced = true;
           }
-          replaced = true;
         }
       } catch (error) {
         showError(

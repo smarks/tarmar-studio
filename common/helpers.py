@@ -12,6 +12,7 @@ into the domain object's ``user`` ownership) so it stays local.
 import hmac
 import ipaddress
 import json
+from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
@@ -73,7 +74,11 @@ def column_length(model: type[models.Model], field_name: str) -> int:
     return max_length
 
 
-def parse_json_text(text: bytes | str) -> object:
+def parse_json_text(
+    text: bytes | str,
+    *,
+    object_pairs_hook: Callable[[list[tuple[str, Any]]], Any] | None = None,
+) -> object:
     """``json.loads`` for text a user sent, with every refusal a ``ValueError``.
 
     ``json.loads`` raises ``JSONDecodeError`` for malformed text, but also
@@ -84,6 +89,9 @@ def parse_json_text(text: bytes | str) -> object:
 
     Args:
         text: The request body or uploaded file's bytes, or decoded text.
+        object_pairs_hook: Passed through to ``json.loads``: builds each
+            object from its key-value pairs, and may raise ``ValueError`` to
+            refuse one (``battle.magic_rules`` refuses a repeated key).
 
     Returns:
         The parsed JSON value.
@@ -92,7 +100,7 @@ def parse_json_text(text: bytes | str) -> object:
         ValueError: The text is not JSON this server can read.
     """
     try:
-        return json.loads(text)
+        return json.loads(text, object_pairs_hook=object_pairs_hook)
     except RecursionError:
         raise ValueError("The JSON is nested too deeply") from None
 

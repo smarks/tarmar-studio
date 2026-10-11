@@ -516,6 +516,13 @@
     margin: 0.2rem 0 0.2rem 1.2rem;
 }
 
+/* A cast the Channel withheld from the menu (#960), under its decision. */
+.event-withheld {
+    display: block;
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
 .battle-event:target {
     background: var(--colour-highlight-target);
 }
@@ -983,6 +990,46 @@
 
 .turn-spell-note.is-blocked {
     font-style: italic;
+}
+
+/* A cast the engine offers pushed copies of (#960): the spell card, then the
+   push control beneath it in the same grid cell. "None" is the plain cast. */
+.turn-spell-group {
+    display: grid;
+    gap: 0.35rem;
+    align-content: start;
+}
+
+.turn-push {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.3rem 0.4rem;
+    font-size: 0.75rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-push-amount {
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--colour-border-breadcrumb-link);
+    border-radius: 6px;
+    background: var(--colour-surface);
+    font: inherit;
+    cursor: pointer;
+}
+
+.turn-push-amount:focus-visible {
+    outline: 2px solid var(--colour-accent-gold-strong);
+    outline-offset: 2px;
+}
+
+.turn-push-amount[aria-pressed="true"] {
+    border-color: var(--colour-accent-gold);
+    background: var(--colour-surface-gold-pressed);
+}
+
+.turn-push-cost {
+    flex-basis: 100%;
 }
 
 .combatant-controller {

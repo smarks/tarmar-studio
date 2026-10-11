@@ -14,17 +14,19 @@ them together the way ``test_rules_drift`` pins the rules docs.
 """
 
 import json
+from dataclasses import replace
 
 from django.test import SimpleTestCase
 from django.urls import reverse
 
-from battle import policy
+from battle import policy, profiles
 from battle.classic_adaptation import (
     classic_caster_magic,
     classic_shield,
     classic_state,
 )
 from battle.engine.state import BattleState
+from battle.models import Battle, BattleCombatant
 from battle.services import (
     advance_turn,
     caster_magic,
@@ -35,12 +37,16 @@ from battle.services import (
 )
 from common.test_helpers import BaseTestCase
 
+from .magic_fixtures import INVENTED_RULES, seated_rules
 from .test_classic_adaptation import snapshot as classic_snapshot
 from .test_state import make_combatant
 
 # A caster with enough mana for everything in the catalog's reach and a
 # fighter to aim at — the shared fixture for the unit tests below.
 WIZARD_SPELLS = ["fire_missile", "lightning_bolt", "shield", "heal"]
+#: Each spell's recorded level: under the invented Channel (twice the level)
+#: every spell is within it.
+WIZARD_SPELL_LEVELS = {"fire_missile": 1, "lightning_bolt": 2, "shield": 1, "heal": 1}
 
 
 def wizard_state(**overrides):
@@ -48,6 +54,7 @@ def wizard_state(**overrides):
         "mana": 6,
         "max_mana": 10,
         "spells": list(WIZARD_SPELLS),
+        "spell_skill_levels": dict(WIZARD_SPELL_LEVELS),
         "intelligence": 14,
         "wisdom": 12,
     }
@@ -61,6 +68,11 @@ def wizard_state(**overrides):
 
 
 class CasterMagicTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        # Invented magic rules, so the rows read the same under either canon.
+        self.enterContext(seated_rules())
+
     def test_a_non_caster_has_no_magic_to_show(self):
         state = BattleState(combatants=[make_combatant(1), make_combatant(2)])
         self.assertIsNone(caster_magic(state, 1))
@@ -139,6 +151,36 @@ class CasterMagicTest(SimpleTestCase):
     def test_a_dead_or_missing_combatant_has_no_magic(self):
         self.assertIsNone(caster_magic(wizard_state(), 99))
 
+    def test_each_row_carries_its_channel(self):
+        # The invented Channel is twice the recorded level.
+        magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        self.assertEqual(
+            {spell["key"]: spell["channel"] for spell in magic["spells"]},
+            {key: 2 * level for key, level in WIZARD_SPELL_LEVELS.items()},
+        )
+
+    def test_no_channel_rules_carry_no_channel(self):
+        with seated_rules(replace(INVENTED_RULES, channel=None)):
+            magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        self.assertEqual({spell["channel"] for spell in magic["spells"]}, {None})
+
+    def test_a_spell_past_the_channel_says_so(self):
+        # Level 1 in Lightning Bolt: the invented Channel is 2, its cost 3.
+        magic = caster_magic(
+            wizard_state(
+                spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+            ),
+            1,
+        )
+        assert magic is not None
+        bolt = next(
+            spell for spell in magic["spells"] if spell["key"] == "lightning_bolt"
+        )
+        self.assertFalse(bolt["castable"])
+        self.assertEqual(bolt["reason"], "costs 3 mana, past a Channel of 2 for it")
+
 
 class CastableSetAgreesWithPolicyTest(SimpleTestCase):
     """The shown-castable set must equal the choosable set, exactly.
@@ -147,6 +189,10 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
     (or hide one they are entitled to), so it is pinned rather than
     trusted to stay in step by inspection.
     """
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(seated_rules())
 
     def assert_sets_agree(self, state):
         magic = caster_magic(state, 1)
@@ -158,10 +204,16 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
             for spell in magic["spells"]
             if spell["castable"]
         }
-        actor = state.by_id(1)
+        # The menu as the decider builds it, with the magic rules the turn
+        # runs on (issue #960): its Channel withholds casts too. A pushed
+        # variant is the same cast with more mana, not another row.
+        menu = policy.choose_option(
+            state, state.by_id(1), magic=profiles.tarmar_engine_profile().magic
+        )
         offered = {
             (candidate.spell_key, candidate.target_id)
-            for candidate in policy._cast_candidates(state, actor, "h")
+            for candidate in menu.candidates
+            if candidate.spell_key and not candidate.push_mana
         }
         self.assertEqual(shown, offered)
 
@@ -173,6 +225,37 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
 
     def test_agreement_when_a_continuing_spell_is_up(self):
         self.assert_sets_agree(wizard_state(active_spells=["shield"]))
+
+    def test_agreement_when_the_channel_withholds_a_spell(self):
+        self.assert_sets_agree(
+            wizard_state(
+                spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+            )
+        )
+
+    def test_agreement_when_nothing_is_recorded(self):
+        # No recorded level: Channel 0, every cast withheld on both sides.
+        self.assert_sets_agree(wizard_state(spell_skill_levels={}))
+
+
+def awaiting_wizard_battle(dm, player) -> tuple[Battle, BattleCombatant]:
+    """A battle paused on ``player``'s seated wizard's decision.
+
+    Args:
+        dm: The user who creates the battle.
+        player: The user who claims the one player seat, as a wizard.
+
+    Returns:
+        The paused battle and the wizard's seat.
+    """
+    battle = create_battle(dm, name="Cast flow", seed=7, count=2, player_seats=1)
+    seat = battle.combatants.filter(is_open_seat=True, player=None).first()
+    assert seat is not None
+    seat = claim_seat(battle.pk, seat.pk, player, archetype="wizard")
+    set_seat_ready(battle.pk, seat.pk, player, ready=True)
+    start_battle(battle.pk)
+    battle, _events = advance_turn(battle.pk)
+    return battle, seat
 
 
 class PendingPayloadCarriesMagicTest(BaseTestCase):
@@ -186,16 +269,7 @@ class PendingPayloadCarriesMagicTest(BaseTestCase):
 
     def awaiting_wizard_battle(self):
         """A battle paused on a player-seated wizard's decision."""
-        battle = create_battle(
-            self.dm, name="Cast flow", seed=7, count=2, player_seats=1
-        )
-        seat = battle.combatants.filter(is_open_seat=True, player=None).first()
-        assert seat is not None
-        seat = claim_seat(battle.pk, seat.pk, self.player, archetype="wizard")
-        set_seat_ready(battle.pk, seat.pk, self.player, ready=True)
-        start_battle(battle.pk)
-        battle, _events = advance_turn(battle.pk)
-        return battle, seat
+        return awaiting_wizard_battle(self.dm, self.player)
 
     def state_for(self, user, battle):
         self.login_as(user)

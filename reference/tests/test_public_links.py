@@ -1,16 +1,17 @@
 """No public page links a commit, PR or issue in either repository (issue #956).
 
-After the 2026-10-09 rename, ``smarks/tarmar-studio`` is a public snapshot
-without the project's history, and ``smarks/tarmar-studio-private`` carries
-that history where only its collaborators can open it. A link to a commit,
-pull request or issue under either name is therefore broken or closed to a
-player wherever a player reads it. Public pages name the issue or PR number
+Development moved on 2026-10-10 to the public ``smarks/tarmar-studio``, whose
+history begins at the seed commit; ``smarks/tarmar-studio-private`` is the
+archive of everything before, where only its collaborators can open it. Issue
+and pull request numbers do not carry across, so a link to a commit, pull
+request or issue under either name can be closed to a player or point at the
+wrong item wherever a player reads it. Public pages name the issue or PR number
 in plain text instead.
 
 "Public" here is every file this repository serves or publishes to a reader:
 the reference pages and the default canon, the player-facing guides in
 ``build/``, the README and the site's templates. Operator documents
-(``docs/``, ``DEPLOY.md``) may link the private repository, and so may the
+(``docs/``, ``DEPLOY.md``) may link the archive repository, and so may the
 Tarmar canon, which lives in its own private repository and is not swept.
 A link to either repository's root, or to a file in the public one, is fine.
 """
@@ -55,6 +56,7 @@ def history_links(path: Path) -> list[str]:
 def test_the_pattern_catches_history_links_under_both_names():
     for link in (
         "https://github.com/smarks/tarmar-studio/commit/2be950e",
+        "https://github.com/smarks/tarmar-studio/pulls",
         "https://github.com/smarks/tarmar-studio-private/commit/2be950e",
         "https://github.com/smarks/tarmar-studio-private/pull/272",
         "https://github.com/smarks/tarmar-studio/issues/914",

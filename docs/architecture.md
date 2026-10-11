@@ -56,7 +56,7 @@ graph TB
         review["tarmar-gm-review agent<br/>scripts/llm-host/"]
     end
 
-    gh["GitHub smarks/tarmar-studio-private<br/>origin/main + refs/notes/gate"]
+    gh["GitHub smarks/tarmar-studio<br/>origin/main + refs/notes/gate"]
 
     player --> browser
     gm --> browser
@@ -249,6 +249,10 @@ Notes on the edges, each checkable:
   cannot drift from the published tables. `gm/maps.py` builds its place
   registry from the gazetteer the canon's `maps.json` names for the same
   reason.
+- `battle/magic_rules.py` reads the canon's `magic-rules.json`
+  (`reference.paths.MAGIC_RULES_FILE`) into the engine's `MagicRules`: the
+  casting success tiers, Push and Channel numbers. It is the only path that
+  sets them.
 
 ### Frontend layering
 

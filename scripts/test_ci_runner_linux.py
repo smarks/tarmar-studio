@@ -230,12 +230,14 @@ def test_the_browser_lands_where_ci_caches_it():
     assert cache["with"]["path"] == "~/.cache/ms-playwright"
 
 
-def test_registration_targets_the_private_repository():
+def test_registration_checks_the_runner_opt_in_before_asking_for_the_token():
     assert 'source "$REPOSITORY_PATH"' in JIT_CONFIG_PATH.read_text()
     register = REGISTER_PATH.read_text()
-    assert register.index("require_private_repository gh") < register.index("read -rsp")
+    assert register.index("require_self_hosted_runner_opt_in gh") < register.index(
+        "read -rsp"
+    )
     assert shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY") == (
-        "smarks/tarmar-studio-private"
+        "smarks/tarmar-studio"
     )
 
 

@@ -794,21 +794,21 @@ class MailSettingsTest(DotenvStagingMixin, TestCase):
 
 
 class RepositoryUrlSettingsTest(DotenvStagingMixin, TestCase):
-    """What settings make of the footer's repository addresses (issue #914)."""
+    """What settings make of the footer's repository address (issues #914, #997)."""
 
-    def resolved_repository_urls(self, env_overrides: dict[str, str]) -> list[str]:
-        """Import settings in a clean subprocess; return the two addresses."""
+    def printed_from_settings(
+        self, expression: str, env_overrides: dict[str, str]
+    ) -> str:
+        """Import settings in a clean subprocess; return what ``expression`` prints.
+
+        ``expression`` is evaluated with the settings module bound to ``s``.
+        """
         env = self.subprocess_environment()
         for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG"):
             env.pop(key, None)
-        for key in ("REPOSITORY_PUBLIC_URL", "REPOSITORY_PRIVATE_URL"):
-            env.pop(key, None)
+        env.pop("REPOSITORY_PUBLIC_URL", None)
         env.update({**MailSettingsTest.PRODUCTION, **env_overrides})
-        program = (
-            "import tarmar_studio.settings as s\n"
-            "print(s.REPOSITORY_PUBLIC_URL)\n"
-            "print(s.REPOSITORY_PRIVATE_URL)\n"
-        )
+        program = f"import tarmar_studio.settings as s\nprint({expression})\n"
         result = subprocess.run(
             [sys.executable, "-c", program],
             cwd=BASE_DIR,
@@ -818,74 +818,71 @@ class RepositoryUrlSettingsTest(DotenvStagingMixin, TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        return result.stdout.strip().splitlines()[-2:]
+        return result.stdout.strip().splitlines()[-1]
 
-    def test_the_defaults_are_the_public_snapshot_and_the_private_history(self):
+    def resolved_repository_url(self, env_overrides: dict[str, str]) -> str:
+        """The address settings resolve with ``env_overrides`` applied."""
+        return self.printed_from_settings("s.REPOSITORY_PUBLIC_URL", env_overrides)
+
+    def test_the_default_is_the_one_public_repository(self):
         self.assertEqual(
-            self.resolved_repository_urls({}),
-            [
-                "https://github.com/smarks/tarmar-studio",
-                "https://github.com/smarks/tarmar-studio-private",
-            ],
+            self.resolved_repository_url({}),
+            "https://github.com/smarks/tarmar-studio",
         )
 
-    def test_the_environment_overrides_both_and_trailing_slashes_drop(self):
+    def test_there_is_no_private_repository_setting(self):
         self.assertEqual(
-            self.resolved_repository_urls(
-                {
-                    "REPOSITORY_PUBLIC_URL": "https://example.test/public/",
-                    "REPOSITORY_PRIVATE_URL": "https://example.test/private/",
-                }
+            self.printed_from_settings("hasattr(s, 'REPOSITORY_PRIVATE_URL')", {}),
+            "False",
+        )
+
+    def test_the_environment_overrides_it_and_a_trailing_slash_drops(self):
+        self.assertEqual(
+            self.resolved_repository_url(
+                {"REPOSITORY_PUBLIC_URL": "https://example.test/public/"}
             ),
-            ["https://example.test/public", "https://example.test/private"],
+            "https://example.test/public",
         )
 
     def test_a_malformed_address_refuses_to_start(self):
-        for variable in ("REPOSITORY_PUBLIC_URL", "REPOSITORY_PRIVATE_URL"):
-            for bad in (
-                "github.com/smarks/tarmar-studio",
-                "ftp://github.com/smarks/tarmar-studio",
-                "https://",
-                "https://github.com/smarks/tarmar-studio?tab=readme",
-                "https://github.com/smarks/tarmar-studio#top",
-                "",
-            ):
-                with self.subTest(variable=variable, value=bad):
-                    env = self.subprocess_environment()
-                    for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG"):
-                        env.pop(key, None)
-                    env.update({**MailSettingsTest.PRODUCTION, variable: bad})
-                    result = subprocess.run(
-                        [sys.executable, "-c", "import tarmar_studio.settings"],
-                        cwd=BASE_DIR,
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn(f"{variable} is {bad!r}", result.stderr)
-                    self.assertIn("with no query or fragment", result.stderr)
+        variable = "REPOSITORY_PUBLIC_URL"
+        for bad in (
+            "github.com/smarks/tarmar-studio",
+            "ftp://github.com/smarks/tarmar-studio",
+            "https://",
+            "https://github.com/smarks/tarmar-studio?tab=readme",
+            "https://github.com/smarks/tarmar-studio#top",
+            "",
+        ):
+            with self.subTest(variable=variable, value=bad):
+                env = self.subprocess_environment()
+                for key in ("SECRET_KEY", "ALLOWED_HOSTS", "DEBUG"):
+                    env.pop(key, None)
+                env.update({**MailSettingsTest.PRODUCTION, variable: bad})
+                result = subprocess.run(
+                    [sys.executable, "-c", "import tarmar_studio.settings"],
+                    cwd=BASE_DIR,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{variable} is {bad!r}", result.stderr)
+                self.assertIn("with no query or fragment", result.stderr)
 
     def test_an_address_with_a_path_is_accepted(self):
         self.assertEqual(
-            self.resolved_repository_urls(
-                {
-                    "REPOSITORY_PUBLIC_URL": "https://git.example.test/team/repo",
-                    "REPOSITORY_PRIVATE_URL": "http://git.example.test:3000/a/b/",
-                }
+            self.resolved_repository_url(
+                {"REPOSITORY_PUBLIC_URL": "http://git.example.test:3000/a/b/"}
             ),
-            ["https://git.example.test/team/repo", "http://git.example.test:3000/a/b"],
+            "http://git.example.test:3000/a/b",
         )
 
-    def test_env_example_documents_both_with_the_defaults(self):
+    def test_env_example_documents_it_with_the_default(self):
         documented = (BASE_DIR / ".env.example").read_text()
         self.assertIn(
             "# REPOSITORY_PUBLIC_URL=https://github.com/smarks/tarmar-studio\n",
             documented,
         )
-        self.assertIn(
-            "# REPOSITORY_PRIVATE_URL="
-            "https://github.com/smarks/tarmar-studio-private\n",
-            documented,
-        )
+        self.assertNotIn("REPOSITORY_PRIVATE_URL", documented)

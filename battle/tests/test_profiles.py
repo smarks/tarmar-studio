@@ -8,6 +8,7 @@ halves — the Tarmar path unchanged (the other 440 battle tests are the real
 proof of that), and a classic battle that now actually advances a turn.
 """
 
+import functools
 import json
 
 from django.db import IntegrityError
@@ -117,10 +118,16 @@ class AdapterLookupTest(BaseTestCase):
         from tarmar_engine.classic import policy as classic_policy
 
         from battle import policy as tarmar_policy
+        from battle.magic_rules import magic_rules
 
         dm = self.create_dm()
         tarmar = create_battle(dm, name="T", count=2, seed=7)
-        self.assertIs(profiles.decider(tarmar), tarmar_policy.choose_option)
+        # The Tarmar policy, building its menu with the canon's magic rules
+        # (issue #960).
+        tarmar_decider = profiles.decider(tarmar)
+        assert isinstance(tarmar_decider, functools.partial)
+        self.assertIs(tarmar_decider.func, tarmar_policy.choose_option)
+        self.assertEqual(tarmar_decider.keywords, {"magic": magic_rules()})
         classic = classic_battle(dm)
         self.assertIs(profiles.decider(classic), classic_policy.choose_option)
 

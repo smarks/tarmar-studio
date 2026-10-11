@@ -5,11 +5,11 @@ is `datahorde`; then it runs here (issue #964). Spencer's plan: GitHub's
 machines while the month's Actions minutes last, this runner after.
 
 ```bash
-gh variable set CI_RUNNER --body datahorde --repo smarks/tarmar-studio-private
+gh variable set CI_RUNNER --body datahorde --repo smarks/tarmar-studio
 ```
 
 ```bash
-gh variable delete CI_RUNNER --repo smarks/tarmar-studio-private
+gh variable delete CI_RUNNER --repo smarks/tarmar-studio
 ```
 
 The required check keeps its name, `test (default canon)`, in both modes, so
@@ -79,7 +79,7 @@ can reach GitHub. It refuses to start the runner if any check fails.
 
 First make the token on github.com: Settings > Developer settings > Personal
 access tokens > Fine-grained tokens. Resource owner `smarks`; only the
-repository `smarks/tarmar-studio-private`; repository permission
+repository `smarks/tarmar-studio`; repository permission
 Administration: read and write; nothing else.
 
 Then, from a Mac logged in to `gh`, in a checkout of the repository:
@@ -88,13 +88,14 @@ Then, from a Mac logged in to `gh`, in a checkout of the repository:
 scripts/ci-runner-linux/register-from-mac.sh
 ```
 
-It checks the repository is private, asks for the token at a hidden prompt
-(press Return to keep the one datahorde has), copies this directory to
-datahorde, and runs `install.sh` there with sudo. `install.sh` creates the
-store, installs `docker.io` from Ubuntu's archive if Docker is missing, builds
-the image, creates the network, installs the firewall, the scripts and the
-unit as root-owned files, stores the token, proves the walls, and starts the
-service.
+It checks the repository has opted in (`CI_RUNNER` is `datahorde`) and holds
+fork workflows for approval ("Require approval for all outside collaborators"),
+asks for the token at a hidden prompt (press Return to keep the one datahorde
+has), copies this directory to datahorde, and runs `install.sh` there with
+sudo. `install.sh` creates the store, installs `docker.io` from Ubuntu's
+archive if Docker is missing, builds the image, creates the network, installs
+the firewall, the scripts and the unit as root-owned files, stores the token,
+proves the walls, and starts the service.
 
 Rerun it after a Playwright upgrade (bump `PLAYWRIGHT_VERSION` in the
 Dockerfile to the version `package-lock.json` resolves; a test holds the two

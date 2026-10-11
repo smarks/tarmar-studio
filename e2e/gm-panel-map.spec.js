@@ -7,7 +7,9 @@
  * The server-side detector that fills that frame has its own Django tests.
  */
 
-const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const {
+    test, expect, loginAs, loadedCanon, TEST_USER,
+} = require('./fixtures');
 
 const MAJA_FRAME = {
     done: true,
@@ -37,11 +39,6 @@ const CANON_MAPS = {
         mapCount: 1,
     },
 };
-
-async function loadedCanon(page) {
-    const line = await page.locator('.canon-line').textContent();
-    return line.replace('World:', '').trim();
-}
 
 test.describe('GM panel — Map tab', () => {
     test.beforeEach(async ({ page }) => {
