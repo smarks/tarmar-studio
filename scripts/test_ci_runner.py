@@ -1,5 +1,10 @@
 """The CI runner's install files agree with each other and with ci.yml (#576).
 
+Since #964 ci.yml no longer selects the Mac Studio runner: the repository
+variable CI_RUNNER picks GitHub's machines or datahorde's. These tests hold
+that choice, and the Mac files that remain until datahorde's runner replaces
+them.
+
 The runner lives under its own macOS account on a machine this suite can only
 partly see, and the installer needs root, so nothing here registers anything.
 What it can do is hold the four files together: the installer, the daemon it
@@ -9,6 +14,7 @@ matches labels by exact string, so any of those drifting fails silently as a
 job that never starts.
 """
 
+import json
 import plistlib
 import re
 import subprocess
@@ -20,6 +26,7 @@ import yaml
 CI_RUNNER_DIR = Path(__file__).resolve().parent / "ci-runner"
 INSTALLER_PATH = CI_RUNNER_DIR / "install-runner.sh"
 PROTECT_PATH = CI_RUNNER_DIR / "protect-main.sh"
+REPOSITORY_PATH = CI_RUNNER_DIR / "repository.sh"
 PLIST_PATH = CI_RUNNER_DIR / "com.origamisoftware.tarmar-ci-runner.plist"
 README_PATH = CI_RUNNER_DIR / "README.md"
 WORKFLOW_PATH = (
@@ -81,6 +88,11 @@ def test_scripts_parse_and_are_executable(script_path: Path):
     assert script_path.stat().st_mode & 0o111
 
 
+def test_the_sourced_repository_file_parses():
+    # Sourced by both scripts, never run, so it need not be executable.
+    subprocess.run(["bash", "-n", str(REPOSITORY_PATH)], check=True)
+
+
 def test_installer_refuses_to_run_without_root():
     # Not root, no --dry-run: it must stop before touching anything, and say
     # how it wants to be run.
@@ -106,10 +118,11 @@ def test_dry_run_names_the_pinned_release_and_its_checksum(
 def test_dry_run_changes_nothing_but_shows_every_step(
     dry_run_output: str, installer_source: str
 ):
-    repository = shell_constant(installer_source, "REPOSITORY")
+    repository = shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY")
     runner_name = shell_constant(installer_source, "RUNNER_NAME")
     runner_group = shell_constant(installer_source, "RUNNER_GROUP")
     for step in (
+        f"would check that {repository} is private",
         f"dseditgroup -o create -r Tarmar CI {runner_group}",
         "sysadminctl -addUser",
         "cannot read",
@@ -129,6 +142,8 @@ def plan_with_pg_hba(tmp_path: Path, hba_text: str) -> str:
     """The dry-run plan with the installer pointed at a given pg_hba.conf."""
     hba = tmp_path / "pg_hba.conf"
     hba.write_text(hba_text)
+    # The installer sources repository.sh from its own directory.
+    (tmp_path / "repository.sh").write_text(REPOSITORY_PATH.read_text())
     patched = tmp_path / "install-runner.sh"
     patched.write_text(
         INSTALLER_PATH.read_text().replace(
@@ -168,15 +183,136 @@ def test_installer_accepts_a_postgres_that_asks_for_a_password(tmp_path: Path):
     assert "does not trust local connections" in plan
 
 
-def test_installer_labels_cover_what_the_workflow_asks_for(
-    installer_source: str, workflow: dict
+def plan_with_home_mode(tmp_path: Path, mode: int) -> str:
+    """The dry-run plan with the developer's home a directory of ``mode``."""
+    home = tmp_path / "developer"
+    home.mkdir()
+    home.chmod(mode)
+    (tmp_path / "repository.sh").write_text(REPOSITORY_PATH.read_text())
+    patched = tmp_path / "install-runner.sh"
+    source = INSTALLER_PATH.read_text()
+    assert 'INVOKING_HOME="/Users/${INVOKING_USER}"' in source
+    patched.write_text(
+        source.replace(
+            'INVOKING_HOME="/Users/${INVOKING_USER}"', f'INVOKING_HOME="{home}"'
+        )
+    )
+    completed = subprocess.run(
+        ["bash", str(patched), "--dry-run", "--fresh"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    home.chmod(0o700)
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout
+
+
+@pytest.mark.skipif(
+    subprocess.run(["stat", "-f", "%Lp", "/"], capture_output=True).returncode != 0,
+    reason="BSD stat (macOS), as the installer runs on",
+)
+@pytest.mark.parametrize("mode", [0o750, 0o711, 0o705])
+def test_a_home_staff_or_anyone_can_enter_is_refused_before_the_account(
+    tmp_path: Path, mode: int
 ):
-    labels = set(shell_constant(installer_source, "RUNNER_LABELS").split(","))
+    # macOS puts every local account in staff, the runner's included, so a
+    # primary group of its own keeps nothing out (issue #946): the home's
+    # mode must, and the plan says so before it creates the account.
+    plan = plan_with_home_mode(tmp_path, mode)
+    assert "would refuse" in plan
+    assert "chmod 700" in plan
+    assert "~/Public" in plan
+    assert plan.index("chmod 700") < plan.index("sysadminctl -addUser")
+
+
+@pytest.mark.skipif(
+    subprocess.run(["stat", "-f", "%Lp", "/"], capture_output=True).returncode != 0,
+    reason="BSD stat (macOS), as the installer runs on",
+)
+def test_a_home_only_its_owner_can_enter_passes_the_preflight(tmp_path: Path):
+    plan = plan_with_home_mode(tmp_path, 0o700)
+    assert "is drwx------" in plan
+    assert "would refuse" not in plan
+
+
+def test_the_home_check_comes_before_the_account_is_created(installer_source: str):
+    # A real run fails on it before step 1 creates anything (issue #946).
+    assert installer_source.index('fail "$HOME_MODE_MESSAGE"') < installer_source.index(
+        "# ---------------------------------------------------------------- 1. the user"
+    )
+
+
+def test_every_postgres_attempt_refuses_to_prompt_for_a_password(
+    installer_source: str,
+):
+    # Without -w psql asks on /dev/tty, which no redirection stops, and a
+    # developer who answers turns the check into a connection with a
+    # password (issue #947).
+    # Every place psql runs: the binary followed by its options, across a
+    # line continuation if there is one.
+    invocations = re.findall(r'"\$psql_binary"(?:\s|\\)+(-[^\n]*)', installer_source)
+    assert invocations, "the installer no longer runs psql"
+    for options in invocations:
+        assert options.startswith("-w "), options
+    # Both attempts, TCP and the socket, go through that one invocation.
+    assert installer_source.count('postgres_attempt_connects "$psql_binary"') == 2
+    # Its stderr is printed, not thrown away.
+    assert "2>&1 >/dev/null" in installer_source
+    assert (
+        "/dev/null 2>&1; then"
+        not in installer_source.split("postgres_attempt_connects()")[1].split("\n}\n")[
+            0
+        ]
+    )
+
+
+def test_nothing_runs_as_the_runner_from_a_directory_it_cannot_enter(
+    installer_source: str,
+):
+    # sudo -u keeps the working directory (issue #947).
+    first_sudo = installer_source.index('sudo -u "$')
+    assert installer_source.index("\ncd /\n") < first_sudo
+
+
+# What ci.yml's runs-on resolves to for each value of CI_RUNNER (issue #964).
+GITHUB_HOSTED = "ubuntu-24.04"
+DATAHORDE_LABELS = ["self-hosted", "Linux", "tarmar-datahorde"]
+RUNS_ON = (
+    f"${{{{ vars.CI_RUNNER == 'datahorde' && "
+    f"fromJSON('{json.dumps(DATAHORDE_LABELS)}') || '{GITHUB_HOSTED}' }}}}"
+)
+
+
+def test_every_job_runs_where_ci_runner_says(workflow: dict):
+    # Unset: GitHub's machines. "datahorde": the container runner there. No
+    # value selects the Mac Studio runner, whose labels are not datahorde's.
     for job_name, job in workflow["jobs"].items():
-        runs_on = job["runs-on"]
-        wanted = set(runs_on if isinstance(runs_on, list) else [runs_on])
-        missing = wanted - labels
-        assert not missing, f"job {job_name} wants labels the runner lacks: {missing}"
+        assert job["runs-on"] == RUNS_ON, job_name
+
+
+def test_the_datahorde_labels_are_not_the_mac_runners(installer_source: str):
+    mac_labels = set(shell_constant(installer_source, "RUNNER_LABELS").split(","))
+    assert "tarmar-datahorde" not in mac_labels
+    assert set(DATAHORDE_LABELS) - mac_labels == {"Linux", "tarmar-datahorde"}
+
+
+def test_the_job_sets_up_its_own_tools_in_either_mode(workflow: dict):
+    # Neither machine is trusted to hold uv, Node or the browser already.
+    steps = workflow["jobs"]["test"]["steps"]
+    uses = [step.get("uses", "") for step in steps]
+    assert any(action.startswith("astral-sh/setup-uv@") for action in uses)
+    assert any(action.startswith("actions/setup-node@") for action in uses)
+    setup_uv = next(
+        step for step in steps if step.get("uses", "").startswith("astral-sh/setup-uv@")
+    )
+    # Not the newest CPython uv can find: 3.15.0 had no Pillow wheel.
+    assert setup_uv["with"]["python-version"] == "3.14"
+    install = next(
+        step for step in steps if step.get("name") == "Install Playwright browser"
+    )
+    # apt (--with-deps) only where the job has root: GitHub's own machines.
+    assert "runner.environment == 'github-hosted' && '--with-deps'" in install["run"]
 
 
 def test_daemon_label_matches_the_filename_and_the_installer(
@@ -193,7 +329,9 @@ def test_daemon_runs_as_the_runner_user_in_the_runner_directory(
     runner_home = shell_constant(installer_source, "RUNNER_HOME")
     runner_dir = shell_constant(installer_source, "RUNNER_DIR")
     assert daemon["UserName"] == runner_user
-    # Its own group: staff can read into the developer's home.
+    # Its own primary group, so its files are not group staff. That does not
+    # keep the account out of staff (macOS adds every local account), so the
+    # developer's home is shut by its own mode (issue #946).
     assert daemon["GroupName"] == shell_constant(installer_source, "RUNNER_GROUP")
     assert daemon["GroupName"] != "staff"
     assert daemon["WorkingDirectory"] == runner_dir
@@ -273,3 +411,100 @@ def test_the_guides_check_runs_unconditionally(workflow: dict):
 def test_readme_names_the_same_release(installer_source: str):
     version = shell_constant(installer_source, "RUNNER_VERSION")
     assert version in README_PATH.read_text()
+
+
+def require_private_with_stand_in_gh(tmp_path: Path, stand_in_body: str):
+    """Run require_private_repository as the scripts do, under their shell
+    options and through a shell function as the installer's gh_as_invoker is,
+    against a stand-in gh, and return the finished process."""
+    stand_in = tmp_path / "gh"
+    stand_in.write_text(f"#!/bin/bash\n{stand_in_body}\n")
+    stand_in.chmod(0o755)
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail; "
+            f'source "{REPOSITORY_PATH}"; '
+            f'wrapped_gh() {{ "{stand_in}" "$@"; }}; '
+            "require_private_repository wrapped_gh; "
+            'echo "went on"',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def answers_visibility(visibility: str) -> str:
+    """A stand-in gh body that answers only the question the scripts must ask."""
+    question = (
+        "repo view smarks/tarmar-studio-private --json visibility --jq .visibility"
+    )
+    return f'[ "$*" = "{question}" ] || exit 1\necho "{visibility}"'
+
+
+def test_a_private_repository_lets_the_scripts_go_on(tmp_path: Path):
+    completed = require_private_with_stand_in_gh(
+        tmp_path, answers_visibility("PRIVATE")
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "went on" in completed.stdout
+
+
+@pytest.mark.parametrize("visibility", ["PUBLIC", "INTERNAL", ""])
+def test_any_other_visibility_stops_the_scripts(tmp_path: Path, visibility: str):
+    # Issue #961: the old name went to a public repository, and the scripts
+    # would have protected it and could have put this Mac's runner on it.
+    completed = require_private_with_stand_in_gh(
+        tmp_path, answers_visibility(visibility)
+    )
+    assert completed.returncode != 0
+    assert "went on" not in completed.stdout
+    assert "refusing" in completed.stderr
+
+
+def test_a_gh_that_cannot_answer_stops_the_scripts(tmp_path: Path):
+    completed = require_private_with_stand_in_gh(tmp_path, "exit 1")
+    assert completed.returncode != 0
+    assert "went on" not in completed.stdout
+    assert "could not read" in completed.stderr
+
+
+def first_line_matching(source: str, pattern: str) -> int:
+    """Where the first line matching ``pattern`` starts in ``source``."""
+    match = re.search(pattern, source, re.MULTILINE)
+    assert match, pattern
+    return match.start()
+
+
+def test_the_repository_is_named_once_and_checked_before_either_script_acts(
+    installer_source: str,
+):
+    protect_source = PROTECT_PATH.read_text()
+    assert shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY") == (
+        "smarks/tarmar-studio-private"
+    )
+    for source, first_action in (
+        (installer_source, r"^\s*act dseditgroup -o create"),
+        (protect_source, r"^gh api -X PUT"),
+    ):
+        assert not re.search(r"^REPOSITORY=", source, re.MULTILINE)
+        sourced = first_line_matching(source, r'^source ".*repository\.sh"')
+        check = first_line_matching(source, r"^\s*require_private_repository\s")
+        assert sourced < check < first_line_matching(source, first_action)
+
+
+def test_the_dry_run_checks_the_repository_before_it_plans_any_change(
+    dry_run_output: str,
+):
+    repository = shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY")
+    assert dry_run_output.index(
+        f"would check that {repository} is private"
+    ) < dry_run_output.index("dseditgroup -o create")
+
+
+def test_readme_names_the_same_repository():
+    repository = shell_constant(REPOSITORY_PATH.read_text(), "REPOSITORY")
+    named = set(re.findall(r"repos/([\w.-]+/[\w.-]+)/", README_PATH.read_text()))
+    assert named == {repository}

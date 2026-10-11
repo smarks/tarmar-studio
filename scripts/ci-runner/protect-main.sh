@@ -16,7 +16,9 @@
 
 set -euo pipefail
 
-REPOSITORY="smarks/tarmar-studio"
+# REPOSITORY and require_private_repository (issue #961).
+# shellcheck source=repository.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/repository.sh"
 BRANCH="main"
 # The status check name of the `test` job in .github/workflows/ci.yml;
 # scripts/test_ci_runner.py checks that it is the name the workflow produces.
@@ -25,6 +27,8 @@ REQUIRED_CHECK="test (default canon)"
 # GitHub Actions' app id, so a status of one of those names posted by anything
 # else does not satisfy the rule.
 GITHUB_ACTIONS_APP_ID="15368"
+
+require_private_repository gh
 
 gh api -X PUT "repos/${REPOSITORY}/branches/${BRANCH}/protection" \
     --input - <<JSON
