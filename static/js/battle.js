@@ -764,18 +764,37 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
-     * The cast candidates on a menu (one per castable spell), and the rest.
-     * Casting collapses into a single CAST SPELL option so a wizard's
-     * spells do not flood the action list — the spells live in the cast
-     * stage the option opens.
+     * The cast candidates on a menu (one per castable spell), their pushed
+     * copies, and the rest. Casting collapses into a single CAST SPELL
+     * option so a wizard's spells do not flood the action list — the spells
+     * live in the cast stage the option opens.
+     *
+     * A pushed copy (#960) is the same cast with ``push_mana`` more mana in
+     * it: the engine offers one per amount it allows. It is not a spell of
+     * its own, so it does not count as a cast; ``pushes`` holds the copies
+     * under their cast's key (:func:`castKey`), smallest push first, for the
+     * stage's push control. The amounts are the menu's, never the page's.
      */
     function splitCastCandidates(candidates) {
         const plain = [];
         const casts = [];
+        const pushes = new Map();
         (candidates || []).forEach((candidate, index) => {
-            (candidate.spell_key ? casts : plain).push({ candidate, index });
+            if (!candidate.spell_key) {
+                plain.push({ candidate, index });
+            } else if (candidate.push_mana) {
+                const key = castKey(candidate.spell_key, candidate.target_id);
+                if (!pushes.has(key)) { pushes.set(key, []); }
+                pushes.get(key).push({ candidate, index });
+            } else {
+                casts.push({ candidate, index });
+            }
         });
-        return { plain, casts };
+        pushes.forEach((copies) => {
+            copies.sort((first, second) => first.candidate.push_mana
+                - second.candidate.push_mana);
+        });
+        return { plain, casts, pushes };
     }
 
     /**
@@ -870,10 +889,77 @@ if (typeof module !== 'undefined' && module.exports) {
         );
         let target = byKey(key);
         if ((!target || target.disabled)
-                && (key.startsWith('spell-') || key === 'cast-standdown')) {
+                && (key.startsWith('spell-') || key.startsWith('push-')
+                    || key === 'cast-standdown')) {
             target = byKey('cast');
         }
         if (target && !target.disabled) { target.focus(); }
+    }
+
+    /**
+     * The push control beside a cast the engine offers pushed copies of
+     * (#960): no push, or one of the amounts the menu holds, each a
+     * pressable button that selects that copy. Nothing is pushed unless the
+     * player picks an amount. The words under it are the server's: the
+     * selected copy's cost, and the spell's Channel when the rules give one.
+     *
+     * @param {object} spell - the stage row (``name``, ``channel``)
+     * @param {{candidate: object, index: number}} entry - the plain cast
+     * @param {Array<{candidate: object, index: number}>} copies - its pushed
+     *     copies, smallest first
+     * @param {number} aiPick - the AI's pick on the menu
+     * @param {object} opts - the panel's options (``selectedIndex``,
+     *     ``onSelect``)
+     */
+    function buildPushControl(spell, entry, copies, aiPick, opts) {
+        const control = document.createElement('div');
+        control.className = 'turn-push';
+        control.setAttribute('role', 'group');
+        control.setAttribute('aria-label', `Push more mana into ${spell.name}`);
+
+        const label = document.createElement('span');
+        label.className = 'turn-push-label';
+        label.textContent = (spell.channel === null || spell.channel === undefined)
+            ? 'Push more mana:'
+            : `Push more mana (Channel ${spell.channel}):`;
+        control.appendChild(label);
+
+        const choices = [{ entry, text: 'None' }].concat(copies.map((copy) => ({
+            entry: copy, text: `+${copy.candidate.push_mana} mana`,
+        })));
+        choices.forEach((choice) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'turn-push-amount';
+            button.dataset.focusKey = `push-${choice.entry.index}`;
+            button.dataset.pushMana = String(choice.entry.candidate.push_mana || 0);
+            button.setAttribute(
+                'aria-pressed',
+                choice.entry.index === opts.selectedIndex ? 'true' : 'false'
+            );
+            button.textContent = choice.text;
+            if (choice.entry.index === aiPick) {
+                const tag = document.createElement('span');
+                tag.className = 'turn-option-ai-pick';
+                tag.textContent = 'AI pick';
+                button.appendChild(tag);
+            }
+            button.addEventListener('click', () => {
+                if (opts.onSelect && choice.entry.index !== opts.selectedIndex) {
+                    opts.onSelect(choice.entry.index);
+                }
+            });
+            control.appendChild(button);
+        });
+
+        const pushed = copies.find((copy) => copy.index === opts.selectedIndex);
+        if (pushed && pushed.candidate.cost) {
+            const cost = document.createElement('span');
+            cost.className = 'turn-push-cost';
+            cost.textContent = `Costs ${pushed.candidate.cost}.`;
+            control.appendChild(cost);
+        }
+        return control;
     }
 
     /**
@@ -889,7 +975,7 @@ if (typeof module !== 'undefined' && module.exports) {
      * serve Tarmar's mana and classic's ST without printing either
      * profile's numbers under the other's label.
      */
-    function buildCastStage(pending, casts, aiPick, opts) {
+    function buildCastStage(pending, casts, pushes, aiPick, opts) {
         const stage = document.createElement('div');
         stage.className = 'turn-cast-stage';
         stage.setAttribute('role', 'group');
@@ -908,7 +994,9 @@ if (typeof module !== 'undefined' && module.exports) {
             entry,
         ]));
         (magic.spells || []).forEach((spell) => {
-            const entry = castByKey.get(castKey(spell.key, spell.target_id));
+            const key = castKey(spell.key, spell.target_id);
+            const entry = castByKey.get(key);
+            const copies = (entry && pushes.get(key)) || [];
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'turn-spell';
@@ -917,7 +1005,9 @@ if (typeof module !== 'undefined' && module.exports) {
             // hold focus, so it needs none.
             if (entry) { button.dataset.focusKey = `spell-${entry.index}`; }
             button.disabled = !spell.castable || !entry;
-            const selected = Boolean(entry) && entry.index === opts.selectedIndex;
+            // A pushed copy selected is this spell selected too.
+            const selected = Boolean(entry) && (entry.index === opts.selectedIndex
+                || copies.some((copy) => copy.index === opts.selectedIndex));
             button.setAttribute('aria-pressed', selected ? 'true' : 'false');
 
             const name = document.createElement('span');
@@ -952,7 +1042,16 @@ if (typeof module !== 'undefined' && module.exports) {
                     if (opts.onSelect) { opts.onSelect(entry.index); }
                 });
             }
-            stage.appendChild(button);
+            if (!copies.length || button.disabled) {
+                stage.appendChild(button);
+                return;
+            }
+            // The cast and its push control travel together in the grid.
+            const group = document.createElement('div');
+            group.className = 'turn-spell-group';
+            group.appendChild(button);
+            group.appendChild(buildPushControl(spell, entry, copies, aiPick, opts));
+            stage.appendChild(group);
         });
 
         const standDown = document.createElement('button');
@@ -1075,7 +1174,7 @@ if (typeof module !== 'undefined' && module.exports) {
         menu.setAttribute('role', 'group');
         menu.setAttribute('aria-label', 'Action options');
         const aiPick = topCandidateIndex(pending.candidates);
-        const { plain, casts } = splitCastCandidates(pending.candidates);
+        const { plain, casts, pushes } = splitCastCandidates(pending.candidates);
 
         /**
          * One menu row: letter, rules name, an optional AI-pick tag, then
@@ -1159,7 +1258,8 @@ if (typeof module !== 'undefined' && module.exports) {
                 'cast'
             );
             castOption.classList.add('turn-option-cast');
-            if (casts.some(({ index }) => index === aiPick)) {
+            const pushedCopies = Array.from(pushes.values()).flat();
+            if (casts.concat(pushedCopies).some(({ index }) => index === aiPick)) {
                 tagAiPick(castOption);
             }
             castOption.addEventListener('click', () => {
@@ -1188,7 +1288,7 @@ if (typeof module !== 'undefined' && module.exports) {
         }
 
         if (casts.length && opts.castOpen) {
-            panel.appendChild(buildCastStage(pending, casts, aiPick, opts));
+            panel.appendChild(buildCastStage(pending, casts, pushes, aiPick, opts));
         }
 
         const selected = opts.selectedIndex == null
@@ -1497,9 +1597,12 @@ if (typeof module !== 'undefined' && module.exports) {
                     letter: candidate.letter,
                     target_id: candidate.target_id,
                     spell_key: candidate.spell_key || '',
-                // The hex only when one was picked (#819, #866): with none
-                // the option makes its own move, as it always has.
-                }, destination ? { destination } : {})),
+                // The mana a pushed copy pushes (#960), only for one: the
+                // server takes none as the plain cast. The hex only when
+                // one was picked (#819, #866): with none the option makes
+                // its own move, as it always has.
+                }, candidate.push_mana ? { push_mana: candidate.push_mana } : {},
+                destination ? { destination } : {})),
                 onAiChoose: () => submitAction({
                     combatant_id: answering.combatant_id,
                     turn: answering.turn,

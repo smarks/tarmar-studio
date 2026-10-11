@@ -87,6 +87,34 @@ def dump_state(state) -> dict:
     return state.to_dict()
 
 
+def tarmar_state(snapshot: dict) -> BattleState:
+    """Rebuild a Tarmar snapshot, filling what one written earlier lacks.
+
+    A figure snapshotted before issue #960 carries no ``spell_skill_levels``
+    (or carries the engine's empty default), and the engine reads a missing
+    spell at level 0, so a Channel derived from it would allow no cast at
+    all. Its ``spell_mastery`` is the same reading of the same record (a
+    spell's mastery is its skill level, ``battle.services.snapshot_character``),
+    so an entry with no spell skill levels takes its mastery's. A figure
+    snapshotted since has the two equal, so the fill changes nothing for it.
+
+    Args:
+        snapshot: A Tarmar ``state_json``, or the lobby's assembled one.
+
+    Returns:
+        The engine's state.
+    """
+    combatants = []
+    for entry in snapshot.get("combatants", []):
+        if not entry.get("spell_skill_levels"):
+            entry = {
+                **entry,
+                "spell_skill_levels": dict(entry.get("spell_mastery") or {}),
+            }
+        combatants.append(entry)
+    return BattleState.from_dict({**snapshot, "combatants": combatants})
+
+
 def load_state(snapshot: dict, profile_name: str):
     """Rebuild the state in ``snapshot``, as the named profile's state type.
 
@@ -98,7 +126,7 @@ def load_state(snapshot: dict, profile_name: str):
         ValueError: for a profile this app cannot persist.
     """
     if _known(profile_name) == TARMAR_PROFILE:
-        return BattleState.from_dict(snapshot)
+        return tarmar_state(snapshot)
     # Lazy, and only here: the classic subpackage is SJG-derived and
     # quarantined from every Tarmar-canon import chain.
     from tarmar_engine.classic.state import GameState

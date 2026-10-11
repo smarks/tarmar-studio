@@ -223,11 +223,12 @@ if _configured_site_base_url and not is_base_url(_configured_site_base_url):
 SITE_BASE_URL = _configured_site_base_url.rstrip("/")
 # --- end Mail ---
 
-# --- Source repositories (issue #914) ---
-# The public repository is a snapshot with its own history, so a deployed
-# commit id does not exist there; everyone is linked to its root. The private
-# repository holds the real history and is what is deployed, so a commit link
-# into it is offered only to a Game Master or admin, who can open it.
+# --- Source repository (issues #914, #997) ---
+# One public repository holds the code, its history and the deployed commits,
+# and is where players and sessions file issues; everyone is linked to its
+# root, and a Game Master or admin's footer version to the running commit in
+# it. (Until 2026-10-10 the history lived in a private repository and this
+# setting had a private twin.)
 
 
 def _repository_url_from_environment(name: str, default: str) -> str:
@@ -248,10 +249,7 @@ def _repository_url_from_environment(name: str, default: str) -> str:
 REPOSITORY_PUBLIC_URL = _repository_url_from_environment(
     "REPOSITORY_PUBLIC_URL", "https://github.com/smarks/tarmar-studio"
 )
-REPOSITORY_PRIVATE_URL = _repository_url_from_environment(
-    "REPOSITORY_PRIVATE_URL", "https://github.com/smarks/tarmar-studio-private"
-)
-# --- end Source repositories ---
+# --- end Source repository ---
 
 # Fail-fast in production: a silent dev fallback for SECRET_KEY or empty
 # ALLOWED_HOSTS is a security hole, not a bootable misconfiguration. Skip

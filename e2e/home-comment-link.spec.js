@@ -4,7 +4,7 @@
  * What only a browser proves: the link sits on the same row as Play at the
  * desktop and laptop widths, the row wraps instead of pushing the page
  * sideways where it no longer fits, and clicking the link opens the public
- * repository's issue forms in a new tab (the code repository is private).
+ * repository's issue forms in a new tab.
  * GitHub itself is never contacted; the new tab's request is answered
  * locally.
  */

@@ -1,4 +1,4 @@
-# The GitHub Actions runner for smarks/tarmar-studio-private on datahorde, in
+# The GitHub Actions runner for smarks/tarmar-studio on datahorde, in
 # a container, one job per container (issue #964). install.sh copies this to
 # /etc/systemd/system/tarmar-ci-runner.service.
 #

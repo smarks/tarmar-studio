@@ -13,18 +13,18 @@
  * turns the control loaded.
  */
 
-const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 
 const PAGE_SIZE = 50;
 const TURNS = PAGE_SIZE + 2;
 
-/** Seed a session of TURNS turns and TURNS resolved threads; its id. */
-function seedLongSession(tag) {
+/** Seed a session of TURNS turns and TURNS resolved threads for ``owner``; its id. */
+function seedLongSession(tag, owner = TEST_USER) {
     const output = readDjangoShell(`
 from django.contrib.auth import get_user_model
 from gm.models import GMSession, StoryThread
-user = get_user_model().objects.get(username='${TEST_USER.username}')
+user = get_user_model().objects.get(username='${owner.username}')
 history = []
 for number in range(1, ${TURNS} + 1):
     history.append({'role': 'user', 'content': f'Player move {number}.'})
@@ -101,6 +101,39 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
 
         await expect(names).toHaveCount(TURNS);
         await expect(names.first()).toHaveText('Settled matter 1');
+        await expect(resolved.locator('[data-earlier]')).toHaveCount(0);
+    });
+
+    test('Reopen on a thread from an earlier page leaves the loaded pages in place (#982)', async ({ page }, testInfo) => {
+        // Reopen is a Game Master's control.
+        const sessionId = seedLongSession(`reopen-${testInfo.workerIndex}-${Date.now()}`, TEST_ADMIN);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        await page.click('#gm-panel-tab-campaign');
+
+        const resolved = page.locator('#gm-panel-campaign .gm-campaign-resolved');
+        await resolved.locator('summary').click();
+        const names = resolved.locator('li[data-thread-id] .gm-campaign-name');
+        await expect(names).toHaveCount(PAGE_SIZE);
+        await resolved.getByRole('button', { name: 'Show earlier threads' }).click();
+        await expect(names).toHaveCount(TURNS);
+        await expect(names.first()).toHaveText('Settled matter 1');
+
+        // A thread on the page that was loaded, not on the one the tab opened with.
+        await resolved.locator('li[data-thread-id]')
+            .filter({ has: page.getByText('Settled matter 1', { exact: true }) })
+            .getByRole('button', { name: 'Reopen' }).click();
+
+        // The change is saved and shown: the thread is open again, so it has
+        // left the resolved list. Every other thread loaded stays, the
+        // earlier page among them, and the list is still open.
+        await expect(page.locator('#gm-panel-campaign-status')).toContainText('Reopened thread');
+        await expect(page.locator('#gm-campaign-threads-group')).toContainText('Settled matter 1');
+        await expect(resolved.locator('summary')).toHaveText(`${TURNS - 1} resolved`);
+        await expect(names).toHaveCount(TURNS - 1);
+        await expect(names.first()).toHaveText('Settled matter 2');
+        await expect(names.last()).toHaveText(`Settled matter ${TURNS}`);
+        await expect(resolved).toHaveAttribute('open', '');
         await expect(resolved.locator('[data-earlier]')).toHaveCount(0);
     });
 });

@@ -55,7 +55,7 @@ TARBALL_NAME="actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
 TARBALL_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${TARBALL_NAME}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# REPOSITORY and require_private_repository (issue #961).
+# REPOSITORY (issue #961).
 # shellcheck source=repository.sh
 source "${SCRIPT_DIR}/repository.sh"
 PLIST_SOURCE="${SCRIPT_DIR}/${SERVICE_LABEL}.plist"
@@ -91,6 +91,15 @@ cd /
 
 log() { printf '[ci-runner] %s\n' "$*"; }
 fail() { printf '[ci-runner] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# This path is retired: a runner registered here would run any fork's pull
+# request on this Mac, now that the repository is public (issue #961). A real
+# run stops before it touches anything; --dry-run still prints the old plan.
+RETIRED_MESSAGE="the Mac Studio runner path was retired on 2026-10-10; CI is GitHub-hosted by default and the one self-hosted option is the runner on datahorde (scripts/ci-runner-linux/register-from-mac.sh)"
+if [ "$DRY_RUN" = false ]; then
+    fail "$RETIRED_MESSAGE"
+fi
+log "retired: ${RETIRED_MESSAGE}; a real run refuses, this is the old plan"
 
 # Every command that changes the machine goes through here, so --dry-run can
 # show the plan and a reader can grep for exactly what the script touches.
@@ -129,15 +138,6 @@ fi
 gh_as_invoker() {
     sudo -u "$INVOKING_USER" -H "$GH_BIN" "$@"
 }
-
-# Before anything is created: a runner on a public repository runs any
-# fork's pull request on this Mac.
-if [ "$DRY_RUN" = false ]; then
-    require_private_repository gh_as_invoker
-    log "${REPOSITORY} is private"
-else
-    log "would check that ${REPOSITORY} is private"
-fi
 
 # A directory chain owned by the runner user at every level. `install -d`
 # with -o/-g applies them to the last component only and leaves the parents

@@ -332,7 +332,25 @@ async function chooseToAttach(page, name) {
     await page.selectOption('#gm-character-select', { label: name });
 }
 
+/** The canon name the "World:" line prints when no TARMAR_CANON_DIR is set. */
+const DEFAULT_CANON = 'default canon';
+
+/**
+ * The loaded canon's name, as the page in hand prints it on its "World:"
+ * line (the GM chat and the reference pages carry one): "Tarmar canon" or
+ * "default canon". A spec whose numbers belong to one canon reads it and
+ * skips under the other rather than assuming which one the server runs.
+ * @param {import('@playwright/test').Page} page - on a page with the line
+ * @returns {Promise<string>}
+ */
+async function loadedCanon(page) {
+    const line = await page.locator('.canon-line').textContent();
+    return line.replace('World:', '').trim();
+}
+
 module.exports = {
+    DEFAULT_CANON,
+    loadedCanon,
     ARENA_ORIGIN,
     battleRowOnList,
     GATE_PASSPHRASE,

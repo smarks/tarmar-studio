@@ -1,8 +1,7 @@
 #!/bin/bash
 # Require the CI check before anything merges to main (issue #576).
 #
-# Run as the account that is logged in to gh, once the self-hosted runner has
-# produced a green run:
+# Run as the account that is logged in to gh, once CI has produced a green run:
 #
 #     scripts/ci-runner/protect-main.sh
 #
@@ -16,7 +15,8 @@
 
 set -euo pipefail
 
-# REPOSITORY and require_private_repository (issue #961).
+# REPOSITORY (issue #961). Protection suits a public repository, so there is no
+# visibility check here.
 # shellcheck source=repository.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/repository.sh"
 BRANCH="main"
@@ -27,8 +27,6 @@ REQUIRED_CHECK="test (default canon)"
 # GitHub Actions' app id, so a status of one of those names posted by anything
 # else does not satisfy the rule.
 GITHUB_ACTIONS_APP_ID="15368"
-
-require_private_repository gh
 
 gh api -X PUT "repos/${REPOSITORY}/branches/${BRANCH}/protection" \
     --input - <<JSON

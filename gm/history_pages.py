@@ -108,7 +108,11 @@ class ResolvedThreadsPage:
 
 
 def resolved_threads_page(
-    session: GMSession, *, before: StoryThread | None = None, size: int = PAGE_SIZE
+    session: GMSession,
+    *,
+    before: StoryThread | None = None,
+    since: StoryThread | None = None,
+    size: int = PAGE_SIZE,
 ) -> ResolvedThreadsPage:
     """The page of resolved threads listed just before ``before``.
 
@@ -116,16 +120,37 @@ def resolved_threads_page(
     resolved and reopened while the tab is open: a position would move under
     the reader, a thread's place in the order does not.
 
+    ``since`` is for the tab refetched with pages already loaded (issue #982):
+    it holds every resolved thread from that thread's place to the end, so
+    the pages a reader loaded stay and the threads resolved since are added,
+    and never fewer than the latest page.
+
     Args:
         session: The session.
         before: The first thread already shown, for the page above it;
-            ``None`` for the latest page.
+            ``None`` for the latest page. Not used when ``since`` names
+            a longer run.
+        since: The first thread of the earliest page loaded, for the whole
+            run the reader has loaded; ``None`` for the latest page.
         size: Threads a page holds.
 
     Returns:
         The page.
     """
     resolved = StoryThread.objects.filter(session=session, resolved=True)
+    total = resolved.count()
+    if since is not None:
+        loaded = resolved.filter(
+            Q(created_at__gt=since.created_at)
+            | Q(created_at=since.created_at, pk__gte=since.pk)
+        )
+        threads = list(loaded.order_by("created_at", "pk"))
+        if len(threads) > size:
+            return ResolvedThreadsPage(
+                threads=threads,
+                earlier=total - len(threads),
+                total=total,
+            )
     listed = resolved
     if before is not None:
         listed = resolved.filter(
@@ -136,5 +161,5 @@ def resolved_threads_page(
     return ResolvedThreadsPage(
         threads=threads,
         earlier=listed.count() - len(threads),
-        total=resolved.count(),
+        total=total,
     )

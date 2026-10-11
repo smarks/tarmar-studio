@@ -28,13 +28,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from django.apps import apps
 from django.db import connections, migrations
 from django.db.migrations.executor import MigrationExecutor
 from django.db.migrations.loader import MigrationLoader
 from django.test import override_settings
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from tarmar_studio.tests.repository_apps import is_this_repositorys_app
 
 #: The connection alias each targeted run uses.
 FRESH_ALIAS = "fresh_for_migration_dependencies"
@@ -63,17 +62,6 @@ def touches_rows(migration: migrations.Migration) -> bool:
         isinstance(operation, migrations.RunPython | migrations.RunSQL)
         for operation in migration.operations
     )
-
-
-def is_this_repositorys_app(app_label: str) -> bool:
-    """Whether ``app_label`` is one of this repository's own apps.
-
-    By the app's own directory, a top-level package of the checkout. A test
-    of where each migration's file lives is not enough: a worktree's
-    ``.venv`` sits inside the checkout too, so Django's own ``auth`` and
-    ``contenttypes`` migrations would count as this repository's.
-    """
-    return Path(apps.get_app_config(app_label).path).resolve().parent == REPO_ROOT
 
 
 def local_data_migrations() -> list[Node]:

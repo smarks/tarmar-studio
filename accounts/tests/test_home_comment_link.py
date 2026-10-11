@@ -1,8 +1,8 @@
 """The home page's link row ends with a way to leave a comment.
 
-"Leave a comment" sits after "Play" in the same row and opens the public
-repository's issue forms (bug, feature request, general comment); the code
-repository is private. The address is built from REPOSITORY_PUBLIC_URL.
+"Leave a comment" sits after "Play" in the same row and opens the repository's
+issue forms (bug, feature request, general comment). The address is built from
+REPOSITORY_PUBLIC_URL, the one repository setting.
 """
 
 import re
@@ -12,7 +12,6 @@ from common.test_helpers import BaseTestCase
 
 HOME_URL = "/tarmar/"
 PUBLIC_REPOSITORY_URL = "https://github.com/smarks/tarmar-studio"
-PRIVATE_REPOSITORY_URL = "https://github.com/smarks/tarmar-studio-private"
 ISSUES_URL = "https://github.com/smarks/tarmar-studio/issues/new/choose"
 
 
@@ -46,16 +45,15 @@ class HomeCommentLinkTest(BaseTestCase):
 
 
 class FooterCommitLinkTest(BaseTestCase):
-    """The footer's version is a link only for people who can open it (#914).
+    """The footer's version is a link only for a Game Master or admin (#914).
 
-    The deployed commit lives in the private repository; the public one is a
-    snapshot that does not hold it. Everyone gets the public repository's root
-    as "Source code", and the commit id is plain text unless the viewer is a
-    Game Master or admin, who can open the private commit page.
+    Everyone gets the repository's root as "Source code"; the commit id is
+    plain text unless the viewer is a Game Master or admin, who get a link to
+    the running commit in the same repository (#997).
     """
 
     COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567"
-    COMMIT_URL = f"{PRIVATE_REPOSITORY_URL}/commit/{COMMIT_SHA}"
+    COMMIT_URL = f"{PUBLIC_REPOSITORY_URL}/commit/{COMMIT_SHA}"
 
     def footer(self) -> str:
         """The home page's footer markup, with a known commit checked out."""
@@ -72,7 +70,6 @@ class FooterCommitLinkTest(BaseTestCase):
         self.assertIn(f'<a href="{PUBLIC_REPOSITORY_URL}"', footer)
         self.assertIn("Version: 0123456</span>", footer)
         self.assertNotIn("/commit/", footer)
-        self.assertNotIn(PRIVATE_REPOSITORY_URL, footer)
 
     def test_signed_out_visitor_sees_the_public_root_and_the_id_as_text(self) -> None:
         self.assert_public_view(self.footer())
@@ -81,13 +78,13 @@ class FooterCommitLinkTest(BaseTestCase):
         self.login_as(self.create_user("footer-player"))
         self.assert_public_view(self.footer())
 
-    def test_game_master_sees_the_private_commit_link(self) -> None:
+    def test_game_master_sees_the_commit_link(self) -> None:
         self.login_as(self.create_dm("footer-game-master"))
         footer = self.footer()
         self.assertIn(f'<a href="{self.COMMIT_URL}"', footer)
         self.assertIn(f'<a href="{PUBLIC_REPOSITORY_URL}"', footer)
 
-    def test_admin_sees_the_private_commit_link(self) -> None:
+    def test_admin_sees_the_commit_link(self) -> None:
         self.login_as(self.create_admin("footer-admin"))
         self.assertIn(f'<a href="{self.COMMIT_URL}"', self.footer())
 
@@ -102,18 +99,17 @@ class FooterCommitLinkTest(BaseTestCase):
         self.assertNotIn("/commit/", page)
         self.assertIn(f'<a href="{PUBLIC_REPOSITORY_URL}"', page)
 
-    def test_addresses_come_from_the_settings(self) -> None:
-        with self.settings(
-            REPOSITORY_PUBLIC_URL="https://example.test/public",
-            REPOSITORY_PRIVATE_URL="https://example.test/private",
-        ):
-            self.assertIn('<a href="https://example.test/public"', self.footer())
-            # The comment link is built from the same setting, so the two
+    def test_every_link_comes_from_the_one_setting(self) -> None:
+        with self.settings(REPOSITORY_PUBLIC_URL="https://example.test/repository"):
+            self.assertIn('<a href="https://example.test/repository"', self.footer())
+            # The comment link is built from the same setting, so the three
             # cannot point at different repositories.
             home = self.client.get(HOME_URL).content.decode()
-            self.assertIn('href="https://example.test/public/issues/new/choose"', home)
+            self.assertIn(
+                'href="https://example.test/repository/issues/new/choose"', home
+            )
             self.login_as(self.create_dm("footer-settings-gm"))
             self.assertIn(
-                f'<a href="https://example.test/private/commit/{self.COMMIT_SHA}"',
+                f'<a href="https://example.test/repository/commit/{self.COMMIT_SHA}"',
                 self.footer(),
             )
