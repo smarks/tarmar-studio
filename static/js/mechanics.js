@@ -79,7 +79,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 return;
             }
             if (block.dataset.reload === 'true') {
-                window.location.reload();
+                pageNavigation.reload();
                 return;
             }
             // The change's history line joins Recent Changes (issue #792):

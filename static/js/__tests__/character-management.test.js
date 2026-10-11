@@ -32,7 +32,6 @@ describe('deleteCharacter / restoreCharacter URLs', () => {
 
     test('a refused delete says why and leaves the row (#640)', async () => {
         document.body.innerHTML = '<table><tbody><tr data-id="123"></tr></tbody></table>';
-        window.location.reload.mockClear();
         fetch.mockResolvedValue({
             ok: false, redirected: false, status: 403,
             json: () => Promise.resolve({ error: 'Permission denied' }),
@@ -42,7 +41,7 @@ describe('deleteCharacter / restoreCharacter URLs', () => {
 
         expect(alert).toHaveBeenCalledWith('Permission denied');
         expect(document.querySelector('tr[data-id="123"]')).not.toBeNull();
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('a rate-limited delete with no readable body still says something', async () => {
@@ -371,7 +370,6 @@ describe('bindCharacterRowActions', () => {
         fetch.mockReset();
         confirm.mockReset();
         confirm.mockReturnValue(true);
-        window.location.reload.mockClear();
     });
 
     test('Restore posts to the button\'s rendered URL and reloads', async () => {
@@ -384,7 +382,7 @@ describe('bindCharacterRowActions', () => {
 
         expect(confirm).toHaveBeenCalledWith('Restore this character?');
         expect(fetch).toHaveBeenCalledWith('/tarmar/characters/4/restore/', expect.objectContaining({ method: 'POST' }));
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('Delete asks by name and, without reload, removes just that row', async () => {
@@ -398,7 +396,7 @@ describe('bindCharacterRowActions', () => {
         expect(confirm).toHaveBeenCalledWith('Delete character "Mira"?');
         expect(fetch).toHaveBeenCalledWith('/tarmar/characters/5/delete/', expect.objectContaining({ method: 'POST' }));
         expect(document.querySelector('tr[data-id="5"]')).toBeNull();
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('a button that carries no action URL is ignored', async () => {

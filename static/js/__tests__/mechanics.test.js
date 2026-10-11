@@ -42,8 +42,6 @@ function pageHtml() {
         </div>`;
 }
 
-let reload;
-
 async function load(response) {
     jest.resetModules();
     document.body.innerHTML = pageHtml();
@@ -54,9 +52,6 @@ async function load(response) {
 
 beforeEach(() => {
     fetch.mockReset();
-    reload = jest.fn();
-    delete window.location;
-    window.location = { reload };
 });
 
 test('posts the named controls, leaving blanks out', async () => {
@@ -77,7 +72,7 @@ test("prints the server's check without recomputing the total", async () => {
     expect(result.textContent).toBe(
         'stealth: 2d6 [5, 4] = 9 +2 DEX (15) +2 level = 99 vs 10: success'
     );
-    expect(reload).not.toHaveBeenCalled();
+    expect(pageNavigation.reload).not.toHaveBeenCalled();
 });
 
 test("a player's roll with no difficulty prints the total and no outcome", async () => {
@@ -148,7 +143,7 @@ test('a record change reloads the page the server renders', async () => {
     document.getElementById('give').click();
     await flush();
     expect(fetch.mock.calls[0][0]).toBe(CONFIG.coinUrl);
-    expect(reload).toHaveBeenCalled();
+    expect(pageNavigation.reload).toHaveBeenCalled();
 });
 
 test('a refusal stays beside the control', async () => {
@@ -158,6 +153,6 @@ test('a refusal stays beside the control', async () => {
     const error = document.querySelector('#coin .mechanics-error');
     expect(error.hidden).toBe(false);
     expect(error.textContent).toBe('Only a Game Master can give or take coin');
-    expect(reload).not.toHaveBeenCalled();
+    expect(pageNavigation.reload).not.toHaveBeenCalled();
     expect(document.getElementById('give').disabled).toBe(false);
 });

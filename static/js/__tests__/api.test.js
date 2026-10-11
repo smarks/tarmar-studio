@@ -527,3 +527,22 @@ describe('paintNameChrome (issue #792)', () => {
         expect(document.querySelector('[data-name-chrome]').textContent).toBe('New');
     });
 });
+
+describe('pageNavigation', () => {
+    // Every other test runs against jest.setup.js's mocks; this one loads
+    // api.js with none in place, so the real go() runs. jsdom implements only
+    // a fragment change, which is enough to see it move the page.
+    test('go moves the real page when no test has replaced it', () => {
+        const mocks = global.pageNavigation;
+        delete global.pageNavigation;
+        try {
+            jest.isolateModules(() => {
+                require('../api.js').pageNavigation.go('#moved');
+            });
+            expect(window.location.hash).toBe('#moved');
+        } finally {
+            global.pageNavigation = mocks;
+            window.history.replaceState(null, '', window.location.pathname);
+        }
+    });
+});

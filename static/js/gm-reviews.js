@@ -62,14 +62,12 @@
      * @param {Object} [options]
      * @param {Document} [options.doc]
      * @param {Function} [options.fetchImpl]
-     * @param {Function} [options.reload]
      * @param {Function} [options.schedule] - setInterval's shape
      * @returns {Function|null} one poll, for tests; null when nothing is open
      */
     function initReviewsPage(options = {}) {
         const doc = options.doc || document;
         const fetchImpl = options.fetchImpl || ((url) => fetch(url));
-        const reload = options.reload || (() => window.location.reload());
         const schedule = options.schedule || ((callback, delay) => setInterval(callback, delay));
 
         const page = doc.getElementById('gm-reviews');
@@ -92,7 +90,7 @@
             const data = await response.json();
             if (statusesChanged(baseline, data.reviews)) {
                 reloading = true;
-                reload();
+                pageNavigation.reload();
             }
         }
         schedule(poll, POLL_INTERVAL_MS);

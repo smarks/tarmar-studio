@@ -15,9 +15,9 @@
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.40.0",
     "@testing-library/jest-dom": "^6.1.0",
-    "jest": "^29.7.0",
-    "jest-environment-jsdom": "^29.7.0",
-    "nyc": "^17.1.0",
+    "jest": "^30.5.2",
+    "jest-environment-jsdom": "^30.5.2",
+    "nyc": "^18.0.0",
     "rimraf": "^6.1.2",
     "v8-to-istanbul": "^9.3.0"
   },
@@ -32,5 +32,10 @@
     ],
     "all": true
   },
-  "jsCoverageThreshold": 81
+  "jsCoverageThreshold": 81,
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.1.1"
+    }
+  }
 }

@@ -31,7 +31,7 @@ function reloadWithParam(name, value) {
     } else {
         url.searchParams.delete(name);
     }
-    window.location.href = url.toString();
+    pageNavigation.go(url.toString());
 }
 
 function toggleShowDeleted(checked) {
@@ -56,7 +56,7 @@ async function importCharacter(form, errorSpan) {
         const data = await response.json();
         if (response.ok && data.success) {
             // Placeholder pk of 0 stands in for the id the server just made.
-            window.location.href = form.dataset.editUrlTemplate.replace('/0/', `/${data.character_id}/`);
+            pageNavigation.go(form.dataset.editUrlTemplate.replace('/0/', `/${data.character_id}/`));
         } else {
             errorSpan.textContent = data.error || 'Import failed';
             errorSpan.hidden = false;
@@ -75,7 +75,7 @@ async function deleteSelectedCharacters(bulkDeleteUrl) {
     }
     const result = await bulkDeleteCharacters(ids, csrfToken(), bulkDeleteUrl);
     if (result.success) {
-        location.reload();
+        pageNavigation.reload();
     } else if (result.error) {
         uiNotify(result.error);
     }
@@ -106,7 +106,7 @@ async function restoreSelectedCharacters(restoreUrlTemplate) {
         uiNotify(`${failures} of ${ids.length} character(s) could not be restored. Reload the page to see which are still deleted.`);
         return;
     }
-    location.reload();
+    pageNavigation.reload();
 }
 
 //: Marks a document whose owner filter is already listened for, so wiring

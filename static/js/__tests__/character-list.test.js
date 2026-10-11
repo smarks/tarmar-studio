@@ -13,8 +13,10 @@ const {
 } = require('../character-list.js');
 const { flush } = require('./test-helpers');
 
-function setHref(href) {
-    window.location.href = href;
+// The page's own URL, for the code that reads it; jsdom's origin is
+// http://localhost, so only the path and query are set.
+function setPath(pathAndQuery) {
+    window.history.replaceState(null, '', pathAndQuery);
 }
 
 beforeEach(() => {
@@ -22,28 +24,28 @@ beforeEach(() => {
     alert.mockClear();
     confirm.mockReset();
     confirm.mockReturnValue(true);
-    window.location.reload.mockClear();
 });
 
 describe('filters', () => {
     test('showing deleted characters adds the parameter and keeps the rest', () => {
-        setHref('http://testserver/tarmar/characters/?user=3');
+        setPath('/tarmar/characters/?user=3');
         toggleShowDeleted(true);
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=3&show_deleted=1');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/?user=3&show_deleted=1');
     });
 
     test('hiding them again removes only that parameter', () => {
-        setHref('http://testserver/tarmar/characters/?show_deleted=1&user=3');
+        setPath('/tarmar/characters/?show_deleted=1&user=3');
         toggleShowDeleted(false);
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=3');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/?user=3');
     });
 
     test('filtering by a user sets it, and All Users clears it', () => {
-        setHref('http://testserver/tarmar/characters/');
+        setPath('/tarmar/characters/');
         filterByUser('7');
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=7');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/?user=7');
+        setPath('/tarmar/characters/?user=7');
         filterByUser('');
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/');
     });
 
     test('the checkbox and the select are wired by initCharacterList', () => {
@@ -51,13 +53,13 @@ describe('filters', () => {
             <input type="checkbox" id="show-deleted">
             <select id="user-filter"><option value="">All</option><option value="4">bo</option></select>
         `;
-        setHref('http://testserver/tarmar/characters/');
+        setPath('/tarmar/characters/');
         initCharacterList(document);
 
         const select = document.getElementById('user-filter');
         select.value = '4';
         select.dispatchEvent(new Event('change'));
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=4');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/?user=4');
     });
 });
 
@@ -68,7 +70,7 @@ describe('the owner filter is a searchable picker (#973)', () => {
                 <select id="user-filter"><option value="">All</option><option value="4">bo</option></select>
             </div></div>
         `;
-        setHref('http://testserver/tarmar/characters/');
+        setPath('/tarmar/characters/');
         initCharacterList(document);
         // What picker.js does with a search's answer: a new body, a new select.
         document.querySelector('[data-picker-body]').innerHTML =
@@ -77,12 +79,12 @@ describe('the owner filter is a searchable picker (#973)', () => {
         const select = document.getElementById('user-filter');
         select.value = '9';
         select.dispatchEvent(new Event('change', { bubbles: true }));
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=9');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/?user=9');
     });
 
     test('wiring the page twice reloads once per choice', () => {
         document.body.innerHTML = '<select id="user-filter"><option value="">All</option><option value="4">bo</option></select>';
-        setHref('http://testserver/tarmar/characters/');
+        setPath('/tarmar/characters/');
         initCharacterList(document);
         initCharacterList(document);
         const select = document.getElementById('user-filter');
@@ -92,7 +94,7 @@ describe('the owner filter is a searchable picker (#973)', () => {
         select.dispatchEvent(new Event('change', { bubbles: true }));
         expect(built).toHaveBeenCalledTimes(1);
         built.mockRestore();
-        expect(window.location.href).toBe('http://testserver/tarmar/characters/?user=4');
+        expect(pageNavigation.go).toHaveBeenLastCalledWith('http://localhost/tarmar/characters/?user=4');
     });
 });
 
@@ -131,7 +133,7 @@ describe('importing a character', () => {
             expect.stringContaining('/tarmar/characters/import/'),
             expect.objectContaining({ method: 'POST' })
         );
-        expect(window.location.href).toBe('/tarmar/characters/42/');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/characters/42/');
         expect(errorSpan.hidden).toBe(true);
     });
 
@@ -178,7 +180,7 @@ describe('the bulk bar', () => {
         expect(alert).toHaveBeenCalledWith(
             '1 of 2 character(s) could not be restored. Reload the page to see which are still deleted.'
         );
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('Restore Selected reloads when every row came back', async () => {
@@ -187,7 +189,7 @@ describe('the bulk bar', () => {
 
         await restoreSelectedCharacters('/tarmar/characters/0/restore/');
 
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('Delete Selected with no active row selected says so', async () => {
@@ -209,7 +211,7 @@ describe('the bulk bar', () => {
             '/tarmar/characters/bulk-delete/',
             expect.objectContaining({ body: JSON.stringify({ ids: [1] }) })
         );
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('initCharacterList wires the bulk buttons from the bar\'s data attributes', async () => {

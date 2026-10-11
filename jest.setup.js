@@ -6,9 +6,29 @@ global.confirm = jest.fn(() => true);
 // Mock window.alert
 global.alert = jest.fn();
 
-// Mock location.reload
-delete window.location;
-window.location = { reload: jest.fn() };
+// Pages navigate only through api.js's pageNavigation, which keeps these mocks
+// when it loads: jsdom will not let a test replace window.location, and it
+// does not implement navigation (#23). A test that needs the page at a given
+// URL sets it with history.replaceState, which jsdom does support.
+global.pageNavigation = { reload: jest.fn(), go: jest.fn() };
+
+// A script that navigates around pageNavigation reaches jsdom's own
+// navigation, which only reports "Not implemented" on console.error; the test
+// it ran in fails here instead of passing with a warning. jsdom says nothing
+// when href is set to the URL the page is already at, so that one case is
+// left to the tests' assertions on pageNavigation.go.
+let navigationAroundTheSeam = null;
+const reportError = console.error;
+console.error = (...args) => {
+  const said = args.map((arg) => String((arg && arg.message) || arg)).join(' ');
+  if (said.includes('Not implemented: navigation')) navigationAroundTheSeam = said;
+  reportError(...args);
+};
+afterEach(() => {
+  const said = navigationAroundTheSeam;
+  navigationAroundTheSeam = null;
+  if (said) throw new Error(`A script navigated without pageNavigation: ${said}`);
+});
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -25,6 +45,8 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 // same way for every test, so a suite exercising a POST gets the token its
 // page would really have rather than each fixture inventing a transport.
 beforeEach(() => {
+  global.pageNavigation.reload.mockClear();
+  global.pageNavigation.go.mockClear();
   let meta = document.querySelector('meta[name="csrf-token"]');
   if (!meta) {
     meta = document.createElement('meta');

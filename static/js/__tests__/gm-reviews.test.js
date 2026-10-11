@@ -74,37 +74,34 @@ describe('initReviewsPage', () => {
         renderPage({ rows: [[3, 'pending'], [2, 'done']], openIds: [3] });
         const schedule = jest.fn();
         const fetchImpl = answer({ 3: 'pending' });
-        const reload = jest.fn();
 
-        const poll = initReviewsPage({ schedule, fetchImpl, reload });
+        const poll = initReviewsPage({ schedule, fetchImpl });
         expect(schedule).toHaveBeenCalledWith(poll, POLL_INTERVAL_MS);
         await poll();
 
         expect(fetchImpl).toHaveBeenCalledWith('/tarmar/gm/reviews/statuses/?ids=3');
-        expect(reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('reloads once when a watched review changes', async () => {
         renderPage({ rows: [[3, 'pending']], openIds: [3] });
-        const reload = jest.fn();
-        const poll = initReviewsPage({ schedule: jest.fn(), fetchImpl: answer({ 3: 'claimed' }), reload });
+        const poll = initReviewsPage({ schedule: jest.fn(), fetchImpl: answer({ 3: 'claimed' }) });
 
         await poll();
         await poll();
 
-        expect(reload).toHaveBeenCalledTimes(1);
+        expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
     });
 
     test('a failed request or refused answer leaves the page as it is', async () => {
         renderPage({ rows: [[3, 'pending']], openIds: [3] });
-        const reload = jest.fn();
         const failing = jest.fn().mockRejectedValue(new Error('offline'));
-        const poll = initReviewsPage({ schedule: jest.fn(), fetchImpl: failing, reload });
+        const poll = initReviewsPage({ schedule: jest.fn(), fetchImpl: failing });
         await poll();
 
-        const refused = initReviewsPage({ schedule: jest.fn(), fetchImpl: answer({}, false), reload });
+        const refused = initReviewsPage({ schedule: jest.fn(), fetchImpl: answer({}, false) });
         await refused();
 
-        expect(reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 });

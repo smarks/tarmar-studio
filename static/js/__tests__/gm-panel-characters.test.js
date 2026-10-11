@@ -75,16 +75,13 @@ function flushPromises() {
 
 beforeEach(() => {
     global.fetch.mockReset();
-    window.location.reload.mockClear();
-    window.location.pathname = '/tarmar/gm/';
-    window.location.search = '';
-    window.location.href = undefined;
+    window.history.replaceState(null, '', '/tarmar/gm/');
 });
 
 describe('currentSessionId', () => {
     test('prefers the session in the URL over the one the page loaded with', () => {
         setUpDom({ sessionId: 4 });
-        window.location.search = '?session=9';
+        window.history.replaceState(null, '', '?session=9');
         loadTab();
         expect(panelCharacters.currentSessionId()).toBe(9);
     });
@@ -101,7 +98,7 @@ describe('currentSessionId', () => {
 
     test('ignores a non-numeric session parameter', () => {
         setUpDom({ sessionId: 2 });
-        window.location.search = '?session=abc';
+        window.history.replaceState(null, '', '?session=abc');
         loadTab();
         expect(panelCharacters.currentSessionId()).toBe(2);
     });
@@ -124,7 +121,7 @@ describe('attach', () => {
         expect(url).toBe('/tarmar/gm/characters/attach/');
         expect(options.headers['X-CSRFToken']).toBe('test-token');
         expect(JSON.parse(options.body)).toEqual({ session_id: null, character_id: 7 });
-        expect(window.location.href).toBe('/tarmar/gm/?session=12');
+        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=12');
     });
 
     test('an empty pick is reported in the tab and nothing is posted', () => {
@@ -150,7 +147,7 @@ describe('attach', () => {
         const error = document.getElementById('gm-panel-characters-error');
         expect(error.hidden).toBe(false);
         expect(error.textContent).toBe('Character is dead');
-        expect(window.location.href).toBeUndefined();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('a failed response with no error text shows the status text', async () => {
@@ -196,7 +193,7 @@ describe('detach', () => {
         const [url, options] = global.fetch.mock.calls[0];
         expect(url).toBe('/tarmar/gm/characters/detach/');
         expect(JSON.parse(options.body)).toEqual({ session_id: 5, character_id: 3 });
-        expect(window.location.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).toHaveBeenCalled();
     });
 
     test('a click elsewhere in the sheets does nothing', () => {
@@ -221,7 +218,7 @@ describe('detach', () => {
         );
         loadTab();
         expect(await panelCharacters.detachCharacter(3)).toBe(false);
-        expect(window.location.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
         expect(document.getElementById('gm-panel-characters-error').textContent).toBe('GM session not found');
     });
 });
@@ -262,7 +259,7 @@ describe('live refresh (issue #571)', () => {
 
     test('the done frame refetches it too, for the session now in the URL', async () => {
         setUpDom({ live: true });
-        window.location.search = '?session=8';
+        window.history.replaceState(null, '', '?session=8');
         global.fetch.mockReturnValue(htmlResponse(FRAGMENT));
         loadTab();
 

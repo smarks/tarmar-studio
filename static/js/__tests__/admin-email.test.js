@@ -26,9 +26,8 @@ function setUp({ succeeds }) {
         elements.container.classList.add(succeeds ? 'saved' : 'error');
     });
     const updateOriginalValue = jest.fn();
-    const reload = jest.fn();
-    initAdminEmail({ saveField, updateOriginalValue, reload });
-    return { ...elements, saveField, updateOriginalValue, reload };
+    initAdminEmail({ saveField, updateOriginalValue });
+    return { ...elements, saveField, updateOriginalValue };
 }
 
 test('remembers the drawn address so a refusal can put it back', () => {
@@ -37,23 +36,23 @@ test('remembers the drawn address so a refusal can put it back', () => {
 });
 
 test('the button saves the trimmed address and reloads on success', async () => {
-    const { input, button, saveField, reload } = setUp({ succeeds: true });
+    const { input, button, saveField } = setUp({ succeeds: true });
     input.value = '  new@example.test ';
     button.click();
     await Promise.resolve();
     await Promise.resolve();
     expect(saveField).toHaveBeenCalledWith('email', 'new@example.test');
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
     expect(button.disabled).toBe(true);
 });
 
 test('a refusal leaves the page as it is, button usable again', async () => {
-    const { input, button, reload } = setUp({ succeeds: false });
+    const { input, button } = setUp({ succeeds: false });
     input.value = 'new@example.test';
     button.click();
     await Promise.resolve();
     await Promise.resolve();
-    expect(reload).not.toHaveBeenCalled();
+    expect(pageNavigation.reload).not.toHaveBeenCalled();
     expect(button.disabled).toBe(false);
 });
 
@@ -69,14 +68,14 @@ test('Enter in the field sets the address, not blur', async () => {
 });
 
 test('a second Enter while the first save is out posts nothing', async () => {
-    const { input, saveField, reload } = setUp({ succeeds: true });
+    const { input, saveField } = setUp({ succeeds: true });
     input.value = 'new@example.test';
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     await Promise.resolve();
     await Promise.resolve();
     expect(saveField).toHaveBeenCalledTimes(1);
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
 });
 
 test('does nothing on a page without the set button', () => {
