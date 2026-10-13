@@ -12,6 +12,8 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from tarmar_engine.magic import (
+    BorrowingFailure,
+    BorrowingRules,
     ChannelDerivation,
     ChannelRules,
     ControlBand,
@@ -62,6 +64,24 @@ INVENTED_RULES = MagicRules(
             STUDIED_KIND: ChannelDerivation(source_skill=None, multiplier=2, offset=0)
         },
         default_kind=STUDIED_KIND,
+    ),
+)
+
+
+#: :data:`INVENTED_RULES` with Borrowing (tarmar-engine #28): a 2d6 debt roll
+#: under WIS less two per point owed, a natural 12 failing it whatever the
+#: target, a non-Runaway failure, and a cap of three owed.
+BORROWING_RULES = replace(
+    INVENTED_RULES,
+    borrowing=BorrowingRules(
+        debt_dice="2d6",
+        debt_attributes=("WIS",),
+        penalty_per_debt=2,
+        failure=BorrowingFailure(
+            key="slip", label="Slip of the purse", is_runaway=False
+        ),
+        automatic_failure_totals=frozenset({12}),
+        max_debt=3,
     ),
 )
 

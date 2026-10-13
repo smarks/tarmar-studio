@@ -48,7 +48,7 @@ partial and kept as they were, since the specs find those lines by them.
         <div><dt>Fatigue</dt><dd class="gm-sheet-fatigue"><span class="gm-draft-unset" title="Needs {{ ledger.pools_pending }} first">&mdash;</span></dd></div>
         <div><dt>Body</dt><dd class="gm-sheet-body"><span class="gm-draft-unset" title="Needs {{ ledger.pools_pending }} first">&mdash;</span></dd></div>
         {% endif %}
-        <div><dt>Mana</dt><dd class="gm-sheet-mana">{{ sheet.current_mana }}/{{ sheet.mana }}</dd></div>
+        <div><dt>Mana</dt><dd class="gm-sheet-mana">{{ sheet.current_mana }}/{{ sheet.mana }}{{ sheet.mana_owed }}</dd></div>
         <div><dt>Physical</dt><dd class="gm-sheet-physical">{% if sheet.physical is not None %}{{ sheet.physical }}{% else %}<span class="gm-draft-unset" title="Needs STR, DEX and CON first">&mdash;</span>{% endif %}</dd></div>
         <div><dt>Mental</dt><dd class="gm-sheet-mental">{% if sheet.mental is not None %}{{ sheet.mental }}{% else %}<span class="gm-draft-unset" title="Needs WIS, INT and CHR first">&mdash;</span>{% endif %}</dd></div>
     </dl>

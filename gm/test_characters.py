@@ -475,6 +475,20 @@ class GMChatPagePanelTest(BaseTestCase):
         self.assertContains(response, "Alive")
         self.assertNotContains(response, "gm-sheets-empty")
 
+    def test_an_attached_caster_shows_the_mana_owed(self):
+        # Borrowing (tarmar-engine #28): the debt beside the pool, worded as
+        # the record's own line words it.
+        character = create_character(
+            self.user, name="Aldwin", free_spell_points=6, mana_spent=6, mana_owed=2
+        )
+        self.session.characters.add(character)
+        response = self.client.get(f"/tarmar/gm/?session={self.session.pk}")
+        self.assertContains(response, '<dd class="gm-sheet-mana">0/6, owes 2</dd>')
+        character.mana_owed = 0
+        character.save()
+        response = self.client.get(f"/tarmar/gm/?session={self.session.pk}")
+        self.assertContains(response, '<dd class="gm-sheet-mana">0/6</dd>')
+
     def test_dead_and_aged_characters_show_as_such(self):
         character = create_character(
             self.user,

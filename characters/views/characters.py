@@ -1585,7 +1585,9 @@ def _pool_value(data: Mapping, key: str) -> int | None:
 @require_POST
 @rate_limit("set_pools", max_requests=60, window_seconds=60)
 def character_set_pools(request, pk):
-    """Set current Fatigue and/or Body from the sheet (issue #751).
+    """Set current Fatigue, Body, Mana and/or the mana owed from the sheet.
+
+    Issue #751; the mana owed since tarmar-engine #28.
 
     A Game Master only (``services.apply_current_pools`` refuses anyone
     else): a fight on the board writes a character's pools as it goes, and
@@ -1604,6 +1606,7 @@ def character_set_pools(request, pk):
             fatigue=_pool_value(data, "fatigue"),
             body=_pool_value(data, "body"),
             mana=_pool_value(data, "mana"),
+            owed=_pool_value(data, "owed"),
             actor=request.user,
             authorize=may_edit(request),
             is_game_master=is_game_master,

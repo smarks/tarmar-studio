@@ -1,8 +1,10 @@
-"""The casting success tier, the Control Roll and a withheld cast, as read.
+"""The casting success tier, the Control Roll, the debt roll and a withheld
+cast, as read.
 
 Issue #960: the engine narrates each with the labels the canon's rules give
-it (a tier's ``label``, a failure band's ``label``) and its own words only
-for held and a Runaway. These pin that every such line reaches both readers
+it (a tier's ``label``, a failure band's ``label``, and since tarmar-engine
+#28 a failed debt roll's ``label``) and its own words only for held,
+failed, borrows, debt and a Runaway. These pin that every such line reaches both readers
 of a battle's log, the battle page (``battle/_event.html``) and the GM
 battle report (:func:`gm.battle_report.turn_block`). Every label here is
 invented.
@@ -14,7 +16,7 @@ from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from django.utils.html import escape
 from tarmar_engine.engine import TurnRunner
-from tarmar_engine.magic import CastingSuccessTier
+from tarmar_engine.magic import BorrowingFailure, BorrowingRules, CastingSuccessTier
 from tarmar_engine.policy import choose_option
 from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 from tarmar_engine.state import BattleState
@@ -77,6 +79,53 @@ def pushed_cast_events(control_faces: tuple[int, int, int]) -> list[BattleEvent]
     return [as_row(event) for event in events]
 
 
+#: Borrowing under :data:`RULES`: a 2d6 debt roll under WIS less two per
+#: point owed. Every die of the turn below is the scripted roller's midline,
+#: so the debt roll is a natural 6; which totals fail it whatever the target
+#: is the test's to choose.
+BORROWING = BorrowingRules(
+    debt_dice="2d6",
+    debt_attributes=("WIS",),
+    penalty_per_debt=2,
+    failure=BorrowingFailure(key="hex", label="Hexed purse", is_runaway=True),
+    automatic_failure_totals=frozenset({12}),
+    max_debt=4,
+)
+
+
+def borrowing_cast_events(failing_totals: frozenset[int]) -> list[BattleEvent]:
+    """One Fire Missile cast on borrowed mana, as log rows.
+
+    Args:
+        failing_totals: The natural debt-roll totals that fail it.
+    """
+    caster = make_combatant(
+        1,
+        name="Caster",
+        intelligence=14,
+        wisdom=12,
+        mana=0,
+        max_mana=6,
+        spells=["fire_missile"],
+        spell_skill_levels={"fire_missile": 2},
+        chosen_spell="fire_missile",
+        chosen_target=2,
+        chosen_borrow=True,
+    )
+    foe = make_combatant(2, name="Foe", q=3, r=0)
+    state = BattleState(arena_radius=6, combatants=[caster, foe])
+    events: list[dict] = []
+    rules = replace(
+        RULES,
+        borrowing=replace(BORROWING, automatic_failure_totals=failing_totals),
+    )
+    runner = TurnRunner(
+        state, ScriptedRoller(), events.append, profile=EngineTarmarProfile(magic=rules)
+    )
+    runner.cast_spell(caster)
+    return [as_row(event) for event in events]
+
+
 def as_row(event: dict) -> BattleEvent:
     """An engine event as the battle log stores it, unsaved."""
     return BattleEvent(
@@ -102,7 +151,7 @@ def gm_report_text(events: list[BattleEvent]) -> str:
     return turn_block(Battle(name="Narrated"), 1, events)
 
 
-class PushedCastNarrationTest(SimpleTestCase):
+class BothReadersTestCase(SimpleTestCase):
     def assert_both_read(self, events: list[BattleEvent], *phrases: str) -> None:
         # The page escapes its text for HTML; the report is plain text.
         for reader, text, written in (
@@ -113,6 +162,8 @@ class PushedCastNarrationTest(SimpleTestCase):
                 with self.subTest(reader=reader, phrase=phrase):
                     self.assertIn(written(phrase), text)
 
+
+class PushedCastNarrationTest(BothReadersTestCase):
     def test_the_tier_and_a_held_control_roll_read(self) -> None:
         self.assert_both_read(
             pushed_cast_events(HELD_FACES),
@@ -172,3 +223,29 @@ class WithheldCastNarrationTest(SimpleTestCase):
         # Outside the collapsed working, so it reads without opening it.
         self.assertGreater(page.index(withheld_line), page.index("</details>"))
         self.assertIn(f"- Forecast — Caster chooses\n  - {reason}", report)
+
+
+class BorrowingCastNarrationTest(BothReadersTestCase):
+    """The debt roll and its outcome (tarmar-engine #28), on both readers."""
+
+    def test_the_borrowing_and_a_held_debt_roll_read(self) -> None:
+        self.assert_both_read(
+            borrowing_cast_events(frozenset({12})),
+            "borrows 1, debt 1",
+            "Caster debt 2d6: [3, 3] = 6 vs WIS 10 (need 10 or less) — held",
+            "Caster holds the debt roll for Fire Missile (1 owed)",
+        )
+
+    def test_a_failed_debt_roll_reads_by_its_label(self) -> None:
+        events = borrowing_cast_events(frozenset({6}))
+        self.assert_both_read(
+            events,
+            "= 6 vs WIS 10 (need 10 or less) — failed",
+            "Caster fails the debt roll for Fire Missile (1 owed)",
+            "Caster's failed debt for Fire Missile: Hexed purse",
+        )
+        # The failure is a status line of its own, in the log's order.
+        report = gm_report_text(events)
+        self.assertLess(
+            report.index("fails the debt roll"), report.index("Hexed purse")
+        )

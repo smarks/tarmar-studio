@@ -993,14 +993,16 @@
 }
 
 /* A cast the engine offers pushed copies of (#960): the spell card, then the
-   push control beneath it in the same grid cell. "None" is the plain cast. */
+   push control beneath it in the same grid cell. "None" is the plain cast.
+   The borrowing control (tarmar-engine #28) has the same shape and look. */
 .turn-spell-group {
     display: grid;
     gap: 0.35rem;
     align-content: start;
 }
 
-.turn-push {
+.turn-push,
+.turn-borrow {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -1009,7 +1011,8 @@
     color: var(--colour-ink-breadcrumb);
 }
 
-.turn-push-amount {
+.turn-push-amount,
+.turn-borrow-amount {
     padding: 0.2rem 0.55rem;
     border: 1px solid var(--colour-border-breadcrumb-link);
     border-radius: 6px;
@@ -1018,17 +1021,20 @@
     cursor: pointer;
 }
 
-.turn-push-amount:focus-visible {
+.turn-push-amount:focus-visible,
+.turn-borrow-amount:focus-visible {
     outline: 2px solid var(--colour-accent-gold-strong);
     outline-offset: 2px;
 }
 
-.turn-push-amount[aria-pressed="true"] {
+.turn-push-amount[aria-pressed="true"],
+.turn-borrow-amount[aria-pressed="true"] {
     border-color: var(--colour-accent-gold);
     background: var(--colour-surface-gold-pressed);
 }
 
-.turn-push-cost {
+.turn-push-cost,
+.turn-borrow-cost {
     flex-basis: 100%;
 }
 

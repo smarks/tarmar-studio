@@ -350,6 +350,16 @@ def _plain_line(
             )
         else:
             cost = f"{spell.level} mana, paid only if it succeeds or the roll is {lost_rolls}"
+        if candidate.borrow:
+            # A borrowing copy (tarmar-engine #28): the engine offers it for a
+            # cast the caster cannot afford, with the debt roll's working in
+            # its rationale.
+            owed = borrowed_mana(actor, candidate)
+            plain += f", borrowing the {owed} mana you lack"
+            cost += (
+                f"; paying it empties your pool and borrows the {owed} you lack "
+                "as debt, and a debt roll follows the spell"
+            )
     elif option == "j":
         plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
     elif option == "k":
@@ -426,6 +436,9 @@ class DescribedCandidate(Candidate):
             ``tarmar_engine.movement.legal_destinations`` on the live state
             (#819, #866); empty for an option that takes none and for a
             classic figure's.
+        borrowed: The mana a borrowing cast borrows (tarmar-engine #28,
+            :func:`borrowed_mana`), for the battle screen's borrow control
+            to name; 0 for every other option, and then not in the payload.
     """
 
     ai_choice: bool = False
@@ -434,6 +447,7 @@ class DescribedCandidate(Candidate):
     target_name: str = ""
     described: bool = False
     destinations: tuple[tuple[int, int], ...] = ()
+    borrowed: int = 0
 
     def to_payload(self) -> dict:
         payload = super().to_payload()
@@ -442,6 +456,8 @@ class DescribedCandidate(Candidate):
             payload["plain"] = self.plain
             payload["cost"] = self.cost
             payload["target_name"] = self.target_name
+        if self.borrowed:
+            payload["borrowed"] = self.borrowed
         return payload
 
     def menu_payload(self) -> dict:
@@ -465,6 +481,30 @@ def menu_payload(candidate: Candidate) -> dict:
     return candidate.to_payload()
 
 
+def mana_short(actor: CombatantState, cost: int) -> int:
+    """The mana a casting of ``cost`` would borrow: the cost less the pool.
+
+    The studio's one reading of the shortfall (tarmar-engine #28), for the
+    menu (:func:`borrowed_mana`) and the cast stage
+    (``battle.services.caster_magic``) alike. The engine's
+    :class:`~tarmar_engine.policy.Candidate` does not carry it; the engine
+    borrows exactly this when the cast pays (``TurnRunner.cast_spell``,
+    whose action payload's ``borrowed`` ``battle.tests.test_magic_seating``
+    compares it to). 0 when the pool covers the cost.
+    """
+    return max(0, cost - actor.mana)
+
+
+def borrowed_mana(actor: CombatantState, candidate: Candidate) -> int:
+    """The mana a borrowing cast borrows: its whole cost less the pool.
+
+    0 for a cast that does not borrow.
+    """
+    if not candidate.borrow or not candidate.spell_key:
+        return 0
+    return mana_short(actor, get_spell(candidate.spell_key).level + candidate.push_mana)
+
+
 def _base_fields(candidate: Candidate) -> dict:
     """A candidate's own engine fields, to rebuild it as a described one."""
     return {
@@ -475,6 +515,7 @@ def _base_fields(candidate: Candidate) -> dict:
         "target_id": candidate.target_id,
         "spell_key": candidate.spell_key,
         "push_mana": candidate.push_mana,
+        "borrow": candidate.borrow,
         "destination": candidate.destination,
     }
 
@@ -503,6 +544,7 @@ def describe(
         cost=cost,
         target_name=target.name if target is not None else "",
         described=True,
+        borrowed=borrowed_mana(actor, candidate),
         # Every hex the engine would take for this option, from the engine's
         # own rule (tarmar_engine.movement), so the picker offers nothing the
         # engine refuses on this board.

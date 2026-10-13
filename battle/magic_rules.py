@@ -1,7 +1,8 @@
 """The canon's magic rules, read into the engine's ``MagicRules`` (issue #960).
 
 The engine (``tarmar_engine.magic``) carries the structure of the casting
-success tiers, Push and Channel and takes every number from a ``MagicRules``
+success tiers, Push, Channel and Borrowing (tarmar-engine #28) and takes
+every number from a ``MagicRules``
 its caller injects. The numbers are the canon's: the Tarmar canon builds them
 from its DM-only magic-mechanics pages, and the default canon ships invented
 ones. This module is the one path that sets them, and it reads only the
@@ -34,14 +35,23 @@ The file is a JSON object::
         "kind_by_spell": {<engine spell key>: <kind of magic>},
         "default_kind": str | null
       },
+      "borrowing": null | {
+        "debt_dice": str, "debt_attributes": [str, ...],
+        "penalty_per_debt": int,
+        "failure": {"key": str, "label": str, "is_runaway": bool},
+        "automatic_failure_totals": [int, ...],
+        "max_debt": int | null,
+        "refunds_pay_debt_first": bool
+      },
       "rulings": [{"key": str, "reading": str, ...}]
     }
 
 Field names are the engine dataclass fields they fill, and every one of them
 is required: a canon states each number rather than inheriting an engine
 default. An unknown key at any level is an error, since it is most likely a
-misspelling of a known one; so is a key repeated in one object, and two tiers or
-two failure bands sharing a ``key``. ``rulings`` is optional and is the canon's own
+misspelling of a known one; so is a key repeated in one object, two tiers or
+two failure bands sharing a ``key``, and an attribute named twice in
+``borrowing.debt_attributes``. ``rulings`` is optional and is the canon's own
 record of the readings its pages left open; it is checked for shape and not
 otherwise read.
 """
@@ -49,11 +59,14 @@ otherwise read.
 import functools
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NoReturn
 
 from django.core.exceptions import ImproperlyConfigured
 from tarmar_engine.magic import (
+    BorrowingFailure,
+    BorrowingRules,
     CastingSuccessTier,
     ChannelDerivation,
     ChannelRules,
@@ -91,7 +104,17 @@ PUSH_FIELDS = (
 )
 CHANNEL_FIELDS = ("derivations", "kind_by_spell", "default_kind")
 DERIVATION_FIELDS = ("source_skill", "multiplier", "offset")
-TOP_LEVEL_FIELDS = ("casting_success_tiers", "push", "channel")
+BORROWING_FIELDS = (
+    "debt_dice",
+    "debt_attributes",
+    "penalty_per_debt",
+    "failure",
+    "automatic_failure_totals",
+    "max_debt",
+    "refunds_pay_debt_first",
+)
+BORROWING_FAILURE_FIELDS = ("key", "label", "is_runaway")
+TOP_LEVEL_FIELDS = ("casting_success_tiers", "push", "channel", "borrowing")
 OPTIONAL_TOP_LEVEL_FIELDS = ("rulings",)
 RULING_FIELDS = ("key", "reading")
 
@@ -203,6 +226,17 @@ class _RulesFileReader:
         if len(set(integers)) != len(integers):
             self.fail(field_path, f"repeats a total: {integers}")
         return frozenset(integers)
+
+    def text_list(self, value: Any, field_path: str) -> tuple[str, ...]:
+        """A list of non-empty strings with no repeats."""
+        items = self.json_list(value, field_path)
+        texts = tuple(
+            self.text(item, f"{field_path}[{index}]")
+            for index, item in enumerate(items)
+        )
+        if len(set(texts)) != len(texts):
+            self.fail(field_path, f"repeats an entry: {list(texts)}")
+        return texts
 
     def unique_keys(
         self, items: Sequence[CastingSuccessTier | ControlBand], field_path: str
@@ -386,6 +420,45 @@ class _RulesFileReader:
                 ),
             )
 
+    def borrowing_failure(self, value: Any, field_path: str) -> BorrowingFailure:
+        """``borrowing.failure``: what a failed debt roll does."""
+        fields = self.json_object(value, field_path, BORROWING_FAILURE_FIELDS)
+        return BorrowingFailure(
+            key=self.text(fields["key"], f"{field_path}.key"),
+            label=self.text(fields["label"], f"{field_path}.label"),
+            is_runaway=self.boolean(fields["is_runaway"], f"{field_path}.is_runaway"),
+        )
+
+    def borrowing(self, value: Any, field_path: str) -> BorrowingRules | None:
+        """``borrowing``, or ``None`` when no caster may borrow."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, BORROWING_FIELDS)
+        with self.engine_check(field_path):
+            return BorrowingRules(
+                debt_dice=self.text(fields["debt_dice"], f"{field_path}.debt_dice"),
+                debt_attributes=self.text_list(
+                    fields["debt_attributes"], f"{field_path}.debt_attributes"
+                ),
+                penalty_per_debt=self.integer(
+                    fields["penalty_per_debt"], f"{field_path}.penalty_per_debt"
+                ),
+                failure=self.borrowing_failure(
+                    fields["failure"], f"{field_path}.failure"
+                ),
+                automatic_failure_totals=self.integer_set(
+                    fields["automatic_failure_totals"],
+                    f"{field_path}.automatic_failure_totals",
+                ),
+                max_debt=self.optional_integer(
+                    fields["max_debt"], f"{field_path}.max_debt"
+                ),
+                refunds_pay_debt_first=self.boolean(
+                    fields["refunds_pay_debt_first"],
+                    f"{field_path}.refunds_pay_debt_first",
+                ),
+            )
+
     def rulings(self, value: Any, field_path: str) -> None:
         """``rulings``: a list of objects with string ``key`` and ``reading``."""
         for index, ruling in enumerate(self.json_list(value, field_path)):
@@ -412,11 +485,16 @@ class _RulesFileReader:
         )
         self.unique_keys(tiers, "casting_success_tiers")
         with self.engine_check("casting_success_tiers"):
-            return MagicRules(
+            rules = MagicRules(
                 casting_success_tiers=tiers,
                 push=self.push(fields["push"], "push"),
                 channel=self.channel(fields["channel"], "channel"),
             )
+        # Added once the rest stands, so the engine's refusal of an uncapped
+        # Borrowing with no Channel to bound it names this field.
+        borrowing = self.borrowing(fields["borrowing"], "borrowing")
+        with self.engine_check("borrowing"):
+            return replace(rules, borrowing=borrowing)
 
 
 def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

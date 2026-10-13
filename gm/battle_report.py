@@ -150,8 +150,9 @@ def event_lines(event: BattleEvent) -> list[str]:
     The event's own message, and beneath a decision that withheld casts past
     the caster's Channel (issue #960) each reason, in the engine's words, as
     the battle log prints them (``battle/_event.html``). The casting success
-    tier and the Control Roll are events of their own, narrated by the
-    engine with the labels the canon's rules give them.
+    tier, the Control Roll and the debt roll (tarmar-engine #28) are events
+    of their own, narrated by the engine with the labels the canon's rules
+    give them.
 
     Args:
         event: A battle log event.

@@ -1880,6 +1880,35 @@ describe('the wizard cast flow (#250)', () => {
     });
 });
 
+/** The battle page around a pending menu, its act endpoint answering. */
+function mountPage(pending) {
+    document.body.innerHTML = `
+        <strong id="battle-status">Awaiting players</strong>
+        <span id="battle-turn">1</span>
+        <div id="battle-roster"></div>
+        <svg id="battle-arena"></svg>
+        <div id="battle-log"></div>
+        <div id="turn-panel" hidden
+             data-act-url="/tarmar/battles/1/act/"
+             data-state-url="/tarmar/battles/1/state/"
+            ></div>
+        <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+        <script id="battle-seats" type="application/json">[]</script>
+        <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+    `;
+    battle.initBattlePage();
+    global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            status: 'paused', turn: 2,
+            view: sampleState([sampleCombatant()]),
+            events: [], seats: [], pending: null,
+        }),
+    });
+    require('../api.js');
+    return document.getElementById('turn-panel');
+}
+
 describe('pushing mana into a cast (#960)', () => {
     // A caster's menu as the engine builds it with Push rules: the plain
     // Fire Missile (the AI's pick), then one pushed copy per amount the
@@ -2025,34 +2054,6 @@ describe('pushing mana into a cast (#960)', () => {
         expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
     });
 
-    function mountPage(pending) {
-        document.body.innerHTML = `
-            <strong id="battle-status">Awaiting players</strong>
-            <span id="battle-turn">1</span>
-            <div id="battle-roster"></div>
-            <svg id="battle-arena"></svg>
-            <div id="battle-log"></div>
-            <div id="turn-panel" hidden
-                 data-act-url="/tarmar/battles/1/act/"
-                 data-state-url="/tarmar/battles/1/state/"
-                ></div>
-            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
-            <script id="battle-seats" type="application/json">[]</script>
-            <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
-        `;
-        battle.initBattlePage();
-        global.fetch = jest.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({
-                status: 'paused', turn: 2,
-                view: sampleState([sampleCombatant()]),
-                events: [], seats: [], pending: null,
-            }),
-        });
-        require('../api.js');
-        return document.getElementById('turn-panel');
-    }
-
     test('confirming a pushed cast sends the amount picked', async () => {
         const panel = mountPage(pushPending());
         panel.querySelector('.turn-option-cast').click();
@@ -2077,6 +2078,154 @@ describe('pushing mana into a cast (#960)', () => {
         expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
             combatant_id: 4, turn: 2, letter: 'h', target_id: 9,
             spell_key: 'fire_missile',
+        });
+    });
+});
+
+describe('borrowing mana for a cast (tarmar-engine #28)', () => {
+    // A caster with 1 mana, as the engine builds the menu with Borrowing:
+    // Shield (1 mana) is castable and pushable into borrowing; Lightning
+    // Bolt (3 mana) has no plain cast, only borrowing copies. Every number
+    // the control prints is the server's: ``borrowed`` and ``cost``.
+    function borrowPending() {
+        return {
+            combatant_id: 4,
+            turn: 2,
+            display_name: 'Ysolde Fenner',
+            player: 'playeruser',
+            is_you: true,
+            candidates: [
+                { letter: 'a', name: 'MOVE', score: 0.4, ai_choice: true,
+                  rationale: 'Close the gap', target_id: null, spell_key: '' },
+                { letter: 'h', name: 'CAST SPELL Shield', score: 0.9,
+                  rationale: 'buff', target_id: null, spell_key: 'shield' },
+                { letter: 'h', name: 'CAST SPELL Shield (PUSH 1 MANA, BORROW 1 MANA)',
+                  score: 0, rationale: 'debt roll', target_id: null,
+                  spell_key: 'shield', push_mana: 1, borrow: true, borrowed: 1,
+                  cost: '2 mana (1 and 1 pushed); borrows the 1 you lack' },
+                { letter: 'h', name: 'CAST SPELL Lightning Bolt (PUSH 1 MANA, BORROW 3 MANA)',
+                  score: 0, rationale: 'debt roll', target_id: 9,
+                  spell_key: 'lightning_bolt', push_mana: 1, borrow: true, borrowed: 3,
+                  cost: '4 mana (3 and 1 pushed); borrows the 3 you lack' },
+                { letter: 'h', name: 'CAST SPELL Lightning Bolt (BORROW 2 MANA)',
+                  score: 0, rationale: 'debt roll', target_id: 9,
+                  spell_key: 'lightning_bolt', borrow: true, borrowed: 2,
+                  cost: '3 mana; borrows the 2 you lack' },
+            ],
+            magic: {
+                pool_label: 'Mana', pool: 1, max_pool: 10, owed: 2,
+                spells: [
+                    { key: 'shield', target_id: null, name: 'Shield',
+                      cost: 'Protection — 1 mana', note: '84% on 3d6',
+                      castable: true, reason: '', channel: null,
+                      borrowable: false, shortfall: 0 },
+                    { key: 'lightning_bolt', target_id: 9, name: 'Lightning Bolt',
+                      cost: 'Elemental — 3 mana', note: '50% on 3d6',
+                      castable: false, reason: 'needs 3 mana, 1 left: borrow the 2 it lacks',
+                      channel: null, borrowable: true, shortfall: 2 },
+                ],
+            },
+        };
+    }
+
+    function panelNode() {
+        document.body.innerHTML = '<div id="turn-panel" hidden></div>';
+        return document.getElementById('turn-panel');
+    }
+
+    function boltGroup(panel) {
+        return Array.from(panel.querySelectorAll('.turn-spell-group')).find(
+            (group) => group.textContent.includes('Lightning Bolt')
+        );
+    }
+
+    test('a cast only borrowing pays for still opens the stage', () => {
+        const pending = borrowPending();
+        // No affordable cast at all: Shield gone, only borrowing copies left.
+        pending.candidates = pending.candidates.filter(
+            (candidate) => candidate.spell_key !== 'shield'
+        );
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pending, { selectedIndex: null, castOpen: true });
+        expect(panel.querySelector('.turn-option-cast').textContent)
+            .toContain('0 casts ready, 1 by borrowing');
+        expect(panel.querySelectorAll('.turn-borrow')).toHaveLength(1);
+    });
+
+    test('the borrowing control lists the menu\'s copies, in the server\'s numbers', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, borrowPending(), {
+            selectedIndex: null, castOpen: true,
+        });
+        // Shield is affordable (its pushed copy borrows); only Lightning
+        // Bolt is paid for by borrowing alone.
+        expect(panel.querySelector('.turn-option-cast').textContent)
+            .toContain('1 cast ready, 1 by borrowing');
+        expect(panel.querySelector('.turn-cast-pool').textContent)
+            .toBe('Mana 1 of 10, owing 2. Pick a spell to cast.');
+        const group = boltGroup(panel);
+        const bolt = group.querySelector('.turn-spell');
+        // Not castable on its own: the row stays disabled with the reason.
+        expect(bolt.disabled).toBe(true);
+        expect(bolt.querySelector('.turn-spell-note').textContent)
+            .toBe('needs 3 mana, 1 left: borrow the 2 it lacks');
+        expect(group.querySelector('.turn-push')).toBeNull();
+        const choices = Array.from(group.querySelectorAll('.turn-borrow-amount'));
+        expect(choices.map((button) => button.textContent))
+            .toEqual(['Borrow 2 mana', '+1 mana, borrow 3']);
+        expect(choices.map((button) => button.dataset.borrowed)).toEqual(['2', '3']);
+        // Nothing is borrowed until the player picks.
+        expect(choices.every((button) => button.getAttribute('aria-pressed') === 'false'))
+            .toBe(true);
+        // Shield sits beside a borrowing copy of its push, with no plain push.
+        const shieldGroup = Array.from(panel.querySelectorAll('.turn-spell-group'))
+            .find((node) => node.textContent.includes('Shield'));
+        expect(shieldGroup.querySelector('.turn-push')).toBeNull();
+        expect(Array.from(shieldGroup.querySelectorAll('.turn-borrow-amount'))
+            .map((button) => button.textContent)).toEqual(['+1 mana, borrow 1']);
+    });
+
+    test('a borrowing copy selects its cast and shows what it costs', () => {
+        const panel = panelNode();
+        const onSelect = jest.fn();
+        battle.renderTurnPanel(panel, borrowPending(), {
+            selectedIndex: null, castOpen: true, onSelect,
+        });
+        boltGroup(panel).querySelector('.turn-borrow-amount').click();
+        expect(onSelect).toHaveBeenCalledWith(4);
+        battle.renderTurnPanel(panel, borrowPending(), {
+            selectedIndex: 4, castOpen: true,
+        });
+        const group = boltGroup(panel);
+        expect(group.querySelector('.turn-spell').getAttribute('aria-pressed')).toBe('true');
+        expect(group.querySelector('.turn-borrow-amount').getAttribute('aria-pressed'))
+            .toBe('true');
+        expect(group.querySelector('.turn-borrow-cost').textContent)
+            .toBe('Costs 3 mana; borrows the 2 you lack.');
+        expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
+    });
+
+    test('confirming a borrowing copy sends borrow and its push', async () => {
+        const panel = mountPage(borrowPending());
+        panel.querySelector('.turn-option-cast').click();
+        boltGroup(panel).querySelectorAll('.turn-borrow-amount')[1].click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 2, letter: 'h', target_id: 9,
+            spell_key: 'lightning_bolt', push_mana: 1, borrow: true,
+        });
+    });
+
+    test('confirming a plain cast sends no borrow', async () => {
+        const panel = mountPage(borrowPending());
+        panel.querySelector('.turn-option-cast').click();
+        Array.from(panel.querySelectorAll('.turn-spell'))
+            .find((button) => button.textContent.includes('Shield')).click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 2, letter: 'h', target_id: null, spell_key: 'shield',
         });
     });
 });

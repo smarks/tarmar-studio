@@ -474,6 +474,32 @@ def is_demon_die_chain(text: str) -> bool:
     return bool(_DEMON_DIE_CHAIN.match(text.strip()))
 
 
+def mana_owed_text(owed: int) -> str:
+    """``", owes 2"`` after a Mana Pool, or ``""`` when nothing is owed.
+
+    The one wording of a debt (tarmar-engine #28) wherever a pool is printed
+    as text: the record's lines (:func:`mana_pool_text`) and the Games
+    Master's panel sheet.
+    """
+    return f", owes {owed}" if owed else ""
+
+
+def mana_pool_text(current: int, pool: int, owed: int) -> str:
+    """The Mana Pool as the record's lines print it, or ``""`` with no pool.
+
+    One wording for the record's own line (:attr:`Character.mana_text`) and
+    for a fight's history line, which prints the pool as the fight found it.
+
+    Args:
+        current: The mana in hand.
+        pool: The Mana Pool's maximum; 0 for a character with none.
+        owed: Mana borrowed and not yet paid back (tarmar-engine #28).
+    """
+    if not pool:
+        return ""
+    return f"Mana {current}/{pool}{mana_owed_text(owed)}"
+
+
 class Character(models.Model):
     """A player character with rolled attributes."""
 
@@ -754,6 +780,11 @@ class Character(models.Model):
     # until a Game Master restores it. Stored as the amount spent for the
     # same reasons as the damage columns.
     mana_spent = models.PositiveSmallIntegerField(default=0, db_default=0)
+    # Mana borrowed in a fight and not yet paid back (tarmar-engine #28,
+    # Borrowing): the debt a fight's result writes, as it writes mana spent,
+    # and a Game Master settles on the sheet. The caster's next fight starts
+    # owing it (the canon's ruling; Spencer may overrule).
+    mana_owed = models.PositiveSmallIntegerField(default=0, db_default=0)
     is_played = models.BooleanField(default=False)  # True if user has manually edited
 
     # Visibility (issue #273, the parties chain's foundation). Private -- the
@@ -1280,10 +1311,8 @@ class Character(models.Model):
 
     @property
     def mana_text(self) -> str:
-        """``Mana 3/5``, or ``""`` for a character with no Mana Pool."""
-        if not self.free_spell_points:
-            return ""
-        return f"Mana {self.current_mana}/{self.free_spell_points}"
+        """``Mana 3/5``, ``Mana 0/5, owes 2``, or ``""`` with no Mana Pool."""
+        return mana_pool_text(self.current_mana, self.free_spell_points, self.mana_owed)
 
     @property
     def condition(self) -> "CurrentCondition | None":
@@ -2292,6 +2321,7 @@ CHARACTER_INT_FIELD_MAX = {
     "fatigue_damage": MAX_SMALLINT_FIELD_VALUE,
     "body_damage": MAX_SMALLINT_FIELD_VALUE,
     "mana_spent": MAX_SMALLINT_FIELD_VALUE,
+    "mana_owed": MAX_SMALLINT_FIELD_VALUE,
     # The counts the rules derive (issue #940): written by a run of years, an
     # XP change or a Game Master's grant, never by the single-field editor.
     # Bounded here for an import, like the wounds above, so the import holds
@@ -2333,6 +2363,7 @@ CHARACTER_INT_FIELD_MIN = {
     "fatigue_damage": 0,
     "body_damage": 0,
     "mana_spent": 0,
+    "mana_owed": 0,
     "age": STARTING_AGE,
     "experience_terms": 0,
     "free_skill_points": 0,
