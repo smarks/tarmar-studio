@@ -38,5 +38,14 @@
     "effect_bonus_per_mana_by_kind": { "damage": 1 },
     "spell_effect_bonus_per_mana": {}
   },
-  "channel": null
+  "channel": null,
+  "borrowing": {
+    "debt_dice": "2d6",
+    "debt_attributes": ["WIS"],
+    "penalty_per_debt": 2,
+    "failure": { "key": "backlash", "label": "Backlash", "is_runaway": false },
+    "automatic_failure_totals": [12],
+    "max_debt": 4,
+    "refunds_pay_debt_first": true
+  }
 }

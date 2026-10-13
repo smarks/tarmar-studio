@@ -463,6 +463,9 @@ def snapshot_character(
         # Spent mana stays spent between fights, as wounds do (coordinator's
         # ruling; Spencer may overrule): a caster arrives with what is left.
         mana=min(mana, current_mana(character)),
+        # So does mana borrowed and not paid back (tarmar-engine #28): the
+        # caster's next fight starts owing it.
+        debt=character.mana_owed,
         spells=list(spells),
         spell_mastery=seated_spell_levels,
         spell_skill_levels=dict(seated_spell_levels),
@@ -1540,6 +1543,11 @@ def _with_current_pools(combatant: BattleCombatant, entry: dict) -> dict:
     entry["body"] = body - character.body_damage
     entry["conscious"] = entry["fatigue"] > 0 and entry["body"] > 0
     entry["mana"] = min(int(entry.get("max_mana", 0)), current_mana(character))
+    # The mana owed (tarmar-engine #28), written only when owed, as the
+    # engine's own snapshot writes it.
+    entry.pop("debt", None)
+    if character.mana_owed:
+        entry["debt"] = character.mana_owed
     return entry
 
 
@@ -1645,13 +1653,26 @@ class StalePools(ValueError):
     """A record-writing fight whose figures no longer match their records."""
 
 
-def _record_pools(combatant_state, character: Character) -> tuple[int, int, int]:
+def _figure_pools(combatant_state) -> tuple[int, int, int, int]:
+    """A figure's Fatigue, Body, Mana and debt, as :func:`_record_pools`
+    gives the record's."""
+    return (
+        combatant_state.fatigue,
+        combatant_state.body,
+        combatant_state.mana,
+        combatant_state.debt,
+    )
+
+
+def _record_pools(combatant_state, character: Character) -> tuple[int, int, int, int]:
     """What the record holds now, as the board would have taken it.
 
     Fatigue and Body as the record's current pools; Mana capped at the
     figure's own pool, as :func:`snapshot_character` caps it. A character
     with no Mana Pool on the record has no mana to compare, so the figure's
-    own stands.
+    own stands. The mana owed (tarmar-engine #28) as the record owes it,
+    as :func:`snapshot_character` seats it: a debt a Game Master settled
+    mid-fight must not go on being rolled against or paid back on the board.
     """
     fatigue, body = character.pools()
     mana = (
@@ -1659,7 +1680,12 @@ def _record_pools(combatant_state, character: Character) -> tuple[int, int, int]
         if character.free_spell_points
         else combatant_state.mana
     )
-    return fatigue - character.fatigue_damage, body - character.body_damage, mana
+    return (
+        fatigue - character.fatigue_damage,
+        body - character.body_damage,
+        mana,
+        character.mana_owed,
+    )
 
 
 #: Why a fight no longer writes one character's record (review of #837), as
@@ -1777,9 +1803,7 @@ def _moved_figures(battle: Battle, state) -> list[tuple[BattleCombatant, object]
             continue
         if not figure.alive or not character.is_alive or not character.is_complete:
             continue
-        if (figure.fatigue, figure.body, figure.mana) != _record_pools(
-            figure, character
-        ):
+        if _figure_pools(figure) != _record_pools(figure, character):
             moved.append((combatant, figure))
     return moved
 
@@ -1800,7 +1824,8 @@ def resnapshot_pools(battle_id: int, *, is_game_master: bool) -> Battle:
     """Take each moved figure's pools from its character record (issue #842).
 
     The Game Master's answer to :data:`STALE_POOLS_REFUSAL`: the board takes
-    the record's current Fatigue, Body and Mana, a figure at 0 or below
+    the record's current Fatigue, Body and Mana and the mana owed
+    (tarmar-engine #28), a figure at 0 or below
     comes down, and the log says so. Nothing is written to the record, which
     is what the board now agrees with. Coordinator's ruling under the
     standing rule; Spencer may overrule.
@@ -1821,12 +1846,15 @@ def resnapshot_pools(battle_id: int, *, is_game_master: bool) -> Battle:
             raise ValueError("Every figure already holds its record's pools")
         lines = []
         for combatant, figure in moved:
-            fatigue, body, mana = _record_pools(figure, combatant.character)
+            fatigue, body, mana, debt = _record_pools(figure, combatant.character)
             lines.append(
                 f"{combatant.display_name} Fatigue {figure.fatigue}→{fatigue}, "
                 f"Body {figure.body}→{body}, Mana {figure.mana}→{mana}"
+                # The debt (tarmar-engine #28) only where either side owes.
+                + (f", owed {figure.debt}→{debt}" if figure.debt or debt else "")
             )
             figure.fatigue, figure.body, figure.mana = fatigue, body, mana
+            figure.debt = debt
             figure.conscious = fatigue > 0 and body > 0
         battle.state_json = dump_state(state)
         battle.save(update_fields=["state_json", "updated_at"])
@@ -1925,11 +1953,14 @@ def fight_reports(
             fatigue_lost=_lost(start.fatigue, end.fatigue),
             body_lost=_lost(start.body, end.body),
             mana_spent=_lost(start.mana, end.mana),
+            # What the debt rose by: the fall from the end back to the start.
+            debt_incurred=_lost(end.debt, start.debt),
             died=start.alive and not end.alive,
             closes=closes,
             started_fatigue=began.fatigue if began is not None else None,
             started_body=began.body if began is not None else None,
             started_mana=began.mana if began is not None else None,
+            started_debt=began.debt if began is not None else None,
             author=author,
         )
         if report.changes_anything:
@@ -2114,28 +2145,51 @@ def same_target(one, other) -> bool:
     return str(one) == str(other)
 
 
+def cast_variant(fields: dict) -> dict:
+    """How a cast is paid, from a menu option or a recorded choice.
+
+    The mana it pushes into its spell (issue #960) and whether it borrows the
+    mana its caster lacks (tarmar-engine #28). A missing ``push_mana`` is 0
+    and a missing ``borrow`` is false, the plain cast, as a menu or a choice
+    stored before Push or Borrowing reads; the engine's payload carries
+    either key only when set.
+
+    Args:
+        fields: A menu option's payload, a recorded choice, or the act
+            endpoint's parsed body.
+
+    Returns:
+        ``{"push_mana": int, "borrow": bool}``.
+    """
+    return {
+        "push_mana": fields.get("push_mana") or 0,
+        "borrow": bool(fields.get("borrow")),
+    }
+
+
 def names_option(option: dict, recorded: dict) -> bool:
     """Does a recorded choice name this menu option?
 
     The one comparison both sides of a player's choice make: the submission
     against the stored pending menu, and the recorded choice against the
-    replayed one. An option is its letter, its target, its spell and the
-    mana it pushes into that spell (issue #960), so a pushed cast is a
-    different option from the plain cast of the same spell, and a player may
-    record only a push the engine offered for it. A missing ``push_mana`` is
-    0, the plain cast, as a menu or a choice stored before Push reads.
+    replayed one. An option is its letter, its target, its spell and how the
+    cast is paid (:func:`cast_variant`): the mana it pushes into that spell
+    (issue #960) and whether it borrows (tarmar-engine #28). So a pushed or
+    borrowing cast is a different option from the plain cast of the same
+    spell, and a player may record only a push or a borrowing the engine
+    offered for it.
 
     Args:
         option: A menu option's fields, as :meth:`~tarmar_engine.policy.
             Candidate.to_payload` writes them.
-        recorded: The choice: ``letter``, ``target_id``, ``spell_key`` and
-            ``push_mana``.
+        recorded: The choice: ``letter``, ``target_id``, ``spell_key``,
+            ``push_mana`` and ``borrow``.
     """
     return (
         option.get("letter") == recorded.get("letter")
         and same_target(option.get("target_id"), recorded.get("target_id"))
         and (option.get("spell_key") or "") == (recorded.get("spell_key") or "")
-        and (option.get("push_mana") or 0) == (recorded.get("push_mana") or 0)
+        and cast_variant(option) == cast_variant(recorded)
     )
 
 
@@ -3062,6 +3116,14 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     built with. ``battle.tests.test_cast_flow`` pins the two sets equal,
     against a menu built with those rules, so the explanation can never
     contradict the menu.
+
+    A spell the caster cannot afford, and could otherwise cast, is
+    ``borrowable`` when the canon's Borrowing rules allow it (tarmar-engine
+    #28): within the engine's own
+    :meth:`~tarmar_engine.magic.BorrowingRules.borrowing_ceiling`, the debt
+    cap and the Channel. Such a row is not castable (the plain cast is not
+    on the menu) and not withheld: the menu offers it as a borrowing copy,
+    and the row carries the ``shortfall`` that copy borrows.
     """
     try:
         actor = state.by_id(combatant_id)
@@ -3073,21 +3135,37 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     # ``policy._cast_candidates`` chooses it — a spell with nobody to aim at
     # is not offered, so the row has to say so rather than claim castable.
     enemy = policy.nearest_enemy(state, actor)
-    channel = magic_rules().channel
+    rules = magic_rules()
     rows = []
     for key in actor.spells:
         spell = get_spell(key)
         aimed = spell.damage is not None and not spell.heals
-        castable, reason = True, ""
-        spell_channel, channel_refusal = _channel_reading(channel, actor, spell)
-        if spell.level > actor.mana:
-            castable, reason = False, f"needs {spell.level} mana, {actor.mana} left"
-        elif spell.continuing and key in actor.active_spells:
-            castable, reason = False, "already up — renews itself"
+        spell_channel, channel_refusal = _channel_reading(rules.channel, actor, spell)
+        other_reason = ""
+        if spell.continuing and key in actor.active_spells:
+            other_reason = "already up — renews itself"
         elif aimed and enemy is None:
-            castable, reason = False, "nothing in reach to aim at"
+            other_reason = "nothing in reach to aim at"
         elif channel_refusal:
-            castable, reason = False, channel_refusal
+            other_reason = channel_refusal
+        shortfall = turn_menu.mana_short(actor, spell.level)
+        borrowable = (
+            bool(shortfall)
+            and not other_reason
+            and rules.borrowing is not None
+            and spell.level
+            <= rules.borrowing.borrowing_ceiling(actor.mana, actor.debt, spell_channel)
+        )
+        if borrowable:
+            reason = (
+                f"needs {spell.level} mana, {actor.mana} left: "
+                f"borrow the {shortfall} it lacks"
+            )
+        elif shortfall:
+            reason = f"needs {spell.level} mana, {actor.mana} left"
+        else:
+            reason = other_reason
+        castable = not reason
         attribute = actor.intelligence if spell.attribute == "INT" else actor.wisdom
         chance = policy.three_d6_at_most(attribute)
         aim = ", then a DEX roll to land it" if spell.targeted else ""
@@ -3100,6 +3178,9 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                 "note": f"{chance:.0%} on 3d6 \u2264 {spell.attribute}{aim}",
                 "castable": castable,
                 "reason": reason,
+                # Cast only by borrowing the shortfall (tarmar-engine #28).
+                "borrowable": borrowable,
+                "shortfall": shortfall if borrowable else 0,
                 # The most mana one casting may take, cost and push together
                 # (issue #960); None when the canon bounds no casting by it.
                 "channel": spell_channel,
@@ -3109,6 +3190,8 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         "pool_label": "Mana",
         "pool": actor.mana,
         "max_pool": actor.max_mana,
+        # Mana borrowed and not yet paid back (tarmar-engine #28).
+        "owed": actor.debt,
         "spells": rows,
     }
 
@@ -3156,6 +3239,7 @@ def record_player_action(
     target_id: int | None = None,
     spell_key: str = "",
     push_mana: int = 0,
+    borrow: bool = False,
     destination: tuple[int, int] | None = None,
     as_ai: bool = False,
 ) -> tuple[Battle, list[BattleEvent]]:
@@ -3175,13 +3259,15 @@ def record_player_action(
     stored copy is display-only). Only the seated player may choose for
     their combatant; a DM may instead pass ``as_ai=True`` to let the AI's
     top-scored candidate stand for an absent player (the ``letter``/
-    ``target_id``/``spell_key``/``push_mana`` arguments are ignored then, but
-    the binding is not: an AI hand-off is a choice for one named figure too).
+    ``target_id``/``spell_key``/``push_mana``/``borrow`` arguments are
+    ignored then, but the binding is not: an AI hand-off is a choice for one
+    named figure too).
 
     ``push_mana`` is the extra mana a cast pushes into its spell (issue
-    #960). A player may record only a push the engine offered on the menu for
-    that cast; any other amount is not on the menu, and refused as an option
-    that is not.
+    #960), and ``borrow`` whether the cast borrows the mana its caster lacks
+    (tarmar-engine #28). A player may record only a push or a borrowing the
+    engine offered on the menu for that cast; any other is not on the menu,
+    and refused as an option that is not.
 
     ``destination`` is the hex the player picked for an option that places
     the figure (#819, #866). It must be one of that option's
@@ -3241,7 +3327,9 @@ def record_player_action(
             letter = top["letter"]
             target_id = top.get("target_id")
             spell_key = top.get("spell_key") or ""
-            push_mana = top.get("push_mana") or 0
+            # The AI never pushes or borrows (house readings), so this is the
+            # plain cast; read from the option all the same.
+            variant = cast_variant(top)
             # The AI's own hex, if it named one. On tarmar-engine 0.9.10 the AI
             # names none (house ruling ai_destinations), so this is None and
             # the option makes its own move; kept so a hand-off carries the
@@ -3250,11 +3338,12 @@ def record_player_action(
         else:
             if not decides_for(actor, battle, seat):
                 raise ValueError("That is not your combatant")
+            variant = cast_variant({"push_mana": push_mana, "borrow": borrow})
             recorded = {
                 "letter": letter,
                 "target_id": target_id,
                 "spell_key": spell_key or "",
-                "push_mana": push_mana,
+                **variant,
             }
             matched = next(
                 (
@@ -3279,7 +3368,7 @@ def record_player_action(
             "letter": letter,
             "target_id": target_id,
             "spell_key": spell_key or "",
-            "push_mana": push_mana,
+            **variant,
             "destination": list(destination) if destination is not None else None,
         }
         battle.turn_inputs_json = inputs

@@ -16,6 +16,8 @@ from unittest.mock import patch
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
+    BorrowingFailure,
+    BorrowingRules,
     CastingSuccessTier,
     ChannelDerivation,
     ChannelRules,
@@ -35,7 +37,7 @@ from reference.paths import (
 )
 
 # A complete file with invented numbers: every field present, both kinds of
-# Channel derivation, a per-spell push bonus and a ruling.
+# Channel derivation, a per-spell push bonus, Borrowing and a ruling.
 INVENTED_RULES: dict[str, Any] = {
     "casting_success_tiers": [
         {
@@ -99,6 +101,15 @@ INVENTED_RULES: dict[str, Any] = {
         },
         "kind_by_spell": {"fire_ball": "deep"},
         "default_kind": "hedge",
+    },
+    "borrowing": {
+        "debt_dice": "2d8",
+        "debt_attributes": ["WIS", "INT"],
+        "penalty_per_debt": 2,
+        "failure": {"key": "backlash", "label": "Backlash", "is_runaway": False},
+        "automatic_failure_totals": [16],
+        "max_debt": 6,
+        "refunds_pay_debt_first": False,
     },
     "rulings": [
         {"key": "made_up", "reading": "An invented reading.", "for_spencer": True}
@@ -169,6 +180,15 @@ INVENTED_MAGIC_RULES = MagicRules(
         kind_by_spell={"fire_ball": "deep"},
         default_kind="hedge",
     ),
+    borrowing=BorrowingRules(
+        debt_dice="2d8",
+        debt_attributes=("WIS", "INT"),
+        penalty_per_debt=2,
+        failure=BorrowingFailure(key="backlash", label="Backlash", is_runaway=False),
+        automatic_failure_totals=frozenset({16}),
+        max_debt=6,
+        refunds_pay_debt_first=False,
+    ),
 )
 
 
@@ -205,9 +225,21 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             load_magic_rules(self.write_rules(INVENTED_RULES)), INVENTED_MAGIC_RULES
         )
 
-    def test_null_push_and_channel_and_no_tiers_load(self) -> None:
-        rules = {"casting_success_tiers": [], "push": None, "channel": None}
+    def test_null_push_channel_and_borrowing_and_no_tiers_load(self) -> None:
+        rules = {
+            "casting_success_tiers": [],
+            "push": None,
+            "channel": None,
+            "borrowing": None,
+        }
         self.assertEqual(load_magic_rules(self.write_rules(rules)), MagicRules())
+
+    def test_borrowing_with_no_cap_loads_beside_channel(self) -> None:
+        rules = invented_rules()
+        rules["borrowing"]["max_debt"] = None
+        loaded = load_magic_rules(self.write_rules(rules))
+        assert loaded.borrowing is not None
+        self.assertIsNone(loaded.borrowing.max_debt)
 
     def test_rulings_are_optional(self) -> None:
         rules = invented_rules()
@@ -349,6 +381,54 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         "channel.kind_by_spell has an empty key",
         lambda rules: rules["channel"].update(kind_by_spell={"": "deep"}),
     ),
+    ("borrowing", lambda rules: rules.pop("borrowing")),
+    ("borrowing", lambda rules: rules.update(borrowing=[])),
+    ("borrowing.debt_dice", lambda rules: rules["borrowing"].update(debt_dice=3)),
+    ("borrowing.debt_dice", lambda rules: rules["borrowing"].pop("debt_dice")),
+    (
+        "borrowing.debt_attributes",
+        lambda rules: rules["borrowing"].update(debt_attributes="WIS"),
+    ),
+    (
+        "borrowing.debt_attributes[1]",
+        lambda rules: rules["borrowing"].update(debt_attributes=["WIS", ""]),
+    ),
+    (
+        "borrowing.debt_attributes repeats an entry",
+        lambda rules: rules["borrowing"].update(debt_attributes=["WIS", "WIS"]),
+    ),
+    (
+        "borrowing.penalty_per_debt",
+        lambda rules: rules["borrowing"].update(penalty_per_debt=True),
+    ),
+    ("borrowing.failure", lambda rules: rules["borrowing"].update(failure=None)),
+    (
+        "borrowing.failure.label",
+        lambda rules: rules["borrowing"]["failure"].update(label=""),
+    ),
+    (
+        "borrowing.failure.is_runaway",
+        lambda rules: rules["borrowing"]["failure"].update(is_runaway=1),
+    ),
+    (
+        "borrowing.failure.spell_takes_effect",
+        lambda rules: rules["borrowing"]["failure"].update(spell_takes_effect=True),
+    ),
+    (
+        "borrowing.automatic_failure_totals",
+        lambda rules: rules["borrowing"].update(automatic_failure_totals=[16, 16]),
+    ),
+    (
+        "borrowing.automatic_failure_totals[0]",
+        lambda rules: rules["borrowing"].update(automatic_failure_totals=[False]),
+    ),
+    ("borrowing.max_debt", lambda rules: rules["borrowing"].update(max_debt="6")),
+    ("borrowing.max_debt", lambda rules: rules["borrowing"].pop("max_debt")),
+    (
+        "borrowing.refunds_pay_debt_first",
+        lambda rules: rules["borrowing"].update(refunds_pay_debt_first=0),
+    ),
+    ("borrowing.cap", lambda rules: rules["borrowing"].update(cap=6)),
     ("rulings", lambda rules: rules.update(rulings={})),
     ("rulings[0]", lambda rules: rules.update(rulings=["An unkeyed reading."])),
     ("rulings[0].reading", lambda rules: rules["rulings"][0].pop("reading")),
@@ -394,6 +474,38 @@ class EngineValidationTest(MagicRulesFileTestCase):
         rules["channel"]["default_kind"] = "wild"
         self.assert_engine_refused(rules, "channel", "no Channel derivation")
 
+    def test_bad_debt_dice(self) -> None:
+        rules = invented_rules()
+        rules["borrowing"]["debt_dice"] = "two dice"
+        self.assert_refused(rules, "borrowing")
+
+    def test_an_unknown_debt_attribute(self) -> None:
+        rules = invented_rules()
+        rules["borrowing"]["debt_attributes"] = ["WIS", "STR"]
+        self.assert_engine_refused(rules, "borrowing", "debt_attributes")
+
+    def test_no_debt_attributes(self) -> None:
+        rules = invented_rules()
+        rules["borrowing"]["debt_attributes"] = []
+        self.assert_engine_refused(rules, "borrowing", "at least one attribute")
+
+    def test_a_negative_debt_penalty(self) -> None:
+        rules = invented_rules()
+        rules["borrowing"]["penalty_per_debt"] = -1
+        self.assert_engine_refused(rules, "borrowing", "penalty")
+
+    def test_a_negative_debt_cap(self) -> None:
+        rules = invented_rules()
+        rules["borrowing"]["max_debt"] = -1
+        self.assert_engine_refused(rules, "borrowing", "cap")
+
+    def test_borrowing_with_no_cap_and_no_channel(self) -> None:
+        rules = invented_rules()
+        rules["channel"] = None
+        rules["push"]["spell_effect_bonus_per_mana"] = {}
+        rules["borrowing"]["max_debt"] = None
+        self.assert_engine_refused(rules, "borrowing", "Channel")
+
 
 class CanonMagicRulesTest(SimpleTestCase):
     def tearDown(self) -> None:
@@ -402,8 +514,11 @@ class CanonMagicRulesTest(SimpleTestCase):
     def test_the_default_canon_file_loads(self) -> None:
         rules = load_magic_rules(DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME)
         self.assertIsNotNone(rules.push)
-        # The default canon's channel.md sets no separate limit on Channel.
+        # The default canon's channel.md sets no separate limit on Channel,
+        # so its invented Borrowing carries a debt cap to bound a casting.
         self.assertIsNone(rules.channel)
+        assert rules.borrowing is not None
+        self.assertIsNotNone(rules.borrowing.max_debt)
 
     def test_the_loaded_canon_file_loads_once_per_process(self) -> None:
         self.assertEqual(MAGIC_RULES_FILE, DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME)
@@ -427,6 +542,7 @@ class TarmarMagicRulesTest(SimpleTestCase):
         assert rules.channel is not None, "the Tarmar canon has Channel"
         runaway_band = rules.push.runaway_band()
         assert runaway_band is not None, "the Tarmar canon has a Runaway band"
+        assert rules.borrowing is not None, "the Tarmar canon offers Borrowing"
         summary = {
             "tier_natural_totals": sorted(
                 total
@@ -446,6 +562,17 @@ class TarmarMagicRulesTest(SimpleTestCase):
             "channel_source_skills": {
                 kind: derivation.source_skill
                 for kind, derivation in rules.channel.derivations.items()
+            },
+            "borrowing": {
+                "debt_dice": rules.borrowing.debt_dice,
+                "debt_attributes": list(rules.borrowing.debt_attributes),
+                "penalty_per_debt": rules.borrowing.penalty_per_debt,
+                "failure_is_runaway": rules.borrowing.failure.is_runaway,
+                "automatic_failure_totals": sorted(
+                    rules.borrowing.automatic_failure_totals
+                ),
+                "max_debt": rules.borrowing.max_debt,
+                "refunds_pay_debt_first": rules.borrowing.refunds_pay_debt_first,
             },
         }
         self.assertEqual(summary, CANON_EXPECTATIONS["magic_rules"])

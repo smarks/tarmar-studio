@@ -5,7 +5,10 @@ The engine runs the casting success tiers, Push and Channel only on the
 menu carry the loaded canon's, that a seated character brings the levels
 Channel reads, that a snapshot written before carries them too, that a player
 records only a push the menu offered, and that a canon the loader refuses
-fails the system check. Every number here is invented.
+fails the system check. Borrowing (tarmar-engine #28) the same way: a cast
+the caster cannot afford is offered as a borrowing copy, its debt roll is
+recorded, and a player records only a borrowing the menu offered. Every
+number here is invented.
 """
 
 from dataclasses import replace
@@ -32,17 +35,30 @@ from battle.services import (
     record_player_action,
     snapshot_character,
 )
+from battle.turn_menu import borrowed_mana
 from characters.skills import ARCANE_SKILL_NAME, points_for_level
 from common.rolling import Roller
 from common.test_helpers import BaseTestCase, create_character
 
-from .magic_fixtures import INVENTED_RULES, rules_with_channel, seated_rules
+from .magic_fixtures import (
+    BORROWING_RULES,
+    INVENTED_RULES,
+    rules_with_channel,
+    seated_rules,
+)
 from .test_cast_flow import awaiting_wizard_battle
 from .test_state import make_combatant
 
 #: The seed whose dice give the caster a successful casting roll, so the
 #: pushed cast reaches its Control Roll.
 PUSHED_CAST_SEED = 3
+#: Seeds whose dice give a caster with no mana a successful borrowing cast of
+#: Fire Missile, then a debt roll that holds, and one that fails.
+DEBT_HELD_SEED = 20
+DEBT_FAILED_SEED = 28
+#: A seed whose dice let a caster with 1 mana pay for the most-pushed
+#: borrowing copy of Fire Missile, so the engine borrows.
+PUSHED_BORROW_SEED = 1
 
 
 def caster_and_foe(*, spell_level_recorded: int) -> BattleState:
@@ -143,6 +159,123 @@ class PushedCastTurnTest(SimpleTestCase):
         ]
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["payload"]["push_mana"], 2)
+
+
+class BorrowingCastTurnTest(SimpleTestCase):
+    """A borrowing cast through the studio's own turn path, with seeded dice."""
+
+    #: What the studio read the chosen copy as borrowing, set by each turn.
+    studio_borrowed: int = 0
+
+    def run_borrowing_turn(
+        self, seed: int, *, mana: int = 0, pushed: bool = False
+    ) -> tuple[BattleState, list[dict]]:
+        """The caster borrows for Fire Missile; the foe acts.
+
+        Args:
+            seed: The turn's dice.
+            mana: The caster's pool when the turn begins.
+            pushed: Choose the most-pushed borrowing copy, not the plain one.
+
+        Returns:
+            The state after the turn and its events. The studio's own reading
+            of what the chosen copy borrows (:func:`borrowed_mana`) is kept on
+            ``self.studio_borrowed``, for comparison with the engine's.
+        """
+        battle = unsaved_tarmar_battle()
+        state = caster_and_foe(spell_level_recorded=2)
+        state.by_id(1).mana = mana
+        with seated_rules(BORROWING_RULES):
+            advise = profiles.decider(battle)
+
+            def decide(state: BattleState, actor: CombatantState) -> Decision:
+                advice = advise(state, actor)
+                if actor.combatant_id != 1:
+                    return advice
+                borrowing = [
+                    candidate
+                    for candidate in advice.candidates
+                    if candidate.borrow and bool(candidate.push_mana) == pushed
+                ]
+                self.assertEqual(
+                    {candidate.spell_key for candidate in borrowing}, {"fire_missile"}
+                )
+                # Only a player borrows: the AI's own pick is something else.
+                self.assertFalse(advice.chosen.borrow)
+                chosen = borrowing[-1]
+                self.studio_borrowed = borrowed_mana(actor, chosen)
+                return Decision(chosen=chosen, candidates=advice.candidates)
+
+            events = profiles.TarmarProfile(battle).run_turn(
+                state, Roller(seed=seed), decide
+            )
+        return state, events
+
+    def cast_payload(self, events: list[dict]) -> dict:
+        return next(
+            event["payload"]
+            for event in events
+            if event["event_type"] == "action"
+            and event["payload"].get("spell") == "fire_missile"
+        )
+
+    def test_the_studio_s_shortfall_is_what_the_engine_borrows(self) -> None:
+        # The engine's Candidate carries no shortfall, so the menu and the
+        # cast stage read it through one studio helper; the engine's cast
+        # payload is the check, for a plain copy and for a pushed one.
+        for seed, mana, pushed in (
+            (DEBT_HELD_SEED, 0, False),
+            (PUSHED_BORROW_SEED, 1, True),
+        ):
+            with self.subTest(pushed=pushed):
+                _state, events = self.run_borrowing_turn(seed, mana=mana, pushed=pushed)
+                payload = self.cast_payload(events)
+                self.assertEqual(bool(payload.get("push_mana")), pushed)
+                self.assertGreater(payload["borrowed"], 0)
+                self.assertEqual(payload["borrowed"], self.studio_borrowed)
+
+    def debt_events(self, events: list[dict]) -> tuple[list[dict], list[dict]]:
+        rolls = [
+            event
+            for event in events
+            if event["event_type"] == "roll" and event["payload"]["purpose"] == "debt"
+        ]
+        outcomes = [
+            event
+            for event in events
+            if event["event_type"] == "status" and "held" in event["payload"]
+        ]
+        return rolls, outcomes
+
+    def test_a_borrowing_cast_records_its_debt_and_a_held_roll(self) -> None:
+        state, events = self.run_borrowing_turn(DEBT_HELD_SEED)
+        caster = state.by_id(1)
+        self.assertEqual((caster.mana, caster.debt), (0, 1))
+        cast = self.cast_payload(events)
+        self.assertEqual((cast["borrowed"], cast["debt"]), (1, 1))
+        rolls, outcomes = self.debt_events(events)
+        self.assertEqual(len(rolls), 1)
+        # Target: WIS 10 less 2 per point owed.
+        self.assertEqual(outcomes[0]["payload"]["target"], 8)
+        self.assertTrue(outcomes[0]["payload"]["held"])
+        self.assertEqual(
+            profiles.TarmarProfile(unsaved_tarmar_battle())
+            .figure_vitals(state)[1]
+            .debt,
+            1,
+        )
+
+    def test_a_failed_debt_roll_names_the_injected_failure(self) -> None:
+        _state, events = self.run_borrowing_turn(DEBT_FAILED_SEED)
+        _rolls, outcomes = self.debt_events(events)
+        self.assertFalse(outcomes[0]["payload"]["held"])
+        failure = next(
+            event
+            for event in events
+            if event["event_type"] == "status" and "debt_failure" in event["payload"]
+        )
+        self.assertEqual(failure["payload"]["label"], "Slip of the purse")
+        self.assertFalse(failure["payload"]["runaway"])
 
 
 class SeatedMagicLevelsTest(BaseTestCase):
@@ -326,6 +459,120 @@ class RecordPushedChoiceTest(BaseTestCase):
         response = self.post_json(url, {**body, "push_mana": "lots"})
         self.assertEqual(response.status_code, 400)
         response = self.post_json(url, {**body, "push_mana": self.offered["push_mana"]})
+        self.assertEqual(response.status_code, 200)
+
+
+class BorrowedChoiceMatchTest(SimpleTestCase):
+    plain = Candidate("h", "CAST", 1.0, "", target_id=2, spell_key="fire_missile")
+    borrowing = Candidate(
+        "h",
+        "CAST (BORROW 1)",
+        0.0,
+        "",
+        target_id=2,
+        spell_key="fire_missile",
+        borrow=True,
+    )
+    choice = {"letter": "h", "target_id": 2, "spell_key": "fire_missile"}
+
+    def test_a_borrowing_choice_names_the_borrowing_option_only(self) -> None:
+        borrowing_choice = {**self.choice, "borrow": True}
+        self.assertTrue(names_option(self.borrowing.to_payload(), borrowing_choice))
+        self.assertFalse(names_option(self.plain.to_payload(), borrowing_choice))
+        # A choice with no borrow, as one stored before Borrowing, is the plain cast.
+        self.assertTrue(names_option(self.plain.to_payload(), self.choice))
+        self.assertFalse(names_option(self.borrowing.to_payload(), self.choice))
+
+    def test_the_replayed_menu_resolves_a_borrowing_choice(self) -> None:
+        self.assertIs(
+            _match_candidate(
+                [self.plain, self.borrowing], {**self.choice, "borrow": True}
+            ),
+            self.borrowing,
+        )
+        self.assertIsNone(
+            _match_candidate([self.plain], {**self.choice, "borrow": True})
+        )
+
+
+class RecordBorrowedChoiceTest(BaseTestCase):
+    """Who may set ``borrow``: a player, for a borrowing copy the menu offered."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(seated_rules(BORROWING_RULES))
+        self.player = self.create_player()
+        self.battle, self.seat = awaiting_wizard_battle(
+            self.create_dm(), self.player, mana=0
+        )
+        self.pending = self.battle.pending_input_json
+        self.offered = next(
+            candidate
+            for candidate in self.pending["candidates"]
+            if candidate.get("borrow") and not candidate.get("push_mana")
+        )
+
+    def record(self, option: dict, *, borrow: bool):
+        return record_player_action(
+            self.battle.pk,
+            self.player,
+            combatant_id=self.seat.pk,
+            turn=self.pending["turn"],
+            letter=option["letter"],
+            target_id=option.get("target_id"),
+            spell_key=option.get("spell_key") or "",
+            push_mana=option.get("push_mana") or 0,
+            borrow=borrow,
+        )
+
+    def test_an_offered_borrowing_is_recorded_and_replayed(self) -> None:
+        self.record(self.offered, borrow=True)
+        chosen = [
+            event.payload["chosen"]
+            for event in self.battle.events.filter(event_type="decision")
+            if event.payload["chosen"].get("spell_key") == self.offered["spell_key"]
+        ]
+        self.assertTrue(chosen[0]["borrow"])
+        self.assertTrue(chosen[0]["rationale"].startswith("chosen by"))
+
+    def test_a_borrowing_copy_says_what_it_borrows(self) -> None:
+        cost = int(self.offered["borrowed"])
+        self.assertGreater(cost, 0)
+        self.assertIn(f", borrowing the {cost} mana you lack", self.offered["plain"])
+        self.assertIn(f"borrows the {cost} you lack as debt", self.offered["cost"])
+        self.assertIn("a debt roll follows the spell", self.offered["cost"])
+
+    def test_the_same_cast_without_borrowing_is_not_on_the_menu(self) -> None:
+        # The caster cannot afford the plain cast: only the borrowing copy is
+        # offered, and a choice that leaves borrow off is refused.
+        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+            self.record(self.offered, borrow=False)
+
+    def test_a_borrowing_the_menu_did_not_offer_is_refused(self) -> None:
+        not_a_cast = next(
+            candidate
+            for candidate in self.pending["candidates"]
+            if not candidate.get("spell_key")
+        )
+        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+            self.record(not_a_cast, borrow=True)
+
+    def test_the_endpoint_reads_borrow(self) -> None:
+        self.login_as(self.player)
+        url = reverse("battle:act", args=[self.battle.pk])
+        body = {
+            "combatant_id": self.seat.pk,
+            "turn": self.pending["turn"],
+            "letter": self.offered["letter"],
+            "target_id": self.offered["target_id"],
+            "spell_key": self.offered["spell_key"],
+        }
+        response = self.post_json(url, {**body, "borrow": "yes"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "borrow is true or false")
+        response = self.post_json(url, body)
+        self.assertEqual(response.status_code, 400)
+        response = self.post_json(url, {**body, "borrow": True})
         self.assertEqual(response.status_code, 200)
 
 

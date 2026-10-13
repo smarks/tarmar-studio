@@ -2139,7 +2139,8 @@ def battle_act(request, pk):
     was composed for (#644): the service refuses a submission that names a
     different one rather than applying it to whoever is awaited now.
     ``push_mana`` (optional, 0 when absent) picks a pushed cast the menu
-    offered (#960).
+    offered (#960), and ``borrow`` (optional, false when absent) a borrowing
+    cast (tarmar-engine #28).
     """
     actor, battle = _actor_and_readable_battle(request, pk)
     data, err = _parse_json_body(request)
@@ -2170,6 +2171,9 @@ def battle_act(request, pk):
         push_mana = whole_number(data.get("push_mana") or 0)
     except ValueError:
         return _json_error("A numeric push_mana is required")
+    borrow = data.get("borrow", False)
+    if not isinstance(borrow, bool):
+        return _json_error("borrow is true or false")
     destination_raw = data.get("destination")
     destination = None
     if destination_raw is not None:
@@ -2193,6 +2197,7 @@ def battle_act(request, pk):
             target_id=target_id,
             spell_key=str(data.get("spell_key") or ""),
             push_mana=push_mana,
+            borrow=borrow,
             destination=destination,
             as_ai=as_ai,
         )

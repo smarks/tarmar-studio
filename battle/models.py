@@ -141,8 +141,9 @@ class Battle(models.Model):
     pending_input_json = models.JSONField(default=dict, blank=True)
     # Player choices recorded for the in-progress turn, keyed by combatant id
     # (as a string — JSON object keys): ``{"7": {"letter": "j",
-    # "target_id": 3, "spell_key": "", "push_mana": 0}}`` (``push_mana`` since
-    # #960; a choice without it is the plain cast). Consumed by the
+    # "target_id": 3, "spell_key": "", "push_mana": 0, "borrow": false}}``
+    # (``push_mana`` since #960, ``borrow`` since tarmar-engine #28; a choice
+    # without them is the plain cast). Consumed by the
     # deterministic turn replay and cleared when the turn commits.
     turn_inputs_json = models.JSONField(default=dict, blank=True)
     turn_number = models.PositiveIntegerField(default=0)

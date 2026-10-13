@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from characters.magic import known_spells
-from characters.models import Character
+from characters.models import Character, mana_owed_text
 from characters.purse import format_purse
 from characters.skills import calculate_attribute_modifier, format_skill_level
 
@@ -91,6 +91,8 @@ class CharacterSheet:
     condition: str | None
     mana: int
     current_mana: int
+    #: The mana owed after the pool, ", owes 2", or "" (tarmar-engine #28).
+    mana_owed: str
     physical: int | None
     mental: int | None
     skills: tuple[SkillLine, ...]
@@ -199,6 +201,7 @@ class CharacterSheet:
             # free_spell_points.
             mana=character.free_spell_points,
             current_mana=character.current_mana,
+            mana_owed=mana_owed_text(character.mana_owed),
             physical=character.physical,
             mental=character.mental,
             skills=skills,
