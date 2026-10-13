@@ -1,0 +1,10 @@
+gate: pass
+commit: 7db9874ef94e197fb3d534523d4a79b4c4675150
+recorded: 2026-10-13T21:15:42Z
+host: QuantumFoamRedux.local
+canon: tarmar
+canon-dir: /private/tmp/tarmar-ship-41ptcsg2/canon
+canon-commit: eb6c1e889a765a719bdc4dcb555a9141eb1e0ac3
+e2e-port: 8565
+default-canon-e2e-port: 8566
+steps: ruff, ruff format, pyright, makemigrations, build_guides, pytest, jest, playwright, pytest (default canon), jest (default canon), playwright (default canon)
