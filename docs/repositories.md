@@ -94,7 +94,7 @@ All are under `github.com/smarks`.
 
 | Repository | Visibility | Responsible for |
 |---|---|---|
-| `tarmar-studio-private` | private, archived | Where the application was developed until 2026-10-10. Archived and read-only, and nothing deploys from it. Its closed issues and pull requests stay there; its open issues are being recreated in `tarmar-studio`, and three (#979, #981, #982) were still open there, not yet moved, on 2026-10-11 |
+| `tarmar-studio-private` | private, archived | Where the application was developed until 2026-10-10. Archived and read-only, and nothing deploys from it. Its closed issues and pull requests stay there. Its open issues were recreated in `tarmar-studio` and closed in the archive with a link to the copy; only the pinned notice of the move (`tarmar-studio-private#1002`) is still open there |
 | `tarmar-feedback` | public | Retired 2026-10-10, replaced by the public repository's issue forms. Still exists; deleting it is Spencer's to run (`gh repo delete smarks/tarmar-feedback --yes`) |
 
 ## The machines
