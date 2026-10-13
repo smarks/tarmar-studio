@@ -1038,6 +1038,17 @@
     flex-basis: 100%;
 }
 
+/* A spell running away from the figure (tarmar-engine #30): it stays on
+   the card while the state says it runs. */
+.combatant-runaway {
+    margin: 0.2rem 0;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.75rem;
+    color: var(--colour-status-danger-ink);
+    background: var(--colour-status-danger-surface);
+    border-radius: 3px;
+}
+
 .combatant-controller {
     margin: 0.1rem 0 0.3rem;
     font-size: 0.75rem;

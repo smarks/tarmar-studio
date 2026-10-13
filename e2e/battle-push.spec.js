@@ -23,6 +23,16 @@
  * borrowing copy is offered and that the debt roll is logged; why, and the
  * numbers, are the canon's.
  *
+ * Runaway (tarmar-engine #30), in the third test. Under the default canon
+ * the turns' seed is pinned so the wizard's Fire Missile, pushed by two, is
+ * a Runaway on its Control Roll's automatic total: the roster card shows it
+ * running, the next turn's Renew Spells phase drains the wizard's mana, and
+ * the wizard takes the anchor the menu offers, whose roll holds and ends it.
+ * Under the Tarmar canon, where this wizard pushes nothing, the Runaway is
+ * started on the board before the turn, and the spec pins only that the card
+ * shows it, the wizard's own anchor is the AI's pick, and the drain and the
+ * anchor roll are logged; the numbers are the canon's.
+ *
  * Every die is pinned. The battle's seed fixes the turn's rolls and the
  * opponent; the wizard is generated on the claim, so that one request names
  * its dice (X-E2E-Dice-Seed, e2e/dice.js). The seeds were chosen so the
@@ -42,6 +52,12 @@ const { runDjangoShell } = require('./django');
 const BATTLE_SEED = 11;
 /** The claim's seed: the generated wizard's attributes, INT 17 among them. */
 const WIZARD_SEED = 17;
+/**
+ * The turns' seed for the Runaway branch (tarmar-engine #30), set after the
+ * battle starts: turn 1's Control Roll is an 18 and turn 2's anchor roll
+ * holds, under the default canon.
+ */
+const RUNAWAY_TURNS_SEED = 134;
 
 /**
  * Empty the battle's wizard's mana pool, before the turn it decides in.
@@ -57,6 +73,42 @@ state = load_state(battle.state_json, battle.rules_profile)
 for figure in state.combatants:
     if figure.spells:
         figure.mana = 0
+battle.state_json = dump_state(state)
+battle.save(update_fields=["state_json"])
+`);
+}
+
+/**
+ * Seed the started battle's turns so turn 1's pushed Fire Missile reaches a
+ * Control Roll of 18, the default canon's automatic Runaway total, and turn
+ * 2's anchor roll holds. The opponent and the wizard are already made from
+ * BATTLE_SEED and WIZARD_SEED; only the turns' dice follow this seed.
+ *
+ * @param {number} battleId
+ */
+function pinTheRunawayTurns(battleId) {
+    runDjangoShell(`
+from battle.models import Battle
+Battle.objects.filter(pk=${battleId}).update(seed=${RUNAWAY_TURNS_SEED})
+`);
+}
+
+/**
+ * Start a Runaway of Fire Missile on the battle's wizard before the first
+ * turn, under a canon whose Push this wizard is not offered.
+ *
+ * @param {number} battleId
+ */
+function startARunaway(battleId) {
+    runDjangoShell(`
+from battle.models import Battle
+from battle.persistence import dump_state, load_state
+from tarmar_engine.state import RunawayState
+battle = Battle.objects.get(pk=${battleId})
+state = load_state(battle.state_json, battle.rules_profile)
+for figure in state.combatants:
+    if figure.spells:
+        figure.runaway = RunawayState("fire_missile", 1)
 battle.state_json = dump_state(state)
 battle.save(update_fields=["state_json"])
 `);
@@ -247,6 +299,83 @@ test.describe('Pushing mana into a cast', () => {
         await expect(playerPage.locator('.battle-event', {
             hasText: /(holds|fails) the debt roll for Fire Missile \(1 owed\)/,
         })).toHaveCount(1);
+
+        await stopCoverage(playerPage, `${testInfo.title} (player context)`);
+    });
+
+    test('a pushed cast that runs away feeds on its caster, and the caster anchors it', async ({ adminPage, browser }, testInfo) => {
+        test.setTimeout(120000);
+        await adminPage.goto('/tarmar/gm/');
+        const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
+        playerPage = await openTheWizardsStage(
+            adminPage, browser, `E2E Runaway ${Date.now()}`,
+            { beforeTurn: defaultCanon ? pinTheRunawayTurns : startARunaway }
+        );
+        const runawayLine = playerPage.locator('.combatant-runaway');
+
+        if (defaultCanon) {
+            // Turn 1: Fire Missile pushed by 2, a 3 mana casting, whose
+            // Control Roll is the default canon's automatic Runaway total.
+            const missileGroup = playerPage.locator('#turn-panel .turn-spell-group', {
+                has: playerPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
+            });
+            await missileGroup.locator('.turn-spell').click();
+            await missileGroup.locator('.turn-push-amount').nth(2).click();
+            await playerPage.click('#turn-panel .turn-confirm');
+            await expect(playerPage.locator('#battle-turn')).toHaveText('1');
+            await expect(playerPage.locator('.event-roll', { hasText: 'control 3d6' }))
+                .toContainText('= 18 vs INT');
+            await expect(playerPage.locator('.battle-event', {
+                hasText: 'Fire Missile runs away and will feed on',
+            })).toContainText('(3 mana cast)');
+            // The card says so, from the state: the drain is the cost and 1.
+            await expect(runawayLine).toHaveText(
+                'Runaway Fire Missile: began this turn; it takes 4 a turn from mana'
+            );
+
+            await adminPage.click('#advance-turn');
+            await expect(adminPage.locator('#battle-status')).toHaveText('Awaiting players');
+        }
+
+        // The anchor is the caster's own, and the AI's pick: an AI-run
+        // caster always anchors its own Runaway.
+        const anchor = playerPage.locator('#turn-panel .turn-option-anchor');
+        await expect(anchor).toHaveCount(1, { timeout: 15000 });
+        await expect(anchor.locator('.turn-option-ai-pick')).toBeVisible();
+        await expect(anchor.locator('.turn-option-plain'))
+            .toContainText('Take back control of your runaway Fire Missile');
+        if (defaultCanon) {
+            await expect(anchor.locator('.turn-option-plain')).toContainText(
+                '3d6 at or under your WIS'
+            );
+        }
+        await expect(runawayLine).toHaveCount(1);
+        await anchor.click();
+        await playerPage.click('#turn-panel .turn-confirm');
+
+        // The turn ran: the spell fed in the Renew Spells phase, then the
+        // caster's anchor roll and how it went, all in the log.
+        await expect(playerPage.locator('#battle-turn')).toHaveText(defaultCanon ? '2' : '1');
+        const drain = playerPage.locator('.battle-event', { hasText: 'Fire Missile feeds on' });
+        await expect(drain).toHaveCount(1);
+        await expect(drain).toContainText('turn 1: it drains');
+        const anchorRoll = playerPage.locator('.event-roll', { hasText: ' anchor ' });
+        await expect(anchorRoll).toHaveCount(1);
+        if (defaultCanon) {
+            await expect(drain).toContainText('turn 1: it drains 4 mana (3 left)');
+            await expect(anchorRoll).toContainText('vs WIS');
+            await expect(anchorRoll).toContainText('— held');
+            // Fire Missile is not a continuing spell: held, the Runaway ends,
+            // and the card no longer shows one.
+            await expect(playerPage.locator('.battle-event', {
+                hasText: 'anchors Fire Missile after 1 turn(s)',
+            })).toHaveCount(1);
+            await expect(runawayLine).toHaveCount(0);
+        } else {
+            await expect(playerPage.locator('.battle-event', {
+                hasText: /anchors Fire Missile after|fails to anchor Fire Missile/,
+            })).toHaveCount(1);
+        }
 
         await stopCoverage(playerPage, `${testInfo.title} (player context)`);
     });

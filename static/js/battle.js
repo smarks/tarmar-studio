@@ -723,6 +723,18 @@ if (typeof module !== 'undefined' && module.exports) {
             card.appendChild(bar);
         });
 
+        // A spell running away from this figure (tarmar-engine #30): the
+        // server's sentence, from the engine's state and the canon's rules
+        // (battle.viewmodel._tarmar_runaway). It stays until the state says
+        // the Runaway is over.
+        if (combatant.runaway) {
+            const runaway = document.createElement('div');
+            runaway.className = 'combatant-runaway';
+            runaway.dataset.spell = combatant.runaway.spell_key;
+            runaway.textContent = combatant.runaway.line;
+            card.appendChild(runaway);
+        }
+
         if (!combatant.alive && combatant.fatal_chain
                 && combatant.fatal_chain.length) {
             const chain = document.createElement('div');
@@ -1316,6 +1328,11 @@ if (typeof module !== 'undefined' && module.exports) {
                 candidate
             );
             if (index === aiPick) { tagAiPick(option); }
+            // An anchor (tarmar-engine #30) is a plain row like any other:
+            // the server wrote its line and cost from the Runaway it names.
+            if (candidate.anchor_target != null) {
+                option.classList.add('turn-option-anchor');
+            }
             option.addEventListener('click', () => {
                 if (opts.onSelect) { opts.onSelect(index); }
             });
@@ -1691,11 +1708,14 @@ if (typeof module !== 'undefined' && module.exports) {
                     spell_key: candidate.spell_key || '',
                 // The mana a pushed copy pushes (#960), and that a borrowing
                 // copy borrows (tarmar-engine #28), only for such a copy: the
-                // server takes neither as the plain cast. The hex only when
-                // one was picked (#819, #866): with none the option makes
-                // its own move, as it always has.
+                // server takes neither as the plain cast. Whose Runaway an
+                // anchor takes back (tarmar-engine #30), only for an anchor.
+                // The hex only when one was picked (#819, #866): with none
+                // the option makes its own move, as it always has.
                 }, candidate.push_mana ? { push_mana: candidate.push_mana } : {},
                 candidate.borrow ? { borrow: true } : {},
+                candidate.anchor_target != null
+                    ? { anchor_target: candidate.anchor_target } : {},
                 destination ? { destination } : {})),
                 onAiChoose: () => submitAction({
                     combatant_id: answering.combatant_id,

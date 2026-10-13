@@ -19,6 +19,8 @@ from tarmar_engine.magic import (
     ControlBand,
     MagicRules,
     PushRules,
+    RollUnderRule,
+    RunawayRules,
     SpellEffectKind,
 )
 
@@ -82,6 +84,27 @@ BORROWING_RULES = replace(
         ),
         automatic_failure_totals=frozenset({12}),
         max_debt=3,
+    ),
+)
+
+
+#: :data:`INVENTED_RULES` with Runaway's later turns (tarmar-engine #30): a
+#: drain of twice the original cost and 1 more a turn, moving to Body once the
+#: mana is gone, death at minus the Body maximum, a 2d8 self anchor against
+#: WIS, a 2d10 helper anchor against INT at twice the original cost, a failed
+#: helper caught, and a growth of 2 a turn.
+RUNAWAY_RULES = replace(
+    INVENTED_RULES,
+    runaway=RunawayRules(
+        drain_multiplier_of_cost=2,
+        drain_flat=1,
+        overflow_pool="body",
+        death_multiplier_of_max=1,
+        self_anchor=RollUnderRule(dice="2d8", attribute="WIS"),
+        helper_anchor=RollUnderRule(dice="2d10", attribute="INT"),
+        helper_cost_multiplier_of_cost=2,
+        helper_failure_catches_helper=True,
+        effect_bonus_per_turn=2,
     ),
 )
 
