@@ -769,10 +769,19 @@ async function fetchTurnState(turnId) {
 // running there asks after its turn with the next test's fetch mock, and can
 // do that test's work for it (#25).
 let turnWaitsStopped = false;
+// The pause the wait is in before it next asks, so stopping can end it at
+// once rather than leave a timer behind. One is enough: the wait sets
+// isStreaming, and nothing starts another turn while that is set.
+let turnWaitPause = null;
 
-/** End every wait for a running turn on this page, at its next step. */
+/** End every wait for a running turn on this page, now or at its next step. */
 function stopWaitingForTurns() {
   turnWaitsStopped = true;
+  if (turnWaitPause) {
+    clearTimeout(turnWaitPause.timer);
+    turnWaitPause.wake();
+    turnWaitPause = null;
+  }
 }
 
 /**
@@ -791,7 +800,10 @@ async function awaitRunningTurn(turnId, pending) {
   sendBtn.disabled = true;
   setWorkingStatus(null);
   while (true) {
-    await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS));
+    await new Promise((resolve) => {
+      turnWaitPause = { timer: setTimeout(resolve, TURN_POLL_MS), wake: resolve };
+    });
+    turnWaitPause = null;
     if (turnWaitsStopped) return;
     let data;
     try {

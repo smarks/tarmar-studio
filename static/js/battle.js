@@ -1548,6 +1548,23 @@ if (typeof module !== 'undefined' && module.exports) {
     /** Poll cadence for lobby seats and awaited player turns. */
     const POLL_INTERVAL_MS = 2000;
 
+    // The polls this script has started. Each runs until the page goes, and
+    // nothing on the page stops one. The Jest suites outlive the page: they
+    // wire page after page into one jsdom, and a poll left running there
+    // fetches with a later test's mock (#25). stopPagePolls is for them.
+    const pagePolls = new Set();
+
+    /** Run `poll` every POLL_INTERVAL_MS until stopPagePolls. */
+    function startPagePoll(poll) {
+        pagePolls.add(setInterval(poll, POLL_INTERVAL_MS));
+    }
+
+    /** Stop every poll this script has started. */
+    function stopPagePolls() {
+        for (const id of pagePolls) { clearInterval(id); }
+        pagePolls.clear();
+    }
+
     /** Wire the page up. No-op on pages without the battle detail markup. */
     /**
      * Wire the "Show every die roll" checkbox to the log's own class.
@@ -1984,7 +2001,7 @@ if (typeof module !== 'undefined' && module.exports) {
         currentTurn = Number(turnLabel.textContent) || 0;
         renderPanel();
         if (panel && panel.dataset.stateUrl) {
-            setInterval(pollOnce, POLL_INTERVAL_MS);
+            startPagePoll(pollOnce);
         }
 
         if (button) {
@@ -2098,7 +2115,7 @@ if (typeof module !== 'undefined' && module.exports) {
         const seatsScript = document.getElementById('battle-seats');
         if (!lobby || !seatsScript || !lobby.dataset.stateUrl) { return; }
         let baseline = JSON.stringify(JSON.parse(seatsScript.textContent));
-        setInterval(async () => {
+        startPagePoll(async () => {
             if (lobbyEditing(lobby, document.activeElement)) { return; }
             let response;
             try {
@@ -2112,7 +2129,7 @@ if (typeof module !== 'undefined' && module.exports) {
                     || JSON.stringify(data.seats) !== baseline) {
                 pageNavigation.reload();
             }
-        }, POLL_INTERVAL_MS);
+        });
     }
 
     if (typeof document !== 'undefined') {
@@ -2148,6 +2165,7 @@ if (typeof module !== 'undefined' && module.exports) {
             initDiceToggle,
             initBattlePage,
             initLobbyPage,
+            stopPagePolls,
         };
     }
     root.battlePage = { initBattlePage, initLobbyPage };

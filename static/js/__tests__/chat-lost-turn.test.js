@@ -204,6 +204,22 @@ describe('a page whose wait is stopped (#25)', () => {
         return { chat, answer };
     }
 
+    test('leaves no timer behind when stopped during its pause', async () => {
+        jest.useFakeTimers();
+        try {
+            const chat = loadChat({ runningTurn: { id: 52, message: 'Hi' }, turnPollMs: 60000 });
+            const timersWhileWaiting = jest.getTimerCount();
+
+            chat.stopWaitingForTurns();
+
+            expect(jest.getTimerCount()).toBe(timersWhileWaiting - 1);
+        } finally {
+            jest.useRealTimers();
+        }
+        await settle();
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
     test('does nothing with an answer that arrives after it stopped', async () => {
         const { chat, answer } = await pageAskingAfterItsTurn();
 

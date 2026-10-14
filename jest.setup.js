@@ -54,6 +54,36 @@ afterEach(() => {
   if (said) throw new Error(`A GM turn wait warned where no test expected it: ${said}`);
 });
 
+// A page's poll is a setInterval that runs until the page goes. Jest keeps
+// one jsdom for a whole file, so a poll a test leaves running fetches with a
+// later test's mock (#25), or would once the file runs long enough for it to
+// fire. Every interval a test starts must be cleared before the next test
+// begins. Checked at the next test's start, after the suite's own afterEach
+// teardown has run, and once more when the file ends; the leftover intervals
+// are cleared so one leak fails one test, not every test after it. Fake
+// timers replace setInterval while they are on, so theirs are not counted.
+const startInterval = global.setInterval;
+const endInterval = global.clearInterval;
+const runningIntervals = new Map();
+global.setInterval = (...args) => {
+  const id = startInterval(...args);
+  runningIntervals.set(id, expect.getState().currentTestName);
+  return id;
+};
+global.clearInterval = (id) => {
+  runningIntervals.delete(id);
+  return endInterval(id);
+};
+function failOnIntervalsLeftRunning() {
+  if (!runningIntervals.size) return;
+  const startedBy = [...new Set(runningIntervals.values())];
+  for (const id of runningIntervals.keys()) endInterval(id);
+  runningIntervals.clear();
+  throw new Error(`An interval outlived the test that started it: ${startedBy.join('; ')}`);
+}
+beforeEach(failOnIntervalsLeftRunning);
+afterAll(failOnIntervalsLeftRunning);
+
 // Mock fetch
 global.fetch = jest.fn();
 
