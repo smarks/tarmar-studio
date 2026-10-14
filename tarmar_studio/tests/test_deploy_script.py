@@ -832,13 +832,27 @@ def record_gate_note(
     revision: str = "origin/main",
     *,
     canon: str = "tarmar",
-    canon_commit: str = "",
+    canon_commit: str | None = "",
 ) -> str:
-    """Record a passing gate note on origin, the way ./run gate pushes one."""
+    """Record a passing gate note on origin, the way ./run gate pushes one.
+
+    Args:
+        host: The throwaway checkout whose origin gets the note.
+        revision: The commit the note vouches for.
+        canon: The canon the note's first pass ran.
+        canon_commit: The canon commit the note names; empty for the canon
+            origin's head, None to leave the ``canon-commit:`` line out.
+
+    Returns:
+        The sha of the commit the note vouches for.
+    """
     commit_sha = git_in(host.seed, "rev-parse", revision)
-    canon_commit = canon_commit or git_in(
-        host.canon_origin.parent / "canon-seed", "rev-parse", "HEAD"
-    )
+    message = f"gate: pass\ncommit: {commit_sha}\ncanon: {canon}\n"
+    if canon_commit is not None:
+        canon_commit = canon_commit or git_in(
+            host.canon_origin.parent / "canon-seed", "rev-parse", "HEAD"
+        )
+        message += f"canon-commit: {canon_commit}\n"
     git_in(
         host.seed,
         "notes",
@@ -846,8 +860,7 @@ def record_gate_note(
         "add",
         "--force",
         "--message",
-        f"gate: pass\ncommit: {commit_sha}\ncanon: {canon}\n"
-        f"canon-commit: {canon_commit}\n",
+        message,
         commit_sha,
     )
     git_in(host.seed, "push", "--quiet", "origin", "refs/notes/gate")
@@ -922,10 +935,28 @@ def mark_canon_deployed(host: DeployHost, tmp_path: Path) -> str:
     return canon_head
 
 
+def clone_live_canon(host: DeployHost, tmp_path: Path) -> str:
+    """Clone the canon the way an earlier deploy did, and record it as live.
+
+    Args:
+        host: The throwaway checkout whose canon checkout to create.
+        tmp_path: The temporary directory the canon seed lives in.
+
+    Returns:
+        The canon commit the live site now runs.
+    """
+    subprocess.run(
+        ["git", "clone", "--quiet", str(host.canon_origin), str(host.canon_checkout)],
+        capture_output=True,
+        check=True,
+    )
+    return mark_canon_deployed(host, tmp_path)
+
+
 def test_a_gate_record_on_origin_lets_the_deploy_through(tmp_path: Path) -> None:
     host = make_deploy_host(tmp_path)
     commit_sha = record_gate_note(host)
-    mark_canon_deployed(host, tmp_path)
+    clone_live_canon(host, tmp_path)
 
     result = run_deploy(host)
 
@@ -1044,7 +1075,7 @@ def test_a_deploy_clones_the_canon_before_it_builds_a_release(tmp_path: Path) ->
     assert "Cloning the Tarmar canon" in result.stdout, result.stdout + result.stderr
     canon_head = git_in(host.canon_checkout, "rev-parse", "HEAD")
     assert canon_head == git_in(tmp_path / "canon-seed", "rev-parse", "HEAD")
-    assert result.stdout.index("Tarmar canon at") < result.stdout.index(
+    assert result.stdout.index("Tarmar canon to serve:") < result.stdout.index(
         "Syncing dependencies"
     )
 
@@ -1056,7 +1087,7 @@ def test_a_later_deploy_fast_forwards_the_canon(tmp_path: Path) -> None:
 
     result = run_deploy(host, "--force")
 
-    assert "Updating the Tarmar canon" in result.stdout, result.stdout + result.stderr
+    assert "Fetching the Tarmar canon" in result.stdout, result.stdout + result.stderr
     assert git_in(host.canon_checkout, "rev-parse", "HEAD") == newer
     assert "Syncing dependencies" in result.stdout
 
@@ -1069,7 +1100,7 @@ def test_a_canon_that_cannot_be_cloned_stops_the_deploy(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "could not clone the Tarmar canon" in result.stdout
+    assert "could not read the Tarmar canon from" in result.stdout
     # Stopped before any release was checked out or built.
     assert "Syncing dependencies" not in result.stdout
     assert not (tmp_path / "app-blue").exists()
@@ -1169,14 +1200,16 @@ def test_a_bad_env_stops_the_deploy_before_a_release_is_built(tmp_path: Path) ->
 
 def test_a_moved_canon_is_deployed_without_force(tmp_path: Path) -> None:
     host = make_deploy_host(tmp_path)
-    record_gate_note(host)
     mark_canon_deployed(host, tmp_path)
     newer = push_canon_change(tmp_path, "newer canon")
+    # The gate ran against the canon the deploy pulls, so it goes ahead.
+    record_gate_note(host, canon_commit=newer)
 
     result = run_deploy(host)
 
     assert "Already up to date" not in result.stdout, result.stdout + result.stderr
-    assert f"Tarmar canon at {newer}" in result.stdout
+    assert "the gate ran against Tarmar canon" not in result.stdout
+    assert f"Tarmar canon to serve: {newer}" in result.stdout
     assert "deployed with Tarmar canon" in result.stdout
     assert "Syncing dependencies" in result.stdout
 
@@ -1185,9 +1218,9 @@ def test_a_canon_pulled_by_a_failed_deploy_is_still_deployed_next_time(
     tmp_path: Path,
 ) -> None:
     host = make_deploy_host(tmp_path)
-    record_gate_note(host)
     mark_canon_deployed(host, tmp_path)
-    push_canon_change(tmp_path, "newer canon")
+    newer = push_canon_change(tmp_path, "newer canon")
+    record_gate_note(host, canon_commit=newer)
     # This one pulls the canon, then fails in the build (the stub uv).
     run_deploy(host)
 
@@ -1200,13 +1233,29 @@ def test_a_canon_pulled_by_a_failed_deploy_is_still_deployed_next_time(
 def test_an_unmoved_canon_with_no_new_commit_is_up_to_date(tmp_path: Path) -> None:
     host = make_deploy_host(tmp_path)
     record_gate_note(host)
-    mark_canon_deployed(host, tmp_path)
+    clone_live_canon(host, tmp_path)
 
     result = run_deploy(host)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Already up to date" in result.stdout
-    assert "Tarmar canon at" in result.stdout
+    assert "Tarmar canon to serve:" in result.stdout
+
+
+def test_a_missing_canon_checkout_is_cloned_even_at_the_deployed_commit(
+    tmp_path: Path,
+) -> None:
+    host = make_deploy_host(tmp_path)
+    record_gate_note(host)
+    # The live site's record names the canon's head, but no checkout holds it.
+    live = mark_canon_deployed(host, tmp_path)
+
+    result = run_deploy(host)
+
+    assert "Already up to date" not in result.stdout, result.stdout + result.stderr
+    assert "Cloning the Tarmar canon" in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == live
+    assert "Syncing dependencies" in result.stdout
 
 
 def test_a_gate_record_from_the_default_canon_is_refused(tmp_path: Path) -> None:
@@ -1217,31 +1266,234 @@ def test_a_gate_record_from_the_default_canon_is_refused(tmp_path: Path) -> None
 
     assert result.returncode == 1
     assert "not the Tarmar canon" in result.stdout
-    assert "Tarmar canon at" not in result.stdout
+    assert "Tarmar canon to serve:" not in result.stdout
 
 
-def test_a_canon_the_gate_did_not_run_is_warned_about(tmp_path: Path) -> None:
+def test_a_canon_the_gate_did_not_run_stops_the_deploy(tmp_path: Path) -> None:
     host = make_deploy_host(tmp_path)
-    gated = git_in(tmp_path / "canon-seed", "rev-parse", "HEAD")
+    gated = clone_live_canon(host, tmp_path)
     record_gate_note(host, canon_commit=gated)
     newer = push_canon_change(tmp_path, "ungated canon")
 
     result = run_deploy(host)
 
+    assert result.returncode == 1, result.stdout + result.stderr
     assert f"the gate ran against Tarmar canon {gated}" in result.stdout
-    assert f"this deploy serves {newer}" in result.stdout
+    assert f"this deploy would serve {newer}" in result.stdout
+    assert "Run './run ship' again" in result.stdout
+    # Nothing was built: the refusal comes before any release checkout.
+    assert "Syncing dependencies" not in result.stdout
+    assert not (tmp_path / "app-blue").exists()
+    assert not (tmp_path / "app-green").exists()
+    # Refused before the checkout moved: both colours read it, so the live
+    # colour keeps serving the canon the gate ran.
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == gated
+
+
+def test_a_record_whose_canon_commit_is_none_is_refused(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    # What ./run gate records for a canon that is not a checkout of its own.
+    record_gate_note(host, canon_commit="none")
+    canon_head = git_in(tmp_path / "canon-seed", "rev-parse", "HEAD")
+
+    result = run_deploy(host)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "the gate ran against Tarmar canon none" in result.stdout
+    assert f"this deploy would serve {canon_head}" in result.stdout
+    # Refused before the clone, so no canon checkout appeared.
+    assert "Cloning the Tarmar canon" not in result.stdout
+    assert not host.canon_checkout.exists()
+    assert "Syncing dependencies" not in result.stdout
+
+
+def test_host_commits_ahead_of_the_gated_canon_are_refused(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    gated = clone_live_canon(host, tmp_path)
+    record_gate_note(host, canon_commit=gated)
+    # A commit made on the host, ahead of origin, which './run ship' (gating
+    # origin's head) could never cover.
+    identify(host.canon_checkout)
+    (host.canon_checkout / "local.md").write_text("# local\n", encoding="utf-8")
+    git_in(host.canon_checkout, "add", "local.md")
+    git_in(host.canon_checkout, "commit", "-m", "edited on the host")
+    local_head = git_in(host.canon_checkout, "rev-parse", "HEAD")
+
+    result = run_deploy(host)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"has commits origin does not ({local_head})" in result.stdout
+    assert "push or drop them by hand" in result.stdout
+    assert "./run ship" not in result.stdout
+    assert "Syncing dependencies" not in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == local_head
+
+
+def test_a_gate_record_naming_no_canon_commit_is_refused(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    commit_sha = record_gate_note(host, canon_commit=None)
+
+    result = run_deploy(host)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"{commit_sha}'s gate record names no canon-commit" in result.stdout
+    assert "Run './run ship' again" in result.stdout
+    # Refused with the record, before the canon was looked at.
+    assert "Tarmar canon to serve:" not in result.stdout
+    assert not host.canon_checkout.exists()
+
+
+def test_a_canon_checkout_with_no_upstream_stops_the_deploy(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    gated = clone_live_canon(host, tmp_path)
+    record_gate_note(host, canon_commit=gated)
+    git_in(host.canon_checkout, "branch", "--unset-upstream")
+
+    result = run_deploy(host)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "has no upstream branch to fast-forward to" in result.stdout
+    assert "Syncing dependencies" not in result.stdout
+
+
+def test_a_canon_remote_with_no_head_stops_the_deploy(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    record_gate_note(host)
+    empty_remote = tmp_path / "empty-canon.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(empty_remote)],
+        capture_output=True,
+        check=True,
+    )
+
+    result = run_deploy(host, TARMAR_CANON_REMOTE=str(empty_remote))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"the Tarmar canon at {empty_remote} has no HEAD to clone" in result.stdout
+    assert not host.canon_checkout.exists()
+    assert "Syncing dependencies" not in result.stdout
+
+
+def test_expect_refuses_a_canon_the_gate_did_not_run(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    gated = clone_live_canon(host, tmp_path)
+    vouched = record_gate_note(host, canon_commit=gated)
+    newer = push_canon_change(tmp_path, "ungated canon")
+
+    result = run_deploy(host, "--expect", vouched)
+
+    # main has not moved, so this is no stand-down: the deploy fails.
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Nothing to do" not in result.stdout
+    assert f"this deploy would serve {newer}" in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == gated
+
+
+def test_a_deploy_with_nothing_to_change_is_up_to_date_despite_the_record(
+    tmp_path: Path,
+) -> None:
+    host = make_deploy_host(tmp_path)
+    live = clone_live_canon(host, tmp_path)
+    # The record names another canon commit, but neither main nor the canon
+    # has moved, so there is nothing to refuse.
+    record_gate_note(host, canon_commit="0" * 40)
+
+    result = run_deploy(host)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Already up to date" in result.stdout
+    assert "the gate ran against Tarmar canon" not in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == live
+
+
+def test_force_deploys_a_canon_the_gate_did_not_run(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    gated = clone_live_canon(host, tmp_path)
+    # A record on origin for an older canon, which --force never reads.
+    record_gate_note(host, canon_commit=gated)
+    newer = push_canon_change(tmp_path, "ungated canon")
+
+    result = run_deploy(host, "--force")
+
+    assert "the gate ran against Tarmar canon" not in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == newer
+    assert "Syncing dependencies" in result.stdout, result.stdout + result.stderr
+
+
+def test_a_gated_code_change_deploys_on_the_unmoved_canon(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    live = clone_live_canon(host, tmp_path)
+    push_second_commit(host)
+    # The new commit's record ran the live canon.
+    record_gate_note(host)
+
+    result = run_deploy(host)
+
+    assert "the gate ran against Tarmar canon" not in result.stdout
+    assert "Re-running the freshly pulled deploy.sh" in result.stdout
+    assert "Syncing dependencies" in result.stdout, result.stdout + result.stderr
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == live
+
+
+def test_a_gated_canon_change_moves_the_checkout_and_deploys(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    clone_live_canon(host, tmp_path)
+    newer = push_canon_change(tmp_path, "gated canon")
+    record_gate_note(host, canon_commit=newer)
+
+    result = run_deploy(host)
+
+    assert "the gate ran against Tarmar canon" not in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == newer
+    assert "Syncing dependencies" in result.stdout, result.stdout + result.stderr
+
+
+def test_a_deployed_host_commit_ahead_of_origin_is_up_to_date(tmp_path: Path) -> None:
+    host = make_deploy_host(tmp_path)
+    clone_live_canon(host, tmp_path)
+    # A commit made on the host, ahead of origin, that a --force deploy put
+    # live: origin's canon is behind it, so the fast-forward changes nothing.
+    identify(host.canon_checkout)
+    (host.canon_checkout / "local.md").write_text("# local\n", encoding="utf-8")
+    git_in(host.canon_checkout, "add", "local.md")
+    git_in(host.canon_checkout, "commit", "-m", "edited on the host")
+    local_head = git_in(host.canon_checkout, "rev-parse", "HEAD")
+    (host.app_dir / ".deploy-canon").write_text(f"{local_head}\n", encoding="utf-8")
+    record_gate_note(host)
+
+    result = run_deploy(host)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Already up to date" in result.stdout
+    assert "has commits origin does not" not in result.stdout
+    assert git_in(host.canon_checkout, "rev-parse", "HEAD") == local_head
+
+
+def test_advance_canon_moves_only_to_the_commit_already_checked() -> None:
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    start = script.index("advance_canon() {")
+    body = script[start : script.index("\n}\n", start)]
+    # Anything that reads origin again could land on a commit that
+    # refuse_ungated_canon never saw.
+    for reaches_origin in ("fetch", "pull", "ls-remote"):
+        assert reaches_origin not in body, reaches_origin
 
 
 def test_the_canon_is_synced_before_the_build_and_checked_after_env_loads() -> None:
     script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     main_body = script[script.index("main() {") : script.index("rollback() {")]
-    sync = main_body.index("    sync_canon\n")
-    # After the pull and re-exec, so the pulled script syncs it, and before
+    resolve = main_body.index("    resolve_canon\n")
+    # After the pull and re-exec, so the pulled script reads it, and before
     # the up-to-date check, which a moved canon alone can pass.
-    assert main_body.index("git pull --ff-only") < sync
-    assert sync < main_body.index("Already up to date")
+    assert main_body.index("git pull --ff-only") < resolve
+    assert resolve < main_body.index("Already up to date")
+    # The record's canon is compared only for a deploy that would change
+    # something, and before the checkout moves.
+    refuse = main_body.index("    refuse_ungated_canon\n")
+    advance = main_body.index("    advance_canon\n")
+    assert main_body.index("Already up to date") < refuse < advance
     check = main_body.index("    require_canon_dir\n")
-    assert main_body.index("Already up to date") < check
+    assert advance < check
     assert check < main_body.index('prepare_release "$inactive"')
     assert check < main_body.index("uv sync --group prod")
     # The live canon is recorded only once the deploy has gone through.
@@ -1597,6 +1849,24 @@ def test_expect_stands_down_when_main_moved_to_a_default_canon_record(
     assert "Syncing dependencies" not in result.stdout
 
 
+def test_expect_stands_down_when_main_moved_to_a_record_naming_no_canon_commit(
+    tmp_path: Path,
+) -> None:
+    host = make_deploy_host(tmp_path)
+    vouched = record_gate_note(host)
+    mark_canon_deployed(host, tmp_path)
+    push_second_commit(host)
+    record_gate_note(host, canon_commit=None)
+
+    result = run_deploy(host, "--expect", vouched)
+
+    # require_gate_record would refuse that record, so this run stands down
+    # rather than going on to fail.
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no Tarmar-canon gate record" in result.stdout
+    assert "names no canon-commit" not in result.stdout
+
+
 def test_expect_deploys_main_when_it_moved_to_a_commit_with_its_own_record(
     tmp_path: Path,
 ) -> None:
@@ -1618,7 +1888,7 @@ def test_expect_deploys_main_when_it_moved_to_a_commit_with_its_own_record(
 def test_expect_on_the_head_already_deployed_is_up_to_date(tmp_path: Path) -> None:
     host = make_deploy_host(tmp_path)
     vouched = record_gate_note(host)
-    mark_canon_deployed(host, tmp_path)
+    clone_live_canon(host, tmp_path)
 
     result = run_deploy(host, "--expect", vouched)
 
