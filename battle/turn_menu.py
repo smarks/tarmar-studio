@@ -327,6 +327,28 @@ def _anchor_line(
     )
 
 
+def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
+    """A counter option's sentence and cost (tarmar-engine #31).
+
+    The counter names a caster, not a spell, and meets whatever that caster
+    casts this turn; its mana is spent whether a cast comes or not (the
+    canon's ``committed_mana_is_spent``). The opposed roll and the bonus the
+    commitment buys are the engine's, in the option's rationale.
+
+    Args:
+        mana: The mana the counter commits.
+        caster: The enemy caster it opposes.
+
+    Returns:
+        ``(plain, cost)``, as :func:`_plain_line` gives them.
+    """
+    name = caster.name if caster is not None else "an enemy caster"
+    return (
+        f"Counter {name}'s spell this turn, committing {mana} mana",
+        f"{mana} mana, spent whether {name} casts or not",
+    )
+
+
 def _plain_line(
     state: BattleState,
     actor: CombatantState,
@@ -383,7 +405,12 @@ def _plain_line(
         plain = "Stand up; it takes the whole turn"
     elif option in ("h", "r") and candidate.spell_key:
         spell = get_spell(candidate.spell_key)
-        plain = f"Cast {spell.name}" + (f" at {aimed}" if aimed else "")
+        verb = (
+            f"Press your countered {spell.name} again"
+            if candidate.escalate
+            else f"Cast {spell.name}"
+        )
+        plain = verb + (f" at {aimed}" if aimed else "")
         lost_rolls = " or ".join(str(roll) for roll in sorted(CASTING_MANA_LOST_ROLLS))
         if candidate.push_mana:
             # A pushed copy of the cast (issue #960): the engine's menu offers
@@ -406,8 +433,18 @@ def _plain_line(
                 f"; paying it empties your pool and borrows the {owed} you lack "
                 "as debt, and a debt roll follows the spell"
             )
+        if candidate.escalate:
+            # A cast pressing a countered spell again (tarmar-engine #31):
+            # the engine marks it, for a player; the opposed roll comes again
+            # if a counter meets it.
+            cost += (
+                "; a counter against it means another opposed roll, and "
+                "countered again its mana is spent with no casting roll"
+            )
     elif option == ANCHOR_OPTION:
         plain, cost = _anchor_line(actor, target)
+    elif option == actions.COUNTER_OPTION and candidate.counter_mana is not None:
+        plain, cost = _counter_line(candidate.counter_mana, target)
     elif option == "j":
         plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
     elif option == "k":
@@ -565,6 +602,8 @@ def _base_fields(candidate: Candidate) -> dict:
         "push_mana": candidate.push_mana,
         "borrow": candidate.borrow,
         "anchor_target": candidate.anchor_target,
+        "counter_mana": candidate.counter_mana,
+        "escalate": candidate.escalate,
         "destination": candidate.destination,
     }
 

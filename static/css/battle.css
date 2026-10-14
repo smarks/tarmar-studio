@@ -992,6 +992,14 @@
     font-style: italic;
 }
 
+/* A cast pressing a countered spell again (tarmar-engine #31). */
+.turn-spell-escalate {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--colour-status-warning-ink);
+}
+
 /* A cast the engine offers pushed copies of (#960): the spell card, then the
    push control beneath it in the same grid cell. "None" is the plain cast.
    The borrowing control (tarmar-engine #28) has the same shape and look. */
@@ -1002,7 +1010,8 @@
 }
 
 .turn-push,
-.turn-borrow {
+.turn-borrow,
+.turn-counter {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -1012,7 +1021,8 @@
 }
 
 .turn-push-amount,
-.turn-borrow-amount {
+.turn-borrow-amount,
+.turn-counter-amount {
     padding: 0.2rem 0.55rem;
     border: 1px solid var(--colour-border-breadcrumb-link);
     border-radius: 6px;
@@ -1022,19 +1032,22 @@
 }
 
 .turn-push-amount:focus-visible,
-.turn-borrow-amount:focus-visible {
+.turn-borrow-amount:focus-visible,
+.turn-counter-amount:focus-visible {
     outline: 2px solid var(--colour-accent-gold-strong);
     outline-offset: 2px;
 }
 
 .turn-push-amount[aria-pressed="true"],
-.turn-borrow-amount[aria-pressed="true"] {
+.turn-borrow-amount[aria-pressed="true"],
+.turn-counter-amount[aria-pressed="true"] {
     border-color: var(--colour-accent-gold);
     background: var(--colour-surface-gold-pressed);
 }
 
 .turn-push-cost,
-.turn-borrow-cost {
+.turn-borrow-cost,
+.turn-counter-cost {
     flex-basis: 100%;
 }
 
@@ -1046,6 +1059,17 @@
     font-size: 0.75rem;
     color: var(--colour-status-danger-ink);
     background: var(--colour-status-danger-surface);
+    border-radius: 3px;
+}
+
+/* A spell of the figure's standing countered (tarmar-engine #31): it stays
+   on the card while the state says so. */
+.combatant-contest {
+    margin: 0.2rem 0;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.75rem;
+    color: var(--colour-status-warning-ink);
+    background: var(--colour-status-warning-surface);
     border-radius: 3px;
 }
 

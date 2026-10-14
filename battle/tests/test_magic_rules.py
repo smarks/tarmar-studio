@@ -22,6 +22,7 @@ from tarmar_engine.magic import (
     ChannelDerivation,
     ChannelRules,
     ControlBand,
+    CounterspellRules,
     MagicRules,
     PushRules,
     RollUnderRule,
@@ -39,7 +40,8 @@ from reference.paths import (
 )
 
 # A complete file with invented numbers: every field present, both kinds of
-# Channel derivation, a per-spell push bonus, Borrowing, Runaway and a ruling.
+# Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell
+# and a ruling.
 INVENTED_RULES: dict[str, Any] = {
     "casting_success_tiers": [
         {
@@ -123,6 +125,14 @@ INVENTED_RULES: dict[str, Any] = {
         "helper_cost_multiplier_of_cost": 3,
         "helper_failure_catches_helper": True,
         "effect_bonus_per_turn": 2,
+    },
+    "counterspell": {
+        "opposed_dice": "2d8",
+        "opposed_attribute": "WIS",
+        "mana_per_bonus": 4,
+        "ties_go_to_caster": False,
+        "defender_min_mana": 2,
+        "defender_max_mana": 7,
     },
     "rulings": [
         {"key": "made_up", "reading": "An invented reading.", "for_spencer": True}
@@ -213,6 +223,14 @@ INVENTED_MAGIC_RULES = MagicRules(
         helper_failure_catches_helper=True,
         effect_bonus_per_turn=2,
     ),
+    counterspell=CounterspellRules(
+        opposed_dice="2d8",
+        opposed_attribute="WIS",
+        mana_per_bonus=4,
+        ties_go_to_caster=False,
+        defender_min_mana=2,
+        defender_max_mana=7,
+    ),
 )
 
 
@@ -249,7 +267,7 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             load_magic_rules(self.write_rules(INVENTED_RULES)), INVENTED_MAGIC_RULES
         )
 
-    def test_null_push_channel_borrowing_and_runaway_and_no_tiers_load(
+    def test_null_push_channel_borrowing_runaway_counterspell_no_tiers_load(
         self,
     ) -> None:
         rules = {
@@ -258,6 +276,7 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             "channel": None,
             "borrowing": None,
             "runaway": None,
+            "counterspell": None,
         }
         self.assertEqual(load_magic_rules(self.write_rules(rules)), MagicRules())
 
@@ -274,6 +293,13 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
         loaded = load_magic_rules(self.write_rules(rules))
         assert loaded.runaway is not None
         self.assertIsNone(loaded.runaway.death_multiplier_of_max)
+
+    def test_counterspell_with_no_commitment_cap_loads(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"]["defender_max_mana"] = None
+        loaded = load_magic_rules(self.write_rules(rules))
+        assert loaded.counterspell is not None
+        self.assertIsNone(loaded.counterspell.defender_max_mana)
 
     def test_rulings_are_optional(self) -> None:
         rules = invented_rules()
@@ -501,6 +527,37 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         lambda rules: rules["runaway"].update(effect_bonus_per_turn=None),
     ),
     ("runaway.growth", lambda rules: rules["runaway"].update(growth=1)),
+    ("counterspell", lambda rules: rules.pop("counterspell")),
+    ("counterspell", lambda rules: rules.update(counterspell="2d8")),
+    (
+        "counterspell.opposed_dice",
+        lambda rules: rules["counterspell"].update(opposed_dice=""),
+    ),
+    (
+        "counterspell.opposed_attribute",
+        lambda rules: rules["counterspell"].pop("opposed_attribute"),
+    ),
+    (
+        "counterspell.mana_per_bonus",
+        lambda rules: rules["counterspell"].update(mana_per_bonus=True),
+    ),
+    (
+        "counterspell.ties_go_to_caster",
+        lambda rules: rules["counterspell"].update(ties_go_to_caster="caster"),
+    ),
+    (
+        "counterspell.defender_min_mana",
+        lambda rules: rules["counterspell"].update(defender_min_mana=1.5),
+    ),
+    (
+        "counterspell.defender_max_mana",
+        lambda rules: rules["counterspell"].pop("defender_max_mana"),
+    ),
+    (
+        "counterspell.defender_max_mana",
+        lambda rules: rules["counterspell"].update(defender_max_mana="7"),
+    ),
+    ("counterspell.step", lambda rules: rules["counterspell"].update(step=3)),
     ("rulings", lambda rules: rules.update(rulings={})),
     ("rulings[0]", lambda rules: rules.update(rulings=["An unkeyed reading."])),
     ("rulings[0].reading", lambda rules: rules["rulings"][0].pop("reading")),
@@ -603,6 +660,31 @@ class EngineValidationTest(MagicRulesFileTestCase):
         rules["runaway"]["helper_anchor"]["dice"] = "two dice"
         self.assert_refused(rules, "runaway.helper_anchor")
 
+    def test_bad_opposed_dice(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"]["opposed_dice"] = "two dice"
+        self.assert_refused(rules, "counterspell")
+
+    def test_an_unknown_opposed_attribute(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"]["opposed_attribute"] = "STR"
+        self.assert_engine_refused(rules, "counterspell", "opposed_attribute")
+
+    def test_a_bonus_step_of_nothing(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"]["mana_per_bonus"] = 0
+        self.assert_engine_refused(rules, "counterspell", "greater than 0")
+
+    def test_a_negative_least_commitment(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"]["defender_min_mana"] = -1
+        self.assert_engine_refused(rules, "counterspell", "must not be negative")
+
+    def test_a_commitment_cap_below_the_least(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"].update(defender_min_mana=3, defender_max_mana=2)
+        self.assert_engine_refused(rules, "counterspell", "below its least")
+
 
 class CanonMagicRulesTest(SimpleTestCase):
     def tearDown(self) -> None:
@@ -618,6 +700,8 @@ class CanonMagicRulesTest(SimpleTestCase):
         self.assertIsNotNone(rules.borrowing.max_debt)
         # Its runaway.md says a Runaway feeds on the caster each round.
         self.assertIsNotNone(rules.runaway)
+        # Its counterspell.md says a defender may commit mana to a counter.
+        self.assertIsNotNone(rules.counterspell)
 
     def test_the_loaded_canon_file_loads_once_per_process(self) -> None:
         self.assertEqual(MAGIC_RULES_FILE, DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME)
@@ -643,6 +727,7 @@ class TarmarMagicRulesTest(SimpleTestCase):
         assert runaway_band is not None, "the Tarmar canon has a Runaway band"
         assert rules.borrowing is not None, "the Tarmar canon offers Borrowing"
         assert rules.runaway is not None, "the Tarmar canon runs a Runaway"
+        assert rules.counterspell is not None, "the Tarmar canon offers Counterspell"
         summary = {
             "tier_natural_totals": sorted(
                 total
@@ -694,6 +779,14 @@ class TarmarMagicRulesTest(SimpleTestCase):
                     rules.runaway.helper_failure_catches_helper
                 ),
                 "effect_bonus_per_turn": rules.runaway.effect_bonus_per_turn,
+            },
+            "counterspell": {
+                "opposed_dice": rules.counterspell.opposed_dice,
+                "opposed_attribute": rules.counterspell.opposed_attribute,
+                "mana_per_bonus": rules.counterspell.mana_per_bonus,
+                "ties_go_to_caster": rules.counterspell.ties_go_to_caster,
+                "defender_min_mana": rules.counterspell.defender_min_mana,
+                "defender_max_mana": rules.counterspell.defender_max_mana,
             },
         }
         self.assertEqual(summary, CANON_EXPECTATIONS["magic_rules"])

@@ -153,7 +153,9 @@ def event_lines(event: BattleEvent) -> list[str]:
     tier, the Control Roll and the debt roll (tarmar-engine #28) are events
     of their own, narrated by the engine with the labels the canon's rules
     give them; so are a Runaway's drain, collapse, death and anchor roll
-    (tarmar-engine #30), in the engine's own words.
+    (tarmar-engine #30), and a Counterspell's declaration, opposed roll,
+    result, lapse and contest's end (tarmar-engine #31), in the engine's own
+    words.
 
     Args:
         event: A battle log event.

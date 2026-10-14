@@ -2315,6 +2315,197 @@ describe('a Runaway on the board (tarmar-engine #30)', () => {
     });
 });
 
+describe('counterspell on the board (tarmar-engine #31)', () => {
+    // A wizard facing an enemy caster, as the server describes it: the
+    // counters are the engine's menu rows (one per commitment the canon
+    // allows), each with the server's plain line and cost, and an escalating
+    // cast carries ``escalate`` with the server's line. Every word and
+    // number here is invented.
+    const contestLine = 'Fire Missile countered once by Ysolde; cast it again at Ysolde to press it';
+
+    function counterPending() {
+        return {
+            combatant_id: 4,
+            turn: 2,
+            display_name: 'Ysolde Fenner',
+            player: 'playeruser',
+            is_you: true,
+            candidates: [
+                { letter: 'k', name: 'DEFEND', score: 0.3, rationale: 'Hold',
+                  target_id: null, spell_key: '', ai_choice: true,
+                  plain: 'Defend', cost: '' },
+                { letter: 'counter', name: 'COUNTER SPELL Bram (2 MANA)', score: 0,
+                  rationale: '+1 on the opposed roll', target_id: 7, target_name: 'Bram',
+                  counter_mana: 2, spell_key: '', ai_choice: false,
+                  plain: "Counter Bram's spell this turn, committing 2 mana",
+                  cost: '2 mana, spent whether Bram casts or not' },
+                { letter: 'counter', name: 'COUNTER SPELL Bram (1 MANA)', score: 0,
+                  rationale: '+0 on the opposed roll', target_id: 7, target_name: 'Bram',
+                  counter_mana: 1, spell_key: '', ai_choice: false,
+                  plain: "Counter Bram's spell this turn, committing 1 mana",
+                  cost: '1 mana, spent whether Bram casts or not' },
+                { letter: 'counter', name: 'COUNTER SPELL Odo (1 MANA)', score: 0,
+                  rationale: '+0 on the opposed roll', target_id: 8, target_name: 'Odo',
+                  counter_mana: 1, spell_key: '', ai_choice: false,
+                  plain: "Counter Odo's spell this turn, committing 1 mana",
+                  cost: '1 mana, spent whether Odo casts or not' },
+            ],
+        };
+    }
+
+    function escalationPending() {
+        return {
+            combatant_id: 7,
+            turn: 3,
+            display_name: 'Bram',
+            player: 'playeruser',
+            is_you: true,
+            candidates: [
+                { letter: 'k', name: 'DEFEND', score: 0.3, rationale: 'Hold',
+                  target_id: null, spell_key: '', ai_choice: true,
+                  plain: 'Defend', cost: '' },
+                { letter: 'h', name: 'CAST SPELL Fire Missile', score: 0,
+                  rationale: 'Press the countered Fire Missile again', target_id: 4,
+                  spell_key: 'fire_missile', escalate: true, ai_choice: false,
+                  plain: 'Press your countered Fire Missile again at Ysolde',
+                  cost: '2 mana; a counter against it means another opposed roll' },
+            ],
+            magic: {
+                pool_label: 'Mana', pool: 6, max_pool: 10,
+                spells: [
+                    { key: 'fire_missile', target_id: 4, name: 'Fire Missile',
+                      cost: 'Elemental — 2 mana', note: '74% on 3d6',
+                      castable: true, reason: '', channel: null,
+                      borrowable: false, shortfall: 0 },
+                ],
+            },
+        };
+    }
+
+    function panelNode() {
+        document.body.innerHTML = '<div id="turn-panel" hidden></div>';
+        return document.getElementById('turn-panel');
+    }
+
+    test('the card shows the server\'s contest line, and none without', () => {
+        document.body.innerHTML = '<div id="roster"></div>';
+        const roster = document.getElementById('roster');
+        battle.renderRoster(roster, sampleState([
+            sampleCombatant({
+                contest: { spell_key: 'fire_missile', turns: 1, line: contestLine },
+            }),
+            sampleCombatant({ combatant_id: 2, contest: null }),
+        ]));
+        const cards = roster.querySelectorAll('.combatant-card');
+        expect(cards[0].querySelector('.combatant-contest').textContent).toBe(contestLine);
+        expect(cards[0].querySelector('.combatant-contest').dataset.spell)
+            .toBe('fire_missile');
+        expect(cards[1].querySelector('.combatant-contest')).toBeNull();
+    });
+
+    test('each enemy caster gets one counter control with the menu\'s amounts', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, counterPending(), { selectedIndex: null });
+        const controls = panel.querySelectorAll('.turn-counter');
+        expect(controls).toHaveLength(2);
+        expect(controls[0].getAttribute('aria-label')).toBe("Counter Bram's spell");
+        expect(controls[0].querySelector('.turn-counter-label').textContent)
+            .toBe('Counter Bram:');
+        // Least commitment first, whatever order the menu listed them in.
+        const amounts = Array.from(controls[0].querySelectorAll('.turn-counter-amount'));
+        expect(amounts.map((button) => button.textContent)).toEqual(['1 mana', '2 mana']);
+        expect(amounts.map((button) => button.dataset.counterMana)).toEqual(['1', '2']);
+        expect(amounts.every((button) => button.getAttribute('aria-pressed') === 'false'))
+            .toBe(true);
+        expect(controls[1].dataset.caster).toBe('8');
+        // A counter is not a plain row: DEFEND is the only one.
+        expect(panel.querySelectorAll('.turn-option')).toHaveLength(1);
+        expect(panel.querySelector('.turn-counter-cost')).toBeNull();
+    });
+
+    test('a picked commitment is pressed and shows the server\'s cost', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, counterPending(), { selectedIndex: 1 });
+        const bram = panel.querySelector('.turn-counter');
+        const pressed = bram.querySelector('[aria-pressed="true"]');
+        expect(pressed.textContent).toBe('2 mana');
+        expect(bram.querySelector('.turn-counter-cost').textContent)
+            .toBe('Costs 2 mana, spent whether Bram casts or not.');
+        expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
+    });
+
+    test('confirming a counter sends its caster and its commitment', async () => {
+        const panel = mountPage(counterPending());
+        panel.querySelectorAll('.turn-counter')[0]
+            .querySelectorAll('.turn-counter-amount')[1].click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 2, letter: 'counter', target_id: 7,
+            spell_key: '', counter_mana: 2,
+        });
+    });
+
+    test('confirming any other option sends no counter', async () => {
+        const panel = mountPage(counterPending());
+        panel.querySelector('.turn-option').click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 2, letter: 'k', target_id: null, spell_key: '',
+        });
+    });
+
+    test('an escalating cast reads as pressing the countered spell again', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, escalationPending(), {
+            selectedIndex: null, castOpen: true,
+        });
+        const spell = panel.querySelector('.turn-spell');
+        expect(spell.classList.contains('is-escalation')).toBe(true);
+        expect(spell.querySelector('.turn-spell-escalate').textContent)
+            .toBe('Press your countered Fire Missile again at Ysolde');
+    });
+
+    test('a countered spell only borrowing pays for is marked as pressed again', () => {
+        const pending = escalationPending();
+        pending.candidates[1] = Object.assign(pending.candidates[1], {
+            name: 'CAST SPELL Fire Missile (BORROW 1 MANA)', borrow: true, borrowed: 1,
+            plain: 'Press your countered Fire Missile again at Ysolde, borrowing the 1 mana you lack',
+        });
+        Object.assign(pending.magic.spells[0], {
+            castable: false, reason: 'needs 2 mana, 1 left: borrow the 1 it lacks',
+            borrowable: true, shortfall: 1,
+        });
+        pending.magic.pool = 1;
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pending, { selectedIndex: null, castOpen: true });
+        const spell = panel.querySelector('.turn-spell');
+        expect(spell.disabled).toBe(true);
+        expect(spell.classList.contains('is-escalation')).toBe(true);
+        expect(spell.querySelector('.turn-spell-escalate').textContent)
+            .toBe('Press your countered Fire Missile again at Ysolde, borrowing the 1 mana you lack');
+        expect(panel.querySelectorAll('.turn-borrow-amount')).toHaveLength(1);
+    });
+
+    test('counter buttons carry their commitment and no push', () => {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, counterPending(), { selectedIndex: null });
+        const amounts = Array.from(panel.querySelectorAll('.turn-counter-amount'));
+        expect(amounts.every((button) => button.dataset.pushMana === undefined)).toBe(true);
+    });
+
+    test('a cast that does not escalate carries no escalation line', () => {
+        const pending = escalationPending();
+        delete pending.candidates[1].escalate;
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pending, { selectedIndex: null, castOpen: true });
+        expect(panel.querySelector('.turn-spell-escalate')).toBeNull();
+        expect(panel.querySelector('.turn-spell').classList.contains('is-escalation'))
+            .toBe(false);
+    });
+});
+
 describe('teams (#275)', () => {
     test('teamOrderOf lists teams by first appearance, skipping the free pool', () => {
         const view = sampleState([

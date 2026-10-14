@@ -33,6 +33,20 @@
  * shows it, the wizard's own anchor is the AI's pick, and the drain and the
  * anchor roll are logged; the numbers are the canon's.
  *
+ * Counterspell (tarmar-engine #31), in the fourth test: two seated wizards,
+ * the test user's and the Game Master's, face each other. The test user's
+ * counters the Game Master's with a commitment the counter control offers,
+ * and the Game Master's casts Fire Missile at it. Under the default canon the
+ * turns' seed is pinned so the defender wins the opposed roll: the log reads
+ * the declaration, both totals and the result, and the caster's card shows
+ * the spell standing countered. The next turn the caster presses it again,
+ * the stage marking the cast as such, and the defender lets it through by
+ * doing something else: the contest ends unopposed and the casting roll is
+ * made. Under the Tarmar canon the spec pins only what its rulings give: the
+ * test user's wizard may counter the enemy caster, the AI's pick is never a
+ * counter, the commitments rise one mana at a time, and the opposed roll
+ * and its result are logged; the numbers are the canon's.
+ *
  * Every die is pinned. The battle's seed fixes the turn's rolls and the
  * opponent; the wizard is generated on the claim, so that one request names
  * its dice (X-E2E-Dice-Seed, e2e/dice.js). The seeds were chosen so the
@@ -58,6 +72,16 @@ const WIZARD_SEED = 17;
  * holds, under the default canon.
  */
 const RUNAWAY_TURNS_SEED = 134;
+/** The Game Master's claim's seed: the caster's attributes. */
+const CASTER_SEED = 23;
+/**
+ * The turns' seed for the Counterspell branch (tarmar-engine #31), set after
+ * the battle starts: turn 1's opposed roll goes to the defender under the
+ * default canon.
+ */
+const COUNTER_TURNS_SEED = 1;
+/** The commitment the defender picks under the default canon. */
+const COUNTER_MANA = 4;
 
 /**
  * Empty the battle's wizard's mana pool, before the turn it decides in.
@@ -87,9 +111,20 @@ battle.save(update_fields=["state_json"])
  * @param {number} battleId
  */
 function pinTheRunawayTurns(battleId) {
+    pinTheTurns(battleId, RUNAWAY_TURNS_SEED);
+}
+
+/**
+ * Set the started battle's seed, which every later turn's dice follow; the
+ * figures are already made.
+ *
+ * @param {number} battleId
+ * @param {number} seed
+ */
+function pinTheTurns(battleId, seed) {
     runDjangoShell(`
 from battle.models import Battle
-Battle.objects.filter(pk=${battleId}).update(seed=${RUNAWAY_TURNS_SEED})
+Battle.objects.filter(pk=${battleId}).update(seed=${seed})
 `);
 }
 
@@ -115,6 +150,53 @@ battle.save(update_fields=["state_json"])
 }
 
 /**
+ * Claim the lobby's first open seat with a generated wizard, its attributes
+ * from ``seed``, and ready it.
+ *
+ * @param {import('@playwright/test').Page} page - the claimant's page, on the
+ *     battle
+ * @param {number} seed - the claim's dice
+ * @returns {Promise<string>} the seated wizard's name
+ */
+async function claimAWizard(page, seed) {
+    await pinDice(page, /\/seats\/\d+\/claim\/$/, seed);
+    const open = page.locator('.lobby-seat.is-open').first();
+    await open.locator('summary:has-text("Claim this seat")').click();
+    await open.locator('select[name="archetype"]').selectOption('wizard');
+    await open.locator('button:has-text("Join with a generated fighter")').click();
+    const mine = page.locator('.lobby-seat.is-you');
+    await expect(mine).toBeVisible();
+    await mine.locator('button:has-text("I\'m ready")').click();
+    await expect(mine.locator('.lobby-ready-chip.is-ready')).toBeVisible();
+    return (await mine.locator('.lobby-seat-name').textContent()).trim();
+}
+
+/**
+ * Take one turn in which each of two seated players chooses, in whatever
+ * order the turn asks them: each page's choice runs when its panel asks.
+ *
+ * @param {Array<{page: import('@playwright/test').Page,
+ *     choose: () => Promise<void>}>} players
+ */
+async function bothChoose(players) {
+    const waiting = [...players];
+    while (waiting.length) {
+        await expect.poll(async () => {
+            const asked = await Promise.all(waiting.map(
+                ({ page }) => page.locator('#turn-panel .turn-prompt').isVisible()
+            ));
+            return asked.indexOf(true);
+        }, { timeout: 15000 }).toBeGreaterThan(-1);
+        const asked = await Promise.all(waiting.map(
+            ({ page }) => page.locator('#turn-panel .turn-prompt').isVisible()
+        ));
+        const [player] = waiting.splice(asked.indexOf(true), 1);
+        await player.choose();
+        await expect(player.page.locator('#turn-panel .turn-prompt')).toHaveCount(0);
+    }
+}
+
+/**
  * A battle with one generated fighter and the test user's generated wizard,
  * started, with the wizard's spell stage open on the first turn.
  *
@@ -137,15 +219,9 @@ async function openTheWizardsStage(adminPage, browser, battleName, { beforeTurn 
     await startCoverage(page);
     await submitPassphrase(page);
     await loginAs(page, TEST_USER);
-    await pinDice(page, /\/seats\/\d+\/claim\/$/, WIZARD_SEED);
     const listRow = await battleRowOnList(page, battleName);
     await listRow.locator('a', { hasText: battleName }).first().click();
-    await page.click('summary:has-text("Claim this seat")');
-    await page.selectOption('select[name="archetype"]', 'wizard');
-    await page.click('button:has-text("Join with a generated fighter")');
-    await expect(page.locator('.lobby-seat.is-you')).toBeVisible();
-    await page.click('button:has-text("I\'m ready")');
-    await expect(page.locator('.lobby-ready-chip.is-ready')).toBeVisible();
+    await claimAWizard(page, WIZARD_SEED);
 
     await expect(adminPage.locator('.lobby-ready-chip.is-ready'))
         .toBeVisible({ timeout: 15000 });
@@ -376,6 +452,140 @@ test.describe('Pushing mana into a cast', () => {
                 hasText: /anchors Fire Missile after|fails to anchor Fire Missile/,
             })).toHaveCount(1);
         }
+
+        await stopCoverage(playerPage, `${testInfo.title} (player context)`);
+    });
+
+    test('a wizard counters another\'s spell, and the caster presses it again', async ({ adminPage, browser }, testInfo) => {
+        test.setTimeout(150000);
+        await adminPage.goto('/tarmar/gm/');
+        const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
+        const battleName = `E2E Counter ${Date.now()}`;
+        await createBattleViaSetup(adminPage, {
+            name: battleName, seed: BATTLE_SEED, playerSeats: 2,
+        });
+        await expect(adminPage.locator('#battle-status')).toHaveText('Lobby');
+        const battleId = Number(new URL(adminPage.url()).pathname.match(/battles\/(\d+)\//)[1]);
+
+        // The defender: the test user's wizard, in a context of its own.
+        const playerContext = await browser.newContext();
+        playerPage = await playerContext.newPage();
+        await startCoverage(playerPage);
+        await submitPassphrase(playerPage);
+        await loginAs(playerPage, TEST_USER);
+        const listRow = await battleRowOnList(playerPage, battleName);
+        await listRow.locator('a', { hasText: battleName }).first().click();
+        const defender = await claimAWizard(playerPage, WIZARD_SEED);
+        // The caster: the Game Master's own wizard.
+        await adminPage.reload();
+        await claimAWizard(adminPage, CASTER_SEED);
+        await adminPage.click('.battle-start-form button[type="submit"]');
+        await expect(playerPage.locator('#battle-arena')).toBeVisible({ timeout: 15000 });
+        if (defaultCanon) {
+            pinTheTurns(battleId, COUNTER_TURNS_SEED);
+        }
+        await adminPage.reload();
+        await adminPage.click('#advance-turn');
+
+        // Turn 1: the defender counters, the caster casts Fire Missile at it.
+        let committed = '';
+        await bothChoose([
+            {
+                page: playerPage,
+                choose: async () => {
+                    const control = playerPage.locator('#turn-panel .turn-counter');
+                    await expect(control).toHaveCount(1);
+                    // The AI never counters: no commitment is its pick.
+                    await expect(control.locator('.turn-option-ai-pick')).toHaveCount(0);
+                    const amounts = control.locator('.turn-counter-amount');
+                    const texts = await amounts.allTextContents();
+                    const mana = texts.map((text) => Number(text.replace(' mana', '')));
+                    // One button per mana from the least the canon allows.
+                    expect(mana).toEqual(mana.map((_amount, index) => mana[0] + index));
+                    await expect(amounts.first()).toHaveAttribute('aria-pressed', 'false');
+                    const picked = defaultCanon ? COUNTER_MANA - mana[0] : 0;
+                    if (defaultCanon) {
+                        // The default canon: 1 to 5 mana.
+                        expect(mana).toEqual([1, 2, 3, 4, 5]);
+                    }
+                    committed = String(mana[picked]);
+                    await amounts.nth(picked).click();
+                    await expect(amounts.nth(picked)).toHaveAttribute('aria-pressed', 'true');
+                    await expect(control.locator('.turn-counter-cost'))
+                        .toContainText(`${committed} mana, spent whether`);
+                    await playerPage.click('#turn-panel .turn-confirm');
+                },
+            },
+            {
+                page: adminPage,
+                choose: async () => {
+                    await adminPage.locator('#turn-panel .turn-option-cast').click();
+                    await adminPage.locator('#turn-panel .turn-spell', {
+                        has: adminPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
+                    }).click();
+                    await adminPage.click('#turn-panel .turn-confirm');
+                },
+            },
+        ]);
+        await expect(playerPage.locator('#battle-turn')).toHaveText('1');
+        await expect(playerPage.locator('.battle-event', {
+            hasText: `${defender} commits ${committed} mana to counter`,
+        })).toHaveCount(1);
+        const opposed = playerPage.locator('.event-roll', { hasText: / counter \d+d\d+/ });
+        await expect(opposed).toHaveCount(2);
+        const result = playerPage.locator('.battle-event', {
+            hasText: /Fire Missile (is countered|gets through): \d+ against \d+/,
+        });
+        await expect(result).toHaveCount(1);
+        if (!defaultCanon) {
+            await stopCoverage(playerPage, `${testInfo.title} (player context)`);
+            return;
+        }
+        await expect(opposed.first()).toContainText(' counter 2d10');
+        await expect(result).toContainText('Fire Missile is countered');
+        await expect(playerPage.locator('.battle-event', {
+            hasText: `Fire Missile is countered by ${defender}: no casting roll`,
+        })).toHaveCount(1);
+        // The caster's card shows the spell standing countered.
+        const contest = playerPage.locator('.combatant-contest');
+        await expect(contest).toHaveText(
+            `Fire Missile countered once by ${defender}; cast it again at ${defender} to press it`
+        );
+
+        // Turn 2: the caster presses it again; the defender does something
+        // else, so no counter meets it.
+        await adminPage.click('#advance-turn');
+        await bothChoose([
+            {
+                page: playerPage,
+                choose: async () => {
+                    await playerPage.locator('#turn-panel .turn-option', {
+                        has: playerPage.locator('.turn-option-name', { hasText: /^DODGE$/ }),
+                    }).click();
+                    await playerPage.click('#turn-panel .turn-confirm');
+                },
+            },
+            {
+                page: adminPage,
+                choose: async () => {
+                    await adminPage.locator('#turn-panel .turn-option-cast').click();
+                    const pressed = adminPage.locator('#turn-panel .turn-spell.is-escalation');
+                    await expect(pressed.locator('.turn-spell-escalate')).toHaveText(
+                        `Press your countered Fire Missile again at ${defender}`
+                    );
+                    await pressed.click();
+                    await adminPage.click('#turn-panel .turn-confirm');
+                },
+            },
+        ]);
+        await expect(playerPage.locator('#battle-turn')).toHaveText('2');
+        await expect(playerPage.locator('.battle-event', {
+            hasText: 'presses it again and no counter meets it: the contest over Fire '
+                + 'Missile ends after 1 counter(s)',
+        })).toHaveCount(1);
+        await expect(playerPage.locator('.event-roll', { hasText: ' casting 3d6' }))
+            .toHaveCount(1);
+        await expect(contest).toHaveCount(0);
 
         await stopCoverage(playerPage, `${testInfo.title} (player context)`);
     });

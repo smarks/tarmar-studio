@@ -1,12 +1,14 @@
 """The casting success tier, the Control Roll, the debt roll, a withheld
-cast and a Runaway's later turns, as read.
+cast, a Runaway's later turns and a Counterspell, as read.
 
 Issue #960: the engine narrates each with the labels the canon's rules give
 it (a tier's ``label``, a failure band's ``label``, and since tarmar-engine
 #28 a failed debt roll's ``label``) and its own words only for held,
 failed, borrows, debt and a Runaway. A Runaway's later turns (tarmar-engine
 #30) carry no injected label: the drain, the collapse, the death and the
-anchor roll are the engine's own words. These pin that every such line
+anchor roll are the engine's own words, and so is a Counterspell
+(tarmar-engine #31): the declaration, the opposed roll, its result, a
+lapsed counter and the contest's end. These pin that every such line
 reaches both readers of a battle's log, the battle page
 (``battle/_event.html``) and the GM battle report
 (:func:`gm.battle_report.turn_block`). Every label and number here is
@@ -22,12 +24,12 @@ from tarmar_engine.engine import TurnRunner
 from tarmar_engine.magic import BorrowingFailure, BorrowingRules, CastingSuccessTier
 from tarmar_engine.policy import choose_option
 from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
-from tarmar_engine.state import BattleState, RunawayState
+from tarmar_engine.state import BattleState, ContestState, RunawayState
 
 from battle.models import Battle, BattleEvent
 from gm.battle_report import turn_block
 
-from .magic_fixtures import INVENTED_RULES, RUNAWAY_RULES
+from .magic_fixtures import COUNTER_RULES, INVENTED_RULES, RUNAWAY_RULES
 from .test_engine import ScriptedRoller
 from .test_state import make_combatant
 
@@ -368,4 +370,104 @@ class RunawayNarrationTest(BothReadersTestCase):
             "runs on; Helper is caught by it",
             "Fire Missile runs away and will feed on Helper each turn (2 mana cast, "
             "caught from Caster)",
+        )
+
+
+def counter_runner(
+    faces: tuple[tuple[int, ...], ...] = (), **caster_fields
+) -> tuple[TurnRunner, BattleState, list[dict]]:
+    """A turn runner on :data:`COUNTER_RULES` (2d6 plus INT, +1 per 2 mana,
+    ties to the defender), with a caster (INT 14, 6 mana) aiming Fire
+    Missile (1 mana, +0) at a defender (INT 12, 6 mana) who has chosen to
+    counter it with 2 mana (+1).
+
+    Args:
+        faces: The scripted dice, in order.
+        caster_fields: Changes to the caster.
+    """
+    caster = make_combatant(
+        1,
+        **{
+            "name": "Caster",
+            "intelligence": 14,
+            "mana": 6,
+            "max_mana": 6,
+            "spells": ["fire_missile"],
+            "spell_skill_levels": {"fire_missile": 2},
+            "chosen_letter": "h",
+            "chosen_spell": "fire_missile",
+            "chosen_target": 2,
+            **caster_fields,
+        },
+    )
+    defender = make_combatant(
+        2,
+        name="Defender",
+        q=3,
+        r=0,
+        intelligence=12,
+        mana=6,
+        max_mana=6,
+        spells=["shield"],
+        chosen_counter=(1, 2),
+    )
+    state = BattleState(arena_radius=6, combatants=[caster, defender])
+    events: list[dict] = []
+    runner = TurnRunner(
+        state,
+        ScriptedRoller(list(faces)),
+        events.append,
+        profile=EngineTarmarProfile(magic=COUNTER_RULES),
+    )
+    return runner, state, events
+
+
+class CounterspellNarrationTest(BothReadersTestCase):
+    """A counter declared, the opposed roll, its result, a lapsed counter and
+    the contest's end (tarmar-engine #31)."""
+
+    def test_a_countered_cast_reads_both_totals_and_the_result(self) -> None:
+        # Caster 2 + INT 14 = 16; Defender 12 + INT 12 + 1 = 25.
+        runner, state, events = counter_runner(((1, 1), (6, 6)))
+        runner.cast_spell(state.by_id(1))
+        self.assert_both_read(
+            [as_row(event) for event in events],
+            "Defender commits 2 mana to counter Caster's spell (4 left)",
+            "Caster counter 2d6: [1, 1] +14 = 16 — countered",
+            "Defender counter 2d6: [6, 6] +13 = 25 — counters",
+            "Caster's Fire Missile is countered: 16 against 25",
+            "Caster's Fire Missile is countered by Defender: no casting roll",
+        )
+
+    def test_a_cast_that_gets_through_reads(self) -> None:
+        # Caster 12 + 14 = 26 beats Defender 2 + 13 = 15; the casting roll
+        # follows at the scripted roller's midline.
+        runner, state, events = counter_runner(((6, 6), (1, 1)))
+        runner.cast_spell(state.by_id(1))
+        self.assert_both_read(
+            [as_row(event) for event in events],
+            "Caster counter 2d6: [6, 6] +14 = 26 — gets through",
+            "Defender counter 2d6: [1, 1] +13 = 15 — overcome",
+            "Caster's Fire Missile gets through: 26 against 15",
+        )
+
+    def test_a_counter_no_cast_meets_lapses(self) -> None:
+        runner, state, events = counter_runner()
+        runner.declare_counter(state.by_id(2))
+        runner._lapse_counters()
+        self.assert_both_read(
+            [as_row(event) for event in events],
+            "Defender's counter against Caster meets no spell; its 2 mana is spent",
+        )
+
+    def test_an_escalation_no_counter_meets_ends_the_contest(self) -> None:
+        runner, state, events = counter_runner(
+            contest=ContestState("fire_missile", 2, [2], 1)
+        )
+        state.by_id(2).chosen_counter = None
+        runner.cast_spell(state.by_id(1))
+        self.assert_both_read(
+            [as_row(event) for event in events],
+            "Caster presses it again and no counter meets it: the contest over "
+            "Fire Missile ends after 1 counter(s)",
         )
