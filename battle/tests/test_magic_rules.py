@@ -18,6 +18,7 @@ from django.test import SimpleTestCase
 from tarmar_engine.magic import (
     BorrowingFailure,
     BorrowingRules,
+    CastingFailureRules,
     CastingSuccessTier,
     ChannelDerivation,
     ChannelRules,
@@ -40,8 +41,8 @@ from reference.paths import (
 )
 
 # A complete file with invented numbers: every field present, both kinds of
-# Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell
-# and a ruling.
+# Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell,
+# casting failure totals and a ruling.
 INVENTED_RULES: dict[str, Any] = {
     "casting_success_tiers": [
         {
@@ -133,6 +134,11 @@ INVENTED_RULES: dict[str, Any] = {
         "ties_go_to_caster": False,
         "defender_min_mana": 2,
         "defender_max_mana": 7,
+    },
+    "casting_failure": {
+        "fumble_floor": 14,
+        "mana_lost_totals": [14, 15],
+        "runaway_total": 15,
     },
     "rulings": [
         {"key": "made_up", "reading": "An invented reading.", "for_spencer": True}
@@ -231,6 +237,9 @@ INVENTED_MAGIC_RULES = MagicRules(
         defender_min_mana=2,
         defender_max_mana=7,
     ),
+    casting_failure=CastingFailureRules(
+        fumble_floor=14, mana_lost_totals=frozenset({14, 15}), runaway_total=15
+    ),
 )
 
 
@@ -267,9 +276,7 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             load_magic_rules(self.write_rules(INVENTED_RULES)), INVENTED_MAGIC_RULES
         )
 
-    def test_null_push_channel_borrowing_runaway_counterspell_no_tiers_load(
-        self,
-    ) -> None:
+    def test_every_null_block_and_no_tiers_load(self) -> None:
         rules = {
             "casting_success_tiers": [],
             "push": None,
@@ -277,8 +284,24 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             "borrowing": None,
             "runaway": None,
             "counterspell": None,
+            "casting_failure": None,
         }
         self.assertEqual(load_magic_rules(self.write_rules(rules)), MagicRules())
+
+    def test_null_casting_failure_loads_as_none(self) -> None:
+        rules = invented_rules()
+        rules["casting_failure"] = None
+        self.assertIsNone(load_magic_rules(self.write_rules(rules)).casting_failure)
+
+    def test_casting_failure_with_no_runaway_total_or_lost_totals_loads(
+        self,
+    ) -> None:
+        rules = invented_rules()
+        rules["casting_failure"].update(mana_lost_totals=[], runaway_total=None)
+        self.assertEqual(
+            load_magic_rules(self.write_rules(rules)).casting_failure,
+            CastingFailureRules(fumble_floor=14),
+        )
 
     def test_borrowing_with_no_cap_loads_beside_channel(self) -> None:
         rules = invented_rules()
@@ -558,6 +581,52 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         lambda rules: rules["counterspell"].update(defender_max_mana="7"),
     ),
     ("counterspell.step", lambda rules: rules["counterspell"].update(step=3)),
+    ("casting_failure", lambda rules: rules.pop("casting_failure")),
+    ("casting_failure", lambda rules: rules.update(casting_failure=[14])),
+    (
+        "casting_failure.fumble_floor",
+        lambda rules: rules["casting_failure"].pop("fumble_floor"),
+    ),
+    (
+        "casting_failure.mana_lost_totals",
+        lambda rules: rules["casting_failure"].pop("mana_lost_totals"),
+    ),
+    (
+        "casting_failure.runaway_total",
+        lambda rules: rules["casting_failure"].pop("runaway_total"),
+    ),
+    (
+        "casting_failure.fumble_floor",
+        lambda rules: rules["casting_failure"].update(fumble_floor="14"),
+    ),
+    (
+        "casting_failure.fumble_floor",
+        lambda rules: rules["casting_failure"].update(fumble_floor=True),
+    ),
+    (
+        "casting_failure.mana_lost_totals",
+        lambda rules: rules["casting_failure"].update(mana_lost_totals=15),
+    ),
+    (
+        "casting_failure.mana_lost_totals[1]",
+        lambda rules: rules["casting_failure"].update(mana_lost_totals=[14, False]),
+    ),
+    (
+        "casting_failure.mana_lost_totals",
+        lambda rules: rules["casting_failure"].update(mana_lost_totals=[15, 15]),
+    ),
+    (
+        "casting_failure.runaway_total",
+        lambda rules: rules["casting_failure"].update(runaway_total=15.0),
+    ),
+    (
+        "casting_failure.runaway_total",
+        lambda rules: rules["casting_failure"].update(runaway_total=True),
+    ),
+    (
+        "casting_failure.fumble_total",
+        lambda rules: rules["casting_failure"].update(fumble_total=14),
+    ),
     ("rulings", lambda rules: rules.update(rulings={})),
     ("rulings[0]", lambda rules: rules.update(rulings=["An unkeyed reading."])),
     ("rulings[0].reading", lambda rules: rules["rulings"][0].pop("reading")),
@@ -685,6 +754,28 @@ class EngineValidationTest(MagicRulesFileTestCase):
         rules["counterspell"].update(defender_min_mana=3, defender_max_mana=2)
         self.assert_engine_refused(rules, "counterspell", "below its least")
 
+    def test_a_fumble_floor_below_one(self) -> None:
+        rules = invented_rules()
+        rules["casting_failure"].update(
+            fumble_floor=0, mana_lost_totals=[], runaway_total=None
+        )
+        self.assert_engine_refused(rules, "casting_failure", "at least 1")
+
+    def test_a_runaway_total_below_the_fumble_floor(self) -> None:
+        rules = invented_rules()
+        rules["casting_failure"].update(mana_lost_totals=[], runaway_total=13)
+        self.assert_engine_refused(rules, "casting_failure", "below the fumble floor")
+
+    def test_a_mana_lost_total_below_the_fumble_floor(self) -> None:
+        rules = invented_rules()
+        rules["casting_failure"]["mana_lost_totals"] = [13, 14, 15]
+        self.assert_engine_refused(rules, "casting_failure", "mana-lost totals [13]")
+
+    def test_a_runaway_total_that_spends_no_mana(self) -> None:
+        rules = invented_rules()
+        rules["casting_failure"]["mana_lost_totals"] = [14]
+        self.assert_engine_refused(rules, "casting_failure", "not a mana-lost total")
+
 
 class CanonMagicRulesTest(SimpleTestCase):
     def tearDown(self) -> None:
@@ -702,6 +793,8 @@ class CanonMagicRulesTest(SimpleTestCase):
         self.assertIsNotNone(rules.runaway)
         # Its counterspell.md says a defender may commit mana to a counter.
         self.assertIsNotNone(rules.counterspell)
+        # Its mana-pool.md says how a casting roll's high results fail.
+        self.assertIsNotNone(rules.casting_failure)
 
     def test_the_loaded_canon_file_loads_once_per_process(self) -> None:
         self.assertEqual(MAGIC_RULES_FILE, DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME)
@@ -728,6 +821,9 @@ class TarmarMagicRulesTest(SimpleTestCase):
         assert rules.borrowing is not None, "the Tarmar canon offers Borrowing"
         assert rules.runaway is not None, "the Tarmar canon runs a Runaway"
         assert rules.counterspell is not None, "the Tarmar canon offers Counterspell"
+        assert rules.casting_failure is not None, (
+            "the Tarmar canon fails a casting roll on its high totals"
+        )
         summary = {
             "tier_natural_totals": sorted(
                 total
@@ -787,6 +883,11 @@ class TarmarMagicRulesTest(SimpleTestCase):
                 "ties_go_to_caster": rules.counterspell.ties_go_to_caster,
                 "defender_min_mana": rules.counterspell.defender_min_mana,
                 "defender_max_mana": rules.counterspell.defender_max_mana,
+            },
+            "casting_failure": {
+                "fumble_floor": rules.casting_failure.fumble_floor,
+                "mana_lost_totals": sorted(rules.casting_failure.mana_lost_totals),
+                "runaway_total": rules.casting_failure.runaway_total,
             },
         }
         self.assertEqual(summary, CANON_EXPECTATIONS["magic_rules"])

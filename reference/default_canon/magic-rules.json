@@ -66,5 +66,10 @@
     "ties_go_to_caster": false,
     "defender_min_mana": 1,
     "defender_max_mana": 5
+  },
+  "casting_failure": {
+    "fumble_floor": 13,
+    "mana_lost_totals": [13, 14],
+    "runaway_total": 14
   }
 }

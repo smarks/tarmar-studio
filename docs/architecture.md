@@ -251,8 +251,8 @@ Notes on the edges, each checkable:
   reason.
 - `battle/magic_rules.py` reads the canon's `magic-rules.json`
   (`reference.paths.MAGIC_RULES_FILE`) into the engine's `MagicRules`: the
-  casting success tiers, Push, Channel, Borrowing, Runaway and Counterspell
-  numbers. It is the only path that sets them.
+  casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell and
+  casting failure numbers. It is the only path that sets them.
 
 ### Frontend layering
 
