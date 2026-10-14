@@ -1,6 +1,7 @@
 """Reading and checking a JSON plan (issue #590)."""
 
 import json
+import time
 
 from django.test import SimpleTestCase
 
@@ -14,7 +15,13 @@ from .turn_engine.messages import (
     plan_message,
     replan_message,
 )
-from .turn_engine.plan import MAX_ACTIONS, NewCharacter, PlannedAction, read_plan
+from .turn_engine.plan import (
+    _FENCE,
+    MAX_ACTIONS,
+    NewCharacter,
+    PlannedAction,
+    read_plan,
+)
 from .turn_engine.policy import (
     AIDE_MANNER,
     AIDE_PLANNING_GUIDANCE,
@@ -303,6 +310,95 @@ class ReadPlanTest(SimpleTestCase):
                 "background": {"location": "City"},
             },
         )
+
+
+class FencedPlanTest(SimpleTestCase):
+    """A plan the model wrapped in a Markdown fence (issue #11).
+
+    The fence pattern was rewritten to run in linear time; these pin what it
+    reads, so the rewrite changed how long it takes and nothing else.
+    """
+
+    QUESTION = {"action": "ask_gm", "question": "Which track?"}
+
+    def read(self, raw: str):
+        return read_plan(raw, roster_ids={41}, policy=GAME_MASTER)
+
+    def assert_question_read(self, raw: str, question: str = "Which track?"):
+        reading = self.read(raw)
+        self.assertTrue(reading.ok, reading.errors)
+        self.assertEqual([action.question for action in reading.actions], [question])
+
+    def test_a_fence_with_or_without_the_json_tag_is_read(self):
+        body = plan(self.QUESTION)
+        cases = {
+            "json tag": f"```json\n{body}\n```",
+            "tag in capitals": f"```JSON\n{body}\n```",
+            "no tag": f"```\n{body}\n```",
+            "no line breaks": f"```json{body}```",
+            "CRLF line breaks": f"```json\r\n{body}\r\n```",
+            "whitespace around the fence": f"  \n\t```json\n{body}\n```\n  ",
+            "spaces inside the fence": f"```json   {body}   ```",
+        }
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.assert_question_read(raw)
+
+    def test_backticks_inside_the_plan_are_kept(self):
+        # The body runs to the fence that ends the reply, not to the first
+        # run of backticks inside it.
+        for question in ("Use ```code```?", "One ` and two ``"):
+            with self.subTest(question=question):
+                body = plan({"action": "ask_gm", "question": question})
+                self.assert_question_read(f"```json\n{body}\n```", question)
+
+    def test_only_json_is_taken_as_a_tag(self):
+        # Any other tag stays in the body and the reply is not JSON, as before
+        # the rewrite.
+        reading = self.read(f"```python\n{plan(self.QUESTION)}\n```")
+        self.assertIn("not JSON", reading.errors[0])
+
+    def test_an_unclosed_fence_is_not_json(self):
+        for raw in (
+            f"```json\n{plan(self.QUESTION)}",
+            f"```json\n{plan(self.QUESTION)}\n``",
+            "```json",
+            "`````",
+        ):
+            with self.subTest(raw=raw):
+                self.assertIn("not JSON", self.read(raw).errors[0])
+
+    def test_an_empty_fence_is_an_empty_reply(self):
+        for raw in ("```json\n```", "``````", "```  \n  ```"):
+            with self.subTest(raw=raw):
+                self.assertIn("empty", self.read(raw).errors[0])
+
+    def test_long_runs_of_spaces_are_read(self):
+        # The shape that made the old pattern cubic: a fence and a long run of
+        # spaces, closed or not.
+        spaces = " " * 5000
+        body = plan(self.QUESTION)
+        self.assert_question_read(f"```json{spaces}{body}{spaces}```")
+        self.assertIn("not JSON", self.read(f"```{spaces}x").errors[0])
+
+    def test_the_fence_pattern_stays_fast_on_crafted_input(self):
+        # The tests above check what the pattern reads; this one checks how
+        # long it takes. 2,000 spaces took the old pattern 2 s; each input
+        # here is 25 times that, so a pattern that backtracks again takes
+        # hours rather than a millisecond. The closed fence is fast for the
+        # old pattern too; it holds the new one's match path to the same bound.
+        spaces = " " * 50_000
+        crafted = {
+            "unclosed fence then spaces": f"```{spaces}",
+            "unclosed tagged fence, spaces, a word": f"```json{spaces}x",
+            "spaces then two backticks": f"```{spaces}``",
+            "closed fence padded with spaces": f"```json{spaces}{{}}{spaces}```",
+        }
+        for label, text in crafted.items():
+            with self.subTest(input=label, pattern="fence"):
+                started = time.perf_counter()
+                _FENCE.fullmatch(text)
+                self.assertLess(time.perf_counter() - started, 1.0)
 
 
 class TurnMessagesTest(SimpleTestCase):

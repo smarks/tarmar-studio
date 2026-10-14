@@ -105,7 +105,17 @@ BACKGROUND_FIELDS: dict[str, str] = {
     "wealth": "wealth_level",
 }
 
-_FENCE = re.compile(r"^```(?:json)?\s*(?P<body>.*?)\s*```$", re.DOTALL | re.IGNORECASE)
+# A Markdown fence around the plan: "```json ... ```", or "```" with no tag.
+# The reply is the model's words, which a player can steer, so the pattern
+# matches in linear time (issue #11). It has one repeated part, the body. The
+# old pattern put a "\s*" on each side of a lazy body, three repeats that
+# could all take the same spaces, so "```" and a run of spaces with no closing
+# fence was split every possible way before failing: cubic, 2 s at 2,000
+# spaces. The body now runs to the closing "```" at the very end (the reply is
+# stripped first): it takes the rest of the reply and gives back one
+# character at a time until a fence closes it, one comparison a step. The
+# caller strips the whitespace the "\s*"s took.
+_FENCE = re.compile(r"```(?:json)?(?P<body>.*)```", re.DOTALL | re.IGNORECASE)
 
 
 def unknown_thread_error(said: int, open_ids: Collection[int]) -> str:
@@ -356,7 +366,7 @@ class PlanReading:
 def _json_object(raw: str) -> tuple[Any, str]:
     """The JSON the reply holds, or ``(None, error)``."""
     text = raw.strip()
-    fenced = _FENCE.match(text)
+    fenced = _FENCE.fullmatch(text)
     if fenced is not None:
         text = fenced.group("body").strip()
     if not text:
