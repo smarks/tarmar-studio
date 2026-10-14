@@ -54,7 +54,7 @@ partial and kept as they were, since the specs find those lines by them.
     </dl>
 
     {# Luck, once per session per level (issue #861): the count and the spend. #}
-    {% luck_control panel_luck sheet.pk %}
+    {% luck_control panel_luck sheet.pk sheet.name %}
     {% if ledger %}
     <h5>Skill points <span class="gm-sheet-note"{% if first %} id="gm-draft-free-points"{% endif %}>{{ ledger.skill_points.remaining }} free</span></h5>
     <ul class="gm-sheet-list gm-draft-account">

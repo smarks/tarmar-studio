@@ -10,7 +10,9 @@
  * record as the server now holds it: the Campaign tab is fetched again
  * through gm-panel-characters.js, and the recap is replaced by the text
  * saved. A refusal is written into the tab's error line and stays there
- * until the next attempt (no transient UI).
+ * until the next attempt (no transient UI). A form the reader has open or
+ * has typed in while the tab is fetched again keeps both
+ * (gm-panel-drafts.js, issue #16); one that saved is emptied first.
  *
  * The server decides who may (gm/hand_records.py): these controls are only
  * drawn for a Game Master, and a request from anyone else is refused.
@@ -105,6 +107,9 @@ if (typeof module !== 'undefined' && module.exports) {
     }
     const data = await send(form.dataset.url, body, CAMPAIGN_LINES);
     if (!data) return false;
+    // Saved: the form is emptied and closed, so the refetch does not carry
+    // what was sent back into it as a draft (issue #16).
+    if (root.gmPanelDrafts) root.gmPanelDrafts.discard(form);
     await afterCampaignEdit(data);
     return true;
   }

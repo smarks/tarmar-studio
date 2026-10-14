@@ -16,6 +16,12 @@ only (can_edit_records) and the endpoints check the account again; a player
 reads the same lists without them. gm-records.js posts the forms. Each record
 the Game Master set himself says so (hand_mark), and each row carries its
 number, which is how the model and the Game Master name it to each other.
+
+Each form names itself by the record it changes (data-draft-key) and says
+what it is (data-draft-label): gm-panel-drafts.js puts a form the Game Master
+has open or typed in back on the form of the same key when this tab is
+fetched again mid-turn, and keeps what he typed if its record has gone
+(issue #16). A key is unique on the page.
 {% endcomment %}
     <p class="gm-panel-error" id="gm-panel-campaign-error" role="alert" hidden></p>
 {% if not campaign_session %}
@@ -45,7 +51,7 @@ number, which is how the model and the Game Master name it to each other.
                 {% if can_edit_records %}
                 <details class="gm-hand-edit">
                     <summary>Correct</summary>
-                    <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="edit">
+                    <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="edit" data-draft-key="ruling-{{ ruling.pk }}" data-draft-label="Correct ruling {{ ruling.pk }} ({{ ruling.topic }})">
                         <input type="hidden" name="ruling_id" value="{{ ruling.pk }}">
                         <label>Topic <input type="text" name="topic" value="{{ ruling.topic }}" maxlength="{{ gm_text_limits.ruling_topic }}" required></label>
                         <label>Rule <textarea name="text" rows="2" maxlength="{{ gm_text_limits.ruling_text }}" required>{{ ruling.text }}</textarea></label>
@@ -64,7 +70,7 @@ number, which is how the model and the Game Master name it to each other.
     {% if can_edit_records %}
     <details class="gm-hand-edit gm-hand-add" id="gm-add-ruling">
         <summary>Add a ruling</summary>
-        <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="add">
+        <form class="gm-hand-form" data-url="{{ rulings_url }}" data-change="add" data-draft-key="add-ruling" data-draft-label="Add a ruling">
             <label>Topic <input type="text" name="topic" maxlength="{{ gm_text_limits.ruling_topic }}" required placeholder="critical hits"></label>
             <label>Rule <textarea name="text" rows="2" maxlength="{{ gm_text_limits.ruling_text }}" required placeholder="a natural 20 just crits"></textarea></label>
             <button type="submit" class="btn btn-sm">Record the ruling</button>
@@ -146,7 +152,7 @@ number, which is how the model and the Game Master name it to each other.
                 {% if can_edit_records %}
                 <details class="gm-hand-edit">
                     <summary>Correct</summary>
-                    <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="edit">
+                    <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="edit" data-draft-key="thread-{{ thread.pk }}" data-draft-label="Correct thread {{ thread.pk }}">
                         <input type="hidden" name="thread_id" value="{{ thread.pk }}">
                         <label>Thread <textarea name="text" rows="2" maxlength="{{ gm_text_limits.thread_text }}" required>{{ thread.text }}</textarea></label>
                         <button type="submit" class="btn btn-sm">Save the thread</button>
@@ -154,7 +160,7 @@ number, which is how the model and the Game Master name it to each other.
                 </details>
                 <details class="gm-hand-edit">
                     <summary>Resolve</summary>
-                    <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="resolve">
+                    <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="resolve" data-draft-key="resolve-thread-{{ thread.pk }}" data-draft-label="Resolve thread {{ thread.pk }}">
                         <input type="hidden" name="thread_id" value="{{ thread.pk }}">
                         <label>How it ended <input type="text" name="resolution" maxlength="{{ gm_text_limits.thread_resolution }}"></label>
                         <button type="submit" class="btn btn-sm">Close the thread</button>
@@ -170,7 +176,7 @@ number, which is how the model and the Game Master name it to each other.
         {% if can_edit_records %}
         <details class="gm-hand-edit gm-hand-add" id="gm-open-thread">
             <summary>Open a thread</summary>
-            <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="open">
+            <form class="gm-hand-form" data-url="{{ threads_url }}" data-change="open" data-draft-key="add-thread" data-draft-label="Open a thread">
                 <label>Thread <textarea name="text" rows="2" maxlength="{{ gm_text_limits.thread_text }}" required></textarea></label>
                 <button type="submit" class="btn btn-sm">Open the thread</button>
             </form>

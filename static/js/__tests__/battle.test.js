@@ -742,6 +742,62 @@ describe('inline rename', () => {
             .toBe('Kestra Duskmere');
     });
 
+    describe('a rename being typed when the roster is drawn again (issue #16)', () => {
+        function startTyping(roster, typed) {
+            roster.querySelector('.combatant-name').click();
+            const input = roster.querySelector('.combatant-rename-input');
+            input.value = typed;
+            input.setSelectionRange(2, 4);
+            return input;
+        }
+
+        test('goes on in the redrawn card with the text, focus and caret', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            const typed = startTyping(roster, 'Kestra the Grey');
+
+            // A poll brings another seat's move: the roster is drawn again.
+            battle.renderRoster(roster, state, options);
+            // The browser blurs a focused field it removes; that blur saved
+            // the half-typed name.
+            typed.dispatchEvent(new FocusEvent('blur'));
+
+            const input = roster.querySelector('.combatant-rename-input');
+            expect(input).not.toBe(typed);
+            expect(input.value).toBe('Kestra the Grey');
+            expect(document.activeElement).toBe(input);
+            expect([input.selectionStart, input.selectionEnd]).toEqual([2, 4]);
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(options.onRenamed).not.toHaveBeenCalled();
+        });
+
+        test('a rename already saving is not opened again', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn(() => new Promise(() => {}));
+            require('../api.js');
+            const typed = startTyping(roster, 'Kestra the Grey');
+            typed.blur();
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+
+            battle.renderRoster(roster, state, options);
+
+            expect(roster.querySelector('.combatant-rename-input')).toBeNull();
+            expect(roster.querySelector('.combatant-name').textContent).toBe('Kestra Duskmere');
+        });
+
+        test('a figure no longer this viewer\'s to rename shows what was typed', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+
+            expect(roster.querySelector('.combatant-rename-input')).toBeNull();
+            expect(roster.querySelector('.autosave-error').textContent).toContain('Kestra the Grey');
+            expect(global.fetch).not.toHaveBeenCalled();
+        });
+    });
+
     test('a network failure shows a persistent inline error and reverts', async () => {
         const { roster } = rosterWithOptions();
         global.fetch = jest.fn().mockRejectedValue(new Error('offline'));

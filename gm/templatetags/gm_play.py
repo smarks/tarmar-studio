@@ -82,12 +82,14 @@ def sessions_holding(character: Character, viewer) -> dict:
 
 
 @register.inclusion_tag("gm/_luck_control.html")
-def luck_control(panel: LuckPanel | None, character_id: int) -> dict:
+def luck_control(panel: LuckPanel | None, character_id: int, name: str = "") -> dict:
     """The Characters tab's Luck line and "Spend Luck" control (issue #861).
 
     Args:
         panel: The tab's :class:`gm.luck.LuckPanel`, or None without a session.
         character_id: The character the line is for.
+        name: The character's name, which names a roll note the tab could
+            not put back after a refetch (issue #16).
 
     Returns:
         The partial's context; ``account`` is None where there is no Luck.
@@ -96,6 +98,7 @@ def luck_control(panel: LuckPanel | None, character_id: int) -> dict:
     return {
         "account": account,
         "character_id": character_id,
+        "name": name,
         # The roll note's maxlength, the one spend_luck refuses past (#938).
         "gm_text_limits": GM_TEXT_LIMITS,
         "url": panel.url if panel is not None else "",

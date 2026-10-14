@@ -368,6 +368,7 @@ class GMChatPagePanelTest(BaseTestCase):
             content.index("js/chat.js"),
             content.index("js/gm-panel-layout.js"),
             content.index("js/gm-panel.js"),
+            content.index("js/gm-panel-drafts.js"),
             content.index("js/gm-panel-characters.js"),
         ]
         self.assertEqual(order, sorted(order), "panel scripts load after chat.js")

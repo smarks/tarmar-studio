@@ -2,12 +2,13 @@
 The Game Master's form for one person or thing (issue #790): correcting the
 row given as `entity`, or adding one of `kind` when `entity` is None.
 Included by gm/_panel_campaign_body.html for a Game Master's account only.
-Every field is sent as it stands, so a wrong detail can be cleared.
+Every field is sent as it stands, so a wrong detail can be cleared. The
+form's draft key and label are gm-panel-drafts.js's (issue #16).
 {% endcomment %}
 {% url 'gm:entities' campaign_session.pk as entities_url %}
 <details class="gm-hand-edit{% if not entity %} gm-hand-add{% endif %}"{% if not entity %} id="gm-add-{{ kind }}"{% endif %}>
     <summary>{% if entity %}Correct{% elif kind == "person" %}Add someone{% else %}Add a thing{% endif %}</summary>
-    <form class="gm-hand-form" data-url="{{ entities_url }}" data-change="save">
+    <form class="gm-hand-form" data-url="{{ entities_url }}" data-change="save" data-draft-key="{% if entity %}{{ kind }}-{{ entity.pk }}{% else %}add-{{ kind }}{% endif %}" data-draft-label="{% if entity %}Correct {{ kind }} {{ entity.pk }} ({{ entity.name }}){% elif kind == "person" %}Add someone{% else %}Add a thing{% endif %}">
         <input type="hidden" name="kind" value="{{ kind }}">
         {% if entity %}<input type="hidden" name="entity_id" value="{{ entity.pk }}">{% endif %}
         <label>Name <input type="text" name="name" value="{{ entity.name|default:'' }}" maxlength="{{ gm_text_limits.entity_name }}" required></label>

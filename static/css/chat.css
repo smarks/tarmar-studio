@@ -1305,3 +1305,10 @@ body.gm-panel-resizing, body.gm-panel-resizing-rows { user-select: none; }
 }
 .gm-hand-form button { justify-self: start; }
 .gm-hand-mark { font-style: italic; }
+
+/* What was typed into a form whose record a refetch took away (issue #16). */
+.gm-drafts-lost p { margin: 0 0 0.35rem; }
+.gm-drafts-lost ul { margin: 0; padding-left: 1rem; }
+.gm-drafts-lost li { margin-bottom: 0.35rem; }
+.gm-drafts-lost dl { margin: 0.15rem 0; }
+.gm-drafts-lost dd { margin: 0 0 0.25rem 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }

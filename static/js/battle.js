@@ -470,18 +470,29 @@ if (typeof module !== 'undefined' && module.exports) {
      * Swap a roster name for an editable field. Blur/Enter saves through the
      * rename endpoint, Escape cancels; a rejected save reverts the name and
      * leaves a persistent inline error (no modals, no transient UI).
+     * ``draft`` is a rename the roster was redrawn under (takeRename): the
+     * field opens holding what was typed, the caret where it was.
      */
-    function startRename(card, title, combatant, options) {
+    function startRename(card, title, combatant, options, draft) {
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'combatant-rename-input';
-        input.value = combatant.name;
+        input.value = draft ? draft.value : combatant.name;
         let cancelled = false;
         title.replaceWith(input);
         input.focus();
-        input.select();
+        if (draft) {
+            input.setSelectionRange(draft.start, draft.end, draft.direction || 'none');
+        } else {
+            input.select();
+        }
         bindCommitKeys(input, { onCancel: () => { cancelled = true; } });
         input.addEventListener('blur', () => {
+            // Removed by a redraw mid-edit: the browser blurs a focused field
+            // it removes, and this used to save the half-typed name. The edit
+            // goes on in the redrawn card instead (issue #16).
+            if (input.dataset.carried) { return; }
+            input.dataset.finished = 'true';
             const value = input.value.trim();
             if (cancelled || !value || value === combatant.name) {
                 input.replaceWith(title);
@@ -524,6 +535,54 @@ if (typeof module !== 'undefined' && module.exports) {
      * another name.
      */
     function renderRoster(container, view, renameOptions, seatMap, openDetail) {
+        const renaming = takeRename(container);
+        drawRoster(container, view, renameOptions, seatMap, openDetail);
+        if (renaming) { resumeRename(container, view, renameOptions, renaming); }
+    }
+
+    /**
+     * The rename being typed in ``container``, if one is, taken before a
+     * redraw (issue #16): which figure, what was typed and where the caret
+     * was. A field whose edit has finished (it blurred, and is saving or
+     * reverting) is not taken. The field is marked so its own blur, which
+     * the redraw's removal fires, does not save it.
+     * @param {Element} container - The roster.
+     * @returns {{combatantId: string, value: string, start: number, end: number, direction: string}|null}
+     */
+    function takeRename(container) {
+        const input = container.querySelector('.combatant-rename-input:not([data-finished])');
+        const card = input && input.closest('[data-combatant]');
+        if (!card) { return null; }
+        input.dataset.carried = 'true';
+        return {
+            combatantId: card.dataset.combatant,
+            value: input.value,
+            start: input.selectionStart,
+            end: input.selectionEnd,
+            direction: input.selectionDirection,
+        };
+    }
+
+    /**
+     * Open the taken rename again on the redrawn card of the same figure. A
+     * figure this viewer may no longer rename says so in its card, with what
+     * was typed, rather than dropping it.
+     */
+    function resumeRename(container, view, renameOptions, renaming) {
+        const card = container.querySelector(`[data-combatant="${renaming.combatantId}"]`);
+        const title = card && card.querySelector('.combatant-name');
+        const combatant = (view.combatants || []).find(
+            (each) => String(each.combatant_id) === renaming.combatantId
+        );
+        if (title && combatant && renameOptions) {
+            startRename(card, title, combatant, renameOptions, renaming);
+        } else if (card) {
+            showRenameError(card, `Not renamed: "${renaming.value}" could not be kept, this figure can no longer be renamed here`);
+        }
+    }
+
+    /** Draw the roster's cards into ``container`` (see renderRoster). */
+    function drawRoster(container, view, renameOptions, seatMap, openDetail) {
         container.textContent = '';
         const teamOrder = teamOrderOf(view);
         if (!teamOrder.length) {

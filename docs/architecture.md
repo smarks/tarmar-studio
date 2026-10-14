@@ -1208,6 +1208,10 @@ are declared in `gm/templates/gm/chat.html`:
 `gm-panel-layout.js` takes over the display when loaded: panes stack, collapse,
 resize and pop out.
 
+While a turn runs, `gm-panel-characters.js` refetches the Characters and Campaign
+tabs whole. `gm-panel-drafts.js` carries what the reader has open or typed in
+them through each refetch, by each form's `data-draft-key` (issue #16).
+
 ### Narration guarantees
 
 Both are applied server-side in `TurnEngine.run`, after narration and before the

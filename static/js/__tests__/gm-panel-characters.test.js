@@ -302,15 +302,17 @@ describe('live refresh (issue #571)', () => {
     test('a search typed in the attach picker is asked again after a refresh (#864)', async () => {
         setUpDom({ sessionId: 5, live: true });
         const pickerMarkup = (value) => `
-            <form id="gm-character-picker">
+            <form id="gm-character-picker" data-draft-key="attach">
                 <div data-picker data-picker-url="/tarmar/gm/characters/attachable/?session=5">
-                    <input data-picker-search value="${value}">
+                    <input type="search" id="gm-attach-picker-search" data-picker-search value="${value}">
                     <div data-picker-body><select id="gm-character-select"></select></div>
                 </div>
             </form>`;
         document.getElementById('gm-panel-characters').insertAdjacentHTML(
-            'afterbegin', pickerMarkup('wren'),
+            'afterbegin', pickerMarkup(''),
         );
+        // Typed, as the reader types: the server rendered the box empty.
+        document.querySelector('[data-picker-search]').value = 'wren';
         window.picker = require('../picker.js');
         global.fetch
             .mockReturnValueOnce(htmlResponse(pickerMarkup('')))
