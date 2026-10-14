@@ -34,13 +34,17 @@ now that the fix has landed and every catalog spell goes through the plain
 import re
 
 from django.test import SimpleTestCase
+from tarmar_engine.magic import MagicRules
+from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 from tarmar_rules import dex_modifier
 
 from battle.engine import combat_math, engine, hexes
+from battle.magic_rules import magic_rules
 from battle.spells import SPELLS
 from reference.markdown_tables import split_table_row
 from reference.paths import PUBLIC_RULES_DIR
 
+from .magic_fixtures import casting_faces
 from .test_engine import ScriptedRoller, box_in, duel_state, events_of_type
 from .test_state import make_combatant
 
@@ -299,36 +303,62 @@ class EngineRollSpecTest(SimpleTestCase):
 
 
 class CastingFumbleVerdictTest(SimpleTestCase):
-    """mana-pool.md's 16-18 casting-roll verdicts, proved through the app's
-    own ``battle.engine`` re-export (issue #292)."""
+    """The loaded canon's casting failure verdicts, proved through the app's
+    own ``battle.engine`` re-export (issues #292, tarmar-engine #46).
 
-    def test_a_roll_of_sixteen_fails_a_spell_a_high_attribute_would_pass(self):
-        state = duel_state()
-        caster = state.by_id(1)
-        caster.mana = 10
-        caster.intelligence = 18
-        caster.chosen_spell = "fire_missile"
-        caster.chosen_target = 2
-        runner, events = make_runner(state)
-        # 3d6 = [6, 6, 4] = 16 <= 18, but mana-pool.md's table fails it.
-        runner.roller = ScriptedRoller([[6, 6, 4]])
-        runner.cast_spell(caster)
-        cast = roll_events(events)[0]
-        self.assertEqual(cast["payload"]["total"], 16)
-        self.assertIn("failure", events_of_type(events, "action")[0]["message"])
-        self.assertEqual(len(roll_events(events)), 1)  # no aim/damage roll
+    The fumble floor is read from the canon's ``casting_failure`` block, so
+    this holds under either canon and names no total of its own.
+    """
 
-    def test_a_roll_of_fifteen_still_succeeds(self):
-        # Regression guard: only 16-18 change the verdict.
-        state = duel_state()
-        caster = state.by_id(1)
-        caster.mana = 10
-        caster.wisdom = 18  # shield rolls against WIS (#291)
-        caster.chosen_spell = "shield"
-        runner, events = make_runner(state)
-        runner.roller = ScriptedRoller([[6, 6, 3]])  # 15 <= 18
-        runner.cast_spell(caster)
-        self.assertEqual(caster.active_spells, ["shield"])
+    def setUp(self) -> None:
+        """A caster with mana beside a foe, and a runner carrying only the
+        loaded canon's casting failure rules."""
+        magic_rules.cache_clear()
+        self.addCleanup(magic_rules.cache_clear)
+        casting_failure = magic_rules().casting_failure
+        assert casting_failure is not None, "the canon names its fumble floor"
+        self.fumble_floor = casting_failure.fumble_floor
+        self.state = duel_state()
+        self.caster = self.state.by_id(1)
+        self.caster.mana = 10
+        self.events: list[dict] = []
+        # The canon's casting failure rules alone, so no Channel or Push of
+        # either canon's stands between the scripted roll and its verdict.
+        self.runner = engine.TurnRunner(
+            self.state,
+            ScriptedRoller(),
+            self.events.append,
+            profile=EngineTarmarProfile(
+                magic=MagicRules(casting_failure=casting_failure)
+            ),
+        )
+
+    def cast(self, natural_total: int) -> None:
+        """Cast the caster's chosen spell, scripted to ``natural_total``.
+
+        Args:
+            natural_total: The casting roll's total.
+        """
+        self.runner.roller = ScriptedRoller([casting_faces(natural_total)])
+        self.runner.cast_spell(self.caster)
+
+    def test_the_fumble_floor_fails_a_spell_the_attribute_would_pass(self):
+        self.caster.intelligence = self.fumble_floor
+        self.caster.chosen_spell = "fire_missile"
+        self.caster.chosen_target = 2
+        self.cast(self.fumble_floor)
+        cast = roll_events(self.events)[0]
+        self.assertEqual(cast["payload"]["total"], self.fumble_floor)
+        self.assertLessEqual(cast["payload"]["total"], cast["payload"]["target_number"])
+        self.assertIn("failure", events_of_type(self.events, "action")[0]["message"])
+        self.assertEqual(len(roll_events(self.events)), 1)  # no aim/damage roll
+
+    def test_a_total_under_the_floor_still_succeeds(self):
+        # Regression guard: only the canon's failing totals change the verdict.
+        self.caster.wisdom = self.fumble_floor  # shield rolls against WIS (#291)
+        self.caster.chosen_spell = "shield"
+        self.cast(self.fumble_floor - 1)
+        self.assertEqual(self.caster.active_spells, ["shield"])
 
 
 class InjuryRollPenaltyThroughTheAppTest(SimpleTestCase):

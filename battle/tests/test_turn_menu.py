@@ -10,6 +10,7 @@ now carries a plain line built from the same figures, what it costs, and
 whether it is the AI's pick; the score stays on the payload.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 from django.conf import settings
@@ -23,6 +24,7 @@ from battle.engine.state import (
     GroundWeapon,
     WeaponState,
 )
+from battle.magic_rules import magic_rules
 from battle.models import Battle, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
 from battle.policy import Candidate, choose_option
@@ -34,6 +36,8 @@ from battle.services import (
     set_combatant_control_mode,
 )
 from common.test_helpers import BaseTestCase
+
+from .magic_fixtures import CASTING_FAILURE, seated_rules
 
 
 def figure(combatant_id: int, name: str, position: tuple[int, int], **fields):
@@ -245,15 +249,19 @@ class MenuEntryTest(BaseTestCase):
         )
         foe = figure(2, "Foe", (3, 0))
         state = BattleState(arena_radius=6, combatants=[wizard, foe])
-        cast = next(
-            entry for entry in self.entries(state, wizard) if entry["spell_key"]
-        )
-        self.assertEqual(cast["plain"], "Cast Fire Missile at Foe")
-        # #816: a spell's mana is paid on a success or a 17 or 18 only.
-        self.assertRegex(
-            cast["cost"],
-            r"^\d+ mana, paid only if it succeeds or the roll is 17 or 18$",
-        )
+        # #816: a spell's mana is paid on a success, or on a failing total the
+        # canon's casting_failure block names (tarmar-engine #46).
+        for casting_failure, paid_when in (
+            (CASTING_FAILURE, "paid only if it succeeds or the roll is 12 or 13"),
+            (None, "paid only if it succeeds"),
+        ):
+            loaded = replace(magic_rules(), casting_failure=casting_failure)
+            with self.subTest(paid_when=paid_when), seated_rules(loaded):
+                cast = next(
+                    entry for entry in self.entries(state, wizard) if entry["spell_key"]
+                )
+                self.assertEqual(cast["plain"], "Cast Fire Missile at Foe")
+                self.assertRegex(cast["cost"], rf"^\d+ mana, {paid_when}$")
 
     def test_throwing_the_only_hand_weapon_says_so(self):
         thrower = figure(1, "Harar", (0, 0), weapon=_catalog_weapon("dagger"))

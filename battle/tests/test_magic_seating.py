@@ -7,11 +7,13 @@ Channel reads, that a snapshot written before carries them too, that a player
 records only a push the menu offered, and that a canon the loader refuses
 fails the system check. Borrowing (tarmar-engine #28) the same way: a cast
 the caster cannot afford is offered as a borrowing copy, its debt roll is
-recorded, and a player records only a borrowing the menu offered. Every
-number here is invented.
+recorded, and a player records only a borrowing the menu offered. The casting
+roll's failing totals (tarmar-engine #46) need no seating code of their own:
+the profile carries them with the rest. Every number here is invented.
 """
 
 from dataclasses import replace
+from typing import Any
 from unittest.mock import patch
 
 from django.core.checks import Error, run_checks
@@ -37,12 +39,15 @@ from battle.services import (
 )
 from battle.turn_menu import borrowed_mana
 from characters.skills import ARCANE_SKILL_NAME, points_for_level
-from common.rolling import Roller
+from common.rolling import Roller, RollRecord
 from common.test_helpers import BaseTestCase, create_character
 
 from .magic_fixtures import (
     BORROWING_RULES,
+    CASTING_FAILURE,
+    CASTING_FAILURE_RULES,
     INVENTED_RULES,
+    casting_faces,
     rules_with_channel,
     seated_rules,
 )
@@ -159,6 +164,90 @@ class PushedCastTurnTest(SimpleTestCase):
         ]
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["payload"]["push_mana"], 2)
+
+
+class ScriptedCastingRoller(Roller):
+    """A seeded :class:`Roller` whose casting rolls come up as scripted."""
+
+    def __init__(self, seed: int, natural_total: int) -> None:
+        super().__init__(seed=seed)
+        self.casting_faces = tuple(casting_faces(natural_total))
+
+    def roll(self, specification: str, *, purpose: str, **details: Any) -> RollRecord:
+        """Roll as the seeded roller does, but give a casting roll the
+        scripted faces.
+
+        Args:
+            specification: The dice, as :meth:`Roller.roll` takes them.
+            purpose: What the roll is for; ``"casting"`` gets the script.
+            **details: The rest of :meth:`Roller.roll`'s keywords.
+
+        Returns:
+            The seeded roll's record, with the scripted faces and their total
+            when it is a casting roll.
+        """
+        record = super().roll(specification, purpose=purpose, **details)
+        if purpose != "casting":
+            return record
+        return replace(
+            record,
+            faces=self.casting_faces,
+            total=sum(self.casting_faces) + record.modifier,
+        )
+
+
+class CastingFailureTurnTest(SimpleTestCase):
+    """The casting failure totals through the studio's own turn path."""
+
+    def cast_turn(self, natural_total: int) -> tuple[CombatantState, dict]:
+        """The caster casts plain Fire Missile at the foe, its casting roll
+        scripted to ``natural_total``.
+
+        Returns:
+            The caster after the turn, and its cast's payload.
+        """
+        battle = unsaved_tarmar_battle()
+        state = caster_and_foe(spell_level_recorded=1)
+        with seated_rules(CASTING_FAILURE_RULES):
+            advise = profiles.decider(battle)
+
+            def decide(state: BattleState, actor: CombatantState) -> Decision:
+                advice = advise(state, actor)
+                if actor.combatant_id != 1:
+                    return advice
+                (cast,) = [
+                    candidate
+                    for candidate in advice.candidates
+                    if candidate.spell_key and not candidate.push_mana
+                ]
+                return Decision(chosen=cast, candidates=advice.candidates)
+
+            events = profiles.TarmarProfile(battle).run_turn(
+                state, ScriptedCastingRoller(1, natural_total), decide
+            )
+        payload = next(
+            event["payload"]
+            for event in events
+            if event["event_type"] == "action"
+            and event["payload"].get("spell") == "fire_missile"
+        )
+        return state.by_id(1), payload
+
+    def test_the_failing_totals_fail_spend_mana_and_run_away_as_seated(
+        self,
+    ) -> None:
+        floor = CASTING_FAILURE.fumble_floor
+        unnamed_fumble = max(CASTING_FAILURE.mana_lost_totals) + 1
+        for natural_total in range(floor, unnamed_fumble + 1):
+            with self.subTest(natural_total=natural_total):
+                caster, payload = self.cast_turn(natural_total)
+                # The caster's INT would pass every one of these totals.
+                self.assertLessEqual(natural_total, caster.intelligence)
+                self.assertFalse(payload["success"])
+                spends = natural_total in CASTING_FAILURE.mana_lost_totals
+                self.assertEqual(caster.mana, caster.max_mana - (1 if spends else 0))
+                runs_away = natural_total == CASTING_FAILURE.runaway_total
+                self.assertEqual(caster.runaway is not None, runs_away)
 
 
 class BorrowingCastTurnTest(SimpleTestCase):

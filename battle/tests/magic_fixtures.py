@@ -14,6 +14,7 @@ from unittest.mock import patch
 from tarmar_engine.magic import (
     BorrowingFailure,
     BorrowingRules,
+    CastingFailureRules,
     ChannelDerivation,
     ChannelRules,
     ControlBand,
@@ -126,6 +127,19 @@ COUNTER_RULES = replace(
 )
 
 
+#: Casting failure totals (tarmar-engine #46): a natural 12 or more fails
+#: whatever the attribute, a 12 or a 13 spends the mana anyway, and a 13 starts
+#: a Runaway. Not the default canon's, so a test seating these proves the
+#: seating rather than the loaded canon.
+CASTING_FAILURE = CastingFailureRules(
+    fumble_floor=12, mana_lost_totals=frozenset({12, 13}), runaway_total=13
+)
+
+#: :data:`RUNAWAY_RULES` with :data:`CASTING_FAILURE`, so the Runaway a cast
+#: starts has its later turns.
+CASTING_FAILURE_RULES = replace(RUNAWAY_RULES, casting_failure=CASTING_FAILURE)
+
+
 def rules_with_channel(
     *, multiplier: int = 2, source_skills: tuple[str, ...] = ()
 ) -> MagicRules:
@@ -148,6 +162,33 @@ def rules_with_channel(
         INVENTED_RULES,
         channel=ChannelRules(derivations=derivations, default_kind=STUDIED_KIND),
     )
+
+
+def casting_faces(natural_total: int) -> list[int]:
+    """Faces of the casting roll's 3d6 summing to ``natural_total``.
+
+    Lets a test throw a total it read from the loaded canon's rules without
+    writing that total down.
+
+    Args:
+        natural_total: The sum wanted.
+
+    Returns:
+        Three faces, highest first, summing to ``natural_total``.
+
+    Raises:
+        ValueError: No faces of the casting dice sum to it.
+    """
+    dice, sides = 3, 6
+    if not dice <= natural_total <= dice * sides:
+        raise ValueError(f"no {dice}d{sides} faces sum to {natural_total}")
+    faces: list[int] = []
+    remaining = natural_total
+    for dice_left in range(dice, 0, -1):
+        face = min(sides, remaining - (dice_left - 1))
+        faces.append(face)
+        remaining -= face
+    return faces
 
 
 @contextmanager

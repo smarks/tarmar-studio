@@ -47,10 +47,24 @@
  * counter, the commitments rise one mana at a time, and the opposed roll
  * and its result are logged; the numbers are the canon's.
  *
+ * A casting roll's failing totals (tarmar-engine #46), in the fifth and
+ * sixth tests. The spec reads the loaded canon's casting_failure block
+ * through the Django shell and names no total of its own, so it asserts the
+ * same under either canon: the wizard's plain Fire Missile fails when its
+ * total is over the attribute or at or above the floor, and the wizard's
+ * pool, as the roster card shows it, changes exactly when the cast succeeds
+ * or the total is one the block says spends the mana. Under the default
+ * canon the turns' seeds are pinned so one cast lands on the floor itself,
+ * a failure that spends the mana, and the other on a total over the floor
+ * that the block does not name, a failure that keeps it; the spec checks
+ * each landed where it was meant to.
+ *
  * Every die is pinned. The battle's seed fixes the turn's rolls and the
  * opponent; the wizard is generated on the claim, so that one request names
- * its dice (X-E2E-Dice-Seed, e2e/dice.js). The seeds were chosen so the
- * casting roll succeeds and the Control Roll (or the debt roll) is made; the
+ * its dice (X-E2E-Dice-Seed, e2e/dice.js). The seeds were chosen, by
+ * running the turn on the started battle for each seed, so the casting roll
+ * succeeds under the default canon's fumble floor and the Control Roll (or
+ * the debt roll) is made, and in the fifth and sixth tests so it fails; the
  * log assertions are what prove the pin took.
  */
 
@@ -60,10 +74,16 @@ const {
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { pinDice } = require('./dice');
-const { runDjangoShell } = require('./django');
+const { readDjangoShell, runDjangoShell } = require('./django');
 
 /** The battle's seed: the opponent and every roll of the turn. */
 const BATTLE_SEED = 11;
+/**
+ * The turns' seed for the push branch, set after the battle starts: turn 1's
+ * pushed casting roll succeeds under the default canon, so its Control Roll
+ * is made.
+ */
+const PUSH_TURNS_SEED = 1;
 /** The claim's seed: the generated wizard's attributes, INT 17 among them. */
 const WIZARD_SEED = 17;
 /**
@@ -71,7 +91,26 @@ const WIZARD_SEED = 17;
  * battle starts: turn 1's Control Roll is an 18 and turn 2's anchor roll
  * holds, under the default canon.
  */
-const RUNAWAY_TURNS_SEED = 134;
+const RUNAWAY_TURNS_SEED = 502;
+/**
+ * The casting failure tests (tarmar-engine #46): each pins the turns' seed,
+ * set after the battle starts, and says which of the loaded block's cases its
+ * turn 1 casting roll lands in under the default canon. The checks are the
+ * block's own, so they hold under any canon; only `landsOn` is default-canon.
+ */
+const CASTING_FAILURE_CASES = [
+    {
+        title: 'a casting roll at the fumble floor fails and spends the mana',
+        seed: 10,
+        landsOn: (total, block) => total === block.fumble_floor,
+    },
+    {
+        title: 'a casting roll past the floor that no total names fails and keeps the mana',
+        seed: 5,
+        landsOn: (total, block) => total > block.fumble_floor
+            && !block.mana_lost_totals.includes(total),
+    },
+];
 /** The Game Master's claim's seed: the caster's attributes. */
 const CASTER_SEED = 23;
 /**
@@ -147,6 +186,36 @@ for figure in state.combatants:
 battle.state_json = dump_state(state)
 battle.save(update_fields=["state_json"])
 `);
+}
+
+/**
+ * The loaded canon's casting_failure block, as the battle engine has it, or
+ * null when the canon names none.
+ *
+ * @returns {{fumble_floor: number, mana_lost_totals: number[]} | null}
+ */
+function loadedCastingFailure() {
+    const output = readDjangoShell(`
+import json
+from battle.magic_rules import magic_rules
+block = magic_rules().casting_failure
+print("CASTING_FAILURE " + json.dumps(None if block is None else {
+    "fumble_floor": block.fumble_floor,
+    "mana_lost_totals": sorted(block.mana_lost_totals),
+}))
+`);
+    return JSON.parse(output.match(/^CASTING_FAILURE (.*)$/m)[1]);
+}
+
+/**
+ * The seated wizard's pool as its roster card shows it ("10 / 10"): the one
+ * card with a Mana row, since the opponent casts nothing.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {import('@playwright/test').Locator}
+ */
+function wizardsPool(page) {
+    return page.locator('.combatant-card dt:text-is("Mana") + dd .detail-value');
 }
 
 /**
@@ -267,7 +336,11 @@ test.describe('Pushing mana into a cast', () => {
         const pushOffered = (await loadedCanon(adminPage)) === DEFAULT_CANON;
         const battleName = `E2E Push ${Date.now()}`;
 
-        playerPage = await openTheWizardsStage(adminPage, browser, battleName);
+        playerPage = await openTheWizardsStage(adminPage, browser, battleName, {
+            beforeTurn: pushOffered
+                ? (battleId) => pinTheTurns(battleId, PUSH_TURNS_SEED)
+                : undefined,
+        });
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
 
         if (!pushOffered) {
@@ -455,6 +528,54 @@ test.describe('Pushing mana into a cast', () => {
 
         await stopCoverage(playerPage, `${testInfo.title} (player context)`);
     });
+
+    for (const { title, seed, landsOn } of CASTING_FAILURE_CASES) {
+        test(title, async ({ adminPage, browser }, testInfo) => {
+            test.setTimeout(120000);
+            await adminPage.goto('/tarmar/gm/');
+            const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
+            const block = loadedCastingFailure();
+            playerPage = await openTheWizardsStage(
+                adminPage, browser, `E2E Casting failure ${Date.now()}`,
+                { beforeTurn: (battleId) => pinTheTurns(battleId, seed) }
+            );
+            const poolBefore = (await wizardsPool(playerPage).textContent()).trim();
+            // The plain cast, under either canon: no push picked.
+            await playerPage.locator('#turn-panel .turn-cast-stage .turn-spell', {
+                has: playerPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
+            }).click();
+            await playerPage.click('#turn-panel .turn-confirm');
+
+            await expect(playerPage.locator('#battle-turn')).toHaveText('1');
+            const castingRoll = playerPage.locator('.event-roll', { hasText: ' casting 3d6' });
+            await expect(castingRoll).toHaveCount(1);
+            const [, total, attribute] = (await castingRoll.textContent())
+                .match(/= (\d+) vs INT (\d+)/).map(Number);
+            if (defaultCanon) {
+                // The pin took, and the roll is the case this test is for.
+                expect(block).not.toBeNull();
+                expect(landsOn(total, block)).toBe(true);
+            }
+            const failed = total > attribute
+                || (block !== null && total >= block.fumble_floor);
+            const spends = !failed
+                || (block !== null && block.mana_lost_totals.includes(total));
+            const cast = playerPage.locator('.event-action', { hasText: 'casts Fire Missile' });
+            await expect(cast).toContainText(failed ? ': failure (' : ': success (');
+
+            // The pool after the turn, from the saved state: changed exactly
+            // when the cast paid.
+            await playerPage.reload();
+            const poolAfter = (await wizardsPool(playerPage).textContent()).trim();
+            if (spends) {
+                expect(poolAfter).not.toBe(poolBefore);
+            } else {
+                expect(poolAfter).toBe(poolBefore);
+            }
+
+            await stopCoverage(playerPage, `${testInfo.title} (player context)`);
+        });
+    }
 
     test('a wizard counters another\'s spell, and the caster presses it again', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(150000);

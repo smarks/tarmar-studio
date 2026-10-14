@@ -54,11 +54,7 @@ from tarmar_engine.classic.megahex import megahex_distance
 from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.options import spec as classic_spec
 from tarmar_engine.classic.state import GameState
-from tarmar_engine.engine import (
-    CASTING_MANA_LOST_ROLLS,
-    RUN_FATIGUE_COST,
-    SPRINT_FATIGUE_COST,
-)
+from tarmar_engine.engine import RUN_FATIGUE_COST, SPRINT_FATIGUE_COST
 from tarmar_engine.policy import (
     ANCHOR_OPTION,
     GRAPPLE_ATTEMPT_SCORE,
@@ -327,6 +323,27 @@ def _anchor_line(
     )
 
 
+def _when_mana_is_paid() -> str:
+    """When a casting pays its mana, in words, from the canon's casting failure
+    rules (tarmar-engine #46).
+
+    A success pays it, and so does a failing natural total the canon names in
+    ``casting_failure.mana_lost_totals``; every other failure keeps it
+    (tarmar-studio #816). With no such totals, only a success pays.
+
+    Returns:
+        The phrase, e.g. "paid only if it succeeds or the roll is 12 or 13".
+    """
+    casting_failure = magic_rules().casting_failure
+    lost_totals = (
+        [] if casting_failure is None else sorted(casting_failure.mana_lost_totals)
+    )
+    if not lost_totals:
+        return "paid only if it succeeds"
+    named = " or ".join(str(total) for total in lost_totals)
+    return f"paid only if it succeeds or the roll is {named}"
+
+
 def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
     """A counter option's sentence and cost (tarmar-engine #31).
 
@@ -359,10 +376,10 @@ def _plain_line(
 
     Returns:
         ``(plain, cost)``: the sentence, and the cost in words ("1 Fatigue",
-        "3 mana, paid only if it succeeds or the roll is 17 or 18", "the
-        Dagger leaves your hand"), or "" when it costs nothing. A spell's mana
-        is paid on a success or a 17 or 18 and kept on any other failure
-        (tarmar-studio #816, the engine's ``CASTING_MANA_LOST_ROLLS``).
+        "3 mana, paid only if it succeeds", "the Dagger leaves your hand"), or
+        "" when it costs nothing. A spell's mana is paid on a success or on a
+        failing total the canon names, and kept on any other failure
+        (tarmar-studio #816, :func:`_when_mana_is_paid`).
     """
     option = actions.base_option(candidate.letter)
     aimed = target.name if target is not None else ""
@@ -411,18 +428,18 @@ def _plain_line(
             else f"Cast {spell.name}"
         )
         plain = verb + (f" at {aimed}" if aimed else "")
-        lost_rolls = " or ".join(str(roll) for roll in sorted(CASTING_MANA_LOST_ROLLS))
+        paid_when = _when_mana_is_paid()
         if candidate.push_mana:
             # A pushed copy of the cast (issue #960): the engine's menu offers
             # it, with the Control Roll's working in its rationale.
             plain += f", pushing {candidate.push_mana} more mana into it"
             cost = (
                 f"{spell.level + candidate.push_mana} mana ({spell.level} and "
-                f"{candidate.push_mana} pushed), paid only if it succeeds or the "
-                f"roll is {lost_rolls}; a success makes a Control Roll"
+                f"{candidate.push_mana} pushed), {paid_when}; a success makes a "
+                "Control Roll"
             )
         else:
-            cost = f"{spell.level} mana, paid only if it succeeds or the roll is {lost_rolls}"
+            cost = f"{spell.level} mana, {paid_when}"
         if candidate.borrow:
             # A borrowing copy (tarmar-engine #28): the engine offers it for a
             # cast the caster cannot afford, with the debt roll's working in

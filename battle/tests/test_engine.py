@@ -10,11 +10,14 @@ import random
 from dataclasses import dataclass
 
 from django.test import SimpleTestCase
+from tarmar_engine.magic import MagicRules
+from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 
 from battle import policy
 from battle.engine import combat_math, engine
-from battle.engine.state import BattleState, WeaponState
+from battle.engine.state import BattleState, CombatantState, WeaponState
 
+from .magic_fixtures import CASTING_FAILURE, casting_faces
 from .test_state import make_combatant
 
 
@@ -961,32 +964,65 @@ class CastingTest(SimpleTestCase):
         defender = state.by_id(2)
         self.assertEqual(defender.fatigue, defender.max_fatigue - 5)
 
-    def test_failed_casting_roll_still_costs_mana(self):
-        # An 18: Runaway's drain, which still costs the mana since
-        # tarmar-engine 0.9.5 (#816). An ordinary failure does not; see the
-        # next test.
+    def _cast_with_casting_failure(
+        self, intelligence: int, natural_total: int
+    ) -> tuple[CombatantState, list[dict]]:
+        """Cast Fire Missile with only :data:`CASTING_FAILURE` injected.
+
+        Args:
+            intelligence: The caster's INT, which the roll is made under.
+            natural_total: The casting roll's total, scripted.
+
+        Returns:
+            The caster after the cast, and the events it emitted.
+        """
         state = self._wizard_state()
         caster = state.by_id(1)
+        caster.intelligence = intelligence
         caster.chosen_spell = "fire_missile"
-        events = []
-        runner = engine.TurnRunner(state, ScriptedRoller([[6, 6, 6]]), events.append)
+        events: list[dict] = []
+        runner = engine.TurnRunner(
+            state,
+            ScriptedRoller([casting_faces(natural_total)]),
+            events.append,
+            profile=EngineTarmarProfile(
+                magic=MagicRules(casting_failure=CASTING_FAILURE)
+            ),
+        )
         runner.cast_spell(caster)
-        self.assertEqual(caster.mana, 9)
-        self.assertIn("failure", events_of_type(events, "action")[0]["message"])
-        self.assertEqual(events_of_type(events, "damage"), [])
+        return caster, events
+
+    def test_failed_casting_roll_still_costs_mana(self):
+        # The failing totals the canon names spend the mana anyway
+        # (tarmar-engine 0.9.5, #816; the totals injected since
+        # tarmar-engine #46). An ordinary failure does not; see the next test.
+        for natural_total in sorted(CASTING_FAILURE.mana_lost_totals):
+            with self.subTest(natural_total=natural_total):
+                # An attribute the roll would pass: only the canon fails it.
+                caster, events = self._cast_with_casting_failure(
+                    natural_total, natural_total
+                )
+                self.assertEqual(caster.mana, 9)
+                self.assertIn("failure", events_of_type(events, "action")[0]["message"])
+                self.assertEqual(events_of_type(events, "damage"), [])
 
     def test_an_ordinary_failed_cast_keeps_its_mana(self):
-        # tarmar-engine 0.9.5 (#816, coordinator's ruling; Spencer may
-        # overrule): mana is paid on success, a 17 and an 18. A 15 against
-        # INT 14 is an ordinary failure, and the pool is untouched.
-        state = self._wizard_state()
-        caster = state.by_id(1)
-        caster.chosen_spell = "fire_missile"
-        events = []
-        runner = engine.TurnRunner(state, ScriptedRoller([[5, 5, 5]]), events.append)
-        runner.cast_spell(caster)
-        self.assertEqual(caster.mana, 10)
-        self.assertIn("failure", events_of_type(events, "action")[0]["message"])
+        # #816, coordinator's ruling; Spencer may overrule: mana is paid on
+        # success and on the failing totals the canon names. A roll over the
+        # attribute and under the fumble floor, and a fumble the canon does
+        # not name, leave the pool untouched.
+        floor = CASTING_FAILURE.fumble_floor
+        unnamed_fumble = max(CASTING_FAILURE.mana_lost_totals) + 1
+        for intelligence, natural_total in (
+            (floor - 2, floor - 1),
+            (unnamed_fumble, unnamed_fumble),
+        ):
+            with self.subTest(natural_total=natural_total):
+                caster, events = self._cast_with_casting_failure(
+                    intelligence, natural_total
+                )
+                self.assertEqual(caster.mana, 10)
+                self.assertIn("failure", events_of_type(events, "action")[0]["message"])
 
     def test_dodging_target_penalizes_the_aim_roll(self):
         state = self._wizard_state()
