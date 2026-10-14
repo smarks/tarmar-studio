@@ -1,8 +1,12 @@
 """What the server guarantees about a narration (issues #603, #342, #622)."""
 
+import time
+
 from django.test import SimpleTestCase
 
 from gm.turn_engine.narration import (
+    _ITEM_NUMBER,
+    _NUMBERED_ITEM,
     PlanLeakFilter,
     figures_raised,
     with_open_choices,
@@ -493,3 +497,97 @@ class TheFigureLineIsAboutTheRightThingTest(SimpleTestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(figures_raised(message, names=self.NAMES), ())
+
+
+class MenuNumberPatternsTest(SimpleTestCase):
+    """The menu-number patterns, rewritten to run in linear time (issue #11).
+
+    They read the model's reply. These pin what they read, so the rewrite
+    changed how long they take and nothing else: a match starts on the
+    item's own line now, not at the blank lines above it.
+    """
+
+    ONE_POINT = MenuNumbersAreNotFiguresTest.ONE_POINT
+    ASKED = MenuNumbersAreNotFiguresTest.ASKED
+
+    def said(self, narration: str) -> str:
+        return with_record_figure(
+            narration,
+            topics=figures_raised(self.ASKED),
+            lines=[self.ONE_POINT],
+            message=self.ASKED,
+        )
+
+    def test_menus_count_whatever_the_spacing(self):
+        menus = {
+            "blank lines between items": "Choose.\n\n\n1. Left\n\n\n\n2. Right",
+            "indented items": "Choose.\n  1. Left\n\t2) Right",
+            "CRLF": "Choose:\r\n\r\n1. Go left\r\n2. Go right",
+            "bold numbers after blank lines": "Choose.\n\n \n**1.** Left\n\n**2**. Right",
+            "menu at the very start": "\n\n1. Left\n2. Right",
+        }
+        for label, menu in menus.items():
+            with self.subTest(label):
+                self.assertIn("any other action", with_open_choices(menu))
+
+    def test_lines_that_are_not_two_items_stay_prose(self):
+        prose = {
+            "one item after blank lines": "One way.\n\n\n1. The rope.",
+            "number mid-line": "Take 1. Then 2. Then go.",
+            "no space after the number": "Choose.\n1.Left\n2.Right",
+            # The first item's text runs onto the next line and takes its
+            # number, so this is one item, as it always was.
+            "an empty first item": "Choose.\n1.\n2. Right",
+        }
+        for label, said in prose.items():
+            with self.subTest(label):
+                self.assertEqual(with_open_choices(said), said)
+
+    def test_blank_lines_above_a_menu_do_not_make_its_number_a_figure(self):
+        written = (
+            "Wren has no free skill points available to spend.\n\n\n\n"
+            "1. Rest for the night.\n\n\n2. Visit the tavern."
+        )
+
+        self.assertIn("Wren's record: 1 free skill point.", self.said(written))
+
+    def test_the_figure_before_blank_lines_and_a_menu_still_silences_it(self):
+        written = "She has 1 free skill point left.\n\n\n\n1. Rest.\n\n2. Go."
+
+        self.assertEqual(self.said(written), written)
+
+    def test_a_menu_number_does_not_join_the_sentence_above_it(self):
+        # The text before the item and its number are still a line apart, so
+        # "skill points" above is not beside the 1 below.
+        written = "Spend your skill points\n\n\n1. on the sword\n2. on the bow"
+
+        self.assertIn("Wren's record: 1 free skill point.", self.said(written))
+
+    def test_long_runs_of_blank_lines_are_read(self):
+        blank_lines = "\n" * 5000
+        menu = f"Choose.{blank_lines}1. Left{blank_lines}2. Right"
+        self.assertIn("any other action", with_open_choices(menu))
+
+    def test_the_menu_patterns_stay_fast_on_crafted_input(self):
+        # The tests above check what the patterns read; this one checks how
+        # long they take. Each input is sized so each old pattern took about
+        # 20 s on it (45,000 blank lines; 32,000 lines of one space), so a
+        # pattern that backtracks again fails here within the minute rather
+        # than hanging the run, while the new ones take a few milliseconds.
+        blank_lines = "\n" * 45_000
+        crafted = {
+            "blank lines then a word": f"{blank_lines}x",
+            "lines of spaces then a word": " \n" * 32_000 + "x",
+            "blank lines then a bare number": f"{blank_lines}1.",
+            "a number then blank lines": f"1.{blank_lines}",
+        }
+        patterns = {
+            "numbered item": _NUMBERED_ITEM.findall,
+            "item number": lambda text: _ITEM_NUMBER.sub("", text),
+        }
+        for input_label, text in crafted.items():
+            for pattern_label, apply_pattern in patterns.items():
+                with self.subTest(input=input_label, pattern=pattern_label):
+                    started = time.perf_counter()
+                    apply_pattern(text)
+                    self.assertLess(time.perf_counter() - started, 1.0)

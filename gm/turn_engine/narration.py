@@ -112,8 +112,15 @@ _ALREADY_SAID = re.compile(
 #: A numbered choice. The model writes "1.", "1)", "**1.**" and "**1**."
 #: on different turns, and the live transcript that prompted this used
 #: the third.
+#:
+#: The reply is the model's, so this runs in linear time (issue #11). The
+#: indentation before the number stays on its own line. It was ``\s*``,
+#: which also takes line breaks, so every line start in a run of blank lines
+#: scanned the rest of the run: quadratic, 3.9 s on 20,000 blank lines. A
+#: match now starts on the item's own line rather than at the blank lines
+#: above it, which leaves the count the same.
 _NUMBERED_ITEM = re.compile(
-    r"^\s*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?\s+\S", re.MULTILINE
+    r"^[^\S\n]*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?\s+\S", re.MULTILINE
 )
 
 #: Below this, a list is prose ("1. " in a sentence), not a menu.
@@ -314,7 +321,15 @@ def _about(
 #: two of its three runs by exactly that: the reply ended in a five-item menu,
 #: the record held one free skill point, and the "1." of "1. Rest for the
 #: night" was read as the reply having stated it.
-_ITEM_NUMBER = re.compile(r"^\s*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?(?=\s)", re.MULTILINE)
+#:
+#: Linear for the same reason as :data:`_NUMBERED_ITEM` (issue #11). Removing
+#: the number now leaves the blank lines above the item, which the old
+#: pattern removed with it; a line break stays between the item and the text
+#: before it either way, so the sentences and words read around each number
+#: are the same.
+_ITEM_NUMBER = re.compile(
+    r"^[^\S\n]*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?(?=\s)", re.MULTILINE
+)
 
 #: A whole number as prose writes it, thousands separators included, so
 #: ``2,500 XP`` is the number 2500 and not a 2 followed by a 500.

@@ -92,9 +92,15 @@ MAX_XP_AWARDED = 1_000_000
 
 #: Dice a ``roll`` action may ask for: ``NdM``, ``NdM+K``, ``NdM-K``, and a
 #: count of separate rolls on the end, ``3d6 x6``.
+#:
+#: The dice field is the model's, so the pattern runs in linear time (issue
+#: #11). The whitespace after the times is inside their optional group: it
+#: was a ``\s*`` after the group, next to the ``\s*`` before it, and with no
+#: times the two divided a run of spaces every way before failing: quadratic,
+#: 0.78 s on 20,000 spaces.
 DICE_PATTERN = re.compile(
     r"^\s*(?P<dice>\d{1,2}d\d{1,3}(?:\s*[+-]\s*\d{1,3})?)\s*"
-    r"(?:[x×]\s*(?P<times>\d{1,2}))?\s*$",
+    r"(?:[x×]\s*(?P<times>\d{1,2})\s*)?$",
     re.IGNORECASE,
 )
 

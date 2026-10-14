@@ -195,10 +195,17 @@ _SKILL_NAMES = "|".join(
 #: A skill check asked for as one: "a skill check", "his stealth check",
 #: "check Gorn's stealth against 12". Not the bare word: "check the roster"
 #: asks for no dice (second review of #906).
+#:
+#: The message is the player's or the Game Master's, so this runs in linear
+#: time (issue #11). Reading on from "check" to "against" stops at the next
+#: "check": it used to read to the end of the sentence from every "check" in
+#: it, quadratic on a sentence of them (0.27 s at 20,000 characters). Whether
+#: a sentence holds a "check" with "against" after it is unchanged, since the
+#: last "check" before the "against" still reaches it.
 _CHECK_WORDS = re.compile(
     rf"\bskill\s+checks?\b"
     rf"|\b(?:{_SKILL_NAMES})\s+checks?\b"
-    rf"|\bchecks?\b[^.!?\n]*\bagainst\b",
+    rf"|\bchecks?\b(?:(?!\bchecks?\b)[^.!?\n])*\bagainst\b",
     re.IGNORECASE,
 )
 #: A survival save asked for as one: "his survival save", "a save vs death",

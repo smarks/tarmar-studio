@@ -5,6 +5,7 @@ most of its imports inline inside test methods.
 """
 
 import json
+import time
 
 from django.test import TestCase
 
@@ -2029,6 +2030,120 @@ class SkillsViewsTest(BaseTestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid JSON", response.json()["error"])
+
+
+class NormalizeSkillNamePatternsTest(TestCase):
+    """normalize_skill_name's patterns, rewritten for linear time (issue #11).
+
+    A skill name comes from a player's request, an imported file or the
+    model. These pin what the function makes of one, so the rewrite changed
+    how long it takes and nothing else. Some expectations below are odd; they
+    record what the function has always done with an odd name.
+    """
+
+    def test_parenthetical_bonuses(self):
+        from characters.skills import normalize_skill_name
+
+        cases = {
+            "Sword (+1 to hit)": "sword to hit",
+            "Sword\t(+1   to hit)\n": "sword to hit",
+            "Bow (2 vs armour) (masterwork)": "bow vs armour",
+            "Bow (masterwork) (+2 vs armour)": "bow vs armour",
+            "Climb (+1)": "climb (+1)",
+            "Knowledge (history)": "knowledge (history)",
+            "Sword (+1 to hit": "sword (+1 to hit",
+            "Sword (+1 to hit) II": "sword ii to hit",
+            "Lore (+1 (old) tales)": "lore tales) (old",
+            "Sword (+1 ) x)": "sword x) )",
+            # An unclosed "(" after the last ")" stays as it was.
+            "Sword (+1 to hit) (": "sword ( to hit",
+            "Axe (+1 to hit) (((": "axe ((( to hit",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_skill_name(raw), expected)
+
+    def test_roman_numeral_suffixes(self):
+        from characters.skills import normalize_skill_name
+
+        cases = {
+            "Shield Parry IV": "shield parry",
+            "Survival\tXI ": "survival",
+            "Vix": "vix",
+            "Sword  iii  ": "sword",
+            "Track II III": "track ii",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_skill_name(raw), expected)
+
+    def test_long_names_are_read(self):
+        from characters.skills import normalize_skill_name
+
+        words = "a " * 5000
+        self.assertEqual(
+            normalize_skill_name(f"Sword (+1 {words}to hit) II"),
+            f"sword ii {words}to hit",
+        )
+        self.assertEqual(normalize_skill_name("(1 " * 3000), "(1 " * 2999 + "(1")
+
+    def test_the_skill_name_patterns_stay_fast_on_crafted_input(self):
+        # The tests above check what is made of a name; this one checks how
+        # long it takes. Each input the old code was slow on is sized so it
+        # took 13 to 20 s there, so code that backtracks again fails here
+        # within the minute rather than hanging the run, while the new code
+        # takes a few milliseconds; an imported file may hold a name of up to
+        # 256 KB. The first group goes through the function, which is how
+        # every caller reaches the patterns; the second gives each pattern
+        # whitespace runs the function would have collapsed, so each stays
+        # linear on its own. The inputs marked "guard" were fast for the old
+        # code too; they hold the new code's own paths to the same bound.
+        from characters.skills import (
+            _BONUS_IN_PARENTHESES,
+            _PARENTHESES,
+            _ROMAN_NUMERAL_SUFFIX,
+            normalize_skill_name,
+        )
+
+        through_the_function = {
+            "unclosed bonuses": "(1 " * 47_000,
+            "a bonus then unclosed parentheses": "(1 a)" + "(" * 250_000,
+            "a bonus then spaced unclosed parentheses": "(1 a)" + " (" * 125_000,
+            "guard: a bonus then a long text": "(+1 " + "a " * 100_000 + ")",
+            "guard: roman numerals and spaces": "a " + "i " * 100_000 + "z",
+        }
+        for label, raw in through_the_function.items():
+            with self.subTest(input=label, pattern="normalize_skill_name"):
+                started = time.perf_counter()
+                normalize_skill_name(raw)
+                self.assertLess(time.perf_counter() - started, 1.0)
+        on_their_own = {
+            ("bonus", "spaces then a word"): (
+                _BONUS_IN_PARENTHESES.search,
+                "(+1" + " " * 80_000 + "y",
+            ),
+            ("bonus", "guard: spaces then a closing parenthesis"): (
+                _BONUS_IN_PARENTHESES.search,
+                "(+1" + " " * 80_000 + ")",
+            ),
+            ("parentheses", "spaces then a word"): (
+                lambda text: _PARENTHESES.sub("", text),
+                "a" + " " * 160_000 + "y",
+            ),
+            ("roman numeral", "spaces then a word"): (
+                lambda text: _ROMAN_NUMERAL_SUFFIX.sub("", text),
+                "a" + " " * 60_000 + "y",
+            ),
+            ("roman numeral", "spaces then numerals then a word"): (
+                lambda text: _ROMAN_NUMERAL_SUFFIX.sub("", text),
+                "a" + " " * 30_000 + "iv" + " " * 30_000 + "y",
+            ),
+        }
+        for (pattern_label, input_label), (apply_pattern, text) in on_their_own.items():
+            with self.subTest(input=input_label, pattern=pattern_label):
+                started = time.perf_counter()
+                apply_pattern(text)
+                self.assertLess(time.perf_counter() - started, 1.0)
 
 
 class SkillMaxDynamicTest(TestCase):
