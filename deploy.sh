@@ -19,8 +19,10 @@
 # This script:
 #   1. Pulls the latest code into the main checkout (and re-runs itself from
 #      the pulled copy, so a deploy always runs the script it just fetched)
-#   2. Clones or fast-forwards the Tarmar canon checkout beside it (a moved
-#      canon is itself a change to deploy) and checks .env names it
+#   2. Finds the Tarmar canon commit to serve (a moved canon is itself a
+#      change to deploy), refuses it unless the gate record ran against it,
+#      then clones or fast-forwards the canon checkout beside it to exactly
+#      that commit, and checks .env names it
 #   3. Checks out origin/main into the inactive colour's release checkout
 #   4. Runs the verification checks against that checkout
 #   5. Builds it (dependencies, static files, a database backup, migrations,
@@ -69,6 +71,12 @@ STATE_FILE="$APP_DIR/.deploy-state"
 # canon checkout at any other commit is a change to deploy, even if a deploy
 # that pulled it failed before it went live.
 CANON_STATE_FILE="$APP_DIR/.deploy-canon"
+# The canon commit the gate record's suites ran against, set by
+# require_gate_record. Empty means no record was read (--force); set here so a
+# value inherited from the environment can never stand in for one.
+GATE_CANON_COMMIT=""
+# How to recover from a record that does not vouch for the canon to serve.
+RUN_SHIP_AGAIN="Run './run ship' again: it gates main's head against the canon's head and deploys."
 UNIT_TEMPLATE="tarmar.service.template"
 # Runtime directories both colours read and write. nginx serves /static/ from
 # the main checkout's staticfiles/ (nginx/tarmar.conf), the audit log and the
@@ -139,6 +147,19 @@ fetch_gate_notes() {
     git fetch --quiet origin "+$GATE_NOTES_REF:$GATE_NOTES_REF" 2>/dev/null || true
 }
 
+# Read $1's gate record from $GATE_NOTES_REF into GATE_RECORD, with its canon:
+# and canon-commit: fields in GATE_RECORD_CANON and GATE_RECORD_CANON_COMMIT.
+# Returns 1 when $1 has no record. require_gate_record and
+# has_passing_tarmar_record both read records through this, so they cannot
+# disagree about what one says.
+read_gate_record() {
+    fetch_gate_notes
+    GATE_RECORD=$(git notes --ref="$GATE_NOTES_REF" show "$1" 2>/dev/null) || GATE_RECORD=""
+    GATE_RECORD_CANON=$(echo "$GATE_RECORD" | sed -n 's/^canon: *//p')
+    GATE_RECORD_CANON_COMMIT=$(echo "$GATE_RECORD" | sed -n 's/^canon-commit: *//p')
+    [ -n "$GATE_RECORD" ]
+}
+
 # Refuse a commit whose suites nobody ran. `./run gate` runs ruff, pyright, the
 # migration and guide checks, pytest, Jest and Playwright, and on a green run
 # records the commit it ran on in $GATE_NOTES_REF. The record lives in git,
@@ -146,37 +167,33 @@ fetch_gate_notes() {
 # host could be stale or hand-written, and a deploy would wave it through.
 require_gate_record() {
     local revision=$1
-    local record
-    fetch_gate_notes
-    record=$(git notes --ref="$GATE_NOTES_REF" show "$revision" 2>/dev/null) || record=""
-    if [ -z "$record" ]; then
+    if ! read_gate_record "$revision"; then
         error "$revision has no passing gate record in $GATE_NOTES_REF.
 Run './run gate' on that commit on a machine that can run the suites; it
 records the commit and pushes the ref. To deploy it without one, anyway:
   ./deploy.sh --force"
     fi
     log "Gate record for $revision:"
-    echo "$record" | sed 's/^/  /'
+    echo "$GATE_RECORD" | sed 's/^/  /'
     # Production serves the Tarmar canon, so a record whose first pass ran the
     # default canon (a gate run without TARMAR_CANON_DIR) proves nothing about
     # it (issue #921).
-    local gate_canon
-    gate_canon=$(echo "$record" | sed -n 's/^canon: *//p')
-    if [ "$gate_canon" != "tarmar" ]; then
-        error "$revision's gate record ran against the ${gate_canon:-unnamed} canon, not the Tarmar canon.
+    if [ "$GATE_RECORD_CANON" != "tarmar" ]; then
+        error "$revision's gate record ran against the ${GATE_RECORD_CANON:-unnamed} canon, not the Tarmar canon.
 Run './run gate' again with TARMAR_CANON_DIR set to a clone of smarks/tarmar-canon,
 or deploy it anyway with: ./deploy.sh --force"
     fi
-    GATE_CANON_COMMIT=$(echo "$record" | sed -n 's/^canon-commit: *//p')
+    [ -n "$GATE_RECORD_CANON_COMMIT" ] \
+        || error "$revision's gate record names no canon-commit, so it does not say which Tarmar canon it ran against.
+$RUN_SHIP_AGAIN"
+    GATE_CANON_COMMIT=$GATE_RECORD_CANON_COMMIT
 }
 
-# Whether $1 has a passing gate record that ran the Tarmar canon: what
-# require_gate_record demands, asked without failing.
+# Whether $1 has a passing gate record that ran the Tarmar canon and names the
+# canon commit it ran: what require_gate_record demands, asked without failing.
 has_passing_tarmar_record() {
-    local record
-    fetch_gate_notes
-    record=$(git notes --ref="$GATE_NOTES_REF" show "$1" 2>/dev/null) || return 1
-    [ "$(echo "$record" | sed -n 's/^canon: *//p')" = "tarmar" ]
+    read_gate_record "$1" || return 1
+    [ "$GATE_RECORD_CANON" = "tarmar" ] && [ -n "$GATE_RECORD_CANON_COMMIT" ]
 }
 
 # When ./run gate started this deploy for $1 and main has since moved to $2
@@ -196,42 +213,93 @@ stand_down_if_main_moved() {
     exit 0
 }
 
-# Bring the canon checkout up to date with origin's main (issue #921): clone it
-# the first time, fast-forward it every time after. Anything else -- no access
-# to the private repository, a checkout with local commits or edits that block
-# the fast-forward -- stops the deploy before a release is built, since the
-# site would otherwise serve whatever canon happened to be on disk. Sets
-# CANON_MOVED=true when the checkout's HEAD is not the commit the last
-# successful deploy put live ($CANON_STATE_FILE): a canon change is worth
-# deploying even when this repository has none.
-sync_canon() {
+# Find the Tarmar canon commit this deploy would serve (issue #921), without
+# moving the checkout: fetch into it and read its upstream, or, before the
+# first clone, read the remote's HEAD, which is what `git clone` checks out.
+# Sets CANON_TARGET to that commit, and CANON_MOVED=false only when the
+# checkout is at the commit the last successful deploy put live
+# ($CANON_STATE_FILE) and CANON_TARGET is that commit or behind it, so the
+# fast-forward would change nothing: anything else is a canon change worth
+# deploying even when this repository has none. A fetch or ls-remote that fails, a
+# checkout with no upstream, or a path that is not a git checkout stops the
+# deploy before a release is built.
+resolve_canon() {
     local deployed=""
     [ -f "$CANON_STATE_FILE" ] && deployed=$(cat "$CANON_STATE_FILE")
+    CANON_MOVED=true
     if [ -d "$CANON_CHECKOUT/.git" ]; then
-        log "Updating the Tarmar canon in $CANON_CHECKOUT..."
+        log "Fetching the Tarmar canon into $CANON_CHECKOUT..."
         git -C "$CANON_CHECKOUT" fetch --quiet origin \
             || error "could not fetch the Tarmar canon into $CANON_CHECKOUT from its origin"
-        git -C "$CANON_CHECKOUT" pull --quiet --ff-only \
-            || error "the Tarmar canon in $CANON_CHECKOUT cannot fast-forward to its origin; resolve it by hand"
+        # The clone tracks origin's default branch.
+        CANON_TARGET=$(git -C "$CANON_CHECKOUT" rev-parse '@{u}') \
+            || error "the Tarmar canon in $CANON_CHECKOUT has no upstream branch to fast-forward to; resolve it by hand"
+        local checkout_head
+        checkout_head=$(git -C "$CANON_CHECKOUT" rev-parse HEAD)
+        if [ "$checkout_head" = "$deployed" ] \
+            && git -C "$CANON_CHECKOUT" merge-base --is-ancestor "$CANON_TARGET" "$checkout_head"; then
+            CANON_MOVED=false
+        fi
+        log "Tarmar canon to serve: $CANON_TARGET ($(git -C "$CANON_CHECKOUT" log -1 --format='%s' "$CANON_TARGET"))"
     elif [ -e "$CANON_CHECKOUT" ]; then
         error "$CANON_CHECKOUT exists but is not a git checkout of the Tarmar canon"
     else
-        log "Cloning the Tarmar canon into $CANON_CHECKOUT..."
-        git clone --quiet "$CANON_REMOTE" "$CANON_CHECKOUT" \
-            || error "could not clone the Tarmar canon from $CANON_REMOTE"
+        local remote_refs
+        remote_refs=$(git ls-remote "$CANON_REMOTE" HEAD) \
+            || error "could not read the Tarmar canon from $CANON_REMOTE"
+        # ls-remote's pattern also matches refs/remotes/*/HEAD; only the
+        # remote's own HEAD is what a clone checks out.
+        CANON_TARGET=$(echo "$remote_refs" | awk '$2 == "HEAD" {print $1}')
+        [ -n "$CANON_TARGET" ] \
+            || error "the Tarmar canon at $CANON_REMOTE has no HEAD to clone"
+        log "Tarmar canon to serve: $CANON_TARGET (not yet cloned into $CANON_CHECKOUT)"
     fi
-    CANON_HEAD=$(git -C "$CANON_CHECKOUT" rev-parse HEAD)
-    CANON_MOVED=false
-    [ "$deployed" = "$CANON_HEAD" ] || CANON_MOVED=true
-    log "Tarmar canon at $CANON_HEAD ($(git -C "$CANON_CHECKOUT" log -1 --format='%s'))"
     if [ "$CANON_MOVED" = true ]; then
         log "The live site was deployed with Tarmar canon ${deployed:-(none recorded)}"
     fi
-    # The gate record says which canon commit the suites ran against; a
-    # different one here has not been through them.
-    if [ -n "${GATE_CANON_COMMIT:-}" ] && [ "$GATE_CANON_COMMIT" != "$CANON_HEAD" ]; then
-        warn "the gate ran against Tarmar canon $GATE_CANON_COMMIT, but this deploy serves $CANON_HEAD; run './run gate' with the canon at $CANON_HEAD to cover it"
+}
+
+# Refuse a canon the gate record cannot vouch for, before the checkout moves:
+# both colours read that checkout, the live one per request, so a refused
+# canon must never reach it. The canon holds rules the battle engine loads
+# (magic-rules.json), not only lore, so an ungated canon can break a battle.
+# With no record read (--force) GATE_CANON_COMMIT is empty and nothing is
+# compared. Commits made on the host and absent from origin are refused first,
+# since './run ship' gates origin's head and could never cover them.
+refuse_ungated_canon() {
+    [ -n "$GATE_CANON_COMMIT" ] || return 0
+    if [ -d "$CANON_CHECKOUT/.git" ] \
+        && ! git -C "$CANON_CHECKOUT" merge-base --is-ancestor HEAD "$CANON_TARGET"; then
+        error "$CANON_CHECKOUT has commits origin does not ($(git -C "$CANON_CHECKOUT" rev-parse HEAD)); push or drop them by hand"
     fi
+    if [ "$GATE_CANON_COMMIT" != "$CANON_TARGET" ]; then
+        error "the gate ran against Tarmar canon $GATE_CANON_COMMIT, but this deploy would serve $CANON_TARGET, which this commit's gate record does not cover.
+$RUN_SHIP_AGAIN"
+    fi
+}
+
+# Move the canon checkout to $CANON_TARGET, the commit resolve_canon read and
+# refuse_ungated_canon checked, and to nothing newer: a `git pull` would fetch
+# again and could land on a commit origin gained in between. A first clone
+# writes no files until it is reset to that commit, so the directory the live
+# colour reads never holds an unchecked tree. A checkout that cannot
+# fast-forward stops the deploy before a release is built: uncommitted edits
+# on the host to files the merge changes (edits to other files are carried
+# along), or, under --force, host commits that have diverged from origin (with
+# a record, refuse_ungated_canon has already refused any host commits).
+# Sets CANON_HEAD to the commit the checkout holds.
+advance_canon() {
+    if [ -d "$CANON_CHECKOUT/.git" ]; then
+        git -C "$CANON_CHECKOUT" merge --quiet --ff-only "$CANON_TARGET" \
+            || error "the Tarmar canon in $CANON_CHECKOUT cannot fast-forward to its origin; resolve it by hand"
+    else
+        log "Cloning the Tarmar canon into $CANON_CHECKOUT..."
+        git clone --quiet --no-checkout "$CANON_REMOTE" "$CANON_CHECKOUT" \
+            || error "could not clone the Tarmar canon from $CANON_REMOTE"
+        git -C "$CANON_CHECKOUT" reset --hard --quiet "$CANON_TARGET" \
+            || error "could not check out Tarmar canon $CANON_TARGET in $CANON_CHECKOUT"
+    fi
+    CANON_HEAD=$(git -C "$CANON_CHECKOUT" rev-parse HEAD)
 }
 
 # Strip trailing slashes, so /a/b/ and /a/b name the same directory.
@@ -250,7 +318,7 @@ env_file_canon_dir() {
 }
 
 # The units read the canon .env names, so it has to be the checkout
-# sync_canon just updated: unset, production would serve the generic default
+# advance_canon just updated: unset, production would serve the generic default
 # canon; elsewhere, a canon this deploy never pulled. Checked before a release
 # is built, so a bad .env stops the deploy with nothing to undo.
 require_canon_dir() {
@@ -747,14 +815,18 @@ main() {
         exec env TARMAR_DEPLOY_PULLED=1 "$0" "$@"
     fi
 
-    # The canon is synced whether or not this repository changed: a canon
-    # change alone is a reason to deploy (issue #921).
-    sync_canon
+    # The canon is checked whether or not this repository changed: a canon
+    # change alone is a reason to deploy (issue #921). A deploy that would
+    # change nothing exits here, before the gate record's canon is compared,
+    # so a run with nothing to do never goes red.
+    resolve_canon
     if [ "$force" = false ] && [ -z "${TARMAR_DEPLOY_PULLED:-}" ] \
         && [ "$CANON_MOVED" = false ]; then
         log "Already up to date. Use --force to redeploy anyway."
         exit 0
     fi
+    refuse_ungated_canon
+    advance_canon
     require_canon_dir
 
     local active=$(get_active)
