@@ -77,8 +77,11 @@ test.describe('The hex picker', () => {
         await expect(turnOne).toBeVisible();
         const lines = (await turnOne.locator('.battle-event').allTextContents())
             .map((line) => line.replace(/\s+/g, ' ').trim());
+        // Since tarmar-engine 0.9.16 a counted move also says how far it
+        // ended from where it began; a route round an obstacle can end
+        // nearer than the hexes it ran, so that figure is any number.
         expect(lines.some((line) => new RegExp(
-            `^${mover} runs \\d+ hex\\(es\\) to \\(${q}, ${r}\\)$`
+            `^${mover} runs \\d+ hex\\(es\\) to \\(${q}, ${r}\\), ending \\d+ hex\\(es\\) from its start$`
         ).test(line))).toBe(true);
     });
 

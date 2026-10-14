@@ -262,10 +262,19 @@ class GoldenSeedsStillFinishTest(BaseTestCase):
         # 28's: "Dorra Redfen chooses DISENGAGE (n): Step away toward (1, 4)
         # instead of attacking". Nobody in this seed enters hand-to-hand, so
         # the HTH table (engine #19) never comes up.
+        #
+        # Re-pinned for tarmar-engine v0.9.16 (engine #37, #38). No decision
+        # and no die changed: the 824 lines are the same except 22 movement
+        # lines, each the old line with ", ending N hex(es) from its start"
+        # added, N being the hexes it moved, since nobody here is blocked.
+        # The first is turn 1's: "Ulfan Ashvale jogs 5 hex(es) toward Dorra
+        # Redfen, ending 5 hex(es) from its start". Nobody enters
+        # hand-to-hand, so the break-away scoring (engine #38) never comes up,
+        # and Yaria still wins at 37.
         self.assertEqual(battle.turn_number, 37)
         self.assertEqual(
             stream_hash(battle),
-            "4bdec802864787e417b4dd397edad94519172929bdd119f744f963352cb83f4c",
+            "a84e5094f0abfeafc8725df0d46b651ef63b7bd13af8f51fbf49d167b428d37e",
         )
 
     def test_classic_golden_seed_unchanged(self):

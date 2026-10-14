@@ -42,7 +42,7 @@ dependencies = [
     # battle/policy.py are thin re-exports of it. Same tag-pin rules as
     # hexarena/tarmar-rules above. Local dev:
     # uv pip install -e ../tarmar-engine
-    "tarmar-engine @ git+https://github.com/smarks/tarmar-engine.git@v0.9.15",
+    "tarmar-engine @ git+https://github.com/smarks/tarmar-engine.git@v0.9.16",
     "weasyprint>=70.0",
     "whitenoise>=6.11.0",
 ]
