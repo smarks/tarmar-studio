@@ -1,8 +1,8 @@
 """The canon's magic rules, read into the engine's ``MagicRules`` (issue #960).
 
 The engine (``tarmar_engine.magic``) carries the structure of the casting
-success tiers, Push, Channel, Borrowing (tarmar-engine #28) and Runaway's
-later turns (tarmar-engine #30) and takes every number from a ``MagicRules``
+success tiers, Push, Channel, Borrowing (tarmar-engine #28), Runaway's
+later turns (tarmar-engine #30) and Counterspell (tarmar-engine #31) and takes every number from a ``MagicRules``
 its caller injects. The numbers are the canon's: the Tarmar canon builds them
 from its DM-only magic-mechanics pages, and the default canon ships invented
 ones. This module is the one path that sets them, and it reads only the
@@ -53,6 +53,11 @@ The file is a JSON object::
         "helper_failure_catches_helper": bool,
         "effect_bonus_per_turn": int
       },
+      "counterspell": null | {
+        "opposed_dice": str, "opposed_attribute": str,
+        "mana_per_bonus": int, "ties_go_to_caster": bool,
+        "defender_min_mana": int, "defender_max_mana": int | null
+      },
       "rulings": [{"key": str, "reading": str, ...}]
     }
 
@@ -81,6 +86,7 @@ from tarmar_engine.magic import (
     ChannelDerivation,
     ChannelRules,
     ControlBand,
+    CounterspellRules,
     MagicRules,
     PushRules,
     RollUnderRule,
@@ -138,12 +144,21 @@ RUNAWAY_FIELDS = (
     "effect_bonus_per_turn",
 )
 ROLL_UNDER_FIELDS = ("dice", "attribute")
+COUNTERSPELL_FIELDS = (
+    "opposed_dice",
+    "opposed_attribute",
+    "mana_per_bonus",
+    "ties_go_to_caster",
+    "defender_min_mana",
+    "defender_max_mana",
+)
 TOP_LEVEL_FIELDS = (
     "casting_success_tiers",
     "push",
     "channel",
     "borrowing",
     "runaway",
+    "counterspell",
 )
 OPTIONAL_TOP_LEVEL_FIELDS = ("rulings",)
 RULING_FIELDS = ("key", "reading")
@@ -535,6 +550,33 @@ class _RulesFileReader:
                 ),
             )
 
+    def counterspell(self, value: Any, field_path: str) -> CounterspellRules | None:
+        """``counterspell``, or ``None`` when no spell may be countered."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, COUNTERSPELL_FIELDS)
+        with self.engine_check(field_path):
+            return CounterspellRules(
+                opposed_dice=self.text(
+                    fields["opposed_dice"], f"{field_path}.opposed_dice"
+                ),
+                opposed_attribute=self.text(
+                    fields["opposed_attribute"], f"{field_path}.opposed_attribute"
+                ),
+                mana_per_bonus=self.integer(
+                    fields["mana_per_bonus"], f"{field_path}.mana_per_bonus"
+                ),
+                ties_go_to_caster=self.boolean(
+                    fields["ties_go_to_caster"], f"{field_path}.ties_go_to_caster"
+                ),
+                defender_min_mana=self.integer(
+                    fields["defender_min_mana"], f"{field_path}.defender_min_mana"
+                ),
+                defender_max_mana=self.optional_integer(
+                    fields["defender_max_mana"], f"{field_path}.defender_max_mana"
+                ),
+            )
+
     def rulings(self, value: Any, field_path: str) -> None:
         """``rulings``: a list of objects with string ``key`` and ``reading``."""
         for index, ruling in enumerate(self.json_list(value, field_path)):
@@ -571,7 +613,11 @@ class _RulesFileReader:
         borrowing = self.borrowing(fields["borrowing"], "borrowing")
         with self.engine_check("borrowing"):
             rules = replace(rules, borrowing=borrowing)
-        return replace(rules, runaway=self.runaway(fields["runaway"], "runaway"))
+        return replace(
+            rules,
+            runaway=self.runaway(fields["runaway"], "runaway"),
+            counterspell=self.counterspell(fields["counterspell"], "counterspell"),
+        )
 
 
 def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

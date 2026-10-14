@@ -2152,24 +2152,32 @@ def option_variant(fields: dict) -> dict:
     How a cast is paid: the mana it pushes into its spell (issue #960) and
     whether it borrows the mana its caster lacks (tarmar-engine #28). And
     whose Runaway an anchor takes back (tarmar-engine #30): the combatant id
-    the engine's ``anchor_target`` names, the actor's own for its own. A
-    missing ``push_mana`` is 0, a missing ``borrow`` false and a missing
-    ``anchor_target`` ``None``, the plain option, as a menu or a choice
-    stored before Push, Borrowing or Runaway reads; the engine's payload
-    carries each key only when set.
+    the engine's ``anchor_target`` names, the actor's own for its own. And
+    the mana a counter commits against the caster its target names
+    (tarmar-engine #31, the engine's ``counter_mana``). A missing
+    ``push_mana`` is 0, a missing ``borrow`` false and a missing
+    ``anchor_target`` or ``counter_mana`` ``None``, the plain option, as a
+    menu or a choice stored before Push, Borrowing, Runaway or Counterspell
+    reads; the engine's payload carries each key only when set. An
+    escalation (the engine's ``escalate``) is not a variant: every cast of a
+    countered spell at its target escalates, so the letter, target and
+    spell already name it.
 
     Args:
         fields: A menu option's payload, a recorded choice, or the act
             endpoint's parsed body.
 
     Returns:
-        ``{"push_mana": int, "borrow": bool, "anchor_target": int | None}``.
+        ``{"push_mana": int, "borrow": bool, "anchor_target": int | None,
+        "counter_mana": int | None}``.
     """
     anchor_target = fields.get("anchor_target")
+    counter_mana = fields.get("counter_mana")
     return {
         "push_mana": fields.get("push_mana") or 0,
         "borrow": bool(fields.get("borrow")),
         "anchor_target": int(anchor_target) if anchor_target is not None else None,
+        "counter_mana": int(counter_mana) if counter_mana is not None else None,
     }
 
 
@@ -2180,17 +2188,20 @@ def names_option(option: dict, recorded: dict) -> bool:
     against the stored pending menu, and the recorded choice against the
     replayed one. An option is its letter, its target, its spell and its
     variant (:func:`option_variant`): the mana it pushes into that spell
-    (issue #960), whether it borrows (tarmar-engine #28), and whose Runaway
-    it anchors (tarmar-engine #30). So a pushed or borrowing cast is a
-    different option from the plain cast of the same spell, an anchor names
-    the one Runaway it takes back, and a player may record only a push, a
-    borrowing or an anchor the engine offered.
+    (issue #960), whether it borrows (tarmar-engine #28), whose Runaway it
+    anchors (tarmar-engine #30), and the mana a counter commits
+    (tarmar-engine #31). So a pushed or borrowing cast is a different option
+    from the plain cast of the same spell, an anchor names the one Runaway
+    it takes back, a counter names its caster and its commitment, and a
+    player may record only a push, a borrowing, an anchor or a counter the
+    engine offered.
 
     Args:
         option: A menu option's fields, as :meth:`~tarmar_engine.policy.
             Candidate.to_payload` writes them.
         recorded: The choice: ``letter``, ``target_id``, ``spell_key``,
-            ``push_mana``, ``borrow`` and ``anchor_target``.
+            ``push_mana``, ``borrow``, ``anchor_target`` and
+            ``counter_mana``.
     """
     return (
         option.get("letter") == recorded.get("letter")
@@ -2638,10 +2649,14 @@ def _take_off_board(state, combatant_id: int) -> None:
     """Remove one figure from a Tarmar board, and every reference to it.
 
     What a figure that leaves the field leaves behind: its hex, its holds,
-    the per-turn lists that name it, an anchor aimed at its Runaway, and the
+    the per-turn lists that name it, an anchor aimed at its Runaway, the
     record that another figure's Runaway was caught from it (tarmar-engine
-    #30). The ``BattleCombatant`` row stays, so the roster and the log still
-    know who it was.
+    #30), and a counter chosen or held against it and its place among the
+    defenders of another's countered spell (tarmar-engine #31). A contest
+    pressing a spell at it stays, and the engine ends it when its caster
+    next chooses, since no cast can be aimed at a figure gone. The
+    ``BattleCombatant`` row stays, so the roster and the log still know who
+    it was.
     """
     state.combatants = [
         figure for figure in state.combatants if figure.combatant_id != combatant_id
@@ -2663,6 +2678,19 @@ def _take_off_board(state, combatant_id: int) -> None:
             figure.chosen_anchor = None
         if figure.runaway is not None and figure.runaway.caught_from == combatant_id:
             figure.runaway.caught_from = None
+        if (
+            figure.chosen_counter is not None
+            and figure.chosen_counter[0] == combatant_id
+        ):
+            figure.chosen_counter = None
+        if figure.counter is not None and figure.counter.caster_id == combatant_id:
+            figure.counter = None
+        if figure.contest is not None:
+            figure.contest.defender_ids = [
+                defender
+                for defender in figure.contest.defender_ids
+                if defender != combatant_id
+            ]
 
 
 def withdraw_from_fight(battle_id: int, character: Character, *, by) -> bool:
@@ -3254,6 +3282,7 @@ def record_player_action(
     push_mana: int = 0,
     borrow: bool = False,
     anchor_target: int | None = None,
+    counter_mana: int | None = None,
     destination: tuple[int, int] | None = None,
     as_ai: bool = False,
 ) -> tuple[Battle, list[BattleEvent]]:
@@ -3273,17 +3302,20 @@ def record_player_action(
     stored copy is display-only). Only the seated player may choose for
     their combatant; a DM may instead pass ``as_ai=True`` to let the AI's
     top-scored candidate stand for an absent player (the ``letter``/
-    ``target_id``/``spell_key``/``push_mana``/``borrow``/``anchor_target``
-    arguments are ignored then, but the binding is not: an AI hand-off is a
+    ``target_id``/``spell_key``/``push_mana``/``borrow``/``anchor_target``/
+    ``counter_mana`` arguments are ignored then, but the binding is not: an AI hand-off is a
     choice for one named figure too).
 
     ``push_mana`` is the extra mana a cast pushes into its spell (issue
     #960), ``borrow`` whether the cast borrows the mana its caster lacks
-    (tarmar-engine #28), and ``anchor_target`` the combatant whose Runaway
-    an anchor takes back (tarmar-engine #30). A player, or a Game Master
-    choosing for a foe, may record only a push, a borrowing or an anchor the
-    engine offered on the menu; any other is not on the menu, and refused as
-    an option that is not.
+    (tarmar-engine #28), ``anchor_target`` the combatant whose Runaway an
+    anchor takes back (tarmar-engine #30), and ``counter_mana`` the mana a
+    counter commits against the caster ``target_id`` names (tarmar-engine
+    #31). A player, or a Game Master choosing for a foe, may record only a
+    push, a borrowing, an anchor or a counter the engine offered on the
+    menu; any other is not on the menu, and refused as an option that is
+    not. An escalation is the same cast of the countered spell at its
+    target, which the menu marks; it needs no argument of its own.
 
     ``destination`` is the hex the player picked for an option that places
     the figure (#819, #866). It must be one of that option's
@@ -3343,8 +3375,8 @@ def record_player_action(
             letter = top["letter"]
             target_id = top.get("target_id")
             spell_key = top.get("spell_key") or ""
-            # The AI never pushes or borrows (house readings), but it anchors
-            # its own Runaway: read from the option.
+            # The AI never pushes, borrows, counters or escalates (house
+            # readings), but it anchors its own Runaway: read from the option.
             variant = option_variant(top)
             # The AI's own hex, if it named one. On tarmar-engine 0.9.10 the AI
             # names none (house ruling ai_destinations), so this is None and
@@ -3359,6 +3391,7 @@ def record_player_action(
                     "push_mana": push_mana,
                     "borrow": borrow,
                     "anchor_target": anchor_target,
+                    "counter_mana": counter_mana,
                 }
             )
             recorded = {

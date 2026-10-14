@@ -58,5 +58,13 @@
     "helper_cost_multiplier_of_cost": 2,
     "helper_failure_catches_helper": true,
     "effect_bonus_per_turn": 2
+  },
+  "counterspell": {
+    "opposed_dice": "2d10",
+    "opposed_attribute": "INT",
+    "mana_per_bonus": 2,
+    "ties_go_to_caster": false,
+    "defender_min_mana": 1,
+    "defender_max_mana": 5
   }
 }

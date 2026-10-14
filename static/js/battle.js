@@ -735,6 +735,18 @@ if (typeof module !== 'undefined' && module.exports) {
             card.appendChild(runaway);
         }
 
+        // A spell of this figure's that stands countered (tarmar-engine
+        // #31): the server's sentence, from the engine's state
+        // (battle.viewmodel._tarmar_contest). It stays until the state says
+        // the contest is over.
+        if (combatant.contest) {
+            const contest = document.createElement('div');
+            contest.className = 'combatant-contest';
+            contest.dataset.spell = combatant.contest.spell_key;
+            contest.textContent = combatant.contest.line;
+            card.appendChild(contest);
+        }
+
         if (!combatant.alive && combatant.fatal_chain
                 && combatant.fatal_chain.length) {
             const chain = document.createElement('div');
@@ -792,14 +804,24 @@ if (typeof module !== 'undefined' && module.exports) {
      * holds those under their cast's key the same way, for the borrowing
      * control; a spell the caster cannot afford has borrowing copies and no
      * plain cast at all.
+     *
+     * A counter (tarmar-engine #31) carries ``counter_mana``: one per
+     * commitment the engine allows against each enemy caster. ``counters``
+     * holds them under the caster's id (``target_id``), least first, for
+     * that caster's counter control; the amounts are the menu's.
      */
     function splitCastCandidates(candidates) {
         const plain = [];
         const casts = [];
         const pushes = new Map();
         const borrows = new Map();
+        const counters = new Map();
         (candidates || []).forEach((candidate, index) => {
-            if (!candidate.spell_key) {
+            if (candidate.counter_mana != null) {
+                const caster = String(candidate.target_id);
+                if (!counters.has(caster)) { counters.set(caster, []); }
+                counters.get(caster).push({ candidate, index });
+            } else if (!candidate.spell_key) {
                 plain.push({ candidate, index });
             } else if (candidate.borrow || candidate.push_mana) {
                 const copies = candidate.borrow ? borrows : pushes;
@@ -814,7 +836,11 @@ if (typeof module !== 'undefined' && module.exports) {
             copies.sort((first, second) => (first.candidate.push_mana || 0)
                 - (second.candidate.push_mana || 0));
         }));
-        return { plain, casts, pushes, borrows };
+        counters.forEach((copies) => {
+            copies.sort((first, second) => first.candidate.counter_mana
+                - second.candidate.counter_mana);
+        });
+        return { plain, casts, pushes, borrows, counters };
     }
 
     /**
@@ -917,12 +943,13 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
-     * One row of pressable choices beside a cast, each selecting one menu
-     * candidate: the shape the push control (#960) and the borrowing control
-     * (tarmar-engine #28) share. Every word is the caller's from the server's
+     * One row of pressable choices, each selecting one menu candidate: the
+     * shape the push control (#960), the borrowing control (tarmar-engine
+     * #28) and the counter control (tarmar-engine #31) share. Every word is the caller's from the server's
      * data; the selected copy's cost is the server's own line.
      *
-     * @param {string} kind - ``push`` or ``borrow``: the class and focus-key
+     * @param {string} kind - ``push``, ``borrow`` or ``counter``: the class
+     *     and focus-key
      *     prefix (``turn-push``, ``turn-push-amount``, ``turn-push-cost``)
      * @param {string} labelText - the words before the choices
      * @param {string} ariaLabel - the group's accessible name
@@ -951,7 +978,11 @@ if (typeof module !== 'undefined' && module.exports) {
             button.type = 'button';
             button.className = `turn-${kind}-amount`;
             button.dataset.focusKey = `${kind}-${choice.entry.index}`;
-            button.dataset.pushMana = String(candidate.push_mana || 0);
+            if (candidate.counter_mana != null) {
+                button.dataset.counterMana = String(candidate.counter_mana);
+            } else {
+                button.dataset.pushMana = String(candidate.push_mana || 0);
+            }
             if (candidate.borrow) {
                 button.dataset.borrowed = String(candidate.borrowed || 0);
             }
@@ -1040,6 +1071,32 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
+     * The counter control for one enemy caster (tarmar-engine #31): one
+     * button per commitment the menu holds against that caster, least
+     * first. Nothing is countered unless the player picks an amount; the
+     * selected commitment's cost is the server's line, and the bonus it buys
+     * is in the engine's rationale behind the scoring switch.
+     *
+     * @param {Array<{candidate: object, index: number}>} copies - the
+     *     counters against one caster, least commitment first
+     * @param {number} aiPick - the AI's pick on the menu
+     * @param {object} opts - the panel's options (``selectedIndex``,
+     *     ``onSelect``)
+     */
+    function buildCounterControl(copies, aiPick, opts) {
+        const caster = copies[0].candidate.target_name || 'the caster';
+        const choices = copies.map((copy) => ({
+            entry: copy, text: `${copy.candidate.counter_mana} mana`,
+        }));
+        const control = buildCopyControl(
+            'counter', `Counter ${caster}:`, `Counter ${caster}'s spell`,
+            choices, copies, aiPick, opts
+        );
+        control.dataset.caster = String(copies[0].candidate.target_id);
+        return control;
+    }
+
+    /**
      * The spell stage a declared cast opens: the caster's pool, then their
      * whole known hand. A spell the server marked uncastable renders
      * disabled with its reason, so a wizard sees why Lightning Bolt is out
@@ -1108,6 +1165,22 @@ if (typeof module !== 'undefined' && module.exports) {
                 tag.className = 'turn-option-ai-pick';
                 tag.textContent = 'AI pick';
                 button.appendChild(tag);
+            }
+
+            // A cast pressing a countered spell again (tarmar-engine #31):
+            // the engine marks every copy of it, plain, pushed or borrowing,
+            // and the server's line says so. Read from whichever the menu
+            // holds, the plain cast first, so a spell only borrowing pays
+            // for is marked too.
+            const pressing = [entry].concat(copies, borrowing)
+                .find((copy) => copy && copy.candidate.escalate);
+            if (pressing) {
+                button.classList.add('is-escalation');
+                const escalation = document.createElement('span');
+                escalation.className = 'turn-spell-escalate';
+                escalation.textContent = pressing.candidate.plain
+                    || 'Presses the countered spell again';
+                button.appendChild(escalation);
             }
 
             const note = document.createElement('span');
@@ -1263,7 +1336,9 @@ if (typeof module !== 'undefined' && module.exports) {
         menu.setAttribute('role', 'group');
         menu.setAttribute('aria-label', 'Action options');
         const aiPick = topCandidateIndex(pending.candidates);
-        const { plain, casts, pushes, borrows } = splitCastCandidates(pending.candidates);
+        const {
+            plain, casts, pushes, borrows, counters,
+        } = splitCastCandidates(pending.candidates);
         // Every cast on the menu that only borrowing pays for.
         const borrowingCopies = Array.from(borrows.values()).flat();
         const castable = casts.length || borrowingCopies.length;
@@ -1337,6 +1412,12 @@ if (typeof module !== 'undefined' && module.exports) {
                 if (opts.onSelect) { opts.onSelect(index); }
             });
             menu.appendChild(option);
+        });
+
+        // A counter control per enemy caster (tarmar-engine #31), with the
+        // commitments the menu offers against it.
+        counters.forEach((copies) => {
+            menu.appendChild(buildCounterControl(copies, aiPick, opts));
         });
 
         if (castable) {
@@ -1710,12 +1791,16 @@ if (typeof module !== 'undefined' && module.exports) {
                 // copy borrows (tarmar-engine #28), only for such a copy: the
                 // server takes neither as the plain cast. Whose Runaway an
                 // anchor takes back (tarmar-engine #30), only for an anchor.
+                // The mana a counter commits against the caster its target
+                // names (tarmar-engine #31), only for a counter.
                 // The hex only when one was picked (#819, #866): with none
                 // the option makes its own move, as it always has.
                 }, candidate.push_mana ? { push_mana: candidate.push_mana } : {},
                 candidate.borrow ? { borrow: true } : {},
                 candidate.anchor_target != null
                     ? { anchor_target: candidate.anchor_target } : {},
+                candidate.counter_mana != null
+                    ? { counter_mana: candidate.counter_mana } : {},
                 destination ? { destination } : {})),
                 onAiChoose: () => submitAction({
                     combatant_id: answering.combatant_id,
