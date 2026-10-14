@@ -5,9 +5,11 @@ import time
 from django.test import SimpleTestCase
 
 from gm.turn_engine.narration import (
+    _FIGURE_WORDS,
     _ITEM_NUMBER,
     _NUMBERED_ITEM,
     PlanLeakFilter,
+    _states_figure,
     figures_raised,
     with_open_choices,
     with_record_figure,
@@ -16,6 +18,7 @@ from gm.turn_engine.state import (
     AGE_TOPIC,
     BODY_TOPIC,
     EXPERIENCE_POINTS_TOPIC,
+    EXPERIENCE_YEARS_TOPIC,
     LEVEL_TOPIC,
     SKILL_POINTS_TOPIC,
     LedgerFigure,
@@ -591,3 +594,107 @@ class MenuNumberPatternsTest(SimpleTestCase):
                     started = time.perf_counter()
                     apply_pattern(text)
                     self.assertLess(time.perf_counter() - started, 1.0)
+
+
+class FigureCheckOnALongReplyTest(SimpleTestCase):
+    """Whether a reply states a record figure, read in linear time (issue #51).
+
+    Each number is read beside the few words around it in its own sentence;
+    the check used to build that text for every number and search it, which
+    was quadratic when the words around a number were most of the reply. The
+    reply is now indexed once. These pin what it reads, so the rewrite
+    changed how long it takes and nothing else.
+    """
+
+    ONE_POINT = LedgerFigure(SKILL_POINTS_TOPIC, 1, "1 free skill point")
+
+    def test_what_states_the_figure(self):
+        cases = {
+            "She has 1 free skill point.": True,
+            "her free skill points number 1": True,
+            "1\xa0skill\xa0point": True,
+            "1, skill point": True,
+            "x1 skill point": True,
+            # More than four words away, or past a sentence break.
+            "Skill points available to spend: 1": False,
+            "1 is the number of her free skill points": False,
+            "her skill points, as it stands, number 1": False,
+            "Skill points. 1 is left": False,
+            "Skill points! 1 left": False,
+            "Skill points\n1 left": False,
+            "Free skill points:\r\n1": False,
+            # An adjustment, however it is spaced, is not a balance.
+            "+ 1 skill point": False,
+            "+\n1 skill point": False,
+            "−1 skill point": False,
+            # Not the figure, or not its words.
+            "11 skill points": False,
+            "1 skill-point": False,
+        }
+        for reply, stated in cases.items():
+            with self.subTest(reply=reply):
+                self.assertIs(_states_figure(reply, self.ONE_POINT), stated)
+
+    def test_a_number_inside_a_word_reads_the_word_either_side(self):
+        # The part of a word before the number and the part after it are
+        # read as two words with a space between, as they always were.
+        years = LedgerFigure(EXPERIENCE_YEARS_TOPIC, 1, "1 year of experience")
+        cases = {
+            ("skill1point", self.ONE_POINT): True,
+            ("SKILL1Points", self.ONE_POINT): True,
+            ("skill1points-left", self.ONE_POINT): True,
+            ("1a1a1a skill point", self.ONE_POINT): True,
+            ("1skill points", self.ONE_POINT): True,
+            ("her skill point1", self.ONE_POINT): True,
+            ("years of1experience", years): True,
+            ("years1of experience", years): True,
+            ("skills1point", self.ONE_POINT): False,
+            ("a b c d skill1x", self.ONE_POINT): False,
+            ("-skill-point-1-", self.ONE_POINT): False,
+        }
+        for (reply, figure), stated in cases.items():
+            with self.subTest(reply=reply):
+                self.assertIs(_states_figure(reply, figure), stated)
+
+    def test_every_wording_starts_and_ends_with_a_word_character(self):
+        # The index reads a wording at the edge of the text around a number
+        # as a whole word, which holds only for wordings like these.
+        for wordings in _FIGURE_WORDS.values():
+            for wording in wordings:
+                with self.subTest(wording=wording):
+                    self.assertRegex(wording, r"^\w(?:.*\w)?$")
+
+    def test_a_long_reply_is_read(self):
+        filler = "1 x. " * 5000
+        self.assertTrue(
+            _states_figure(f"{filler}She has 1 skill point.", self.ONE_POINT)
+        )
+        self.assertFalse(
+            _states_figure(f"{filler}She has +1 skill point.", self.ONE_POINT)
+        )
+
+    def test_the_figure_check_stays_fast_on_a_long_reply(self):
+        # The tests above check what is read; this one checks how long it
+        # takes. Each of the first five replies is sized so the old check
+        # took about 20 s on it, so a check that reads the whole reply again
+        # for each number fails here within the minute rather than hanging
+        # the run, while the new one takes a few hundredths of a second. The
+        # last three were fast for the old check too; they hold the new one's
+        # reading across long runs of whitespace and a long word to the same
+        # bound.
+        long_run = 60_000
+        crafted = {
+            "short sentences of the figure": "1 x. " * 12_000,
+            "one long sentence of the figure": "1 " * 28_000,
+            "the figure on every line": "1\n" * 16_000,
+            "the figure glued into one word": "1a" * 25_000,
+            "the figure glued with hyphens": "1-a" * 17_000,
+            "a sign far before the figure": "+" + " " * long_run + "1 skill point",
+            "the figure's words far after it": "1" + " " * long_run + "skill points",
+            "a long word after the figure": "1 " + "x" * long_run,
+        }
+        for label, reply in crafted.items():
+            with self.subTest(input=label, pattern="figure check"):
+                started = time.perf_counter()
+                _states_figure(reply, self.ONE_POINT)
+                self.assertLess(time.perf_counter() - started, 1.0)
