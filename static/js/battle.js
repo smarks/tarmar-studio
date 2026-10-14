@@ -452,39 +452,202 @@ if (typeof module !== 'undefined' && module.exports) {
         return map;
     }
 
-    // The persistent inline error inside a roster card is the same span, the
-    // same class and the same role autosave.js hangs on a refused field, and
-    // was written out here a second time. Both ask api.js for it now
-    // (issue #338 item 2).
+    // What a rename could not do -- the server refused the name, the
+    // network failed, or the figure could no longer be renamed when the
+    // roster was redrawn under the edit -- is roster state, not a span hung
+    // on a card (issue #16). The roster repaints every couple of seconds, and
+    // a note written into a card went with the card; a refusal that arrived
+    // after a repaint was written into a card no longer on the page. Each
+    // roster keeps its notes by figure, with what was typed, and paints them
+    // after every draw: in the figure's card, or above the roster for a
+    // figure no longer in it. A note stays until it is dismissed or the
+    // figure is renamed again. The span wears autosave.js's class
+    // (showFieldError), so the two refusals still look alike.
     //
-    // What is NOT shared is the rest of the rename: initAutosave binds fields
-    // that are already in the page, keyed by data-field, posting {field,
-    // value} to one URL. A rename creates its input by swapping out a heading
-    // on a roster that repaints every couple of seconds, and posts
+    // What is NOT shared with autosave.js is the rest of the rename:
+    // initAutosave binds fields that are already in the page, keyed by
+    // data-field, posting {field, value} to one URL. A rename creates its
+    // input by swapping out a heading on a roster that repaints, and posts
     // {combatant_id, name}. Running one through the other would couple two
     // different lifecycles for the sake of a six-line keyboard contract.
-    const showRenameError = showFieldError;
-    const clearRenameError = clearFieldError;
+    const rosterNotes = new WeakMap();
+
+    /** A roster's notes, by combatant id (registering the roster). */
+    function notesOf(roster) {
+        let notes = rosterNotes.get(roster);
+        if (!notes) {
+            notes = new Map();
+            rosterNotes.set(roster, notes);
+        }
+        return notes;
+    }
+
+    /** The roster ``element`` is drawn in, or null once it has left it. */
+    function rosterOf(element) {
+        for (let node = element; node; node = node.parentElement) {
+            if (rosterNotes.has(node)) { return node; }
+        }
+        return null;
+    }
+
+    /**
+     * Keep a note for one figure and paint the roster's notes again.
+     * @param {Element|null} roster
+     * @param {number|string} combatantId
+     * @param {string} message
+     * @param {string} typed - What the person had typed, kept with the note.
+     */
+    function noteRename(roster, combatantId, message, typed) {
+        if (!roster) { return; }
+        notesOf(roster).set(String(combatantId), { message, typed, announce: true });
+        keepRosterFocus(roster, () => { paintNotes(roster); });
+    }
+
+    /** Drop a figure's note: it is being renamed again. */
+    function forgetRenameNote(roster, combatantId) {
+        if (roster && notesOf(roster).delete(String(combatantId))) {
+            keepRosterFocus(roster, () => { paintNotes(roster); });
+        }
+    }
+
+    /** Give the roster itself the focus, when what had it is gone. */
+    function focusRoster(roster) {
+        if (!roster.hasAttribute('tabindex')) { roster.setAttribute('tabindex', '-1'); }
+        roster.focus({ preventScroll: true });
+    }
+
+    /**
+     * Run ``redraw`` and put the keyboard focus back where it was in the
+     * roster (issue #16): a redraw empties it, and the focus fell to the
+     * page on every applied poll. Every control a card draws carries a
+     * data-focus-key (its figure's name, a seat hand-off, the attributes
+     * summary, a fatal-roll link, a note's Dismiss), the convention of the
+     * turn panel (#646) and the GM side panel's tabs, and the focus goes to
+     * the control of the same key, or to the roster when it has gone. A
+     * redraw that left the focus in the roster (a rename carried through
+     * it) is left alone, and focus elsewhere on the page is never taken.
+     * @param {Element} roster
+     * @param {function(): void} redraw
+     */
+    function keepRosterFocus(roster, redraw) {
+        const active = document.activeElement;
+        const held = Boolean(active) && active !== roster && roster.contains(active);
+        const key = held ? active.dataset.focusKey || '' : '';
+        redraw();
+        if (!held) { return; }
+        const now = document.activeElement;
+        if (now && now !== roster && roster.contains(now)) { return; }
+        const target = key ? elementByFocusKey(roster, key) : null;
+        if (target) { target.focus({ preventScroll: true }); }
+        if (document.activeElement !== target) { focusRoster(roster); }
+    }
+
+    /**
+     * Draw the roster's notes: each in its figure's card, or in a block
+     * above the roster for a figure no longer in it. Read out once, when
+     * the note is new, not on every repaint.
+     */
+    function paintNotes(roster) {
+        roster.querySelectorAll('.roster-rename-note, .roster-notes')
+            .forEach((node) => { node.remove(); });
+        const notes = notesOf(roster);
+        let index = 0;
+        notes.forEach((note, combatantId) => {
+            const place = index;
+            index += 1;
+            const line = document.createElement('span');
+            line.className = 'autosave-error roster-rename-note';
+            line.dataset.renameNote = combatantId;
+            if (note.announce) { line.setAttribute('role', 'alert'); }
+            note.announce = false;
+            const words = document.createElement('span');
+            words.textContent = note.typed
+                ? `${note.message} What you typed: "${note.typed}".`
+                : note.message;
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'battle-button battle-button-outline roster-note-dismiss';
+            dismiss.dataset.focusKey = `note-dismiss-${combatantId}`;
+            dismiss.textContent = 'Dismiss';
+            dismiss.addEventListener('click', () => {
+                notes.delete(combatantId);
+                paintNotes(roster);
+                // Onto the Dismiss that took this one's place, the last one
+                // left, or the roster once none are.
+                const left = roster.querySelectorAll('.roster-note-dismiss');
+                const next = left[Math.min(place, left.length - 1)];
+                if (next) {
+                    next.focus();
+                    return;
+                }
+                focusRoster(roster);
+            });
+            line.append(words, ' ', dismiss);
+            const card = roster.querySelector(`[data-combatant="${combatantId}"]`);
+            if (card) {
+                card.appendChild(line);
+                return;
+            }
+            let block = roster.querySelector(':scope > .roster-notes');
+            if (!block) {
+                block = document.createElement('div');
+                block.className = 'roster-notes';
+                roster.prepend(block);
+            }
+            block.appendChild(line);
+        });
+    }
 
     /**
      * Swap a roster name for an editable field. Blur/Enter saves through the
-     * rename endpoint, Escape cancels; a rejected save reverts the name and
-     * leaves a persistent inline error (no modals, no transient UI).
+     * rename endpoint, Escape cancels; a refused save reverts the name and
+     * leaves a note on the roster that stays until dismissed (no modals, no
+     * transient UI).
+     *
+     * ``draft`` is a rename the roster was redrawn under (takeRename): the
+     * field opens holding what was typed, the caret where it was. If the
+     * figure's name changed meanwhile -- another seat renamed it -- a note
+     * under the field says what to, so saving does not replace that name
+     * unawares. It goes when the edit ends.
      */
-    function startRename(card, title, combatant, options) {
+    function startRename(card, title, combatant, options, draft) {
+        const roster = rosterOf(card);
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'combatant-rename-input';
-        input.value = combatant.name;
+        input.value = draft ? draft.value : combatant.name;
+        // The name the edit started from, carried through redraws.
+        input.dataset.base = draft ? draft.base : combatant.name;
         let cancelled = false;
         title.replaceWith(input);
+        let changed = null;
+        if (draft && combatant.name !== draft.base) {
+            changed = document.createElement('span');
+            changed.className = 'rename-changed-note';
+            if (!draft.noted) { changed.setAttribute('role', 'status'); }
+            changed.textContent = `Renamed meanwhile to "${combatant.name}".`;
+            input.after(changed);
+        }
         input.focus();
-        input.select();
+        if (draft) {
+            putCaret(input, draft.caret);
+        } else {
+            input.select();
+        }
+        const revert = () => {
+            if (changed) { changed.remove(); }
+            if (input.isConnected) { input.replaceWith(title); }
+        };
         bindCommitKeys(input, { onCancel: () => { cancelled = true; } });
         input.addEventListener('blur', () => {
+            // Removed by a redraw mid-edit: the browser blurs a focused field
+            // it removes, and this used to save the half-typed name. The edit
+            // goes on in the redrawn card instead (issue #16).
+            if (input.dataset.carried) { return; }
+            input.dataset.finished = 'true';
             const value = input.value.trim();
             if (cancelled || !value || value === combatant.name) {
-                input.replaceWith(title);
+                revert();
                 return;
             }
             postForSuccess(options.url, {
@@ -497,15 +660,18 @@ if (typeof module !== 'undefined' && module.exports) {
                     // caller re-renders roster and arena from it.
                     options.onRenamed(data);
                 } else {
-                    input.replaceWith(title);
-                    showRenameError(
-                        card, data && data.error ? data.error : 'Rename failed'
+                    revert();
+                    // The roster the card was drawn in, whether or not a
+                    // repaint has replaced the card since the save went out.
+                    noteRename(
+                        roster, combatant.combatant_id,
+                        data && data.error ? data.error : 'Rename failed', value
                     );
                 }
             })
             .catch(() => {
-                input.replaceWith(title);
-                showRenameError(card, FIELD_NETWORK_ERROR);
+                revert();
+                noteRename(roster, combatant.combatant_id, FIELD_NETWORK_ERROR, value);
             });
         });
     }
@@ -521,9 +687,72 @@ if (typeof module !== 'undefined' && module.exports) {
      * attribute panel the reader has opened (#302) — carried across
      * re-renders, because the poll repaints this list every couple of
      * seconds and a panel that closed itself would be a transient popup by
-     * another name.
+     * another name. A rename being typed is carried the same way, and the
+     * roster's rename notes are painted again (issue #16).
+     *
+     * The lobby page takes the other way with its poll (lobbyEditing): it
+     * holds the poll off while the viewer is mid-edit, because its answer is
+     * a reload of the whole document. The roster redraws in place, so the
+     * edit is carried through the redraw instead of the redraw waiting.
      */
     function renderRoster(container, view, renameOptions, seatMap, openDetail) {
+        notesOf(container);
+        keepRosterFocus(container, () => {
+            const renaming = takeRename(container);
+            drawRoster(container, view, renameOptions, seatMap, openDetail);
+            if (renaming) { resumeRename(container, view, renameOptions, renaming); }
+            paintNotes(container);
+        });
+    }
+
+    /**
+     * The rename being typed in ``container``, if one is, taken before a
+     * redraw (issue #16): which figure, what was typed, the name it started
+     * from, and where the caret was. A field whose edit has finished (it
+     * blurred, and is saving or reverting) is not taken. The field is marked
+     * so its own blur, which the redraw's removal fires, does not save it.
+     * @param {Element} container - The roster.
+     * @returns {{combatantId: string, value: string, base: string, noted: boolean, caret: object|null}|null}
+     */
+    function takeRename(container) {
+        const input = container.querySelector('.combatant-rename-input:not([data-finished])');
+        const card = input && input.closest('[data-combatant]');
+        if (!card) { return null; }
+        input.dataset.carried = 'true';
+        return {
+            combatantId: card.dataset.combatant,
+            value: input.value,
+            base: input.dataset.base,
+            noted: Boolean(card.querySelector('.rename-changed-note')),
+            caret: readCaret(input),
+        };
+    }
+
+    /**
+     * Open the taken rename again on the redrawn card of the same figure. A
+     * figure this viewer may no longer rename, or one gone from the fight,
+     * gets a note with what was typed rather than having it dropped.
+     */
+    function resumeRename(container, view, renameOptions, renaming) {
+        const card = container.querySelector(`[data-combatant="${renaming.combatantId}"]`);
+        const title = card && card.querySelector('.combatant-name');
+        const combatant = (view.combatants || []).find(
+            (each) => String(each.combatant_id) === renaming.combatantId
+        );
+        if (title && combatant && renameOptions) {
+            startRename(card, title, combatant, renameOptions, renaming);
+            return;
+        }
+        const message = card
+            ? 'Not renamed: this figure can no longer be renamed here.'
+            : `Not renamed: ${renaming.base} is no longer in this fight.`;
+        notesOf(container).set(
+            renaming.combatantId, { message, typed: renaming.value, announce: true }
+        );
+    }
+
+    /** Draw the roster's cards into ``container`` (see renderRoster). */
+    function drawRoster(container, view, renameOptions, seatMap, openDetail) {
         container.textContent = '';
         const teamOrder = teamOrderOf(view);
         if (!teamOrder.length) {
@@ -585,6 +814,7 @@ if (typeof module !== 'undefined' && module.exports) {
         panel.open = Boolean(openDetail && openDetail.has(combatant.combatant_id));
         const summary = document.createElement('summary');
         summary.textContent = 'Full attributes';
+        summary.dataset.focusKey = `detail-${combatant.combatant_id}`;
         panel.appendChild(summary);
         (combatant.detail.groups || []).forEach((group) => {
             const section = document.createElement('section');
@@ -635,6 +865,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
         const title = document.createElement('strong');
         title.textContent = shortName(combatant.name);
+        title.dataset.focusKey = `name-${combatant.combatant_id}`;
         // Only the figures the server says this viewer may rename (#762): in
         // a Games Master session's fight the foes are not the player's.
         const seatFacts = (seatMap || {})[combatant.combatant_id];
@@ -644,7 +875,7 @@ if (typeof module !== 'undefined' && module.exports) {
             title.setAttribute('role', 'button');
             title.tabIndex = 0;
             const beginEdit = () => {
-                clearRenameError(card);
+                forgetRenameNote(rosterOf(card), combatant.combatant_id);
                 startRename(card, title, combatant, renameOptions);
             };
             title.addEventListener('click', beginEdit);
@@ -705,6 +936,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 handOff.className = 'battle-button battle-button-outline seat-hand-off';
                 handOff.dataset.seatUrl = seat[key];
                 handOff.dataset.seatHandOff = kind;
+                handOff.dataset.focusKey = `hand-off-${kind}-${combatant.combatant_id}`;
                 handOff.textContent = label;
                 card.appendChild(handOff);
             });
@@ -756,6 +988,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 if (index) { chain.appendChild(document.createTextNode(', ')); }
                 const link = document.createElement('a');
                 link.href = `#event-${sequence}`;
+                link.dataset.focusKey = `fatal-${combatant.combatant_id}-${sequence}`;
                 link.textContent = `#${sequence}`;
                 chain.appendChild(link);
             });
@@ -929,10 +1162,7 @@ if (typeof module !== 'undefined' && module.exports) {
     function restoreTurnPanelFocus(panel, key) {
         if (!key) { return; }
         panel.dataset.lastFocusKey = key;
-        const byKey = (wanted) => Array.prototype.find.call(
-            panel.querySelectorAll('[data-focus-key]'),
-            (node) => node.dataset.focusKey === wanted
-        );
+        const byKey = (wanted) => elementByFocusKey(panel, wanted);
         let target = byKey(key);
         if ((!target || target.disabled)
                 && (key.startsWith('spell-') || key.startsWith('push-')

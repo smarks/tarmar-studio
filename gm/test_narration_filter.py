@@ -1,9 +1,15 @@
 """What the server guarantees about a narration (issues #603, #342, #622)."""
 
+import time
+
 from django.test import SimpleTestCase
 
 from gm.turn_engine.narration import (
+    _FIGURE_WORDS,
+    _ITEM_NUMBER,
+    _NUMBERED_ITEM,
     PlanLeakFilter,
+    _states_figure,
     figures_raised,
     with_open_choices,
     with_record_figure,
@@ -12,6 +18,7 @@ from gm.turn_engine.state import (
     AGE_TOPIC,
     BODY_TOPIC,
     EXPERIENCE_POINTS_TOPIC,
+    EXPERIENCE_YEARS_TOPIC,
     LEVEL_TOPIC,
     SKILL_POINTS_TOPIC,
     LedgerFigure,
@@ -493,3 +500,201 @@ class TheFigureLineIsAboutTheRightThingTest(SimpleTestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(figures_raised(message, names=self.NAMES), ())
+
+
+class MenuNumberPatternsTest(SimpleTestCase):
+    """The menu-number patterns, rewritten to run in linear time (issue #11).
+
+    They read the model's reply. These pin what they read, so the rewrite
+    changed how long they take and nothing else: a match starts on the
+    item's own line now, not at the blank lines above it.
+    """
+
+    ONE_POINT = MenuNumbersAreNotFiguresTest.ONE_POINT
+    ASKED = MenuNumbersAreNotFiguresTest.ASKED
+
+    def said(self, narration: str) -> str:
+        return with_record_figure(
+            narration,
+            topics=figures_raised(self.ASKED),
+            lines=[self.ONE_POINT],
+            message=self.ASKED,
+        )
+
+    def test_menus_count_whatever_the_spacing(self):
+        menus = {
+            "blank lines between items": "Choose.\n\n\n1. Left\n\n\n\n2. Right",
+            "indented items": "Choose.\n  1. Left\n\t2) Right",
+            "CRLF": "Choose:\r\n\r\n1. Go left\r\n2. Go right",
+            "bold numbers after blank lines": "Choose.\n\n \n**1.** Left\n\n**2**. Right",
+            "menu at the very start": "\n\n1. Left\n2. Right",
+        }
+        for label, menu in menus.items():
+            with self.subTest(label):
+                self.assertIn("any other action", with_open_choices(menu))
+
+    def test_lines_that_are_not_two_items_stay_prose(self):
+        prose = {
+            "one item after blank lines": "One way.\n\n\n1. The rope.",
+            "number mid-line": "Take 1. Then 2. Then go.",
+            "no space after the number": "Choose.\n1.Left\n2.Right",
+            # The first item's text runs onto the next line and takes its
+            # number, so this is one item, as it always was.
+            "an empty first item": "Choose.\n1.\n2. Right",
+        }
+        for label, said in prose.items():
+            with self.subTest(label):
+                self.assertEqual(with_open_choices(said), said)
+
+    def test_blank_lines_above_a_menu_do_not_make_its_number_a_figure(self):
+        written = (
+            "Wren has no free skill points available to spend.\n\n\n\n"
+            "1. Rest for the night.\n\n\n2. Visit the tavern."
+        )
+
+        self.assertIn("Wren's record: 1 free skill point.", self.said(written))
+
+    def test_the_figure_before_blank_lines_and_a_menu_still_silences_it(self):
+        written = "She has 1 free skill point left.\n\n\n\n1. Rest.\n\n2. Go."
+
+        self.assertEqual(self.said(written), written)
+
+    def test_a_menu_number_does_not_join_the_sentence_above_it(self):
+        # The text before the item and its number are still a line apart, so
+        # "skill points" above is not beside the 1 below.
+        written = "Spend your skill points\n\n\n1. on the sword\n2. on the bow"
+
+        self.assertIn("Wren's record: 1 free skill point.", self.said(written))
+
+    def test_long_runs_of_blank_lines_are_read(self):
+        blank_lines = "\n" * 5000
+        menu = f"Choose.{blank_lines}1. Left{blank_lines}2. Right"
+        self.assertIn("any other action", with_open_choices(menu))
+
+    def test_the_menu_patterns_stay_fast_on_crafted_input(self):
+        # The tests above check what the patterns read; this one checks how
+        # long they take. Each input is sized so each old pattern took about
+        # 20 s on it (45,000 blank lines; 32,000 lines of one space), so a
+        # pattern that backtracks again fails here within the minute rather
+        # than hanging the run, while the new ones take a few milliseconds.
+        blank_lines = "\n" * 45_000
+        crafted = {
+            "blank lines then a word": f"{blank_lines}x",
+            "lines of spaces then a word": " \n" * 32_000 + "x",
+            "blank lines then a bare number": f"{blank_lines}1.",
+            "a number then blank lines": f"1.{blank_lines}",
+        }
+        patterns = {
+            "numbered item": _NUMBERED_ITEM.findall,
+            "item number": lambda text: _ITEM_NUMBER.sub("", text),
+        }
+        for input_label, text in crafted.items():
+            for pattern_label, apply_pattern in patterns.items():
+                with self.subTest(input=input_label, pattern=pattern_label):
+                    started = time.perf_counter()
+                    apply_pattern(text)
+                    self.assertLess(time.perf_counter() - started, 1.0)
+
+
+class FigureCheckOnALongReplyTest(SimpleTestCase):
+    """Whether a reply states a record figure, read in linear time (issue #51).
+
+    Each number is read beside the few words around it in its own sentence;
+    the check used to build that text for every number and search it, which
+    was quadratic when the words around a number were most of the reply. The
+    reply is now indexed once. These pin what it reads, so the rewrite
+    changed how long it takes and nothing else.
+    """
+
+    ONE_POINT = LedgerFigure(SKILL_POINTS_TOPIC, 1, "1 free skill point")
+
+    def test_what_states_the_figure(self):
+        cases = {
+            "She has 1 free skill point.": True,
+            "her free skill points number 1": True,
+            "1\xa0skill\xa0point": True,
+            "1, skill point": True,
+            "x1 skill point": True,
+            # More than four words away, or past a sentence break.
+            "Skill points available to spend: 1": False,
+            "1 is the number of her free skill points": False,
+            "her skill points, as it stands, number 1": False,
+            "Skill points. 1 is left": False,
+            "Skill points! 1 left": False,
+            "Skill points\n1 left": False,
+            "Free skill points:\r\n1": False,
+            # An adjustment, however it is spaced, is not a balance.
+            "+ 1 skill point": False,
+            "+\n1 skill point": False,
+            "−1 skill point": False,
+            # Not the figure, or not its words.
+            "11 skill points": False,
+            "1 skill-point": False,
+        }
+        for reply, stated in cases.items():
+            with self.subTest(reply=reply):
+                self.assertIs(_states_figure(reply, self.ONE_POINT), stated)
+
+    def test_a_number_inside_a_word_reads_the_word_either_side(self):
+        # The part of a word before the number and the part after it are
+        # read as two words with a space between, as they always were.
+        years = LedgerFigure(EXPERIENCE_YEARS_TOPIC, 1, "1 year of experience")
+        cases = {
+            ("skill1point", self.ONE_POINT): True,
+            ("SKILL1Points", self.ONE_POINT): True,
+            ("skill1points-left", self.ONE_POINT): True,
+            ("1a1a1a skill point", self.ONE_POINT): True,
+            ("1skill points", self.ONE_POINT): True,
+            ("her skill point1", self.ONE_POINT): True,
+            ("years of1experience", years): True,
+            ("years1of experience", years): True,
+            ("skills1point", self.ONE_POINT): False,
+            ("a b c d skill1x", self.ONE_POINT): False,
+            ("-skill-point-1-", self.ONE_POINT): False,
+        }
+        for (reply, figure), stated in cases.items():
+            with self.subTest(reply=reply):
+                self.assertIs(_states_figure(reply, figure), stated)
+
+    def test_every_wording_starts_and_ends_with_a_word_character(self):
+        # The index reads a wording at the edge of the text around a number
+        # as a whole word, which holds only for wordings like these.
+        for wordings in _FIGURE_WORDS.values():
+            for wording in wordings:
+                with self.subTest(wording=wording):
+                    self.assertRegex(wording, r"^\w(?:.*\w)?$")
+
+    def test_a_long_reply_is_read(self):
+        filler = "1 x. " * 5000
+        self.assertTrue(
+            _states_figure(f"{filler}She has 1 skill point.", self.ONE_POINT)
+        )
+        self.assertFalse(
+            _states_figure(f"{filler}She has +1 skill point.", self.ONE_POINT)
+        )
+
+    def test_the_figure_check_stays_fast_on_a_long_reply(self):
+        # The tests above check what is read; this one checks how long it
+        # takes. Each of the first five replies is sized so the old check
+        # took about 20 s on it, so a check that reads the whole reply again
+        # for each number fails here within the minute rather than hanging
+        # the run, while the new one takes a few hundredths of a second. The
+        # last three were fast for the old check too; they hold the new one's
+        # reading across long runs of whitespace and a long word to the same
+        # bound.
+        long_run = 60_000
+        crafted = {
+            "short sentences of the figure": "1 x. " * 12_000,
+            "one long sentence of the figure": "1 " * 28_000,
+            "the figure on every line": "1\n" * 16_000,
+            "the figure glued into one word": "1a" * 25_000,
+            "the figure glued with hyphens": "1-a" * 17_000,
+            "a sign far before the figure": "+" + " " * long_run + "1 skill point",
+            "the figure's words far after it": "1" + " " * long_run + "skill points",
+            "a long word after the figure": "1 " + "x" * long_run,
+        }
+        for label, reply in crafted.items():
+            with self.subTest(input=label, pattern="figure check"):
+                started = time.perf_counter()
+                _states_figure(reply, self.ONE_POINT)
+                self.assertLess(time.perf_counter() - started, 1.0)

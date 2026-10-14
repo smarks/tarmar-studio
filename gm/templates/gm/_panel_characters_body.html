@@ -2,9 +2,10 @@
 The contents of the Characters tab (issues #341, #356, #571), inside its
 <section> in gm/_panel_characters.html. gm-panel-characters.js swaps this in
 from gm:characters_panel while a turn runs, so the section itself -- and
-whether it is shown -- stays put.
+whether it is shown -- stays put. A search typed in the picker, and a Luck
+note, stay as typed through that (gm-panel-drafts.js, issues #864, #16).
 {% endcomment %}
-    <form class="gm-panel-picker" id="gm-character-picker">
+    <form class="gm-panel-picker" id="gm-character-picker" data-draft-key="attach" data-draft-label="Attach a character">
         {% include "_picker.html" with picker=attachable_picker %}
         <button type="submit" class="btn btn-sm" id="gm-character-attach" {% if not attachable_characters %}disabled{% endif %}>Attach</button>
     </form>

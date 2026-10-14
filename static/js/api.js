@@ -172,6 +172,56 @@
     }
 
     /**
+     * Where the caret and the selection are in a text field, so a field
+     * drawn again in its place can be given them back (issue #16): a panel
+     * refetch and the battle roster's redraw both replace a field the reader
+     * is typing in. None for a field that has no caret (a button, a select).
+     *
+     * @param {HTMLInputElement|HTMLTextAreaElement} field
+     * @returns {{start: number, end: number, direction: string}|null}
+     */
+    function readCaret(field) {
+        if (field.selectionStart === null || field.selectionStart === undefined) {
+            return null;
+        }
+        return {
+            start: field.selectionStart,
+            end: field.selectionEnd,
+            direction: field.selectionDirection || 'none',
+        };
+    }
+
+    /**
+     * The control in ``scope`` that names itself ``key`` by data-focus-key.
+     *
+     * A control drawn again in place of one that had the keyboard focus
+     * carries the same key, so the focus can be put back on it: battle.js's
+     * turn panel (#646) and the GM side panel's refetched tabs (issue #16)
+     * both find it here.
+     *
+     * @param {ParentNode} scope
+     * @param {string} key
+     * @returns {HTMLElement|null}
+     */
+    function elementByFocusKey(scope, key) {
+        return Array.prototype.find.call(
+            scope.querySelectorAll('[data-focus-key]'),
+            (node) => node.dataset.focusKey === key
+        ) || null;
+    }
+
+    /**
+     * Put back a caret readCaret took. Nothing happens without one.
+     *
+     * @param {HTMLInputElement|HTMLTextAreaElement} field
+     * @param {{start: number, end: number, direction: string}|null} caret
+     */
+    function putCaret(field, caret) {
+        if (!caret) { return; }
+        field.setSelectionRange(caret.start, caret.end, caret.direction);
+    }
+
+    /**
      * A modifier with its sign, the way the character sheet's tiles show one:
      * `+2`, `+0`, `-3`.
      *
@@ -244,7 +294,8 @@
      *
      * autosave.js and battle.js's click-to-rename had each written this,
      * character for character, down to the class name and the role (issue
-     * #338 item 2). `.autosave-error` keeps its name because base.css styles
+     * #338 item 2). The rename's refusals have been roster state since
+     * issue #16, kept across the roster's redraws; they wear the same class. `.autosave-error` keeps its name because base.css styles
      * it under that name and both callers already wore it.
      *
      * The message goes in through textContent: it is often the server's own
@@ -328,6 +379,9 @@
     root.postJson = postJson;
     root.postForSuccess = postForSuccess;
     root.bindCommitKeys = bindCommitKeys;
+    root.readCaret = readCaret;
+    root.putCaret = putCaret;
+    root.elementByFocusKey = elementByFocusKey;
     root.formatSigned = formatSigned;
     root.uiNotify = uiNotify;
     root.uiConfirm = uiConfirm;
@@ -338,7 +392,7 @@
     // Export for testing (Node.js environment)
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
-            csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, formatSigned,
+            csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
             uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation,
             showFieldError, clearFieldError, FIELD_NETWORK_ERROR
         };

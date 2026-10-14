@@ -9,6 +9,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { readDjangoShell } = require('./django');
 
 test.describe('Battle simulator', () => {
     test('create, advance two turns, see rolls and decisions, survive reload', async ({ adminPage }) => {
@@ -235,5 +236,51 @@ test.describe('Battle simulator', () => {
         await expect(
             adminPage.locator('#battle-arena text', { hasText: 'Torin Blackbriar' })
         ).toBeVisible();
+    });
+
+    test('a rename being typed survives the roster poll, and is not saved half-typed (#16)', async ({ adminPage }) => {
+        // A battle awaiting the DM's own move: his page polls the state while
+        // it waits, and a poll that brings anything new redraws the roster.
+        await createBattleViaSetup(adminPage, {
+            name: `E2E Rename poll ${Date.now()}`, fighters: 3, seed: 7, controlMode: 'manual',
+        });
+        const battleId = new URL(adminPage.url()).pathname.match(/battles\/(\d+)\//)[1];
+        await adminPage.click('#advance-turn');
+        await expect(adminPage.locator('#turn-panel')).toContainText('Your move');
+
+        const card = adminPage.locator('#battle-roster [data-combatant]').first();
+        const combatantId = await card.getAttribute('data-combatant');
+        await card.locator('.combatant-name').click();
+        const editor = adminPage.locator('.combatant-rename-input');
+        await editor.fill('Torin Bl');
+        await card.evaluate((node) => { node.dataset.beforePoll = 'yes'; });
+
+        // Meanwhile another seat renames that figure, and the log moves on:
+        // the next poll has something new and redraws the roster.
+        readDjangoShell(`
+from battle.services import rename_combatant, set_battle_control_mode
+rename_combatant(${battleId}, ${combatantId}, 'Shell Renamed')
+set_battle_control_mode(${battleId}, 'manual')
+print('DONE')
+`);
+        await expect(adminPage.locator('#battle-roster [data-before-poll]')).toHaveCount(0);
+
+        // The edit goes on in the redrawn card, focused, with what was typed,
+        // and says what the figure was renamed to meanwhile.
+        await expect(editor).toHaveValue('Torin Bl');
+        await expect(editor).toBeFocused();
+        await expect(adminPage.locator('.rename-changed-note')).toHaveText('Renamed meanwhile to "Shell Renamed".');
+        // The redraw's removal blurred the old field; nothing was saved by it.
+        const midway = readDjangoShell(`
+from battle.models import BattleCombatant
+print('NAME', BattleCombatant.objects.get(pk=${combatantId}).display_name)
+`);
+        expect(midway).toContain('NAME Shell Renamed');
+
+        await adminPage.keyboard.type('ackbriar');
+        await adminPage.keyboard.press('Enter');
+        await expect(adminPage.locator(`#battle-roster [data-combatant="${combatantId}"] .combatant-name`))
+            .toHaveText('Torin Blackbriar');
+        await expect(adminPage.locator('.rename-changed-note')).toHaveCount(0);
     });
 });

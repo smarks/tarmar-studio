@@ -10,6 +10,7 @@
 
 const {
     csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, formatSigned,
+    readCaret, putCaret, elementByFocusKey,
     uiNotify, uiConfirm, uiPrompt,
     showFieldError, clearFieldError, FIELD_NETWORK_ERROR
 } = require('../api.js');
@@ -544,5 +545,44 @@ describe('pageNavigation', () => {
             global.pageNavigation = mocks;
             window.history.replaceState(null, '', window.location.pathname);
         }
+    });
+});
+
+describe('readCaret / putCaret (issue #16)', () => {
+    afterEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    test('a caret taken from one field is put on the field drawn in its place', () => {
+        document.body.innerHTML = '<input id="old" value="Kestra the Grey"><input id="new" value="Kestra the Grey">';
+        const old = document.getElementById('old');
+        old.setSelectionRange(2, 6, 'backward');
+        const caret = readCaret(old);
+        expect(caret).toEqual({ start: 2, end: 6, direction: 'backward' });
+
+        const fresh = document.getElementById('new');
+        putCaret(fresh, caret);
+        expect([fresh.selectionStart, fresh.selectionEnd, fresh.selectionDirection]).toEqual([2, 6, 'backward']);
+    });
+
+    test('a control with no caret gives none, and none puts nothing back', () => {
+        document.body.innerHTML = '<button id="b">x</button><input id="i" value="abc">';
+        expect(readCaret(document.getElementById('b'))).toBeNull();
+        const input = document.getElementById('i');
+        input.setSelectionRange(1, 1);
+        putCaret(input, null);
+        expect(input.selectionStart).toBe(1);
+    });
+});
+
+describe('elementByFocusKey (issue #16)', () => {
+    test('finds the control named by data-focus-key within the scope only', () => {
+        document.body.innerHTML = `
+            <div id="inside"><button data-focus-key="retire-ruling-3">Retire</button></div>
+            <button data-focus-key="elsewhere">x</button>`;
+        const scope = document.getElementById('inside');
+        expect(elementByFocusKey(scope, 'retire-ruling-3').textContent).toBe('Retire');
+        expect(elementByFocusKey(scope, 'elsewhere')).toBeNull();
+        document.body.innerHTML = '';
     });
 });

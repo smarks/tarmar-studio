@@ -202,7 +202,16 @@ CANON_CONTEXT_PREAMBLE = (
     "you remember:"
 )
 
-HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+# A Markdown heading line: one to six hashes, whitespace, then the title. The
+# pattern is matched against every line of the corpus, so it runs in linear
+# time (issue #11). The old one trimmed the title inside the pattern with a
+# lazy title between "\s+" and "\s*#*\s*", repeats that could all take the
+# same spaces: cubic, 5.8 s on 2,000 spaces before a word. Here the title
+# starts on a non-space (or is absent), which the whitespace before it cannot
+# take, so the line divides one way; :func:`_heading` drops any closing
+# hashes and the whitespace around them with ``str.rstrip``, which never
+# backtracks.
+HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(\S.*)?$")
 
 
 @dataclass(frozen=True)
@@ -269,19 +278,31 @@ def _estimate_tokens(text: str) -> int:
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 
+def _heading(line: str) -> tuple[int, str] | None:
+    """The level and title of a Markdown heading line, or ``None``.
+
+    The title leaves out closing hashes and the whitespace around them:
+    ``"## Title ##"`` is ``(2, "Title")``.
+    """
+    heading_match = HEADING_PATTERN.match(line)
+    if heading_match is None:
+        return None
+    title = (heading_match.group(2) or "").rstrip().rstrip("#").rstrip()
+    return len(heading_match.group(1)), title
+
+
 def _iter_sections(markdown_text: str, fallback_title: str) -> Iterator[_Section]:
     """Yield the file's heading-delimited sections in document order."""
     breadcrumb_stack: list[tuple[int, str]] = []
     current = _Section(breadcrumb=(fallback_title,), lines=[])
     for line in markdown_text.splitlines():
-        heading_match = HEADING_PATTERN.match(line)
-        if heading_match is None:
+        heading = _heading(line)
+        if heading is None:
             current.lines.append(line)
             continue
         if current.text:
             yield current
-        level = len(heading_match.group(1))
-        title = heading_match.group(2)
+        level, title = heading
         while breadcrumb_stack and breadcrumb_stack[-1][0] >= level:
             breadcrumb_stack.pop()
         breadcrumb_stack.append((level, title))

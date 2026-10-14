@@ -18,6 +18,7 @@ By the time a whole reply could be scanned the player has already read it.
 """
 
 import re
+from bisect import bisect_right
 from collections.abc import Iterable, Sequence
 
 from .state import (
@@ -112,8 +113,15 @@ _ALREADY_SAID = re.compile(
 #: A numbered choice. The model writes "1.", "1)", "**1.**" and "**1**."
 #: on different turns, and the live transcript that prompted this used
 #: the third.
+#:
+#: The reply is the model's, so this runs in linear time (issue #11). The
+#: indentation before the number stays on its own line. It was ``\s*``,
+#: which also takes line breaks, so every line start in a run of blank lines
+#: scanned the rest of the run: quadratic, 3.9 s on 20,000 blank lines. A
+#: match now starts on the item's own line rather than at the blank lines
+#: above it, which leaves the count the same.
 _NUMBERED_ITEM = re.compile(
-    r"^\s*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?\s+\S", re.MULTILINE
+    r"^[^\S\n]*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?\s+\S", re.MULTILINE
 )
 
 #: Below this, a list is prose ("1. " in a sentence), not a menu.
@@ -314,58 +322,239 @@ def _about(
 #: two of its three runs by exactly that: the reply ended in a five-item menu,
 #: the record held one free skill point, and the "1." of "1. Rest for the
 #: night" was read as the reply having stated it.
-_ITEM_NUMBER = re.compile(r"^\s*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?(?=\s)", re.MULTILINE)
+#:
+#: Linear for the same reason as :data:`_NUMBERED_ITEM` (issue #11). Removing
+#: the number now leaves the blank lines above the item, which the old
+#: pattern removed with it; a line break stays between the item and the text
+#: before it either way, so the sentences and words read around each number
+#: are the same.
+_ITEM_NUMBER = re.compile(
+    r"^[^\S\n]*(?:\*\*)?\d+(?:\*\*)?[.)](?:\*\*)?(?=\s)", re.MULTILINE
+)
 
 #: A whole number as prose writes it, thousands separators included, so
 #: ``2,500 XP`` is the number 2500 and not a 2 followed by a 500.
 _WRITTEN_NUMBER = re.compile(r"\d[\d,]*")
 
 #: How far from the topic's own words a number may stand and still be read
-#: as stating that figure. Four words carries "1 free skill point" and
-#: "skill points available to spend: 1", and stops well short of the next
-#: clause. The same adjacency discipline #649 applied to the asking cue.
+#: as stating that figure: the whole wording has to fall within the four
+#: words either side of the number, in its sentence. That carries "1 free
+#: skill point" and "her free skill points number 1", and stops well short
+#: of the next clause. It does not carry "skill points available to spend:
+#: 1", where "skill" is the fifth word back; the tests pin that reply as not
+#: stating the figure. The same adjacency discipline #649 applied to the
+#: asking cue.
 _FIGURE_WINDOW_WORDS = 4
 
 #: Where one sentence stops. A number in one sentence does not state a
 #: figure word standing in the next. Deliberately not a colon, which is how
 #: a reply writes "free skill points: 1".
-_SENTENCE_BREAK = re.compile(r"[.!?\n]")
+_SENTENCE_BREAK_CHARACTERS = ".!?\n"
+
+#: A reply as the figure check reads it: words, as ``str.split`` sees the
+#: text between two sentence breaks, and the breaks themselves.
+_WORD_OR_BREAK = re.compile(
+    rf"[^\s{re.escape(_SENTENCE_BREAK_CHARACTERS)}]+"
+    rf"|[{re.escape(_SENTENCE_BREAK_CHARACTERS)}]"
+)
 
 #: A number written as an adjustment rather than a total -- "+1 to her
-#: attacks", "-2 to the roll". A bonus is not a balance.
-_MODIFIER_SIGN = re.compile(r"[-+−]\s*$")
+#: attacks", "-2 to the roll". A bonus is not a balance. Matched on the
+#: reversed reply from where the number starts: any whitespace, then a sign.
+_MODIFIER_SIGN_BEFORE = re.compile(r"\s*+[-+−]")
 
 
-def _stands_beside(prose: str, number: re.Match[str], word: str) -> bool:
-    """Whether ``word`` stands within a few words of ``number`` in ``prose``.
+class _FigureReading:
+    """One reply, indexed once so each number is checked in constant time.
 
-    Args:
-        prose: The narration, menu numbering already stripped.
-        number: One number found in it.
-        word: One of the topic's wordings from :data:`_FIGURE_WORDS`.
+    A number is read beside the words around it: up to
+    :data:`_FIGURE_WINDOW_WORDS` either side in its sentence, the part of
+    its own word before and after it counting as one word each, joined by
+    single spaces with a space where the number was. The topic's wording has
+    to appear in that text as a whole word (``\\b`` either side).
 
-    Returns:
-        Whether the word is close enough, in the same sentence, for the
-        number to be read as that figure rather than some other quantity.
+    Building that text for every number and searching it was quadratic in
+    the reply's length: the words around one number can be most of the
+    reply, as in "1a1a1a..." where every number sits inside one long word
+    (issue #51). So the reply is read once. Its words are laid end to end,
+    one space between words of a sentence (the ``collapsed`` text), and every
+    place a wording occurs there is found once. A number's text is then two
+    stretches of the collapsed text, before and after the number, with a
+    space between, and the wording occurs in it if it occurs inside either
+    stretch or across the space. Each of those is a lookup. Every wording
+    starts and ends with a letter, so ``\\b`` holds wherever one starts or
+    ends at the edge of the text a number is read beside.
     """
-    before = _SENTENCE_BREAK.split(prose[: number.start()])[-1]
-    after = _SENTENCE_BREAK.split(prose[number.end() :])[0]
-    context = " ".join(
-        before.split()[-_FIGURE_WINDOW_WORDS:] + after.split()[:_FIGURE_WINDOW_WORDS]
+
+    def __init__(self, prose: str) -> None:
+        self.pieces = list(_WORD_OR_BREAK.finditer(prose))
+        self.piece_starts = [piece.start() for piece in self.pieces]
+        self.is_word = [
+            piece.group() not in _SENTENCE_BREAK_CHARACTERS for piece in self.pieces
+        ]
+        parts: list[str] = []
+        self.collapsed_starts: list[int] = []
+        length = 0
+        for index, piece in enumerate(self.pieces):
+            if index and self.is_word[index] and self.is_word[index - 1]:
+                parts.append(" ")
+                length += 1
+            self.collapsed_starts.append(length)
+            parts.append(piece.group())
+            length += len(piece.group())
+        self.collapsed = "".join(parts)
+        word_characters = bytearray(len(self.collapsed) + 2)
+        for run in re.finditer(r"\w+", self.collapsed):
+            word_characters[run.start() + 1 : run.end() + 1] = b"\x01" * len(
+                run.group()
+            )
+        #: ``boundary[p]``: whether ``\b`` holds at ``p`` in the collapsed
+        #: text, as it does at either end of a text when the character inside
+        #: is a word character.
+        self.boundary = [
+            word_characters[position] != word_characters[position + 1]
+            for position in range(len(self.collapsed) + 1)
+        ]
+
+    def stretches(
+        self, number: re.Match[str]
+    ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
+        """The collapsed text read before and after ``number``, or ``None``."""
+        index = bisect_right(self.piece_starts, number.start()) - 1
+        piece = self.pieces[index]
+        piece_start = self.collapsed_starts[index]
+        number_start = piece_start + number.start() - piece.start()
+        number_end = piece_start + number.end() - piece.start()
+
+        before = None
+        words = 0
+        if piece.start() < number.start():
+            before = (piece_start, number_start)
+            words = 1
+        earlier = index - 1
+        while words < _FIGURE_WINDOW_WORDS and earlier >= 0 and self.is_word[earlier]:
+            end = before[1] if before else self._end(earlier)
+            before = (self.collapsed_starts[earlier], end)
+            words += 1
+            earlier -= 1
+
+        after = None
+        words = 0
+        if number.end() < piece.end():
+            after = (number_end, piece_start + len(piece.group()))
+            words = 1
+        later = index + 1
+        while (
+            words < _FIGURE_WINDOW_WORDS
+            and later < len(self.pieces)
+            and self.is_word[later]
+        ):
+            start = after[0] if after else self.collapsed_starts[later]
+            after = (start, self._end(later))
+            words += 1
+            later += 1
+        return before, after
+
+    def _end(self, index: int) -> int:
+        return self.collapsed_starts[index] + len(self.pieces[index].group())
+
+
+def _same_letters(wording: str, text: str, start: int) -> bool:
+    """Whether ``wording`` stands at ``start`` in ``text``, ignoring case.
+
+    Case is ignored as a pattern compiled with ``re.IGNORECASE`` ignores it.
+    """
+    return (
+        re.compile(re.escape(wording), re.IGNORECASE).match(
+            text, start, start + len(wording)
+        )
+        is not None
     )
-    return bool(re.search(rf"\b{re.escape(word)}\b", context, re.IGNORECASE))
+
+
+class _WordingIndex:
+    """Every place one wording occurs in a reply's collapsed text."""
+
+    def __init__(self, reading: _FigureReading, wording: str) -> None:
+        self.reading = reading
+        self.length = len(wording)
+        collapsed = reading.collapsed
+        boundary = reading.boundary
+        self.starts = {
+            found.start()
+            for found in re.finditer(
+                rf"(?={re.escape(wording)})", collapsed, re.IGNORECASE
+            )
+        }
+        #: ``whole_before[p]``: how many occurrences start before ``p`` with a
+        #: word boundary at both ends in the collapsed text itself.
+        self.whole_before = [0] * (len(collapsed) + 2)
+        for position in range(len(collapsed) + 1):
+            whole = (
+                position in self.starts
+                and boundary[position]
+                and boundary[position + self.length]
+            )
+            self.whole_before[position + 1] = self.whole_before[position] + whole
+        #: The wording cut at each of its spaces: the words that end the text
+        #: before a number and the words that start the text after it.
+        self.splits = [
+            (wording[:space], wording[space + 1 :])
+            for space, character in enumerate(wording)
+            if character == " "
+        ]
+
+    def within(self, stretch: tuple[int, int]) -> bool:
+        """Whether the wording is a whole word inside the stretch alone.
+
+        At the stretch's own ends ``\\b`` holds whatever the collapsed text
+        has beyond them: the stretch is read with a space or nothing there.
+        """
+        start, end = stretch
+        last_start = end - self.length
+        if last_start < start:
+            return False
+        if self.whole_before[last_start + 1] - self.whole_before[start] > 0:
+            return True
+        boundary = self.reading.boundary
+        if start in self.starts and (
+            start + self.length == end or boundary[start + self.length]
+        ):
+            return True
+        return last_start in self.starts and (
+            last_start == start or boundary[last_start]
+        )
+
+    def across(self, before: tuple[int, int], after: tuple[int, int]) -> bool:
+        """Whether the wording runs from the end of ``before`` into ``after``."""
+        collapsed = self.reading.collapsed
+        boundary = self.reading.boundary
+        for head, tail in self.splits:
+            head_start = before[1] - len(head)
+            tail_end = after[0] + len(tail)
+            if head_start < before[0] or tail_end > after[1]:
+                continue
+            if not (head_start == before[0] or boundary[head_start]):
+                continue
+            if not (tail_end == after[1] or boundary[tail_end]):
+                continue
+            if _same_letters(head, collapsed, head_start) and _same_letters(
+                tail, collapsed, after[0]
+            ):
+                return True
+        return False
 
 
 def _states_figure(text: str, figure: LedgerFigure) -> bool:
     """Whether ``text`` already states ``figure`` as a figure about the record.
 
-    The number has to sit beside the topic's own words, and must not be an
-    adjustment. Matching the digit anywhere in the reply silenced the
-    guarantee whenever the prose happened to carry that number for another
-    reason: a measured turn wrote "+1 to her attacks" while the balance was
-    1 free skill point, so the server said nothing and the reply answered
-    the question in words alone (issue #727). The smaller the figure the
-    likelier that is -- 1, 2 and 3 are all over ordinary prose.
+    The number has to sit beside the topic's own words, in the same sentence,
+    and must not be an adjustment. Matching the digit anywhere in the reply
+    silenced the guarantee whenever the prose happened to carry that number
+    for another reason: a measured turn wrote "+1 to her attacks" while the
+    balance was 1 free skill point, so the server said nothing and the reply
+    answered the question in words alone (issue #727). The smaller the
+    figure the likelier that is -- 1, 2 and 3 are all over ordinary prose.
 
     Args:
         text: The narration as the model wrote it.
@@ -375,14 +564,28 @@ def _states_figure(text: str, figure: LedgerFigure) -> bool:
         Whether the reply already says it, so the server should stay silent.
     """
     prose = _ITEM_NUMBER.sub("", text)
-    words = _FIGURE_WORDS.get(figure.topic, ())
+    backwards = prose[::-1]
+    reading: _FigureReading | None = None
+    wordings: list[_WordingIndex] = []
     for number in _WRITTEN_NUMBER.finditer(prose):
         if number.group().replace(",", "") != str(figure.value):
             continue
-        if _MODIFIER_SIGN.search(prose[: number.start()]):
+        if _MODIFIER_SIGN_BEFORE.match(backwards, len(prose) - number.start()):
             continue
-        if any(_stands_beside(prose, number, word) for word in words):
-            return True
+        if reading is None:
+            reading = _FigureReading(prose)
+            wordings = [
+                _WordingIndex(reading, wording)
+                for wording in _FIGURE_WORDS.get(figure.topic, ())
+            ]
+        before, after = reading.stretches(number)
+        for wording in wordings:
+            if before and wording.within(before):
+                return True
+            if after and wording.within(after):
+                return True
+            if before and after and wording.across(before, after):
+                return True
     return False
 
 

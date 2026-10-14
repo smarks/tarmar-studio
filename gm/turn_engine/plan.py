@@ -92,9 +92,15 @@ MAX_XP_AWARDED = 1_000_000
 
 #: Dice a ``roll`` action may ask for: ``NdM``, ``NdM+K``, ``NdM-K``, and a
 #: count of separate rolls on the end, ``3d6 x6``.
+#:
+#: The dice field is the model's, so the pattern runs in linear time (issue
+#: #11). The whitespace after the times is inside their optional group: it
+#: was a ``\s*`` after the group, next to the ``\s*`` before it, and with no
+#: times the two divided a run of spaces every way before failing: quadratic,
+#: 0.78 s on 20,000 spaces.
 DICE_PATTERN = re.compile(
     r"^\s*(?P<dice>\d{1,2}d\d{1,3}(?:\s*[+-]\s*\d{1,3})?)\s*"
-    r"(?:[x×]\s*(?P<times>\d{1,2}))?\s*$",
+    r"(?:[x×]\s*(?P<times>\d{1,2})\s*)?$",
     re.IGNORECASE,
 )
 
@@ -105,7 +111,17 @@ BACKGROUND_FIELDS: dict[str, str] = {
     "wealth": "wealth_level",
 }
 
-_FENCE = re.compile(r"^```(?:json)?\s*(?P<body>.*?)\s*```$", re.DOTALL | re.IGNORECASE)
+# A Markdown fence around the plan: "```json ... ```", or "```" with no tag.
+# The reply is the model's words, which a player can steer, so the pattern
+# matches in linear time (issue #11). It has one repeated part, the body. The
+# old pattern put a "\s*" on each side of a lazy body, three repeats that
+# could all take the same spaces, so "```" and a run of spaces with no closing
+# fence was split every possible way before failing: cubic, 2 s at 2,000
+# spaces. The body now runs to the closing "```" at the very end (the reply is
+# stripped first): it takes the rest of the reply and gives back one
+# character at a time until a fence closes it, one comparison a step. The
+# caller strips the whitespace the "\s*"s took.
+_FENCE = re.compile(r"```(?:json)?(?P<body>.*)```", re.DOTALL | re.IGNORECASE)
 
 
 def unknown_thread_error(said: int, open_ids: Collection[int]) -> str:
@@ -356,7 +372,7 @@ class PlanReading:
 def _json_object(raw: str) -> tuple[Any, str]:
     """The JSON the reply holds, or ``(None, error)``."""
     text = raw.strip()
-    fenced = _FENCE.match(text)
+    fenced = _FENCE.fullmatch(text)
     if fenced is not None:
         text = fenced.group("body").strip()
     if not text:

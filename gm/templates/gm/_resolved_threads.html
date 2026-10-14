@@ -7,7 +7,7 @@ page and stays until it is used; a failure stays beside it (no transient UI).{% 
 {% if campaign_resolved_page.earlier_before %}
 <li class="gm-history-earlier" data-earlier>
     <span class="gm-campaign-detail">{{ campaign_resolved_page.earlier }} earlier resolved thread{{ campaign_resolved_page.earlier|pluralize }} not shown.</span>
-    <button type="button" class="btn btn-sm" data-earlier-url="{% url 'gm:resolved_threads' campaign_session.pk %}?before={{ campaign_resolved_page.earlier_before }}">Show earlier threads</button>
+    <button type="button" class="btn btn-sm" data-focus-key="earlier-resolved" data-earlier-url="{% url 'gm:resolved_threads' campaign_session.pk %}?before={{ campaign_resolved_page.earlier_before }}">Show earlier threads</button>
     <span class="gm-panel-error" data-earlier-error role="alert" hidden></span>
 </li>
 {% endif %}
@@ -17,6 +17,6 @@ page and stays until it is used; a failure stays beside it (no transient UI).{% 
     <span class="gm-campaign-name">{{ thread.text }}</span>
     {% if thread.resolution %}<span class="gm-campaign-detail">{{ thread.resolution }}</span>{% endif %}
     {% if thread.hand_mark %}<span class="gm-campaign-detail gm-hand-mark">{{ thread.hand_mark }}</span>{% endif %}
-    {% if can_edit_records %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ threads_url }}" data-change="reopen" data-thread-id="{{ thread.pk }}">Reopen</button>{% endif %}
+    {% if can_edit_records %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ threads_url }}" data-change="reopen" data-thread-id="{{ thread.pk }}" data-focus-key="reopen-thread-{{ thread.pk }}">Reopen</button>{% endif %}
 </li>
 {% endfor %}

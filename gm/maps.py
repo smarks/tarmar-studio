@@ -36,8 +36,15 @@ from reference.paths import CANON_MAPS_FILE_NAME, DM_RULES_DIR
 MAPS_MANIFEST_NAME = CANON_MAPS_FILE_NAME
 MAPS_MANIFEST: Path = DM_RULES_DIR / MAPS_MANIFEST_NAME
 
-_HEADING_PATTERN = re.compile(r"^#\s+(?P<title>.+?)\s*$", re.MULTILINE)
-_SECTION_PATTERN = re.compile(r"^##\s+(?P<section>.+?)\s*$", re.MULTILINE)
+# A page's "# Title" and a hub's "## Section". Each runs in linear time
+# (issue #11): the name starts and ends on a non-space, so neither the
+# whitespace before it nor the end of the line can take the same characters
+# as the name. The old patterns ended in a lazy name and "\s*$", which
+# overlap on spaces: quadratic, 5 s on a 50,000-character line. One reading
+# changed: a "#" with only whitespace after it to the end of the text was a
+# heading named by that whitespace; it is no heading now.
+_HEADING_PATTERN = re.compile(r"^#\s+(?P<title>\S(?:.*\S)?)", re.MULTILINE)
+_SECTION_PATTERN = re.compile(r"^##\s+(?P<section>\S(?:.*\S)?)", re.MULTILINE)
 
 
 class MapScope(IntEnum):

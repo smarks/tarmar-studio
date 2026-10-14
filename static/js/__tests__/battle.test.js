@@ -742,6 +742,285 @@ describe('inline rename', () => {
             .toBe('Kestra Duskmere');
     });
 
+    describe('a rename being typed when the roster is drawn again (issue #16)', () => {
+        function startTyping(roster, typed) {
+            roster.querySelector('.combatant-name').click();
+            const input = roster.querySelector('.combatant-rename-input');
+            input.value = typed;
+            input.setSelectionRange(2, 4);
+            return input;
+        }
+
+        test('goes on in the redrawn card with the text, focus and caret', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            const typed = startTyping(roster, 'Kestra the Grey');
+
+            // A poll brings another seat's move: the roster is drawn again.
+            battle.renderRoster(roster, state, options);
+            // The browser blurs a focused field it removes; that blur saved
+            // the half-typed name.
+            typed.dispatchEvent(new FocusEvent('blur'));
+
+            const input = roster.querySelector('.combatant-rename-input');
+            expect(input).not.toBe(typed);
+            expect(input.value).toBe('Kestra the Grey');
+            expect(document.activeElement).toBe(input);
+            expect([input.selectionStart, input.selectionEnd]).toEqual([2, 4]);
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(options.onRenamed).not.toHaveBeenCalled();
+        });
+
+        test('a rename already saving is not opened again', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn(() => new Promise(() => {}));
+            require('../api.js');
+            const typed = startTyping(roster, 'Kestra the Grey');
+            typed.blur();
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+
+            battle.renderRoster(roster, state, options);
+
+            expect(roster.querySelector('.combatant-rename-input')).toBeNull();
+            expect(roster.querySelector('.combatant-name').textContent).toBe('Kestra Duskmere');
+        });
+
+        test('a figure no longer this viewer\'s to rename shows what was typed', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+
+            expect(roster.querySelector('.combatant-rename-input')).toBeNull();
+            expect(roster.querySelector('.autosave-error').textContent).toContain('Kestra the Grey');
+            expect(global.fetch).not.toHaveBeenCalled();
+            // The next poll's redraw keeps it, now that it is roster state.
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            const kept = roster.querySelector('[data-combatant="1"] .roster-rename-note');
+            expect(kept.textContent).toContain('can no longer be renamed');
+            expect(kept.textContent).toContain('Kestra the Grey');
+            expect(kept.hasAttribute('role')).toBe(false);
+        });
+
+        test('a figure renamed meanwhile says so by the field; the draft stays', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            const renamed = sampleState([sampleCombatant({ name: 'Kestra of the Pass' })]);
+
+            battle.renderRoster(roster, renamed, options);
+
+            expect(roster.querySelector('.combatant-rename-input').value).toBe('Kestra the Grey');
+            const note = roster.querySelector('.rename-changed-note');
+            expect(note.textContent).toBe('Renamed meanwhile to "Kestra of the Pass".');
+            expect(note.getAttribute('role')).toBe('status');
+
+            battle.renderRoster(roster, renamed, options);
+            expect(roster.querySelector('.rename-changed-note').hasAttribute('role')).toBe(false);
+            expect(roster.querySelector('.combatant-rename-input').value).toBe('Kestra the Grey');
+
+            // Escape ends the edit, and the note with it.
+            roster.querySelector('.combatant-rename-input')
+                .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+            expect(roster.querySelector('.rename-changed-note')).toBeNull();
+            expect(global.fetch).not.toHaveBeenCalled();
+        });
+
+        test('a figure gone from the fight leaves the typed name above the roster', () => {
+            const { roster, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            const without = sampleState([sampleCombatant({ combatant_id: 2, name: 'Bran' })]);
+
+            battle.renderRoster(roster, without, options);
+            battle.renderRoster(roster, without, options);
+
+            const block = roster.querySelector(':scope > .roster-notes');
+            expect(block.textContent).toContain('Kestra Duskmere is no longer in this fight');
+            expect(block.textContent).toContain('Kestra the Grey');
+            expect(global.fetch).not.toHaveBeenCalled();
+        });
+
+        test('a refusal that answers after a redraw is shown on the card now drawn, and stays', async () => {
+            const { roster, state, options } = rosterWithOptions();
+            let answer;
+            global.fetch = jest.fn(() => new Promise((resolve) => { answer = resolve; }));
+            require('../api.js');
+            const typed = startTyping(roster, 'Taken Name');
+            typed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            battle.renderRoster(roster, state, options);
+
+            answer({ ok: false, json: async () => ({ success: false, error: 'Another combatant already has that name' }) });
+            await flush();
+
+            const note = () => roster.querySelector('[data-combatant="1"] .roster-rename-note');
+            expect(note().textContent).toContain('already has that name');
+            expect(note().textContent).toContain('Taken Name');
+            battle.renderRoster(roster, state, options);
+            expect(note().textContent).toContain('already has that name');
+        });
+
+        test('Dismiss takes a note away and leaves the focus on the roster', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+
+            roster.querySelector('.roster-note-dismiss').click();
+
+            expect(roster.querySelector('.roster-rename-note')).toBeNull();
+            expect(document.activeElement).toBe(roster);
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            expect(roster.querySelector('.roster-rename-note')).toBeNull();
+        });
+
+        test('Dismiss moves the focus to the next note\'s Dismiss', () => {
+            document.body.innerHTML = '<div id="roster"></div>';
+            const roster = document.getElementById('roster');
+            const state = sampleState([
+                sampleCombatant({ combatant_id: 1, name: 'Kestra' }),
+                sampleCombatant({ combatant_id: 2, name: 'Bran' }),
+            ]);
+            const options = { url: '/tarmar/battles/1/rename/', csrf: 'tok', onRenamed: jest.fn() };
+            const locked = { 1: { can_rename: false }, 2: { can_rename: false } };
+            battle.renderRoster(roster, state, options);
+            [1, 2].forEach((id) => {
+                roster.querySelector(`[data-combatant="${id}"] .combatant-name`).click();
+                roster.querySelector('.combatant-rename-input').value = `typed ${id}`;
+                battle.renderRoster(roster, state, options, locked);
+                battle.renderRoster(roster, state, options);
+            });
+            expect(roster.querySelectorAll('.roster-note-dismiss')).toHaveLength(2);
+
+            roster.querySelectorAll('.roster-note-dismiss')[0].click();
+
+            expect(document.activeElement).toBe(roster.querySelector('.roster-note-dismiss'));
+        });
+
+        test('renaming the figure again clears its note', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            battle.renderRoster(roster, state, options);
+
+            roster.querySelector('.combatant-name').click();
+
+            expect(roster.querySelector('.roster-rename-note')).toBeNull();
+        });
+    });
+
+    describe('the keyboard focus through a redraw (issue #16 review)', () => {
+        const DETAIL = { groups: [{ label: 'Attributes', rows: [{ label: 'STR', value: '13', note: '' }] }] };
+
+        function roster2() {
+            document.body.innerHTML = '<input id="elsewhere"><div id="roster"></div>';
+            const roster = document.getElementById('roster');
+            const state = sampleState([
+                sampleCombatant({ combatant_id: 1, name: 'Kestra', detail: DETAIL }),
+                sampleCombatant({ combatant_id: 2, name: 'Bran' }),
+            ]);
+            const options = { url: '/tarmar/battles/1/rename/', csrf: 'tok', onRenamed: jest.fn() };
+            battle.renderRoster(roster, state, options);
+            return { roster, state, options };
+        }
+
+        function redrawKeeps(selector, seatMap) {
+            const { roster, state, options } = roster2();
+            battle.renderRoster(roster, state, options, seatMap);
+            const before = roster.querySelector(selector);
+            before.focus();
+            expect(document.activeElement).toBe(before);
+
+            battle.renderRoster(roster, state, options, seatMap);
+
+            const after = roster.querySelector(selector);
+            expect(after).not.toBe(before);
+            expect(document.activeElement).toBe(after);
+        }
+
+        test('a figure\'s name keeps it', () => {
+            redrawKeeps('[data-combatant="2"] .combatant-name');
+        });
+
+        test('the attributes summary keeps it', () => {
+            redrawKeeps('[data-combatant="1"] .combatant-detail summary');
+        });
+
+        test('a seat hand-off keeps it', () => {
+            redrawKeeps('[data-combatant="1"] .seat-hand-off', { 1: { take_seat_url: '/tarmar/battles/1/seat/take/' } });
+        });
+
+        test('a fatal-roll link keeps it', () => {
+            document.body.innerHTML = '<div id="roster"></div>';
+            const roster = document.getElementById('roster');
+            const state = sampleState([
+                sampleCombatant({ combatant_id: 1, alive: false, conscious: false, fatal_chain: [7, 9] }),
+            ]);
+            battle.renderRoster(roster, state);
+            roster.querySelectorAll('.fatal-chain a')[1].focus();
+
+            battle.renderRoster(roster, state);
+
+            expect(document.activeElement).toBe(roster.querySelectorAll('.fatal-chain a')[1]);
+        });
+
+        test('a note\'s Dismiss keeps it', () => {
+            const { roster, state, options } = roster2();
+            roster.querySelector('[data-combatant="1"] .combatant-name').click();
+            roster.querySelector('.combatant-rename-input').value = 'typed';
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            const dismiss = roster.querySelector('.roster-note-dismiss');
+            dismiss.focus();
+
+            battle.renderRoster(roster, state, options);
+
+            expect(roster.querySelector('.roster-note-dismiss')).not.toBe(dismiss);
+            expect(document.activeElement).toBe(roster.querySelector('.roster-note-dismiss'));
+        });
+
+        test('a note painted for a refusal leaves the focus on the Dismiss it had', async () => {
+            const { roster, state, options } = roster2();
+            roster.querySelector('[data-combatant="1"] .combatant-name').click();
+            roster.querySelector('.combatant-rename-input').value = 'typed';
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: false, json: async () => ({ success: false, error: 'Another combatant already has that name' }),
+            });
+            require('../api.js');
+            roster.querySelector('[data-combatant="2"] .combatant-name').click();
+            const input = roster.querySelector('.combatant-rename-input');
+            input.value = 'Kestra';
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            roster.querySelector('[data-focus-key="note-dismiss-1"]').focus();
+
+            await flush();
+
+            expect(roster.querySelectorAll('.roster-note-dismiss')).toHaveLength(2);
+            expect(document.activeElement.dataset.focusKey).toBe('note-dismiss-1');
+        });
+
+        test('a control whose figure has gone hands it to the roster', () => {
+            const { roster, options } = roster2();
+            roster.querySelector('[data-combatant="2"] .combatant-name').focus();
+
+            battle.renderRoster(roster, sampleState([sampleCombatant({ combatant_id: 1, name: 'Kestra' })]), options);
+
+            expect(document.activeElement).toBe(roster);
+        });
+
+        test('focus elsewhere on the page is left there', () => {
+            const { roster, state, options } = roster2();
+            const elsewhere = document.getElementById('elsewhere');
+            elsewhere.focus();
+
+            battle.renderRoster(roster, state, options);
+
+            expect(document.activeElement).toBe(elsewhere);
+        });
+    });
+
     test('a network failure shows a persistent inline error and reverts', async () => {
         const { roster } = rosterWithOptions();
         global.fetch = jest.fn().mockRejectedValue(new Error('offline'));

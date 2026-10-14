@@ -1,6 +1,7 @@
 """Reading and checking a JSON plan (issue #590)."""
 
 import json
+import time
 
 from django.test import SimpleTestCase
 
@@ -14,8 +15,16 @@ from .turn_engine.messages import (
     plan_message,
     replan_message,
 )
-from .turn_engine.plan import MAX_ACTIONS, NewCharacter, PlannedAction, read_plan
+from .turn_engine.plan import (
+    _FENCE,
+    DICE_PATTERN,
+    MAX_ACTIONS,
+    NewCharacter,
+    PlannedAction,
+    read_plan,
+)
 from .turn_engine.policy import (
+    _CHECK_WORDS,
     AIDE_MANNER,
     AIDE_PLANNING_GUIDANCE,
     AIDE_UNASKED_ROLL_REFUSAL,
@@ -303,6 +312,220 @@ class ReadPlanTest(SimpleTestCase):
                 "background": {"location": "City"},
             },
         )
+
+
+class FencedPlanTest(SimpleTestCase):
+    """A plan the model wrapped in a Markdown fence (issue #11).
+
+    The fence pattern was rewritten to run in linear time; these pin what it
+    reads, so the rewrite changed how long it takes and nothing else.
+    """
+
+    QUESTION = {"action": "ask_gm", "question": "Which track?"}
+
+    def read(self, raw: str):
+        return read_plan(raw, roster_ids={41}, policy=GAME_MASTER)
+
+    def assert_question_read(self, raw: str, question: str = "Which track?"):
+        reading = self.read(raw)
+        self.assertTrue(reading.ok, reading.errors)
+        self.assertEqual([action.question for action in reading.actions], [question])
+
+    def test_a_fence_with_or_without_the_json_tag_is_read(self):
+        body = plan(self.QUESTION)
+        cases = {
+            "json tag": f"```json\n{body}\n```",
+            "tag in capitals": f"```JSON\n{body}\n```",
+            "no tag": f"```\n{body}\n```",
+            "no line breaks": f"```json{body}```",
+            "CRLF line breaks": f"```json\r\n{body}\r\n```",
+            "whitespace around the fence": f"  \n\t```json\n{body}\n```\n  ",
+            "spaces inside the fence": f"```json   {body}   ```",
+        }
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.assert_question_read(raw)
+
+    def test_backticks_inside_the_plan_are_kept(self):
+        # The body runs to the fence that ends the reply, not to the first
+        # run of backticks inside it.
+        for question in ("Use ```code```?", "One ` and two ``"):
+            with self.subTest(question=question):
+                body = plan({"action": "ask_gm", "question": question})
+                self.assert_question_read(f"```json\n{body}\n```", question)
+
+    def test_only_json_is_taken_as_a_tag(self):
+        # Any other tag stays in the body and the reply is not JSON, as before
+        # the rewrite.
+        reading = self.read(f"```python\n{plan(self.QUESTION)}\n```")
+        self.assertIn("not JSON", reading.errors[0])
+
+    def test_an_unclosed_fence_is_not_json(self):
+        for raw in (
+            f"```json\n{plan(self.QUESTION)}",
+            f"```json\n{plan(self.QUESTION)}\n``",
+            "```json",
+            "`````",
+        ):
+            with self.subTest(raw=raw):
+                self.assertIn("not JSON", self.read(raw).errors[0])
+
+    def test_an_empty_fence_is_an_empty_reply(self):
+        for raw in ("```json\n```", "``````", "```  \n  ```"):
+            with self.subTest(raw=raw):
+                self.assertIn("empty", self.read(raw).errors[0])
+
+    def test_long_runs_of_spaces_are_read(self):
+        # The shape that made the old pattern cubic: a fence and a long run of
+        # spaces, closed or not.
+        spaces = " " * 5000
+        body = plan(self.QUESTION)
+        self.assert_question_read(f"```json{spaces}{body}{spaces}```")
+        self.assertIn("not JSON", self.read(f"```{spaces}x").errors[0])
+
+    def test_the_fence_pattern_stays_fast_on_crafted_input(self):
+        # The tests above check what the pattern reads; this one checks how
+        # long it takes. Each slow input is sized so the old pattern took
+        # about 17 s on it (4,000 spaces; it was cubic), so a pattern that
+        # backtracks again fails here within the minute rather than hanging
+        # the run, while the new one takes well under a millisecond. The
+        # closed fence was fast for the old pattern too; it holds the new
+        # one's match path to the same bound.
+        spaces = " " * 4000
+        crafted = {
+            "unclosed fence then spaces": f"```{spaces}",
+            "unclosed tagged fence, spaces, a word": f"```json{spaces}x",
+            "spaces then two backticks": f"```{spaces}``",
+            "closed fence padded with spaces": f"```json{spaces}{{}}{spaces}```",
+        }
+        for label, text in crafted.items():
+            with self.subTest(input=label, pattern="fence"):
+                started = time.perf_counter()
+                _FENCE.fullmatch(text)
+                self.assertLess(time.perf_counter() - started, 1.0)
+
+
+class DicePatternTest(SimpleTestCase):
+    """The dice a ``roll`` names, read in linear time (issue #11).
+
+    The field is the model's. These pin what the pattern reads, so the
+    rewrite changed how long it takes and nothing else.
+    """
+
+    def read_dice(self, dice: str):
+        matched = DICE_PATTERN.match(dice)
+        return None if matched is None else matched.group("dice", "times")
+
+    def test_dice_and_times(self):
+        cases = {
+            "3d6": ("3d6", None),
+            "3d6 x6": ("3d6", "6"),
+            "1d20 + 4": ("1d20 + 4", None),
+            "  2d6-1  X 3  ": ("2d6-1", "3"),
+            "3d6\t×\t2": ("3d6", "2"),
+            "3D6x12": ("3D6", "12"),
+            "3d6 x6\n": ("3d6", "6"),
+            "3d6   ": ("3d6", None),
+        }
+        for dice, expected in cases.items():
+            with self.subTest(dice=dice):
+                self.assertEqual(self.read_dice(dice), expected)
+
+    def test_what_is_not_dice(self):
+        for dice in ("3d6 x", "3d6 x6 y", "3d6   y", "3d6 x123", "d6", "3d6 + ", ""):
+            with self.subTest(dice=dice):
+                self.assertIsNone(self.read_dice(dice))
+
+    def test_a_padded_roll_is_read_from_a_plan(self):
+        spaces = " " * 5000
+        reading = read_plan(
+            plan({"action": "roll", "dice": f"{spaces}3d6{spaces}x6{spaces}"}),
+            roster_ids=(),
+            policy=GAME_MASTER,
+        )
+        self.assertTrue(reading.ok, reading.errors)
+        (roll,) = reading.actions
+        self.assertEqual((roll.dice, roll.times), ("3d6", 6))
+        refused = read_plan(
+            plan({"action": "roll", "dice": f"3d6{spaces}y"}),
+            roster_ids=(),
+            policy=GAME_MASTER,
+        )
+        self.assertIn("dice notation", refused.errors[0])
+
+    def test_the_dice_pattern_stays_fast_on_crafted_input(self):
+        # The tests above check what the pattern reads; this one checks how
+        # long it takes. Each of the first three inputs is sized so the old
+        # pattern took about 20 s on it (100,000 spaces), so a pattern that
+        # backtracks again fails here within the minute rather than hanging
+        # the run, while the new one takes a millisecond. The last was fast
+        # for the old pattern too; it holds the new one's whitespace after
+        # the times to the same bound.
+        spaces = " " * 100_000
+        crafted = {
+            "spaces then a word": f"1d6{spaces}y",
+            "spaces either side of the times sign": f"1d6{spaces}x{spaces}y",
+            "spaces either side of a plus": f"1d6{spaces}+{spaces}y",
+            "spaces after the times": f"1d6 x6{spaces}y",
+        }
+        for label, dice in crafted.items():
+            with self.subTest(input=label, pattern="dice"):
+                started = time.perf_counter()
+                DICE_PATTERN.match(dice)
+                self.assertLess(time.perf_counter() - started, 1.0)
+
+
+class CheckWordsTest(SimpleTestCase):
+    """A skill check asked for by name, read in linear time (issue #11).
+
+    The message is the player's or the Game Master's. These pin which
+    messages ask for a check, so the rewrite changed how long reading one
+    takes and nothing else.
+    """
+
+    def test_a_check_with_against_later_in_the_sentence(self):
+        for message in (
+            "check his stealth against 12",
+            "Check, check and check again against 12",
+            "checks against the wall",
+            "check that checker against the list",
+            "check the roster, then check his stealth against 12",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNotNone(_CHECK_WORDS.search(message))
+
+    def test_no_check_with_against_in_the_same_sentence(self):
+        for message in (
+            "check his stealth. Against 12",
+            "check his stealth\nagainst 12",
+            "check the roster! against whom",
+            "recheck it against 12",
+            "check check check",
+            "against 12, check",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(_CHECK_WORDS.search(message))
+
+    def test_the_check_words_stay_fast_on_crafted_input(self):
+        # The tests above check which messages ask; this one checks how long
+        # reading takes. Each input but "a check then words" is sized so the
+        # old pattern took 14 to 17 s on it (about 26,000 "check"s), so a
+        # pattern that reads to the end of the sentence from every "check"
+        # again fails here within the minute rather than hanging the run,
+        # while the new one takes a few milliseconds. "A check then words"
+        # was fast for the old pattern too; it holds the new one's reading on
+        # from a single "check" to the same bound.
+        crafted = {
+            "a sentence of checks": "check " * 26_000,
+            "a check then words": "check" + " x" * 80_000,
+            "plural checks": "checks " * 22_000,
+            "checks with against cut off": "check " * 26_000 + ". against",
+        }
+        for label, message in crafted.items():
+            with self.subTest(input=label, pattern="check words"):
+                started = time.perf_counter()
+                _CHECK_WORDS.search(message)
+                self.assertLess(time.perf_counter() - started, 1.0)
 
 
 class TurnMessagesTest(SimpleTestCase):

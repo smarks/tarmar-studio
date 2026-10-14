@@ -7,6 +7,7 @@ one test of the real HTTP client runs it against an ``httpx.MockTransport``.
 import json
 import re
 import tempfile
+import time
 from collections.abc import Sequence
 from io import StringIO
 from pathlib import Path
@@ -31,6 +32,7 @@ from gm.retrieval import (
     CANON_CONTEXT_PREAMBLE,
     CANON_KIND,
     CHARS_PER_TOKEN,
+    HEADING_PATTERN,
     MAX_CHUNK_TOKENS,
     MESSAGE_OVERHEAD_TOKENS,
     MIN_CHUNK_TOKENS,
@@ -38,6 +40,7 @@ from gm.retrieval import (
     CorpusChunk,
     GMIndex,
     RetrievedChunk,
+    _heading,
     build_index,
     canon_chunk_ids,
     canon_context_message,
@@ -159,6 +162,77 @@ class ChunkerTest(SimpleTestCase):
         sources = {chunk.source for chunk in chunks}
         self.assertTrue(any(source.startswith("dm-rules/") for source in sources))
         self.assertTrue(any(source.startswith("public-rules/") for source in sources))
+
+
+class HeadingTest(SimpleTestCase):
+    """Reading a Markdown heading line (issue #11).
+
+    The heading pattern was rewritten to run in linear time; these pin what
+    it reads, so the rewrite changed how long it takes and nothing else.
+    """
+
+    def test_level_and_title(self):
+        cases = {
+            "# Top": (1, "Top"),
+            "###### Six": (6, "Six"),
+            "#\tTabbed": (1, "Tabbed"),
+            "##   Spaced   ": (2, "Spaced"),
+            "## Closed ##": (2, "Closed"),
+            "### Closed, padded   ###   ": (3, "Closed, padded"),
+            "# Issue #11 notes": (1, "Issue #11 notes"),
+            "#  Two  words ": (1, "Two  words"),
+            "# ": (1, ""),
+            "# ##": (1, ""),
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(_heading(line), expected)
+
+    def test_lines_that_are_not_headings(self):
+        for line in ("#NoSpace", "####### Seven", " # Indented", "", "plain", "#"):
+            with self.subTest(line=line):
+                self.assertIsNone(_heading(line))
+
+    def test_crlf_headings_nest(self):
+        text = "# Top\r\n\r\nintro\r\n\r\n## Middle ##\r\n\r\nbody\r\n"
+        with patch.object(retrieval, "MIN_CHUNK_TOKENS", 1):
+            chunks = chunk_markdown(text, source="page.md")
+        self.assertEqual([chunk.heading for chunk in chunks], ["Top", "Top > Middle"])
+
+    def test_long_runs_of_spaces_are_read(self):
+        # The shapes that made the old pattern slow: a long run of spaces
+        # before a word, or either side of a hash.
+        spaces = " " * 5000
+        self.assertEqual(_heading(f"# a{spaces}x"), (1, f"a{spaces}x"))
+        self.assertEqual(
+            _heading(f"# a{spaces}#{spaces}x"), (1, f"a{spaces}#{spaces}x")
+        )
+        self.assertEqual(_heading(f"# a{spaces}#{spaces}"), (1, "a"))
+
+    def test_the_heading_pattern_stays_fast_on_crafted_input(self):
+        # The tests above check what is read; this one checks how long it
+        # takes. Each of the first three inputs is sized so the old pattern
+        # took 10 to 30 s on it (measured: 19 s, 12 s and 19 s), so a pattern
+        # that backtracks again fails here within the minute rather than
+        # hanging the run, while the new one takes well under a millisecond.
+        # The last two were fast for the old pattern too; they hold the new
+        # one's own paths (the closing hashes it strips, and no title at all)
+        # to the same bound.
+        spaces = " " * 3000
+        crafted = {
+            "spaces then a word": f"# a{spaces}x",
+            "spaces either side of a hash": f"# a{' ' * 2000}#{' ' * 2000}x",
+            "hashes then a word": f"# a{'#' * 60_000}x",
+            "spaces then closing hashes": f"# a{spaces}{'#' * 6}{spaces}",
+            "only spaces": f"#{spaces}",
+        }
+        readers = {"pattern": HEADING_PATTERN.match, "heading reader": _heading}
+        for input_label, line in crafted.items():
+            for reader_label, read in readers.items():
+                with self.subTest(input=input_label, pattern=reader_label):
+                    started = time.perf_counter()
+                    read(line)
+                    self.assertLess(time.perf_counter() - started, 1.0)
 
 
 @skip_unless_canon_expects("retrieval_cases")

@@ -9,6 +9,7 @@
  * - #848, #872: a chat-built character's card carries what an attached one does.
  * - #789, #790: the Game Master adds and corrects records by hand; a player cannot.
  * - #791: the fold's recap is shown where the fold is, and corrected by hand.
+ * - #16: a correction being typed survives the turn's refetch of the tab.
  *
  * Turns are played against the fake Ollama (e2e/fake-ollama.js). The fights
  * are a Game Master's, whose typed foes are built as typed.
@@ -286,5 +287,97 @@ session.save()
         expect(text).toContain('[fold] ENTRIES #0-#3 ARE FOLDED');
         expect(text).toContain('RECORDS SET BY HAND');
         expect(text).toContain('found four empty rooms');
+    });
+});
+
+test.describe('GM session — a correction being typed survives a turn (#16)', () => {
+    /**
+     * Mark the Campaign tab's contents as they are now, so the spec can wait
+     * for the turn's refetch to have replaced them -- an event, not a sleep.
+     */
+    async function markCampaignContents(page) {
+        await page.locator('#gm-panel-campaign .gm-campaign-where').evaluate((node) => {
+            node.dataset.beforeRefetch = 'yes';
+        });
+    }
+
+    async function campaignRefetched(page) {
+        await expect(page.locator('#gm-panel-campaign [data-before-refetch]')).toHaveCount(0, { timeout: 30000 });
+    }
+
+    function seedThreads(texts) {
+        return seedSession(TEST_ADMIN.username, `Correct mid-turn E2E ${Date.now()}`, texts
+            .map((text) => `run_actions(session, {'action': 'open_thread', 'text': ${JSON.stringify(text)}})`)
+            .join('\n'));
+    }
+
+    async function openCorrect(page, threadText, typed) {
+        const thread = page.locator('#gm-panel-campaign li[data-thread-id]', { hasText: threadText });
+        await thread.locator('summary', { hasText: 'Correct' }).click();
+        const field = thread.locator('textarea[name="text"]');
+        await field.fill(typed);
+        return thread;
+    }
+
+    test('the form stays open with the text typed through a turn', async ({ page }) => {
+        const sessionId = seedThreads(['who took the iron box', 'the debt to Vane']);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        await page.click('#gm-panel-tab-campaign');
+        const thread = await openCorrect(page, 'who took the iron box', 'who took the iron box, and why');
+        await markCampaignContents(page);
+
+        await send(page, 'We wait by the shrine.');
+        await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
+        await campaignRefetched(page);
+
+        await expect(thread.locator('details.gm-hand-edit').first()).toHaveAttribute('open', '');
+        await expect(thread.locator('textarea[name="text"]')).toHaveValue('who took the iron box, and why');
+        await expect(page.locator('#gm-panel-campaign [data-drafts-lost]')).toHaveCount(0);
+    });
+
+    test('typing goes on in the same field after a refetch lands mid-word', async ({ page }) => {
+        const sessionId = seedThreads(['who took the iron box']);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        await page.click('#gm-panel-tab-campaign');
+        const thread = await openCorrect(page, 'who took the iron box', 'who stole the');
+        await markCampaignContents(page);
+
+        // The frame chat.js dispatches for each procedure of a running turn.
+        await page.evaluate(() => document.dispatchEvent(new CustomEvent('gm-stream-procedure', { detail: {} })));
+        await campaignRefetched(page);
+        await page.keyboard.type(' iron box');
+
+        await expect(thread.locator('textarea[name="text"]')).toHaveValue('who stole the iron box');
+        await expect(thread.locator('textarea[name="text"]')).toBeFocused();
+    });
+
+    test('a draft whose thread the turn closed is shown, not dropped', async ({ page }) => {
+        const sessionId = seedThreads(['who took the iron box', 'the debt to Vane']);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        await page.click('#gm-panel-tab-campaign');
+        await openCorrect(page, 'who took the iron box', 'who took the iron box, and why');
+        await markCampaignContents(page);
+        // The record changes on the server, as a turn's resolve_thread would.
+        runDjangoShell(`
+from gm.models import StoryThread
+StoryThread.objects.filter(session_id=${sessionId}, text='who took the iron box').update(resolved=True)
+`);
+
+        await send(page, 'We wait by the shrine.');
+        await campaignRefetched(page);
+
+        const notice = page.locator('#gm-panel-campaign [data-drafts-lost]');
+        await expect(notice).toContainText('no longer in this list');
+        await expect(notice.locator('li strong')).toHaveText(/^Correct thread \d+$/);
+        await expect(notice.locator('dd')).toHaveText('who took the iron box, and why');
+        // Gone from the open threads; it is listed with the resolved ones.
+        await expect(page.locator('#gm-campaign-threads-group > ul > li[data-thread-id]', { hasText: 'who took the iron box' })).toHaveCount(0);
+        await expect(page.locator('#gm-campaign-threads-group .gm-campaign-resolved')).toContainText('who took the iron box');
+
+        await notice.getByRole('button', { name: /^Dismiss/ }).click();
+        await expect(notice).toHaveCount(0);
     });
 });

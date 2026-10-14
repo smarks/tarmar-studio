@@ -256,8 +256,19 @@
     font-size: 0.85rem;
 }
 
+/* A figure out of the fight -- dead or unconscious, which its status line
+   says in words. It used to fade the whole card (opacity 0.55), and with it
+   every word on it: the name, the status line and any rename note fell
+   below WCAG AA (issue #16 review, 2.25:1 on a note). The card says it now
+   with a dashed border and greyed gauges, and keeps the ground of any other
+   card: a greyer ground took the gold manual-control line to 4.39:1. */
 .combatant-card.is-down {
-    opacity: 0.55;
+    border-style: dashed;
+    border-color: var(--colour-ink-muted);
+}
+
+.combatant-card.is-down .pool-bar {
+    filter: grayscale(1);
 }
 
 .combatant-status {
@@ -2001,4 +2012,15 @@
 }
 .lobby-blocked {
     margin: -0.4rem 0 1.1rem;
+}
+
+/* A rename the roster could not keep (issue #16): roster state, painted after
+   every redraw, in the figure's card or above the roster when it has gone. */
+.roster-notes { grid-column: 1 / -1; display: grid; gap: 0.35rem; }
+.roster-rename-note { display: block; }
+.roster-rename-note .roster-note-dismiss { margin-left: 0.35rem; }
+.rename-changed-note {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
 }

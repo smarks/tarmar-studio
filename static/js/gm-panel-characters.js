@@ -18,6 +18,9 @@
  * to the character's record as the turn commits (issues #750, #751), and the
  * sheets would otherwise show the old pools until the next chat message.
  *
+ * Whatever the reader has typed or opened in a tab is carried through its
+ * refetch by gm-panel-drafts.js (issue #16), loaded before this file.
+ *
  * Reads #gm-panel-config (attachUrl, detachUrl, charactersPanelUrlTemplate,
  * campaignPanelUrlTemplate,
  * sessionId); the CSRF token
@@ -27,6 +30,7 @@
  */
 if (typeof module !== 'undefined' && module.exports) {
   require('./api.js');
+  require('./gm-panel-drafts.js');
 }
 
 (function (root) {
@@ -161,12 +165,38 @@ if (typeof module !== 'undefined' && module.exports) {
         roll: roll ? roll.value : '',
       });
       if (!data) return false;
+      // The spend is recorded: its note is not a draft to carry (issue #16).
+      root.gmPanelDrafts.discard(form);
       await refreshPanel();
       return true;
     } finally {
       delete form.dataset.spending;
       if (button) button.disabled = false;
     }
+  }
+
+  /**
+   * Which page of its picker a tab shows, and which pager button has the
+   * focus, so the refetched tab shows the same page (issue #16): the server
+   * renders the first, and a Game Master three pages into his players'
+   * characters was sent back to it on every procedure frame.
+   * @param {Element} container
+   * @returns {{page: string, direction: (string|undefined)}}
+   */
+  function readPickerView(container) {
+    const picker = container.querySelector('[data-picker]');
+    if (!picker) return { page: '1', direction: undefined };
+    const active = root.document.activeElement;
+    let direction;
+    if (active && picker.contains(active) && active.matches('[data-picker-page]')) {
+      const buttons = Array.from(picker.querySelectorAll('[data-picker-page]'));
+      direction = buttons.indexOf(active) === 0 ? 'previous' : 'next';
+    }
+    // A page of an earlier search is no page of the one typed since.
+    const search = picker.querySelector('[data-picker-search]');
+    const typed = search ? search.value.trim() : '';
+    const sameSearch = (picker.dataset.pickerShownQuery || '') === typed;
+    return { page: sameSearch ? picker.dataset.pickerShownPage || '1' : '1', direction };
   }
 
   /** A tab with nothing the refetch needs to carry over. */
@@ -255,10 +285,6 @@ if (typeof module !== 'undefined' && module.exports) {
             tab.errorId,
           );
         } else {
-          // A search typed into the attach picker survives the refresh
-          // (issue #864): the fresh picker is wired and asked again.
-          const typed = container.querySelector('[data-picker-search]');
-          const query = typed ? typed.value : '';
           const body = await response.text();
           // The reader may have loaded a page or folded the list while the
           // answer was on its way: read the tab as it is now. An answer to a
@@ -268,15 +294,24 @@ if (typeof module !== 'undefined' && module.exports) {
           if (liveView.query !== sentView.query) {
             refreshAgain.add(tab.containerId);
           } else {
+            // What the reader typed, opened or was typing in goes back on
+            // the forms of the same records (issue #16): read with nothing
+            // in between, so not a keystroke is missed.
+            const drafts = root.gmPanelDrafts.read(container);
+            const pickerView = readPickerView(container);
             container.innerHTML = body;
             if (tab.keepView) tab.keepView.restore(container, liveView);
+            root.gmPanelDrafts.restore(container, drafts);
             if (root.picker) {
               root.picker.initPickers(container);
+              // A search typed into the attach picker is one of those drafts
+              // (issue #864), and the page it was on is asked for again with
+              // it (issue #16).
               const fresh = container.querySelector('[data-picker]');
               const search = fresh && fresh.querySelector('[data-picker-search]');
-              if (search && query) {
-                search.value = query;
-                root.picker.loadPage(fresh, 1);
+              const searched = search && search.value !== search.defaultValue;
+              if (fresh && (searched || pickerView.page !== '1')) {
+                root.picker.loadPage(fresh, pickerView.page, pickerView.direction);
               }
             }
             replaced = true;

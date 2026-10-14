@@ -57,6 +57,12 @@
         }
         if (picker.dataset.pickerTicket !== ticket) return;
         body.innerHTML = html;
+        // The page shown and the search it is a page of, so a refetch of
+        // what holds the picker can ask for it again instead of falling back
+        // to the first (issue #16). Not data-picker-page: that names the
+        // pager's buttons, and the click handler finds them by it.
+        picker.dataset.pickerShownPage = String(page);
+        picker.dataset.pickerShownQuery = url.searchParams.get('q');
         if (focusDirection) focusPager(picker, focusDirection);
     }
 

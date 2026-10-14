@@ -20,6 +20,7 @@ Which maps exist is canon (issue #918), so the tests come in three kinds:
 import json
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from unittest import skipUnless
 from unittest.mock import patch
@@ -36,6 +37,8 @@ from reference.paths import CANON_NAME, DEFAULT_CANON_DIR, TARMAR_CANON_NAME
 
 from . import maps, views
 from .maps import (
+    _HEADING_PATTERN,
+    _SECTION_PATTERN,
     CASE_SENSITIVE_PLACE_NAMES,
     GAZETTEER_DIR,
     GAZETTEER_HUB,
@@ -372,6 +375,85 @@ class MapRegistryTest(SimpleTestCase):
             hub_sections(hub),
             {"First": ("beta", "alpha"), "Second": ("gamma",)},
         )
+
+    # The heading and section patterns were rewritten to run in linear time
+    # (issue #11). The tests from here to the timing test pin what they read,
+    # so the rewrite changed how long they take and, past the one case named
+    # below, nothing else.
+
+    def test_gazetteer_titles_are_read_from_the_first_top_level_heading(self):
+        cases = {
+            "plain": "# Aster\n",
+            "trailing whitespace": "# Aster \t \n",
+            "CRLF": "# Aster\r\nbody\r\n",
+            "tab after the hash": "#\tAster\n",
+            "after a section heading": "## Not this\n\n# Aster\n",
+            "with an epithet": "#  Aster, the bright  \n",
+            # Whitespace after the hash may run onto the next line, as it
+            # always has; the rewrite keeps that reading.
+            "on the next line": "#\nAster\n",
+        }
+        for label, page in cases.items():
+            with self.subTest(label):
+                directory, _hub = self._make_gazetteer({"aster.md": page})
+                self.assertEqual(gazetteer_place_names(directory), {"aster": "Aster"})
+
+    def test_a_heading_with_no_title_is_no_heading(self):
+        # The one reading the rewrite changed: a "#" followed only by
+        # whitespace to the end of the text was a heading named by that
+        # whitespace, giving a place or a section an empty name. A name
+        # starts on a non-space now, so there is no heading there.
+        directory, hub = self._make_gazetteer({"nowhere.md": "*Draft.*\n\n#   \n"})
+        with self.assertRaisesMessage(ValueError, "no top-level heading"):
+            gazetteer_place_names(directory)
+        hub.write_text("# Hub\n\n## First\n- [b](/vale/beta/)\n\n##   \n")
+        self.assertEqual(hub_sections(hub), {"First": ("beta",)})
+
+    def test_hub_sections_read_crlf_and_padding(self):
+        _directory, hub = self._make_gazetteer({})
+        hub.write_text(
+            "# Hub\r\n\r\n## First  \r\n- [b](/vale/beta/)\r\n"
+            "##\tSecond\t\n- [c](/vale/gamma/)\n"
+        )
+        self.assertEqual(
+            hub_sections(hub),
+            {"First": ("beta",), "Second": ("gamma",)},
+        )
+
+    def test_long_runs_of_spaces_are_read(self):
+        # The shape that made the old patterns quadratic: a long run of
+        # spaces inside the name, then the end of the line.
+        spaces = " " * 5000
+        directory, hub = self._make_gazetteer({"aster.md": f"# a{spaces}b{spaces}\n"})
+        self.assertEqual(gazetteer_place_names(directory), {"aster": f"a{spaces}b"})
+        hub.write_text(f"## a{spaces}b{spaces}\n- [x](/vale/aster/)\n")
+        self.assertEqual(hub_sections(hub), {f"a{spaces}b": ("aster",)})
+
+    def test_the_heading_patterns_stay_fast_on_crafted_input(self):
+        # The tests above check what the patterns read; this one checks how
+        # long they take. 90,000 spaces inside a name took each old pattern
+        # about 17 s, so a pattern that backtracks again fails here within
+        # the minute rather than hanging the run, while the new ones take well
+        # under a millisecond. Only that first input was slow for the old
+        # patterns; the others hold the new ones' own paths (no name after
+        # the hash, a name cut by a line break) to the same bound.
+        spaces = " " * 90_000
+        patterns = {
+            "page heading": ("#", _HEADING_PATTERN.search),
+            "hub section": ("##", lambda text: list(_SECTION_PATTERN.finditer(text))),
+        }
+        for pattern_label, (marker, apply_pattern) in patterns.items():
+            crafted = {
+                "spaces inside the name": f"{marker} a{spaces}b",
+                "spaces after the name": f"{marker} a{spaces}",
+                "only spaces": f"{marker}{spaces}",
+                "spaces then a line break": f"{marker} a{spaces}\nb",
+            }
+            for input_label, text in crafted.items():
+                with self.subTest(input=input_label, pattern=pattern_label):
+                    started = time.perf_counter()
+                    apply_pattern(text)
+                    self.assertLess(time.perf_counter() - started, 1.0)
 
     def _make_gazetteer(self, pages: dict[str, str]) -> tuple[Path, Path]:
         """A throwaway gazetteer ``vale/`` holding ``pages``, and its hub path."""
