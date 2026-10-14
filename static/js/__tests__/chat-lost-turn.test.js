@@ -28,12 +28,25 @@ function setUpDom(config = {}) {
     `;
 }
 
+// Every chat.js loaded and not yet left, each standing for one page. A page's
+// wait for its turn ends with the page; this file's jsdom outlives them all,
+// so a page is left when the next one loads and when its test ends. A wait
+// left running asks after its turn with the next test's fetch mock (#25).
+const openPages = [];
+
+function leaveOpenPages() {
+    while (openPages.length) openPages.pop().stopWaitingForTurns();
+}
+
 function loadChat(config) {
+    leaveOpenPages();
     jest.resetModules();
     setUpDom(config);
     global.marked = require('../marked.min.js').marked;
     global.DOMPurify = require('../dompurify.min.js');
-    return require('../chat.js');
+    const chat = require('../chat.js');
+    openPages.push(chat);
+    return chat;
 }
 
 /** A stream response that delivers `chunks`, then fails as Safari does. */
@@ -72,6 +85,8 @@ beforeEach(() => {
     alert.mockClear();
     window.history.replaceState(null, '', '/tarmar/gm/');
 });
+
+afterEach(leaveOpenPages);
 
 describe('a stream lost after the turn started', () => {
     test('says the turn is still running, not that it failed', async () => {
@@ -178,6 +193,42 @@ describe('a page loaded while its turn runs', () => {
     });
 });
 
+describe('a page whose wait is stopped (#25)', () => {
+    /** Load a page waiting on turn 52, held mid-request until the test answers. */
+    async function pageAskingAfterItsTurn() {
+        let answer;
+        fetch.mockImplementation(() => new Promise((resolve, reject) => { answer = { resolve, reject }; }));
+        const chat = loadChat({ runningTurn: { id: 52, message: 'Hi' } });
+        await settle();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        return { chat, answer };
+    }
+
+    test('does nothing with an answer that arrives after it stopped', async () => {
+        const { chat, answer } = await pageAskingAfterItsTurn();
+
+        chat.stopWaitingForTurns();
+        answer.resolve(turnState({ state: 'finished', session_id: 7 }));
+        await settle();
+
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('neither warns nor asks again when the stopped request fails', async () => {
+        const { chat, answer } = await pageAskingAfterItsTurn();
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        chat.stopWaitingForTurns();
+        answer.reject(new TypeError('Load failed'));
+        await settle();
+
+        expect(warn).not.toHaveBeenCalled();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        warn.mockRestore();
+    });
+});
+
 describe('a blank page and a session-less turn (issue #650)', () => {
     beforeEach(() => {
         window.sessionStorage.clear();
@@ -232,6 +283,9 @@ describe('a blank page and a session-less turn (issue #650)', () => {
         loadChat({ sessionId: null, runningTurn: null });
         await settle();
 
+        // Once, by this page: a wait an earlier test left running used to
+        // make this call too, and pass this test for it (#25).
+        expect(pageNavigation.go).toHaveBeenCalledTimes(1);
         expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=12');
         expect(window.sessionStorage.getItem('gmOwnSessionlessTurn')).toBeNull();
     });
@@ -270,11 +324,17 @@ describe('a remembered turn the page cannot reach (issue #650)', () => {
         window.sessionStorage.setItem('gmOwnSessionlessTurn',
                                       JSON.stringify({ id: '41', message: 'I open the iron box' }));
         fetch.mockImplementation(() => Promise.reject(new TypeError('Load failed')));
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
         loadChat({ sessionId: null, runningTurn: null });
         await settle();
 
         expect(document.getElementById('send-btn').disabled).toBe(false);
         expect(JSON.parse(window.sessionStorage.getItem('gmOwnSessionlessTurn')))
             .toEqual({ id: '41', message: 'I open the iron box' });
+        // The page asked once and stopped; it is not waiting on the turn.
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith('Could not ask after GM turn 41: Load failed');
+        warn.mockRestore();
     });
 });

@@ -763,6 +763,18 @@ async function fetchTurnState(turnId) {
   return resp.json();
 }
 
+// Set by stopWaitingForTurns, which nothing on the page calls: a wait ends
+// when its turn lands, or with the page. The Jest suites outlive the page.
+// They load chat.js afresh for each test into one jsdom, and a wait left
+// running there asks after its turn with the next test's fetch mock, and can
+// do that test's work for it (#25).
+let turnWaitsStopped = false;
+
+/** End every wait for a running turn on this page, at its next step. */
+function stopWaitingForTurns() {
+  turnWaitsStopped = true;
+}
+
 /**
  * Wait for a turn the server is running without this page (issue #515).
  *
@@ -780,10 +792,12 @@ async function awaitRunningTurn(turnId, pending) {
   setWorkingStatus(null);
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS));
+    if (turnWaitsStopped) return;
     let data;
     try {
       data = await fetchTurnState(turnId);
     } catch (err) {
+      if (turnWaitsStopped) return;
       if (err.status === 404) {
         // There is no such turn to wait for. Going on asking would leave
         // the page locked for good, with Send disabled and nothing coming
@@ -799,6 +813,7 @@ async function awaitRunningTurn(turnId, pending) {
       console.warn(`Could not ask after GM turn ${turnId}: ${err.message}`);
       continue;
     }
+    if (turnWaitsStopped) return;
     if (data.state === 'running') continue;
     forgetOwnTurn();
     setTurnRunning(null);
@@ -1597,6 +1612,7 @@ if (typeof module !== 'undefined' && module.exports) {
     MARKDOWN_SANITIZE_CONFIG,
     deleteSession,
     streamMessage,
+    stopWaitingForTurns,
     parseChoicePrompt,
     CHOICE_LABEL_MAX_LENGTH,
     CHOICE_OTHER_LABEL,

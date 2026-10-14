@@ -30,6 +30,30 @@ afterEach(() => {
   if (said) throw new Error(`A script navigated without pageNavigation: ${said}`);
 });
 
+// chat.js warns each time it fails to ask after a running GM turn. A test
+// that means to reach that path spies on console.warn and counts the calls;
+// one that reaches the real console has a wait it did not start, most likely
+// one an earlier test left running, which goes on answering this test's
+// fetches (#25). The test fails here instead of passing with the warning.
+let unexpectedTurnWarning = null;
+const reportWarning = console.warn;
+const warnThroughTurnGuard = (...args) => {
+  const said = args.map(String).join(' ');
+  if (said.includes('Could not ask after GM turn') && !unexpectedTurnWarning) {
+    unexpectedTurnWarning = said;
+  }
+  reportWarning(...args);
+};
+console.warn = warnThroughTurnGuard;
+afterEach(() => {
+  const said = unexpectedTurnWarning;
+  unexpectedTurnWarning = null;
+  // A test that failed before restoring its console.warn spy would leave it
+  // in place, silencing every later warning before it reached this guard.
+  console.warn = warnThroughTurnGuard;
+  if (said) throw new Error(`A GM turn wait warned where no test expected it: ${said}`);
+});
+
 // Mock fetch
 global.fetch = jest.fn();
 
