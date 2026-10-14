@@ -29,7 +29,7 @@ from common.services.ollama_client import (
     STRUCTURED_OUTPUT_UNAVAILABLE_STATUS,
     StreamDeadlinePassed,
 )
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, logged_exception
 from common.test_helpers import make_beast as shared_make_beast
 
 from . import battle_report, fight, views
@@ -1297,15 +1297,22 @@ class FightTakesTheTurnClaimTest(BaseTestCase):
         self.assertIsNone(running_turn_for(self.user, self.session.pk))
 
     def test_a_fight_that_fails_releases_the_claim(self):
+        secret = "board broke reading /srv/tarmar/.env DB_PASSWORD=hunter2"
         with (
-            patch("gm.views.start_fight", side_effect=RuntimeError("board broke")),
+            patch("gm.views.start_fight", side_effect=RuntimeError(secret)),
+            self.assertLogs("django.request", "ERROR") as logs,
             self.assertRaises(RuntimeError),
         ):
             self._fight()
 
         record = GMTurnRecord.objects.get(session=self.session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        self.assertEqual(record.error, "board broke")
+        # The record is read back to the player by gm:turn, so it holds the
+        # fixed sentence; Django logs the traceback of what was raised (#13).
+        self.assertEqual(record.error, views.GM_SERVER_ERROR_MESSAGE)
+        state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
+        self.assertNotIn("hunter2", state.content.decode())
+        self.assertIn(secret, str(logged_exception(logs.records[0])))
 
     def test_a_retry_after_a_fight_still_knows_its_message_was_answered(self):
         """The #515 guard reads past a fight: a fight answers no message."""
@@ -1586,17 +1593,27 @@ class PlayersFoesAreTheGameMastersTest(BaseTestCase):
 
     @patch("gm.services.ollama_client.chat")
     def test_a_model_that_cannot_be_reached_is_said_in_words(self, mock_chat):
-        """Review of #841: this was an HTTP 500 with the turn record's error."""
-        mock_chat.side_effect = httpx.ConnectError("connection refused")
+        """Review of #841: this was an HTTP 500 with the turn record's error.
 
-        response = self._post("wolves")
+        The record says what the player was told, since ``gm:turn`` reads it
+        back to them; the model error, which names the model host, goes to
+        the log (#13).
+        """
+        secret = "connection refused by http://10.0.0.9:11434 token=s3cr3t"
+        mock_chat.side_effect = httpx.ConnectError(secret)
+
+        with self.assertLogs("gm.views", "WARNING") as logs:
+            response = self._post("wolves")
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["error"], views.FIGHT_MODEL_UNREACHABLE)
         self.assertIsNone(Battle.objects.first())
         record = GMTurnRecord.objects.get(session=self.session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        self.assertIn("connection refused", record.error)
+        self.assertEqual(record.error, views.FIGHT_MODEL_UNREACHABLE)
+        state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
+        self.assertNotIn("s3cr3t", state.content.decode())
+        self.assertIn(secret, "\n".join(logs.output))
         self.assertIsNone(running_turn_for(self.user, self.session.pk))
 
     def test_a_game_masters_named_foes_are_still_built_as_named(self):

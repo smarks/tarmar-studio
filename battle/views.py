@@ -98,6 +98,7 @@ from .services import (
     MIN_COMBATANTS,
     STALE_POOLS_REFUSAL,
     TAKE_SEAT_GAME_MASTER_ONLY,
+    BattleInLobby,
     StalePools,
     add_draft_entry,
     add_draft_team,
@@ -146,6 +147,15 @@ CONTROL_DENIED_MESSAGE = "Only this battle's DM or the person who made it can do
 FOES_BELONG_TO_GAME_MASTER = (
     "This fight came from a Games Master session: its foes belong to the Game "
     "Master, so only a Game Master can restart it or change who decides"
+)
+
+#: What anyone advancing a battle is told when the advance fails for a reason
+#: that is not a rule refusing it (issue #13). The exception's own text can
+#: carry file paths, SQL or internal state, and players run battles too, so it
+#: goes to the log with its traceback and the page gets this sentence.
+ADVANCE_FAILED_MESSAGE = (
+    "The battle could not advance because of an error on the server. It has "
+    "been logged; reload the page and try again."
 )
 
 #: The spellings a checkbox or a form-posted flag arrives as. A browser sends
@@ -1699,11 +1709,14 @@ def battle_advance(request, pk):
             },
             status=409,
         )
-    except Exception as advance_error:  # noqa: BLE001 — logged, then surfaced to the DM
+    except BattleInLobby as refusal:
+        # A rule refusing, like the other battle views' refusals: its words,
+        # as a 400. Only this type is caught, not ValueError at large, since
+        # the engine's own ValueErrors are internal text (issue #13).
+        return _json_error(str(refusal))
+    except Exception:  # noqa: BLE001 — logged with its traceback, never shown
         logger.exception("Advancing battle %s failed", pk)
-        return _json_error(
-            f"{type(advance_error).__name__}: {advance_error}", status=500
-        )
+        return _json_error(ADVANCE_FAILED_MESSAGE, status=500)
     return JsonResponse(battle_payload(battle, actor, events, request))
 
 

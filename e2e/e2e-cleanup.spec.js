@@ -6,6 +6,9 @@
  * plain `test` rather than the fixtures' gated `page`.
  */
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { test, expect } = require('@playwright/test');
 const { readDjangoShell } = require('./django');
 const {
@@ -13,6 +16,7 @@ const {
     deleteGuestTestBattles,
     resetGuestBattleRate,
 } = require('./cleanup');
+const { removeMailDirectory } = require('./mail');
 
 test.describe('E2E cleanup', () => {
     test('the teardown deletes the guest spec battles and keeps everything else', () => {
@@ -77,5 +81,19 @@ RateLimitCounter.objects.filter(key='e2e-cleanup-other').delete()
 `);
         // The guest window is open again; any other limiter's count stands.
         expect(after).toContain('AFTER 0 3');
+    });
+
+    test('removeMailDirectory removes the directory and what is in it, and a '
+        + 'missing one is not an error (issue #17)', () => {
+        // A directory of this test's own: the run's real one may hold a
+        // message another worker's spec is about to take.
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tarmar-mail-removal-test-'));
+        fs.writeFileSync(path.join(directory, '20261014-120000-message.log'), 'To: a@b.c\n');
+
+        removeMailDirectory(directory);
+        expect(fs.existsSync(directory)).toBe(false);
+
+        // A run that sent no mail never made the directory; that is not an error.
+        expect(() => removeMailDirectory(directory)).not.toThrow();
     });
 });

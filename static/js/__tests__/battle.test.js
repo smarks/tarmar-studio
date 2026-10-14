@@ -71,6 +71,10 @@ beforeEach(() => {
     battle = require('../battle.js');
 });
 
+// A wired page polls until the page goes; this file's jsdom outlives every
+// page, so each test's page stops its polls when the test ends (#25).
+afterEach(() => battle.stopPagePolls());
+
 describe('geometry helpers', () => {
     test('axialToPixel maps the origin to (0, 0)', () => {
         expect(battle.axialToPixel(0, 0, 'pointy')).toEqual({ x: 0, y: 0 });
@@ -3127,5 +3131,45 @@ describe('the hex picker (#819, #866)', () => {
         panel.querySelector('.turn-confirm').click();
         await new Promise((resolve) => { setTimeout(resolve, 0); });
         expect(document.querySelector('.notice-text').textContent).toBe(refusal);
+    });
+});
+
+describe('stopping the page polls (#25)', () => {
+    test('ends the battle page poll', async () => {
+        jest.useFakeTimers();
+        try {
+            mountPage(null);
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+
+            battle.stopPagePolls();
+            await jest.advanceTimersByTimeAsync(6100);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('ends the lobby poll', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = `
+                <div id="battle-lobby" data-state-url="/tarmar/battles/1/state/"></div>
+                <script id="battle-seats" type="application/json">[]</script>
+            `;
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true, json: async () => ({ status: 'lobby', seats: [] }),
+            });
+            battle.initLobbyPage();
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+
+            battle.stopPagePolls();
+            await jest.advanceTimersByTimeAsync(6100);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });

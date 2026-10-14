@@ -763,6 +763,28 @@ async function fetchTurnState(turnId) {
   return resp.json();
 }
 
+// Set by stopWaitingForTurns, which nothing on the page calls: a wait ends
+// when its turn lands, or with the page. The Jest suites outlive the page.
+// They load chat.js afresh for each test into one jsdom, and a wait left
+// running there asks after its turn with the next test's fetch mock, and can
+// do that test's work for it (#25).
+let turnWaitsStopped = false;
+// The pauses waits are in before they next ask, so stopping can end them at
+// once rather than leave timers behind. A page can hold more than one wait:
+// resumeOwnTurn asks after its turn before anything sets isStreaming, so a
+// turn sent meanwhile can be lost from view and waited on alongside it.
+const turnWaitPauses = new Set();
+
+/** End every wait for a running turn on this page, now or at its next step. */
+function stopWaitingForTurns() {
+  turnWaitsStopped = true;
+  for (const pause of turnWaitPauses) {
+    clearTimeout(pause.timer);
+    pause.wake();
+  }
+  turnWaitPauses.clear();
+}
+
 /**
  * Wait for a turn the server is running without this page (issue #515).
  *
@@ -779,11 +801,17 @@ async function awaitRunningTurn(turnId, pending) {
   sendBtn.disabled = true;
   setWorkingStatus(null);
   while (true) {
-    await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS));
+    await new Promise((resolve) => {
+      const pause = { wake: resolve };
+      pause.timer = setTimeout(() => { turnWaitPauses.delete(pause); resolve(); }, TURN_POLL_MS);
+      turnWaitPauses.add(pause);
+    });
+    if (turnWaitsStopped) return;
     let data;
     try {
       data = await fetchTurnState(turnId);
     } catch (err) {
+      if (turnWaitsStopped) return;
       if (err.status === 404) {
         // There is no such turn to wait for. Going on asking would leave
         // the page locked for good, with Send disabled and nothing coming
@@ -799,6 +827,7 @@ async function awaitRunningTurn(turnId, pending) {
       console.warn(`Could not ask after GM turn ${turnId}: ${err.message}`);
       continue;
     }
+    if (turnWaitsStopped) return;
     if (data.state === 'running') continue;
     forgetOwnTurn();
     setTurnRunning(null);
@@ -827,6 +856,7 @@ async function resumeOwnTurn(remembered) {
   try {
     data = await fetchTurnState(remembered.id);
   } catch (err) {
+    if (turnWaitsStopped) return;
     if (err.status === 404) {
       // The record is gone -- cleaned up, or never this player's. There is
       // nothing to come back for, so the page is simply usable.
@@ -838,6 +868,7 @@ async function resumeOwnTurn(remembered) {
     console.warn(`Could not ask after GM turn ${remembered.id}: ${err.message}`);
     return;
   }
+  if (turnWaitsStopped) return;
   if (data.state === 'finished') {
     forgetOwnTurn();
     showFinishedTurn(data.session_id);
@@ -1597,6 +1628,7 @@ if (typeof module !== 'undefined' && module.exports) {
     MARKDOWN_SANITIZE_CONFIG,
     deleteSession,
     streamMessage,
+    stopWaitingForTurns,
     parseChoicePrompt,
     CHOICE_LABEL_MAX_LENGTH,
     CHOICE_OTHER_LABEL,

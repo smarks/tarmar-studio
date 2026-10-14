@@ -20,6 +20,7 @@ from .messages import build_interrupted_turn_message, resumes_interrupted_turn
 from .models import GMSession, GMTurnRecord
 from .retrieval import INTERRUPTED_KIND, PROCEDURE_KIND
 from .testing import gm_replies
+from .views import GM_SERVER_ERROR_MESSAGE
 
 STREAM_URL = "/tarmar/gm/stream/"
 # A plan whose one action changes a character before any reply is written.
@@ -110,7 +111,7 @@ class InterruptedTurnTest(BaseTestCase):
         response, chunks = self._open({"message": "Roll Fatigue."})
         frames = list(_data_frames(chunks))
 
-        self.assertIn("model went away", frames[-1]["error"])
+        self.assertEqual(frames[-1]["error"], GM_SERVER_ERROR_MESSAGE)
         session = GMSession.objects.get()
         self.assertEqual(session.history[-1]["kind"], INTERRUPTED_KIND)
         # The turn's record keeps what already ran (issue #539).

@@ -21,6 +21,7 @@ from gm.retrieval import CANON_KIND, PROCEDURE_KIND
 from gm.testing import add_character, gm_replies
 from gm.transcript import CHIP, HIDDEN, VISIBLE, Block, transcript_blocks
 from gm.turn_record import TurnRecorder, prompt_hash
+from gm.views import GM_SERVER_ERROR_MESSAGE
 
 STREAM_URL = "/tarmar/gm/stream/"
 
@@ -119,10 +120,14 @@ class TurnRecordStreamTest(BaseTestCase):
 
         frames = _post_turn(self.client, {"message": "Are you there?"})
 
-        self.assertEqual(frames[-1], {"error": "ollama exploded"})
+        self.assertEqual(frames[-1], {"error": GM_SERVER_ERROR_MESSAGE})
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        self.assertEqual(record.error, "ollama exploded")
+        # The record holds what the player was told (#13); the engine's
+        # failed event keeps the real reason for whoever debugs the turn.
+        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
+        failed = record.events.get(kind="failed")
+        self.assertEqual(failed.payload["error"], "ollama exploded")
         self.assertEqual(record.user_message, "Are you there?")
         self.assertIsNone(record.history_end)
         self.assertIsNone(record.session)

@@ -1,16 +1,32 @@
 /**
- * Playwright global teardown - removes test users after E2E tests complete.
+ * Playwright global teardown - removes test users after E2E tests complete,
+ * and the mail the dev server wrote for the run (issue #17).
  */
 
 const { runDjangoShell } = require('./django');
 const { allWorkerAccounts } = require('./accounts');
 const { deleteGuestTestBattles } = require('./cleanup');
+const { E2E_MAIL_DIRECTORY, removeMailDirectory } = require('./mail');
 
 /**
  * @param {import('@playwright/test').FullConfig} config - the same `workers`
  *     global-setup seeded a copy of each account for (issue #620).
  */
 async function globalTeardown(config) {
+    try {
+        deleteTestRecords(config);
+    } finally {
+        // Even when the database cleanup throws, the run's mail goes.
+        removeMailDirectory();
+        console.log(`[E2E Teardown] Removed ${E2E_MAIL_DIRECTORY}.\n`);
+    }
+}
+
+/**
+ * The accounts and guest battles the run made in the dev database.
+ * @param {import('@playwright/test').FullConfig} config
+ */
+function deleteTestRecords(config) {
     console.log('\n[E2E Teardown] Cleaning up test users...');
 
     const seeded = allWorkerAccounts(config.workers).map(account => account.username);
@@ -35,7 +51,7 @@ print(f'Deleted {deleted} object(s): {details}')
     // A guest's battle has no user to go with (issue #879).
     deleteGuestTestBattles();
 
-    console.log('[E2E Teardown] Cleanup complete.\n');
+    console.log('[E2E Teardown] Cleanup complete.');
 }
 
 module.exports = globalTeardown;

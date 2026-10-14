@@ -30,6 +30,98 @@ afterEach(() => {
   if (said) throw new Error(`A script navigated without pageNavigation: ${said}`);
 });
 
+// chat.js warns each time it fails to ask after a running GM turn. A test
+// that means to reach that path spies on console.warn with mockImplementation
+// and counts the calls; a pass-through spy still hands the warning on to this
+// guard. One that reaches the guard has a wait the test did not start, most
+// likely one an earlier test left running, which goes on answering this
+// test's fetches (#25). The test fails here instead of passing with the
+// warning.
+let unexpectedTurnWarning = null;
+const reportWarning = console.warn;
+const warnThroughTurnGuard = (...args) => {
+  const said = args.map(String).join(' ');
+  if (said.includes('Could not ask after GM turn') && !unexpectedTurnWarning) {
+    unexpectedTurnWarning = said;
+  }
+  reportWarning(...args);
+};
+console.warn = warnThroughTurnGuard;
+afterEach(() => {
+  const said = unexpectedTurnWarning;
+  unexpectedTurnWarning = null;
+  // A test that failed before restoring its console.warn spy would leave it
+  // in place, silencing every later warning before it reached this guard.
+  console.warn = warnThroughTurnGuard;
+  if (said) throw new Error(`A GM turn wait warned where no test expected it: ${said}`);
+});
+
+// A page's poll is a setInterval that runs until the page goes. Jest keeps
+// one jsdom for a whole file, so a poll a test leaves running fetches with a
+// later test's mock (#25), or would once the file runs long enough for it to
+// fire. So every interval a test starts must be cleared before the next test
+// begins. That is checked as the next test starts, after the suite's own
+// afterEach teardown has run, and again when the file ends; the leftovers are
+// cleared, so one leak fails one test, not every test after it.
+//
+// An interval started outside any test (at the top of a file, or in a
+// beforeAll) runs through the file by design and is checked only when the
+// file ends, as "started in setup". That check runs after every describe's
+// afterAll but before the file's top-level afterAll hooks, because a setup
+// file's hooks are declared first. So clear one in a describe's afterAll, or
+// start it with startSuiteInterval below, the named way to keep an interval
+// for the whole file: it is never counted, and is cleared when the file ends.
+//
+// clearTimeout ends an interval too, as browsers allow. Modern fake timers
+// replace setInterval while they are on, so their intervals are not counted,
+// and put this wrapper back after. Legacy fake timers
+// (useFakeTimers({ legacyFakeTimers: true })) put back jsdom's own instead,
+// so the guard counts nothing for the rest of that file.
+const startInterval = global.setInterval;
+const endInterval = global.clearInterval;
+const endTimeout = global.clearTimeout;
+const runningIntervals = new Map(); // id -> the test that started it, or null
+const suiteIntervals = new Set();
+global.setInterval = (...args) => {
+  const id = startInterval(...args);
+  runningIntervals.set(id, expect.getState().currentTestName || null);
+  return id;
+};
+function forgetInterval(id) {
+  runningIntervals.delete(id);
+  suiteIntervals.delete(id);
+}
+global.clearInterval = (id) => {
+  forgetInterval(id);
+  return endInterval(id);
+};
+global.clearTimeout = (id) => {
+  forgetInterval(id);
+  return endTimeout(id);
+};
+/** setInterval for one a file means to keep running through all its tests. */
+global.startSuiteInterval = (...args) => {
+  const id = startInterval(...args);
+  suiteIntervals.add(id);
+  return id;
+};
+function failOnIntervalsLeftRunning(counted) {
+  const left = [...runningIntervals].filter(([, startedBy]) => counted(startedBy));
+  if (!left.length) return;
+  for (const [id] of left) {
+    endInterval(id);
+    runningIntervals.delete(id);
+  }
+  const startedBy = [...new Set(left.map(([, test]) => test || 'started in setup, outside any test'))];
+  throw new Error(`An interval was left running, started by: ${startedBy.join('; ')}`);
+}
+beforeEach(() => failOnIntervalsLeftRunning((startedBy) => startedBy !== null));
+afterAll(() => {
+  for (const id of suiteIntervals) endInterval(id);
+  suiteIntervals.clear();
+  failOnIntervalsLeftRunning(() => true);
+});
+
 // Mock fetch
 global.fetch = jest.fn();
 

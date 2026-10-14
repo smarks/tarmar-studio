@@ -19,7 +19,7 @@ checkout of it on the Mac whose `origin` is this repository (ship fetches
 It deploys the head of `main` completely. In order, it:
 
 1. checks `gh` is logged in, and removes anything an earlier, killed ship
-   left behind;
+   left behind, processes still running from its directory included;
 2. fetches `main` of this repository and of `smarks/tarmar-canon`;
 3. checks each head out as a temporary, detached worktree, so no checkout
    anyone is working in is touched;
@@ -29,15 +29,23 @@ It deploys the head of `main` completely. In order, it:
    default canon). On green the gate records the commit in `refs/notes/gate`
    and starts the Deploy workflow for it;
 6. follows that Deploy run to its end and reads its log for what it did;
-7. removes both worktrees and the temporary directory, whatever happened,
+7. stops anything still running from inside the temporary directory (the
+   dev server Playwright starts runs in a process group of its own, so
+   stopping the gate does not reach it; a process holding a terminal other
+   than ship's, such as a shell someone opened there, is reported and left
+   alone), then removes both worktrees and the directory, whatever happened,
    including Ctrl-C or a closed terminal.
 
 It ends with one of: `<sha> is live` (exit 0); `<sha> was already live`
 (exit 0); `stopped: ...` with the reason, nothing more deployed (exit 1), which
 includes a Deploy that stood down because `main` moved on while it waited
 (run `./run ship` again); `left behind: ...` when the deploy result stands but
-something could not be removed (exit 3); or `interrupted` (exit 130), naming
-the Deploy run if one had already started, since that run carries on.
+something could not be removed or stopped (exit 3); `lost track of Deploy run
+...` when GitHub kept failing ship's requests while it followed the run, so
+whether it deployed is not known (exit 4; a failed request is retried with a
+growing wait, five times, before ship gives up, and the run itself carries
+on); or `interrupted` (exit 130), naming the Deploy run if one had already
+started, since that run carries on.
 `./run ship --rehearse` does everything but start Deploy: the full gate
 runs and its pass is recorded, and production is not touched.
 

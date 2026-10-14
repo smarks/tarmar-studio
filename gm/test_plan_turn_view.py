@@ -7,7 +7,11 @@ from unittest.mock import Mock, patch
 
 from django.test import override_settings
 
-from common.test_helpers import BaseTestCase
+from common.test_helpers import (
+    BaseTestCase,
+    logged_exception,
+    mark_gate_passed,
+)
 
 from .engine import system_prompt_for
 from .messages import build_interrupted_turn_message
@@ -16,7 +20,7 @@ from .retrieval import LEDGER_KIND, PROCEDURE_KIND, ROLL_KIND, SHEET_KIND
 from .testing import a_mapped_place, add_character, recorded
 from .tests import FakeMonotonicClock
 from .turn_engine.model import Paused
-from .views import PLAN_UNREADABLE_NOTICE, SSE_KEEPALIVE
+from .views import GM_SERVER_ERROR_MESSAGE, PLAN_UNREADABLE_NOTICE, SSE_KEEPALIVE
 
 STREAM_URL = "/tarmar/gm/stream/"
 
@@ -393,7 +397,7 @@ class PlanTurnViewTest(PlanTurnTestCase):
         with self.assertLogs("gm.views", "ERROR"):
             _text, sent, _calls = self.play(ConnectionError("model gone"))
 
-        self.assertEqual(sent[-1], {"error": "model gone"})
+        self.assertEqual(sent[-1], {"error": GM_SERVER_ERROR_MESSAGE})
         record = GMTurnRecord.objects.get(user=self.user)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
         self.assertIsNone(record.history_end)
@@ -470,22 +474,52 @@ class AFailureWithNoMessageTest(PlanTurnTestCase):
     streamed that verbatim, chat.js guarded its whole failure path behind
     ``if (data.error)``, and no done frame follows a failure -- so the stream
     ended, the thinking line stayed, and the player watched it for good while
-    the server had the turn recorded as failed.
+    the server had the turn recorded as failed. Since #13 the reason is a
+    fixed sentence, which is never empty.
     """
 
     def test_the_stream_says_what_went_wrong(self):
-        _text, sent, _calls = self.play(RuntimeError())
+        with self.assertLogs("gm.views", "ERROR"):
+            _text, sent, _calls = self.play(RuntimeError())
 
-        self.assertEqual(sent[-1].get("error"), "RuntimeError")
+        self.assertEqual(sent[-1].get("error"), GM_SERVER_ERROR_MESSAGE)
 
     def test_the_record_keeps_the_same_reason(self):
-        self.play(RuntimeError())
+        with self.assertLogs("gm.views", "ERROR"):
+            self.play(RuntimeError())
 
         record = GMTurnRecord.objects.latest("pk")
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        self.assertEqual(record.error, "RuntimeError")
+        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
 
-    def test_a_failure_that_does_say_why_is_unchanged(self):
-        _text, sent, _calls = self.play(RuntimeError("the model is down"))
 
-        self.assertEqual(sent[-1].get("error"), "the model is down")
+class ExceptionTextIsNotShownToThePlayerTest(PlanTurnTestCase):
+    """A failed turn tells a player a fixed sentence, not the exception (#13).
+
+    The exception's text can carry file paths, SQL or the model host's
+    address. It goes to the log with its traceback; the stream frame, the
+    turn's record and the ``gm:turn`` answer a page reads it back from all
+    carry the fixed sentence.
+    """
+
+    SECRET = "OLLAMA_TOKEN=s3cr3t-7f2a at http://10.0.0.9:11434/api/chat"
+
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_player()
+        self.login_as(self.user)
+        # Signing in as someone else flushed the session, gate flag and all.
+        mark_gate_passed(self.client)
+
+    def test_the_stream_record_and_turn_state_carry_the_fixed_sentence(self):
+        with self.assertLogs("gm.views", "ERROR") as logs:
+            text, sent, _calls = self.play(ConnectionError(self.SECRET))
+
+        self.assertNotIn("s3cr3t", text)
+        self.assertEqual(sent[-1], {"error": GM_SERVER_ERROR_MESSAGE})
+        record = GMTurnRecord.objects.get(user=self.user)
+        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
+        state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
+        self.assertNotIn("s3cr3t", state.content.decode())
+        self.assertEqual(state.json()["error"], GM_SERVER_ERROR_MESSAGE)
+        self.assertIn(self.SECRET, str(logged_exception(logs.records[0])))

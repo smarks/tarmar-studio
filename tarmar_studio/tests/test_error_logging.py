@@ -10,6 +10,7 @@ while chasing the deploy-window 500 in issue #328 (see #329).
 
 import io
 import logging
+import re
 import tempfile
 
 from django.http import HttpRequest, HttpResponse
@@ -17,6 +18,7 @@ from django.test import TestCase, override_settings
 from django.urls import include, path
 
 from common.gate import DEV_GATE_PASSPHRASE
+from tarmar_studio import settings as project_settings
 
 EXPLODE_MESSAGE = "deliberate server error for the logging test"
 
@@ -32,13 +34,8 @@ urlpatterns = [
 ]
 
 
-@override_settings(ROOT_URLCONF=__name__, DEBUG=False)
-class ServerErrorLoggingTest(TestCase):
-    """The configured ``django.request`` handler writes the traceback."""
-
-    def setUp(self) -> None:
-        self.client.raise_request_exception = False
-        self.client.post("/gate/", {"passphrase": DEV_GATE_PASSPHRASE})
+class StderrHandlerCaptureMixin(TestCase):
+    """Reads what a logger's configured stderr handlers write."""
 
     def capture_stderr_handlers(self, logger_name: str) -> io.StringIO:
         """Point every stream handler on ``logger_name`` at a buffer.
@@ -70,6 +67,15 @@ class ServerErrorLoggingTest(TestCase):
             handler.stream = buffer
             self.addCleanup(setattr, handler, "stream", original_stream)
         return buffer
+
+
+@override_settings(ROOT_URLCONF=__name__, DEBUG=False)
+class ServerErrorLoggingTest(StderrHandlerCaptureMixin):
+    """The configured ``django.request`` handler writes the traceback."""
+
+    def setUp(self) -> None:
+        self.client.raise_request_exception = False
+        self.client.post("/gate/", {"passphrase": DEV_GATE_PASSPHRASE})
 
     def test_view_exception_is_logged_with_its_traceback(self) -> None:
         with self.assertLogs("django.request", level="ERROR") as logs:
@@ -122,6 +128,66 @@ class ServerErrorLoggingTest(TestCase):
                 logger = logging.getLogger(logger_name)
                 self.assertFalse(logger.propagate)
                 self.assertEqual(logger.level, logging.ERROR)
+                self.assertTrue(
+                    any(
+                        isinstance(handler, logging.StreamHandler)
+                        for handler in logger.handlers
+                    )
+                )
+
+
+# The ``server`` format: timestamp, level in brackets, logger name.
+SERVER_FORMAT_PREFIX = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[{level}\] {name}: "
+
+
+class AppLoggingTest(StderrHandlerCaptureMixin):
+    """The apps' own loggers reach a configured handler (issue #38).
+
+    Before, they had none, so their records fell through to
+    ``logging.lastResort``: no timestamp, level or name, and nothing below
+    WARNING. The handlers sit on each app's top-level logger, so a module's
+    ``getLogger(__name__)`` (``gm.views``) reaches them by propagation, the
+    way it does in the running site.
+    """
+
+    def server_line(self, level: str, name: str, message: str) -> re.Pattern[str]:
+        """The line the ``server`` format writes for one record."""
+        prefix = SERVER_FORMAT_PREFIX.replace("{level}", level).replace(
+            "{name}", re.escape(name)
+        )
+        return re.compile(f"^{prefix}{re.escape(message)}$", re.MULTILINE)
+
+    def test_an_app_exception_is_written_with_its_traceback(self) -> None:
+        captured = self.capture_stderr_handlers("gm")
+        message = "deliberate app error for the logging test"
+        try:
+            raise RuntimeError(EXPLODE_MESSAGE)
+        except RuntimeError:
+            logging.getLogger("gm.views").exception(message)
+
+        written = captured.getvalue()
+        self.assertRegex(written, self.server_line("ERROR", "gm.views", message))
+        self.assertIn("Traceback (most recent call last):", written)
+        self.assertIn(f"RuntimeError: {EXPLODE_MESSAGE}", written)
+        # Written once: nothing else on the way up prints it again.
+        self.assertEqual(written.count(message), 1)
+
+    def test_an_app_info_record_is_not_dropped(self) -> None:
+        captured = self.capture_stderr_handlers("battle")
+        message = "an info record from an app logger"
+        logging.getLogger("battle.views").info(message)
+
+        self.assertRegex(
+            captured.getvalue(), self.server_line("INFO", "battle.views", message)
+        )
+
+    def test_every_first_party_app_logger_is_configured(self) -> None:
+        """Each app's logger passes INFO up and still propagates (for caplog)."""
+        for app in project_settings._FIRST_PARTY_APPS:
+            with self.subTest(app=app):
+                logger = logging.getLogger(app)
+                self.assertEqual(logger.level, logging.INFO)
+                self.assertTrue(logger.propagate)
                 self.assertTrue(
                     any(
                         isinstance(handler, logging.StreamHandler)
