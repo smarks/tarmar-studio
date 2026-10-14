@@ -8,6 +8,7 @@ npm and GitHub.
 
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -153,6 +154,11 @@ def test_ship_gates_origins_heads_after_fetching_them(
         (None, ship.ALREADY_LIVE, ship.EXIT_LIVE),
         (ship.ShipError("the gate failed"), ship.DEPLOYED, ship.EXIT_NOT_DEPLOYED),
         (None, ship.ShipError("Deploy stood down"), ship.EXIT_NOT_DEPLOYED),
+        (
+            None,
+            ship.LostTrackOfDeploy("lost track of Deploy run 4242"),
+            ship.EXIT_DEPLOY_UNKNOWN,
+        ),
         (KeyboardInterrupt(), ship.DEPLOYED, ship.EXIT_INTERRUPTED),
         (ship.Interrupted("SIGHUP"), ship.DEPLOYED, ship.EXIT_INTERRUPTED),
     ],
@@ -318,6 +324,60 @@ def test_run_step_reports_a_failing_or_missing_program(tmp_path: Path) -> None:
         )
 
 
+# What gh printed for the failed request in issue #33.
+BAD_GATEWAY = "failed to get jobs: HTTP 502: Server Error"
+
+
+def fake_gh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    watch_exits: Sequence[int],
+    states: Sequence[str] = (),
+    log: str = "",
+) -> list[float]:
+    """Put a gh on PATH that answers ``run watch``, the run's state and its log.
+
+    Each ``gh run watch`` exits with the next of ``watch_exits``, printing
+    BAD_GATEWAY when that is non-zero; each state query prints the next of
+    ``states``, where "502" fails the request as GitHub did. ``--log`` prints
+    ``log``. Waits are recorded rather than slept.
+
+    Returns:
+        The seconds follow_deploy asked to wait, in order.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (tmp_path / "watch_exits").write_text("".join(f"{code}\n" for code in watch_exits))
+    (tmp_path / "states").write_text("".join(f"{state}\n" for state in states))
+    write_script(
+        bin_dir,
+        "gh",
+        f"""take() {{
+  count=$(( $(cat "{tmp_path}/$1.count" 2>/dev/null || echo 0) + 1 ))
+  echo "$count" > "{tmp_path}/$1.count"
+  sed -n "${{count}}p" "{tmp_path}/$1"
+}}
+if [ "$2" = watch ]; then
+  code=$(take watch_exits)
+  if [ "$code" != 0 ]; then echo "{BAD_GATEWAY}" >&2; fi
+  exit "$code"
+fi
+if [ "$4" = --json ]; then
+  state=$(take states)
+  if [ "$state" = 502 ]; then echo "HTTP 502: Server Error" >&2; exit 1; fi
+  echo "$state"
+  exit 0
+fi
+echo "{log}"
+""",
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    waits: list[float] = []
+    monkeypatch.setattr(ship.time, "sleep", waits.append)
+    return waits
+
+
 @pytest.mark.parametrize(
     ("watch_exit", "log", "expected"),
     [
@@ -338,14 +398,13 @@ def test_follow_deploy_says_what_the_run_did(
     log: str,
     expected: str,
 ) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    write_script(
-        bin_dir,
-        "gh",
-        f'if [ "$2" = watch ]; then exit {watch_exit}; fi\necho "{log}"',
+    fake_gh(
+        tmp_path,
+        monkeypatch,
+        watch_exits=[watch_exit],
+        states=["completed failure"],
+        log=log,
     )
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     if expected in (ship.DEPLOYED, ship.ALREADY_LIVE):
         assert ship.follow_deploy("9", tmp_path) == expected
     else:
@@ -423,3 +482,65 @@ def test_follow_deploy_waits_for_a_log_that_is_not_ready_yet(
 
     assert ship.follow_deploy("9", tmp_path) == ship.DEPLOYED
     assert len(counter.read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize(
+    "states",
+    [
+        # gh run watch failed a request; the run was still going.
+        ["in_progress "],
+        # ...and so did the question of where the run stood.
+        ["502", "in_progress "],
+    ],
+)
+def test_follow_deploy_rides_out_a_failed_request_to_github(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, states: list[str]
+) -> None:
+    # Issue #33: an HTTP 502 while following the run is not a failed deploy.
+    waits = fake_gh(
+        tmp_path,
+        monkeypatch,
+        watch_exits=[1] * len(states) + [0],
+        states=states,
+        log="[DEPLOY] Deployment complete!",
+    )
+
+    assert ship.follow_deploy("9", tmp_path) == ship.DEPLOYED
+    assert waits == [
+        ship.POLL_RETRY_SECONDS * 2**attempt for attempt in range(len(states))
+    ]
+
+
+def test_follow_deploy_gives_up_on_a_github_that_keeps_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = ship.POLL_FAILURE_LIMIT + 1
+    waits = fake_gh(
+        tmp_path, monkeypatch, watch_exits=[1] * attempts, states=["502"] * attempts
+    )
+
+    with pytest.raises(ship.LostTrackOfDeploy) as lost:
+        ship.follow_deploy("9", tmp_path)
+
+    message = str(lost.value)
+    assert "lost track of Deploy run 9" in message
+    assert "HTTP 502" in message
+    assert "not a failed deploy" in message
+    assert "did not finish green" not in message
+    assert len(waits) == ship.POLL_FAILURE_LIMIT
+
+
+def test_follow_deploy_believes_the_run_over_a_failed_watch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The watch's last request failed, but the run had already ended green.
+    waits = fake_gh(
+        tmp_path,
+        monkeypatch,
+        watch_exits=[1],
+        states=["completed success"],
+        log="[DEPLOY] Deployment complete!",
+    )
+
+    assert ship.follow_deploy("9", tmp_path) == ship.DEPLOYED
+    assert waits == []

@@ -24,8 +24,10 @@ TARMAR_CANON_DIR, and watching the run the gate started. This does all of it:
 Exit status: 0 when the commit is live (deployed now, or already); 1 when
 nothing was deployed (a check failed, the gate failed, Deploy failed or stood
 down); 3 when the deploy result stands but something could not be removed;
-130 when interrupted. ``--rehearse`` does everything but start Deploy: the
-full gate runs and its pass is recorded, and production is not touched.
+4 when GitHub stopped answering while the Deploy run was being followed, so
+whether it deployed is not known; 130 when interrupted. ``--rehearse`` does
+everything but start Deploy: the full gate runs and its pass is recorded, and
+production is not touched.
 """
 
 import fcntl
@@ -58,6 +60,12 @@ DEFAULT_TEMPORARY_PARENT = Path("/tmp")
 # ask for it again before giving up.
 LOG_ATTEMPTS = 6
 LOG_RETRY_SECONDS = 5
+# A request made while following the run can fail on GitHub's side (an HTTP
+# 502, issue #33) while the run itself carries on: how many such failures to
+# ride out, and the first wait after one, doubled after each (10 s to 160 s,
+# about five minutes in all).
+POLL_FAILURE_LIMIT = 5
+POLL_RETRY_SECONDS = 10
 # What the gate announces when it has started Deploy (gate.start_deploy_if_head);
 # the run's address follows when gh printed one.
 DEPLOY_STARTED_PATTERN = re.compile(
@@ -72,11 +80,16 @@ STOOD_DOWN = "Nothing to do."
 EXIT_LIVE = 0
 EXIT_NOT_DEPLOYED = 1
 EXIT_LEFT_BEHIND = 3
+EXIT_DEPLOY_UNKNOWN = 4
 EXIT_INTERRUPTED = 130
 
 
 class ShipError(Exception):
     """A step of the ship could not be completed; nothing more is deployed."""
+
+
+class LostTrackOfDeploy(ShipError):
+    """GitHub stopped answering about the Deploy run, which may still be going."""
 
 
 class Interrupted(Exception):
@@ -319,6 +332,86 @@ def stop_process_group(process: subprocess.Popen[str]) -> None:
         time.sleep(0.1)
 
 
+def deploy_run_state(run_id: str, app: Path) -> tuple[str, str]:
+    """Ask GitHub where the Deploy run stands.
+
+    Returns:
+        The run's status ("completed", "in_progress", ...) and its conclusion
+        ("success", "failure", ...; empty until it has completed).
+
+    Raises:
+        ShipError: the request failed.
+    """
+    state = run_quietly(
+        [
+            "gh",
+            "run",
+            "view",
+            run_id,
+            "--json",
+            "status,conclusion",
+            "--jq",
+            '.status + " " + .conclusion',
+        ],
+        cwd=app,
+    )
+    status, _, conclusion = state.partition(" ")
+    return status, conclusion
+
+
+def watch_deploy_to_its_end(run_id: str, app: Path) -> None:
+    """Watch the Deploy run until it ends green, riding out failed requests.
+
+    ``gh run watch --exit-status`` exits non-zero both when the run fails and
+    when one of its own requests to GitHub fails (issue #33), so after a
+    non-zero exit the run's state says which: concluded, or still going. Up
+    to POLL_FAILURE_LIMIT failed requests are waited out, the wait doubling
+    from POLL_RETRY_SECONDS, before the ship gives up following.
+
+    Raises:
+        ShipError: the run concluded other than green.
+        LostTrackOfDeploy: more than POLL_FAILURE_LIMIT requests failed.
+    """
+    failed_polls = 0
+    while True:
+        watched = subprocess.run(
+            ["gh", "run", "watch", run_id, "--exit-status", "--interval", "30"],
+            cwd=app,
+            check=False,
+        )
+        if watched.returncode == 0:
+            return
+        try:
+            status, conclusion = deploy_run_state(run_id, app)
+        except ShipError as failure:
+            poll_failure = str(failure)
+        else:
+            if status == "completed":
+                if conclusion == "success":
+                    return
+                raise ShipError(
+                    f"Deploy run {run_id} did not finish green (it concluded "
+                    f"{conclusion or 'without a conclusion'})"
+                )
+            poll_failure = (
+                f"gh run watch exited {watched.returncode} with the run still {status}"
+            )
+        failed_polls += 1
+        if failed_polls > POLL_FAILURE_LIMIT:
+            raise LostTrackOfDeploy(
+                f"lost track of Deploy run {run_id}: {failed_polls} requests to "
+                f"GitHub failed while following it (last: {poll_failure}). This is "
+                "not a failed deploy; the run may still be going. Check it with "
+                f"gh run view {run_id}"
+            )
+        wait = POLL_RETRY_SECONDS * 2 ** (failed_polls - 1)
+        announce(
+            f"could not follow Deploy run {run_id} ({poll_failure}); "
+            f"trying again in {wait} s ({failed_polls} of {POLL_FAILURE_LIMIT})"
+        )
+        time.sleep(wait)
+
+
 def follow_deploy(run_id: str, app: Path) -> str:
     """Follow the Deploy run to its end and say what it did.
 
@@ -327,15 +420,10 @@ def follow_deploy(run_id: str, app: Path) -> str:
 
     Raises:
         ShipError: the run failed, or stood down because main moved on.
+        LostTrackOfDeploy: GitHub stopped answering while it was followed.
     """
     announce(f"following Deploy run {run_id}")
-    completed = subprocess.run(
-        ["gh", "run", "watch", run_id, "--exit-status", "--interval", "30"],
-        cwd=app,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise ShipError(f"Deploy run {run_id} did not finish green")
+    watch_deploy_to_its_end(run_id, app)
     for attempt in range(LOG_ATTEMPTS):
         try:
             log = run_quietly(["gh", "run", "view", run_id, "--log"], cwd=app)
@@ -454,6 +542,9 @@ def ship(
                 else f"{commit_sha} was already live; Deploy run {run_id} had nothing to change"
             )
             status = EXIT_LIVE
+    except LostTrackOfDeploy as failure:
+        announce(f"stopped: {failure}")
+        status = EXIT_DEPLOY_UNKNOWN
     except ShipError as failure:
         announce(f"stopped: {failure}")
         status = EXIT_NOT_DEPLOYED
