@@ -220,6 +220,58 @@ describe('a page whose wait is stopped (#25)', () => {
         expect(fetch).not.toHaveBeenCalled();
     });
 
+    test('cancels every pause when the page holds two waits', async () => {
+        window.sessionStorage.setItem('gmOwnSessionlessTurn',
+                                      JSON.stringify({ id: '41', message: 'I open the iron box' }));
+        let answerResume;
+        jest.useFakeTimers();
+        try {
+            // The tab asks after its remembered turn; the player sends a new
+            // one before the answer comes, and that stream drops.
+            fetch.mockImplementationOnce(() => new Promise((resolve) => { answerResume = resolve; }));
+            fetch.mockResolvedValueOnce(droppedStream([], '52'));
+            const chat = loadChat({ sessionId: null, runningTurn: null, turnPollMs: 60000 });
+            document.getElementById('user-input').value = 'I search the crypt';
+            chat.handleSubmit({ preventDefault() {} });
+            for (let tick = 0; tick < 50; tick += 1) await Promise.resolve();
+            answerResume(turnState({ state: 'running', session_id: null }));
+            for (let tick = 0; tick < 50; tick += 1) await Promise.resolve();
+            const timersWhileWaiting = jest.getTimerCount();
+
+            chat.stopWaitingForTurns();
+
+            expect(jest.getTimerCount()).toBe(timersWhileWaiting - 2);
+        } finally {
+            jest.useRealTimers();
+        }
+        await settle();
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test.each([
+        ['finished', () => Promise.resolve(turnState({ state: 'finished', session_id: 12 }))],
+        ['still running', () => Promise.resolve(turnState({ state: 'running', session_id: null }))],
+        ['unreachable', () => Promise.reject(new TypeError('Load failed'))],
+    ])('ignores a remembered turn\'s answer (%s) that arrives after it stopped', async (_, answer) => {
+        window.sessionStorage.setItem('gmOwnSessionlessTurn',
+                                      JSON.stringify({ id: '41', message: 'I open the iron box' }));
+        let release;
+        fetch.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }).then(answer));
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const chat = loadChat({ sessionId: null, runningTurn: null });
+        await settle();
+
+        chat.stopWaitingForTurns();
+        release();
+        await settle();
+
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(warn).not.toHaveBeenCalled();
+        expect(document.getElementById('gm-turn-running').hidden).toBe(true);
+        warn.mockRestore();
+    });
+
     test('does nothing with an answer that arrives after it stopped', async () => {
         const { chat, answer } = await pageAskingAfterItsTurn();
 

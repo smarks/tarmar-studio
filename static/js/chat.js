@@ -769,19 +769,20 @@ async function fetchTurnState(turnId) {
 // running there asks after its turn with the next test's fetch mock, and can
 // do that test's work for it (#25).
 let turnWaitsStopped = false;
-// The pause the wait is in before it next asks, so stopping can end it at
-// once rather than leave a timer behind. One is enough: the wait sets
-// isStreaming, and nothing starts another turn while that is set.
-let turnWaitPause = null;
+// The pauses waits are in before they next ask, so stopping can end them at
+// once rather than leave timers behind. A page can hold more than one wait:
+// resumeOwnTurn asks after its turn before anything sets isStreaming, so a
+// turn sent meanwhile can be lost from view and waited on alongside it.
+const turnWaitPauses = new Set();
 
 /** End every wait for a running turn on this page, now or at its next step. */
 function stopWaitingForTurns() {
   turnWaitsStopped = true;
-  if (turnWaitPause) {
-    clearTimeout(turnWaitPause.timer);
-    turnWaitPause.wake();
-    turnWaitPause = null;
+  for (const pause of turnWaitPauses) {
+    clearTimeout(pause.timer);
+    pause.wake();
   }
+  turnWaitPauses.clear();
 }
 
 /**
@@ -801,9 +802,10 @@ async function awaitRunningTurn(turnId, pending) {
   setWorkingStatus(null);
   while (true) {
     await new Promise((resolve) => {
-      turnWaitPause = { timer: setTimeout(resolve, TURN_POLL_MS), wake: resolve };
+      const pause = { wake: resolve };
+      pause.timer = setTimeout(() => { turnWaitPauses.delete(pause); resolve(); }, TURN_POLL_MS);
+      turnWaitPauses.add(pause);
     });
-    turnWaitPause = null;
     if (turnWaitsStopped) return;
     let data;
     try {
@@ -854,6 +856,7 @@ async function resumeOwnTurn(remembered) {
   try {
     data = await fetchTurnState(remembered.id);
   } catch (err) {
+    if (turnWaitsStopped) return;
     if (err.status === 404) {
       // The record is gone -- cleaned up, or never this player's. There is
       // nothing to come back for, so the page is simply usable.
@@ -865,6 +868,7 @@ async function resumeOwnTurn(remembered) {
     console.warn(`Could not ask after GM turn ${remembered.id}: ${err.message}`);
     return;
   }
+  if (turnWaitsStopped) return;
   if (data.state === 'finished') {
     forgetOwnTurn();
     showFinishedTurn(data.session_id);
