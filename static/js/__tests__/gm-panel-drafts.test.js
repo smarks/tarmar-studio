@@ -40,11 +40,11 @@ function threadRow(id, text) {
         </li>`;
 }
 
-/** The Campaign tab's contents with these open threads, in this order. */
-function campaignBody(threads) {
+/** The Campaign tab's contents with these open threads, in this order, and ``extra``. */
+function campaignBody(threads, extra = '') {
     return `
         <p class="gm-panel-error" id="gm-panel-campaign-error" role="alert" hidden></p>
-        <ul class="gm-campaign-list">${threads.map(([id, text]) => threadRow(id, text)).join('')}</ul>
+        <ul class="gm-campaign-list">${threads.map(([id, text]) => threadRow(id, text)).join('')}</ul>${extra}
         <p class="gm-panel-status" id="gm-panel-campaign-status" role="status" hidden></p>`;
 }
 
@@ -66,7 +66,12 @@ let characters;
 let records;
 let documentListeners = [];
 
-function setUpPage(threads) {
+/**
+ * The page: both tabs, the Campaign tab holding ``threads`` and ``extra``.
+ * ``inPane`` puts the Characters tab inside an open <details> of its own, as
+ * a pane that folds would.
+ */
+function setUpPage(threads, { extra = '', inPane = false } = {}) {
     const config = JSON.stringify({
         charactersPanelUrlTemplate: '/tarmar/gm/sessions/{session_id}/characters/',
         campaignPanelUrlTemplate: '/tarmar/gm/sessions/{session_id}/campaign/',
@@ -74,9 +79,12 @@ function setUpPage(threads) {
     });
     document.body.innerHTML = `
         <script id="gm-panel-config" type="application/json">${config}<\/script>
-        <section id="gm-panel-characters">${CHARACTERS_BODY}</section>
-        <section id="gm-panel-campaign">${campaignBody(threads)}</section>`;
-    campaignAnswer = campaignBody(threads);
+        ${inPane ? '<details id="pane" open><summary>Characters</summary>' : ''}
+        <section id="gm-panel-characters" data-panel-container="characters">${CHARACTERS_BODY}</section>
+        ${inPane ? '</details>' : ''}
+        <section id="gm-panel-campaign" data-panel-container="campaign">${campaignBody(threads, extra)}</section>
+        <textarea id="user-input"></textarea>`;
+    campaignAnswer = campaignBody(threads, extra);
     global.fetch = jest.fn((url) => Promise.resolve({
         ok: true,
         statusText: 'OK',
@@ -394,5 +402,322 @@ describe('the Characters tab carries typing the same way (issue #16 sweep)', () 
         expect(notice.querySelector('strong').textContent).toBe('Spend Luck for Wren');
         expect(notice.querySelector('dt').textContent).toBe('Roll the Luck is added to');
         expect(notice.querySelector('dd').textContent).toBe('the climb');
+    });
+});
+
+describe('a draft whose record the turn changed says so (issue #16 review)', () => {
+    function changedNote() {
+        return form('thread-5').querySelector('[data-draft-changed]');
+    }
+
+    test('the draft is kept and a note by the field gives the turn\'s value', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'who stole the iron box');
+        campaignAnswer = campaignBody([[5, 'who took the iron box from the shrine']]);
+
+        await procedureFrame();
+
+        expect(form('thread-5').querySelector('[name="text"]').value).toBe('who stole the iron box');
+        expect(changedNote().textContent).toContain('The turn changed this to: who took the iron box from the shrine');
+        expect(changedNote().getAttribute('role')).toBe('status');
+    });
+
+    test('the note stays through the next refetch, unannounced', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'who stole the iron box');
+        campaignAnswer = campaignBody([[5, 'who took the iron box from the shrine']]);
+        await procedureFrame();
+
+        await procedureFrame();
+
+        expect(form('thread-5').querySelector('[name="text"]').value).toBe('who stole the iron box');
+        expect(changedNote().textContent).toContain('from the shrine');
+        expect(changedNote().hasAttribute('role')).toBe(false);
+    });
+
+    test('dismissed, it is gone for good and the focus is back in the field', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'who stole the iron box');
+        campaignAnswer = campaignBody([[5, 'who took the iron box from the shrine']]);
+        await procedureFrame();
+
+        changedNote().querySelector('button').click();
+
+        expect(changedNote()).toBeNull();
+        expect(document.activeElement).toBe(form('thread-5').querySelector('[name="text"]'));
+        await procedureFrame();
+        expect(changedNote()).toBeNull();
+        expect(form('thread-5').querySelector('[name="text"]').value).toBe('who stole the iron box');
+    });
+
+    test('saved, the note goes with the draft', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'who stole the iron box');
+        campaignAnswer = campaignBody([[5, 'who took the iron box from the shrine']]);
+        await procedureFrame();
+        global.fetch.mockImplementationOnce(() => jsonResponse({ ok: true, message: 'Corrected thread 5' }));
+        campaignAnswer = campaignBody([[5, 'who stole the iron box']]);
+
+        await records.submitForm(form('thread-5'));
+        await flush();
+
+        expect(changedNote()).toBeNull();
+        expect(form('thread-5').querySelector('[name="text"]').value).toBe('who stole the iron box');
+    });
+
+    test('saved, the note goes even when the refetch after it fails', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'who stole the iron box');
+        campaignAnswer = campaignBody([[5, 'who took the iron box from the shrine']]);
+        await procedureFrame();
+        global.fetch
+            .mockImplementationOnce(() => jsonResponse({ ok: true, message: 'Corrected thread 5' }))
+            .mockImplementation(() => Promise.resolve({ ok: false, statusText: 'Server Error', text: () => Promise.resolve('') }));
+
+        await records.submitForm(form('thread-5'));
+        await flush();
+
+        expect(changedNote()).toBeNull();
+        expect('draftBase' in form('thread-5').querySelector('[name="text"]').dataset).toBe(false);
+    });
+
+    test('a field the turn cleared says it was cleared', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('resolve-thread-5', 'resolution', 'Brannoc had it');
+        // As if the field had been rendered holding a value that the turn,
+        // in the refetched tab, renders empty.
+        form('resolve-thread-5').querySelector('[name="resolution"]').defaultValue = 'with Vane';
+
+        await procedureFrame();
+
+        expect(form('resolve-thread-5').querySelector('[data-draft-changed]').textContent)
+            .toContain('The turn cleared this.');
+    });
+
+    test('a field only opened, not typed in, takes the new value with no note', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        form('thread-5').closest('details').open = true;
+        campaignAnswer = campaignBody([[5, 'who took the iron box from the shrine']]);
+
+        await procedureFrame();
+
+        expect(changedNote()).toBeNull();
+    });
+});
+
+describe('Dismiss leaves the keyboard focus somewhere (issue #16 review)', () => {
+    test('on the next Dismiss, then on the tab once none are left', async () => {
+        setUpPage([[5, 'who took the iron box'], [6, 'the debt to Vane']]);
+        openAndType('thread-5', 'text', 'five, typed');
+        openAndType('thread-6', 'text', 'six, typed');
+        campaignAnswer = campaignBody([]);
+        await procedureFrame();
+        const buttons = () => lostNotice().querySelectorAll('button');
+        expect(buttons()).toHaveLength(2);
+
+        buttons()[0].click();
+        expect(buttons()).toHaveLength(1);
+        expect(document.activeElement).toBe(buttons()[0]);
+
+        buttons()[0].click();
+        expect(lostNotice()).toBeNull();
+        expect(document.activeElement).toBe(document.getElementById('gm-panel-campaign'));
+    });
+
+    test('a Dismiss with the focus keeps it through a refetch', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'five, typed');
+        campaignAnswer = campaignBody([]);
+        await procedureFrame();
+        const dismiss = lostNotice().querySelector('button');
+        dismiss.focus();
+
+        await procedureFrame();
+
+        expect(document.activeElement).not.toBe(dismiss);
+        expect(document.activeElement).toBe(lostNotice().querySelector('button'));
+    });
+});
+
+describe('the focus on a tab\'s other controls survives a refetch (issue #16 review)', () => {
+    const retire = (id) => `
+        <ul id="gm-table-rulings"><li data-ruling-id="${id}">ruling ${id}
+            <button type="button" class="gm-hand-action" data-change="retire" data-ruling-id="${id}"
+                    data-focus-key="retire-ruling-${id}">Retire</button></li></ul>`;
+    const resolved = `
+        <details class="gm-campaign-resolved"><summary data-focus-key="resolved-threads">2 resolved</summary>
+            <ul><li data-thread-id="31">thread 31
+                <button type="button" class="gm-hand-action" data-focus-key="reopen-thread-31">Reopen</button></li></ul>
+        </details>`;
+
+    test('a Retire button keeps it by its focus key', async () => {
+        setUpPage([], { extra: retire(3) });
+        const button = document.querySelector('[data-focus-key="retire-ruling-3"]');
+        button.focus();
+
+        await procedureFrame();
+
+        const fresh = document.querySelector('[data-focus-key="retire-ruling-3"]');
+        expect(fresh).not.toBe(button);
+        expect(document.activeElement).toBe(fresh);
+    });
+
+    test('the resolved list\'s summary keeps it', async () => {
+        setUpPage([], { extra: resolved });
+        document.querySelector('[data-focus-key="resolved-threads"]').focus();
+
+        await procedureFrame();
+
+        expect(document.activeElement.dataset.focusKey).toBe('resolved-threads');
+    });
+
+    test('a control whose record has gone hands it to the tab, not the page', async () => {
+        setUpPage([], { extra: retire(3) });
+        document.querySelector('[data-focus-key="retire-ruling-3"]').focus();
+        campaignAnswer = campaignBody([]);
+
+        await procedureFrame();
+
+        expect(document.activeElement).toBe(document.getElementById('gm-panel-campaign'));
+    });
+
+    test('a form\'s own button keeps it', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        form('thread-5').closest('details').open = true;
+        form('thread-5').querySelector('button').focus();
+
+        await procedureFrame();
+
+        expect(document.activeElement).toBe(form('thread-5').querySelector('button'));
+    });
+
+    test('a control known by its id keeps it', async () => {
+        setUpPage([], { extra: '<button type="button" id="gm-something-by-id">x</button>' });
+        document.getElementById('gm-something-by-id').focus();
+
+        await procedureFrame();
+
+        expect(document.activeElement.id).toBe('gm-something-by-id');
+    });
+
+    test('Detach in the Characters tab keeps it', async () => {
+        setUpPage([]);
+        const sheet = '<button type="button" class="gm-sheet-detach" data-character-id="3" data-focus-key="detach-3">x</button>';
+        document.getElementById('gm-sheets').insertAdjacentHTML('beforeend', sheet);
+        global.fetch.mockImplementation((url) => Promise.resolve({
+            ok: true,
+            statusText: 'OK',
+            text: () => Promise.resolve(url.startsWith(CHARACTERS_URL) ? CHARACTERS_BODY + sheet : campaignAnswer),
+        }));
+        document.querySelector('[data-focus-key="detach-3"]').focus();
+
+        await procedureFrame();
+
+        expect(document.activeElement.dataset.focusKey).toBe('detach-3');
+    });
+
+    test('focus outside the tab is left where it is', async () => {
+        setUpPage([], { extra: retire(3) });
+        const chat = document.getElementById('user-input');
+        chat.focus();
+
+        await procedureFrame();
+
+        expect(document.activeElement).toBe(chat);
+    });
+
+    test('a correction saved from the keyboard leaves the focus on its summary', async () => {
+        setUpPage([[5, 'who took the iron box']]);
+        openAndType('thread-5', 'text', 'who stole the iron box');
+        form('thread-5').querySelector('button').focus();
+        global.fetch.mockImplementationOnce(() => jsonResponse({ ok: true, message: 'Corrected thread 5' }));
+        campaignAnswer = campaignBody([[5, 'who stole the iron box']]);
+
+        await records.submitForm(form('thread-5'));
+        await flush();
+
+        expect(document.activeElement).toBe(form('thread-5').closest('details').querySelector('summary'));
+    });
+});
+
+describe('a form\'s <details> is its own, inside the tab (issue #16 review)', () => {
+    test('a Luck spend does not fold the pane the tab sits in', async () => {
+        setUpPage([], { inPane: true });
+        document.getElementById('gm-luck-roll-3').value = 'the climb';
+        global.fetch.mockImplementationOnce(() => jsonResponse({ ok: true, note: 'spent Luck' }));
+
+        await characters.spendLuck(document.querySelector('.gm-luck-form'));
+
+        expect(document.getElementById('pane').open).toBe(true);
+    });
+
+    test('a refetch neither opens nor reports the pane as the form\'s', async () => {
+        setUpPage([], { inPane: true });
+        document.getElementById('pane').open = true;
+
+        await procedureFrame();
+
+        expect(document.querySelector('#gm-panel-characters [data-drafts-lost]')).toBeNull();
+        expect(document.getElementById('pane').open).toBe(true);
+    });
+});
+
+describe('the attach picker keeps its page through a refetch (issue #16 review)', () => {
+    const picker = (page) => `
+        <form class="gm-panel-picker" id="gm-character-picker" data-draft-key="attach">
+            <div data-picker data-picker-url="/tarmar/gm/characters/attachable/?session=12">
+                <input type="search" id="gm-attach-picker-search" data-picker-search value="">
+                <div data-picker-body>
+                    <span class="page-current">Page ${page}</span>
+                    <button type="button" data-focus-key="picker-newer" data-picker-page="${page - 1 || ''}"${page === 1 ? ' disabled' : ''}>Newer</button>
+                    <button type="button" data-focus-key="picker-older" data-picker-page="${page + 1}">Older</button>
+                </div>
+            </div>
+        </form>`;
+
+    function pickerPage() {
+        setUpPage([]);
+        window.picker = require('../picker.js');
+        document.getElementById('gm-panel-characters').insertAdjacentHTML('afterbegin', picker(1));
+        window.picker.initPickers(document.getElementById('gm-panel-characters'));
+        global.fetch.mockImplementation((url) => {
+            const asked = new URL(url, 'http://test/');
+            const body = asked.pathname === '/tarmar/gm/characters/attachable/'
+                ? picker(Number(asked.searchParams.get('page'))).match(/<div data-picker-body>([\s\S]*?)<\/div>\s*<\/div>/)[1]
+                : asked.pathname.startsWith(CHARACTERS_URL) ? picker(1) + CHARACTERS_BODY : campaignAnswer;
+            return Promise.resolve({ ok: true, statusText: 'OK', text: () => Promise.resolve(body) });
+        });
+    }
+
+    afterEach(() => { delete window.picker; });
+
+    test('a reader on page 2 is still on page 2, the Older button focused', async () => {
+        pickerPage();
+        document.querySelector('[data-focus-key="picker-older"]').click();
+        await flush();
+        expect(document.querySelector('.page-current').textContent).toBe('Page 2');
+        expect(document.activeElement.dataset.focusKey).toBe('picker-older');
+
+        await procedureFrame();
+        await flush();
+
+        expect(document.querySelector('.page-current').textContent).toBe('Page 2');
+        expect(document.activeElement.dataset.focusKey).toBe('picker-older');
+    });
+
+    test('a search typed since that page was shown starts again at page 1', async () => {
+        pickerPage();
+        document.querySelector('[data-focus-key="picker-older"]').click();
+        await flush();
+        document.getElementById('gm-attach-picker-search').value = 'wren';
+
+        await procedureFrame();
+        await flush();
+
+        const pickerAsks = global.fetch.mock.calls.map(([url]) => new URL(url, 'http://test/'))
+            .filter((asked) => asked.pathname === '/tarmar/gm/characters/attachable/');
+        const last = pickerAsks[pickerAsks.length - 1];
+        expect(last.searchParams.get('q')).toBe('wren');
+        expect(last.searchParams.get('page')).toBe('1');
     });
 });

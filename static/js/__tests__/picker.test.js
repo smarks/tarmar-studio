@@ -141,6 +141,30 @@ test('the pager fetches the page it names and keeps the focus on the pager', asy
     expect(document.activeElement.textContent).toBe('Newer');
 });
 
+test('after a page loads, a click on a row is the row\'s, not the pager\'s (issue #16)', async () => {
+    // The picker notes the page it shows on itself; the pager's click
+    // handler finds its buttons by data-picker-page, so that note must not
+    // be one -- or every click inside the picker reads as a page turn.
+    const picker = buildPicker();
+    const calls = answering(`
+        <ul><li><button type="button" class="row-add">Add Morwen</button></li></ul>
+        <nav class="pagination">
+            <button type="button" data-picker-page="1">Newer</button>
+            <button type="button" data-picker-page="" disabled>Older</button>
+        </nav>`);
+    loadPicker();
+    picker.querySelectorAll('[data-picker-page]')[1].click();
+    await settle();
+    expect(calls).toHaveLength(1);
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    picker.querySelector('.row-add').dispatchEvent(click);
+    await settle();
+
+    expect(click.defaultPrevented).toBe(false);
+    expect(calls).toHaveLength(1);
+});
+
 test('a disabled pager button asks for nothing', () => {
     const picker = buildPicker();
     answering();

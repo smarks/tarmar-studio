@@ -1210,7 +1210,8 @@ resize and pop out.
 
 While a turn runs, `gm-panel-characters.js` refetches the Characters and Campaign
 tabs whole. `gm-panel-drafts.js` carries what the reader has open or typed in
-them through each refetch, by each form's `data-draft-key` (issue #16).
+them through each refetch, by each form's `data-draft-key`, and the keyboard focus
+by each control's `data-focus-key` (issue #16).
 
 ### Narration guarantees
 

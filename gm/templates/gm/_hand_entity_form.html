@@ -19,4 +19,4 @@ form's draft key and label are gm-panel-drafts.js's (issue #16).
         <button type="submit" class="btn btn-sm">{% if entity %}Save{% else %}Record{% endif %}</button>
     </form>
 </details>
-{% if entity %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ entities_url }}" data-change="remove" data-entity-id="{{ entity.pk }}" data-confirm="Remove {{ entity.name }} from this session?">Remove</button>{% endif %}
+{% if entity %}<button type="button" class="btn btn-sm gm-hand-action" data-url="{{ entities_url }}" data-change="remove" data-entity-id="{{ entity.pk }}" data-focus-key="remove-{{ kind }}-{{ entity.pk }}" data-confirm="Remove {{ entity.name }} from this session?">Remove</button>{% endif %}

@@ -175,6 +175,30 @@ if (typeof module !== 'undefined' && module.exports) {
     }
   }
 
+  /**
+   * Which page of its picker a tab shows, and which pager button has the
+   * focus, so the refetched tab shows the same page (issue #16): the server
+   * renders the first, and a Game Master three pages into his players'
+   * characters was sent back to it on every procedure frame.
+   * @param {Element} container
+   * @returns {{page: string, direction: (string|undefined)}}
+   */
+  function readPickerView(container) {
+    const picker = container.querySelector('[data-picker]');
+    if (!picker) return { page: '1', direction: undefined };
+    const active = root.document.activeElement;
+    let direction;
+    if (active && picker.contains(active) && active.matches('[data-picker-page]')) {
+      const buttons = Array.from(picker.querySelectorAll('[data-picker-page]'));
+      direction = buttons.indexOf(active) === 0 ? 'previous' : 'next';
+    }
+    // A page of an earlier search is no page of the one typed since.
+    const search = picker.querySelector('[data-picker-search]');
+    const typed = search ? search.value.trim() : '';
+    const sameSearch = (picker.dataset.pickerShownQuery || '') === typed;
+    return { page: sameSearch ? picker.dataset.pickerShownPage || '1' : '1', direction };
+  }
+
   /** A tab with nothing the refetch needs to carry over. */
   const NO_VIEW = { query: '', open: false };
 
@@ -274,17 +298,20 @@ if (typeof module !== 'undefined' && module.exports) {
             // the forms of the same records (issue #16): read with nothing
             // in between, so not a keystroke is missed.
             const drafts = root.gmPanelDrafts.read(container);
+            const pickerView = readPickerView(container);
             container.innerHTML = body;
             if (tab.keepView) tab.keepView.restore(container, liveView);
             root.gmPanelDrafts.restore(container, drafts);
             if (root.picker) {
               root.picker.initPickers(container);
               // A search typed into the attach picker is one of those drafts
-              // (issue #864): the fresh picker is asked for it again.
+              // (issue #864), and the page it was on is asked for again with
+              // it (issue #16).
               const fresh = container.querySelector('[data-picker]');
               const search = fresh && fresh.querySelector('[data-picker-search]');
-              if (search && search.value !== search.defaultValue) {
-                root.picker.loadPage(fresh, 1);
+              const searched = search && search.value !== search.defaultValue;
+              if (fresh && (searched || pickerView.page !== '1')) {
+                root.picker.loadPage(fresh, pickerView.page, pickerView.direction);
               }
             }
             replaced = true;

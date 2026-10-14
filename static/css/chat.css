@@ -1312,3 +1312,6 @@ body.gm-panel-resizing, body.gm-panel-resizing-rows { user-select: none; }
 .gm-drafts-lost li { margin-bottom: 0.35rem; }
 .gm-drafts-lost dl { margin: 0.15rem 0; }
 .gm-drafts-lost dd { margin: 0 0 0.25rem 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What the turn changed a record to under a correction being typed (issue #16). */
+.gm-draft-changed { margin: 0; font-size: 0.8rem; color: var(--colour-ink-muted); }
+.gm-draft-changed button { margin-left: 0.35rem; }

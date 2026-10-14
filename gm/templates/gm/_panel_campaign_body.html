@@ -21,7 +21,8 @@ Each form names itself by the record it changes (data-draft-key) and says
 what it is (data-draft-label): gm-panel-drafts.js puts a form the Game Master
 has open or typed in back on the form of the same key when this tab is
 fetched again mid-turn, and keeps what he typed if its record has gone
-(issue #16). A key is unique on the page.
+(issue #16). A key is unique on the page. The other controls carry a
+data-focus-key, so the keyboard focus on one survives the refetch too.
 {% endcomment %}
     <p class="gm-panel-error" id="gm-panel-campaign-error" role="alert" hidden></p>
 {% if not campaign_session %}
@@ -58,7 +59,7 @@ fetched again mid-turn, and keeps what he typed if its record has gone
                         <button type="submit" class="btn btn-sm">Save the ruling</button>
                     </form>
                 </details>
-                <button type="button" class="btn btn-sm gm-hand-action" data-url="{{ rulings_url }}" data-change="retire" data-ruling-id="{{ ruling.pk }}">Retire</button>
+                <button type="button" class="btn btn-sm gm-hand-action" data-url="{{ rulings_url }}" data-change="retire" data-ruling-id="{{ ruling.pk }}" data-focus-key="retire-ruling-{{ ruling.pk }}">Retire</button>
                 {% endif %}
             </li>
             {% endfor %}
@@ -185,7 +186,7 @@ fetched again mid-turn, and keeps what he typed if its record has gone
         {% if campaign_resolved %}
         <details class="gm-campaign-resolved">
             {% comment %}Every resolved thread is counted; the latest page of them is listed, with a control for the page above (issue #972).{% endcomment %}
-            <summary>{{ campaign_resolved_page.total }} resolved</summary>
+            <summary data-focus-key="resolved-threads">{{ campaign_resolved_page.total }} resolved</summary>
             <ul class="gm-campaign-list">
                 {% include "gm/_resolved_threads.html" %}
             </ul>

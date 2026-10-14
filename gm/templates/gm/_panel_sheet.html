@@ -22,12 +22,12 @@ partial and kept as they were, since the specs find those lines by them.
 <article class="gm-sheet{% if ledger %} gm-draft{% endif %}{% if not sheet.is_alive %} gm-sheet-dead{% endif %}"{% if ledger and first %} id="gm-draft-ledger"{% endif %} data-character-id="{{ sheet.pk }}"{% if not ledger %}
          data-popout-item data-popout-url="{% url 'characters:edit' sheet.pk %}" data-popout-label="{{ sheet.name }}"{% endif %}>
     <header class="gm-sheet-header">
-        <h4 class="gm-sheet-name"><a href="{% url 'characters:edit' sheet.pk %}">{{ heading|default:sheet.name }}</a></h4>
+        <h4 class="gm-sheet-name"><a href="{% url 'characters:edit' sheet.pk %}" data-focus-key="sheet-{{ sheet.pk }}">{{ heading|default:sheet.name }}</a></h4>
         {% if ledger %}
         <span class="gm-sheet-status">{% if character.is_complete %}Complete{% else %}Being built{% for mark in character.missing_parts %} · <span class="status-badge incomplete-mark">{{ mark }}</span>{% endfor %}{% endif %}{% if not sheet.is_alive %} · Dead{% if sheet.death_cause %} — {{ sheet.death_cause }}{% endif %}{% endif %}</span>
         {% else %}
         <span class="gm-sheet-status">{% if sheet.is_alive %}Alive{% else %}Dead{% if sheet.death_cause %} — {{ sheet.death_cause }}{% endif %}{% endif %}</span>
-        <button type="button" class="gm-sheet-detach" data-character-id="{{ sheet.pk }}" aria-label="Detach {{ sheet.name }}" title="Detach from this session">&times;</button>
+        <button type="button" class="gm-sheet-detach" data-character-id="{{ sheet.pk }}" data-focus-key="detach-{{ sheet.pk }}" aria-label="Detach {{ sheet.name }}" title="Detach from this session">&times;</button>
         {% endif %}
     </header>
     {% if ledger %}<p class="gm-draft-note">The server keeps these numbers, not the Game Master. Every change is saved to the character as it happens.</p>{% endif %}

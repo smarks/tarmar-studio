@@ -10,8 +10,8 @@ itself.
 </p>
 {% if picker.page.has_other_pages %}
 <nav class="pagination picker-pager" aria-label="Pages of {{ picker.source.noun_plural }}">
-    <button type="button" class="picker-page" data-picker-page="{% if picker.page.has_previous %}{{ picker.page.previous_page_number }}{% endif %}"{% if not picker.page.has_previous %} disabled{% endif %}>&laquo; Newer</button>
+    <button type="button" class="picker-page" data-focus-key="picker-newer" data-picker-page="{% if picker.page.has_previous %}{{ picker.page.previous_page_number }}{% endif %}"{% if not picker.page.has_previous %} disabled{% endif %}>&laquo; Newer</button>
     <span class="page-current">Page {{ picker.page.number }} of {{ picker.page.paginator.num_pages }}</span>
-    <button type="button" class="picker-page" data-picker-page="{% if picker.page.has_next %}{{ picker.page.next_page_number }}{% endif %}"{% if not picker.page.has_next %} disabled{% endif %}>Older &raquo;</button>
+    <button type="button" class="picker-page" data-focus-key="picker-older" data-picker-page="{% if picker.page.has_next %}{{ picker.page.next_page_number }}{% endif %}"{% if not picker.page.has_next %} disabled{% endif %}>Older &raquo;</button>
 </nav>
 {% endif %}

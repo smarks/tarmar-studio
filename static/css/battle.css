@@ -2002,3 +2002,14 @@
 .lobby-blocked {
     margin: -0.4rem 0 1.1rem;
 }
+
+/* A rename the roster could not keep (issue #16): roster state, painted after
+   every redraw, in the figure's card or above the roster when it has gone. */
+.roster-notes { grid-column: 1 / -1; display: grid; gap: 0.35rem; }
+.roster-rename-note { display: block; }
+.roster-rename-note .roster-note-dismiss { margin-left: 0.35rem; }
+.rename-changed-note {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--colour-ink-muted);
+}

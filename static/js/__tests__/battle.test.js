@@ -795,6 +795,119 @@ describe('inline rename', () => {
             expect(roster.querySelector('.combatant-rename-input')).toBeNull();
             expect(roster.querySelector('.autosave-error').textContent).toContain('Kestra the Grey');
             expect(global.fetch).not.toHaveBeenCalled();
+            // The next poll's redraw keeps it, now that it is roster state.
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            const kept = roster.querySelector('[data-combatant="1"] .roster-rename-note');
+            expect(kept.textContent).toContain('can no longer be renamed');
+            expect(kept.textContent).toContain('Kestra the Grey');
+            expect(kept.hasAttribute('role')).toBe(false);
+        });
+
+        test('a figure renamed meanwhile says so by the field; the draft stays', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            const renamed = sampleState([sampleCombatant({ name: 'Kestra of the Pass' })]);
+
+            battle.renderRoster(roster, renamed, options);
+
+            expect(roster.querySelector('.combatant-rename-input').value).toBe('Kestra the Grey');
+            const note = roster.querySelector('.rename-changed-note');
+            expect(note.textContent).toBe('Renamed meanwhile to "Kestra of the Pass".');
+            expect(note.getAttribute('role')).toBe('status');
+
+            battle.renderRoster(roster, renamed, options);
+            expect(roster.querySelector('.rename-changed-note').hasAttribute('role')).toBe(false);
+            expect(roster.querySelector('.combatant-rename-input').value).toBe('Kestra the Grey');
+
+            // Escape ends the edit, and the note with it.
+            roster.querySelector('.combatant-rename-input')
+                .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+            expect(roster.querySelector('.rename-changed-note')).toBeNull();
+            expect(global.fetch).not.toHaveBeenCalled();
+        });
+
+        test('a figure gone from the fight leaves the typed name above the roster', () => {
+            const { roster, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            const without = sampleState([sampleCombatant({ combatant_id: 2, name: 'Bran' })]);
+
+            battle.renderRoster(roster, without, options);
+            battle.renderRoster(roster, without, options);
+
+            const block = roster.querySelector(':scope > .roster-notes');
+            expect(block.textContent).toContain('Kestra Duskmere is no longer in this fight');
+            expect(block.textContent).toContain('Kestra the Grey');
+            expect(global.fetch).not.toHaveBeenCalled();
+        });
+
+        test('a refusal that answers after a redraw is shown on the card now drawn, and stays', async () => {
+            const { roster, state, options } = rosterWithOptions();
+            let answer;
+            global.fetch = jest.fn(() => new Promise((resolve) => { answer = resolve; }));
+            require('../api.js');
+            const typed = startTyping(roster, 'Taken Name');
+            typed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            battle.renderRoster(roster, state, options);
+
+            answer({ ok: false, json: async () => ({ success: false, error: 'Another combatant already has that name' }) });
+            await flush();
+
+            const note = () => roster.querySelector('[data-combatant="1"] .roster-rename-note');
+            expect(note().textContent).toContain('already has that name');
+            expect(note().textContent).toContain('Taken Name');
+            battle.renderRoster(roster, state, options);
+            expect(note().textContent).toContain('already has that name');
+        });
+
+        test('Dismiss takes a note away and leaves the focus on the roster', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+
+            roster.querySelector('.roster-note-dismiss').click();
+
+            expect(roster.querySelector('.roster-rename-note')).toBeNull();
+            expect(document.activeElement).toBe(roster);
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            expect(roster.querySelector('.roster-rename-note')).toBeNull();
+        });
+
+        test('Dismiss moves the focus to the next note\'s Dismiss', () => {
+            document.body.innerHTML = '<div id="roster"></div>';
+            const roster = document.getElementById('roster');
+            const state = sampleState([
+                sampleCombatant({ combatant_id: 1, name: 'Kestra' }),
+                sampleCombatant({ combatant_id: 2, name: 'Bran' }),
+            ]);
+            const options = { url: '/tarmar/battles/1/rename/', csrf: 'tok', onRenamed: jest.fn() };
+            const locked = { 1: { can_rename: false }, 2: { can_rename: false } };
+            battle.renderRoster(roster, state, options);
+            [1, 2].forEach((id) => {
+                roster.querySelector(`[data-combatant="${id}"] .combatant-name`).click();
+                roster.querySelector('.combatant-rename-input').value = `typed ${id}`;
+                battle.renderRoster(roster, state, options, locked);
+                battle.renderRoster(roster, state, options);
+            });
+            expect(roster.querySelectorAll('.roster-note-dismiss')).toHaveLength(2);
+
+            roster.querySelectorAll('.roster-note-dismiss')[0].click();
+
+            expect(document.activeElement).toBe(roster.querySelector('.roster-note-dismiss'));
+        });
+
+        test('renaming the figure again clears its note', () => {
+            const { roster, state, options } = rosterWithOptions();
+            global.fetch = jest.fn();
+            startTyping(roster, 'Kestra the Grey');
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            battle.renderRoster(roster, state, options);
+
+            roster.querySelector('.combatant-name').click();
+
+            expect(roster.querySelector('.roster-rename-note')).toBeNull();
         });
     });
 
