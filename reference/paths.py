@@ -43,13 +43,12 @@ the Games Master's world digest, all read once per process (issues #918,
   (strings ``slug``, ``title``, ``image`` and a list of strings
   ``place_names``), and an optional list of strings
   ``case_sensitive_place_names``. Read by ``gm.maps``.
-- ``magic-rules.json`` (required to seat a battle): the casting success
-  tiers, Push and Channel numbers the engine's ``MagicRules`` takes, with
-  ``casting_success_tiers`` (a list), ``push`` and ``channel`` (objects or
-  ``null``) and an optional ``rulings`` list recording readings the pages
-  left open. Every other field is named exactly as the engine dataclass
-  field it fills. Read by ``battle.magic_rules``, whose docstring gives the
-  full schema.
+- ``magic-rules.json`` (required to seat a battle): the magic-mechanics
+  numbers the engine's ``MagicRules`` takes, one top-level field per
+  mechanic, and an optional ``rulings`` list recording readings the pages
+  left open. Every field but ``rulings`` is named exactly as the engine
+  dataclass field it fills. Read by ``battle.magic_rules``, whose docstring
+  gives the full schema.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's
   system prompt, used verbatim less its trailing newlines. Without it
   ``gm.engine`` uses a one-paragraph built-in fallback and logs a warning.

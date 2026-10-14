@@ -2,11 +2,13 @@
 
 The engine (``tarmar_engine.magic``) carries the structure of the casting
 success tiers, Push, Channel, Borrowing (tarmar-engine #28), Runaway's
-later turns (tarmar-engine #30) and Counterspell (tarmar-engine #31) and takes every number from a ``MagicRules``
-its caller injects. The numbers are the canon's: the Tarmar canon builds them
-from its DM-only magic-mechanics pages, and the default canon ships invented
-ones. This module is the one path that sets them, and it reads only the
-loaded canon's ``magic-rules.json`` (:data:`reference.paths.MAGIC_RULES_FILE`).
+later turns (tarmar-engine #30), Counterspell (tarmar-engine #31) and the
+casting roll's failing totals (tarmar-engine #46) and takes every number from
+a ``MagicRules`` its caller injects. The numbers are the canon's: the Tarmar
+canon builds them from its DM-only magic-mechanics pages, and the default
+canon ships invented ones. This module is the one path that sets them, and it
+reads only the loaded canon's ``magic-rules.json``
+(:data:`reference.paths.MAGIC_RULES_FILE`).
 Nothing a player or a Game Master does at the table writes them.
 
 The file is a JSON object::
@@ -58,6 +60,10 @@ The file is a JSON object::
         "mana_per_bonus": int, "ties_go_to_caster": bool,
         "defender_min_mana": int, "defender_max_mana": int | null
       },
+      "casting_failure": null | {
+        "fumble_floor": int, "mana_lost_totals": [int, ...],
+        "runaway_total": int | null
+      },
       "rulings": [{"key": str, "reading": str, ...}]
     }
 
@@ -82,6 +88,7 @@ from django.core.exceptions import ImproperlyConfigured
 from tarmar_engine.magic import (
     BorrowingFailure,
     BorrowingRules,
+    CastingFailureRules,
     CastingSuccessTier,
     ChannelDerivation,
     ChannelRules,
@@ -152,6 +159,7 @@ COUNTERSPELL_FIELDS = (
     "defender_min_mana",
     "defender_max_mana",
 )
+CASTING_FAILURE_FIELDS = ("fumble_floor", "mana_lost_totals", "runaway_total")
 TOP_LEVEL_FIELDS = (
     "casting_success_tiers",
     "push",
@@ -159,6 +167,7 @@ TOP_LEVEL_FIELDS = (
     "borrowing",
     "runaway",
     "counterspell",
+    "casting_failure",
 )
 OPTIONAL_TOP_LEVEL_FIELDS = ("rulings",)
 RULING_FIELDS = ("key", "reading")
@@ -577,6 +586,28 @@ class _RulesFileReader:
                 ),
             )
 
+    def casting_failure(
+        self, value: Any, field_path: str
+    ) -> CastingFailureRules | None:
+        """``casting_failure``, or ``None`` when the attribute alone judges a
+        casting roll: no total fails on its own, no failure spends the mana,
+        and no cast starts a Runaway."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, CASTING_FAILURE_FIELDS)
+        with self.engine_check(field_path):
+            return CastingFailureRules(
+                fumble_floor=self.integer(
+                    fields["fumble_floor"], f"{field_path}.fumble_floor"
+                ),
+                mana_lost_totals=self.integer_set(
+                    fields["mana_lost_totals"], f"{field_path}.mana_lost_totals"
+                ),
+                runaway_total=self.optional_integer(
+                    fields["runaway_total"], f"{field_path}.runaway_total"
+                ),
+            )
+
     def rulings(self, value: Any, field_path: str) -> None:
         """``rulings``: a list of objects with string ``key`` and ``reading``."""
         for index, ruling in enumerate(self.json_list(value, field_path)):
@@ -617,6 +648,9 @@ class _RulesFileReader:
             rules,
             runaway=self.runaway(fields["runaway"], "runaway"),
             counterspell=self.counterspell(fields["counterspell"], "counterspell"),
+            casting_failure=self.casting_failure(
+                fields["casting_failure"], "casting_failure"
+            ),
         )
 
 
