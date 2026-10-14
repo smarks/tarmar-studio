@@ -75,6 +75,12 @@ STOP_GRACE_SECONDS = 10
 STOP_GIVE_UP_SECONDS = 30
 # Where Linux lists its processes; macOS has none, and ship asks ps and lsof.
 PROC = Path("/proc")
+# One row of ``ps -o pid=,ppid=,stat=,tty=,command=``. A line that does not
+# look like a row is the rest of a command line that holds a newline.
+PS_ROW_PATTERN = re.compile(
+    r"\s*(?P<pid>\d+)\s+(?P<ppid>\d+)\s+(?P<state>[A-Z]\S*)\s+(?P<tty>\S+)"
+    r"(?:\s+(?P<command>.*))?"
+)
 # What the gate announces when it has started Deploy (gate.start_deploy_if_head);
 # the run's address follows when gh printed one.
 DEPLOY_STARTED_PATTERN = re.compile(
@@ -418,7 +424,10 @@ def processes_from_proc() -> dict[int, RunningProcess]:
 def processes_from_ps() -> dict[int, RunningProcess]:
     """Every live process, from ps, with this user's working directories from lsof.
 
-    For macOS, which has no /proc. Zombies are left out, as from /proc.
+    For macOS, which has no /proc. Zombies are left out, as from /proc. A
+    command line holding a newline spans several of ps's lines; the later
+    ones are joined to it with a space, so a workspace path after the
+    newline still counts.
 
     Raises:
         ShipError: ps or lsof failed.
@@ -435,11 +444,30 @@ def processes_from_ps() -> dict[int, RunningProcess]:
             directories[process_id] = line[1:]
     processes: dict[int, RunningProcess] = {}
     listing = run_quietly(["ps", "-A", "-ww", "-o", "pid=,ppid=,stat=,tty=,command="])
+    last_process_id: int | None = None
+    listed_process_ids: set[int] = set()
     for line in listing.splitlines():
-        process_id_text, parent_text, state, terminal, *command = line.split(None, 4)
-        if state.startswith("Z"):
+        row = PS_ROW_PATTERN.fullmatch(line)
+        process_id = int(row.group("pid")) if row is not None else None
+        if row is None or process_id == 0 or process_id in listed_process_ids:
+            # Not a row: the rest of the previous command line, whose
+            # argument holds a newline (ps prints it as is). Joined to that
+            # command; never a process. A remainder can only pass as a row
+            # by naming a process id ps has not listed yet, which takes a
+            # crafted argument.
+            if last_process_id in processes:
+                previous = processes[last_process_id]
+                processes[last_process_id] = dataclasses.replace(
+                    previous, command=f"{previous.command} {line.strip()}".strip()
+                )
             continue
-        process_id = int(process_id_text)
+        last_process_id = process_id
+        listed_process_ids.add(process_id)
+        if row.group("state").startswith("Z"):
+            continue
+        parent_text = row.group("ppid")
+        terminal = row.group("tty")
+        command = row.group("command") or ""
         # macOS's ps has no session column that holds the id ("sess" prints
         # 0), but getsid answers for any process it is allowed to ask about.
         session_id: int | None
@@ -450,7 +478,7 @@ def processes_from_ps() -> dict[int, RunningProcess]:
         except PermissionError:
             session_id = None  # Unknown, like an unreadable working directory.
         processes[process_id] = RunningProcess(
-            command=command[0] if command else "",
+            command=command.strip(),
             working_directory=directories.get(process_id, ""),
             parent_process_id=int(parent_text),
             # ps shows "??" (macOS) or "?" for a process with no terminal.
