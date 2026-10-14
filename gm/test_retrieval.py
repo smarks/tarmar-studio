@@ -211,16 +211,18 @@ class HeadingTest(SimpleTestCase):
 
     def test_the_heading_pattern_stays_fast_on_crafted_input(self):
         # The tests above check what is read; this one checks how long it
-        # takes. 2,000 spaces before a word took the old pattern 5.8 s; each
-        # input here is 25 times that, so a pattern that backtracks again
-        # takes hours rather than a millisecond. The last two are fast for
-        # the old pattern too; they hold the new one's own slow paths (the
-        # closing hashes it strips, and no title at all) to the same bound.
-        spaces = " " * 50_000
+        # takes. Each of the first three inputs is sized so the old pattern
+        # took 10 to 30 s on it (measured: 19 s, 12 s and 19 s), so a pattern
+        # that backtracks again fails here within the minute rather than
+        # hanging the run, while the new one takes well under a millisecond.
+        # The last two were fast for the old pattern too; they hold the new
+        # one's own paths (the closing hashes it strips, and no title at all)
+        # to the same bound.
+        spaces = " " * 3000
         crafted = {
             "spaces then a word": f"# a{spaces}x",
-            "spaces either side of a hash": f"# a{spaces}#{spaces}x",
-            "hashes then a word": f"# a{'#' * 50_000}x",
+            "spaces either side of a hash": f"# a{' ' * 2000}#{' ' * 2000}x",
+            "hashes then a word": f"# a{'#' * 60_000}x",
             "spaces then closing hashes": f"# a{spaces}{'#' * 6}{spaces}",
             "only spaces": f"#{spaces}",
         }

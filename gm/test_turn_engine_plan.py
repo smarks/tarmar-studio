@@ -383,11 +383,13 @@ class FencedPlanTest(SimpleTestCase):
 
     def test_the_fence_pattern_stays_fast_on_crafted_input(self):
         # The tests above check what the pattern reads; this one checks how
-        # long it takes. 2,000 spaces took the old pattern 2 s; each input
-        # here is 25 times that, so a pattern that backtracks again takes
-        # hours rather than a millisecond. The closed fence is fast for the
-        # old pattern too; it holds the new one's match path to the same bound.
-        spaces = " " * 50_000
+        # long it takes. Each slow input is sized so the old pattern took
+        # about 17 s on it (4,000 spaces; it was cubic), so a pattern that
+        # backtracks again fails here within the minute rather than hanging
+        # the run, while the new one takes well under a millisecond. The
+        # closed fence was fast for the old pattern too; it holds the new
+        # one's match path to the same bound.
+        spaces = " " * 4000
         crafted = {
             "unclosed fence then spaces": f"```{spaces}",
             "unclosed tagged fence, spaces, a word": f"```json{spaces}x",

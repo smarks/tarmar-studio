@@ -431,13 +431,13 @@ class MapRegistryTest(SimpleTestCase):
 
     def test_the_heading_patterns_stay_fast_on_crafted_input(self):
         # The tests above check what the patterns read; this one checks how
-        # long they take. A 50,000-character line took the old patterns 5 s;
-        # each input here is ten times that, so a pattern that backtracks
-        # again takes minutes rather than a few milliseconds. Only the first
-        # input is slow for the old patterns; the others hold the new ones'
-        # own paths (no name after the hash, a name cut by a line break) to
-        # the same bound.
-        spaces = " " * 500_000
+        # long they take. 90,000 spaces inside a name took each old pattern
+        # about 17 s, so a pattern that backtracks again fails here within
+        # the minute rather than hanging the run, while the new ones take well
+        # under a millisecond. Only that first input was slow for the old
+        # patterns; the others hold the new ones' own paths (no name after
+        # the hash, a name cut by a line break) to the same bound.
+        spaces = " " * 90_000
         patterns = {
             "page heading": ("#", _HEADING_PATTERN.search),
             "hub section": ("##", lambda text: list(_SECTION_PATTERN.finditer(text))),
