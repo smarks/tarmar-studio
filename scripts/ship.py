@@ -369,6 +369,15 @@ class RunningProcess:
     command: str
     # Empty when it cannot be read (another user's process).
     working_directory: str
+    parent_process_id: int
+    # A controlling terminal in a session other than ship's means someone's
+    # shell or a program they are running; ship reports such a process rather
+    # than closing their terminal. One in ship's own session is ship's (what
+    # uv sync or npm ci started), and is stopped.
+    has_terminal: bool
+    # None when it cannot be read, which counts as not ship's session: a
+    # terminal holder whose session is unknown is reported, not signalled.
+    session_id: int | None
 
 
 def processes_from_proc() -> dict[int, RunningProcess]:
@@ -382,12 +391,13 @@ def processes_from_proc() -> dict[int, RunningProcess]:
         if not entry.name.isdigit():
             continue
         try:
-            # The state follows the parenthesised name, which may hold spaces.
-            state = (entry / "stat").read_text().rpartition(")")[2].split()[0]
+            # The fields after the parenthesised name (which may hold spaces):
+            # state, parent, process group, session, terminal (0 for none).
+            fields = (entry / "stat").read_text().rpartition(")")[2].split()
             arguments = (entry / "cmdline").read_bytes()
         except (FileNotFoundError, ProcessLookupError):
             continue  # It exited while this looked.
-        if state == "Z":
+        if fields[0] == "Z":
             continue
         try:
             working_directory = os.readlink(entry / "cwd")
@@ -398,6 +408,9 @@ def processes_from_proc() -> dict[int, RunningProcess]:
         processes[int(entry.name)] = RunningProcess(
             command=arguments.replace(b"\0", b" ").decode(errors="replace").strip(),
             working_directory=working_directory,
+            parent_process_id=int(fields[1]),
+            has_terminal=fields[4] != "0",
+            session_id=int(fields[3]),
         )
     return processes
 
@@ -421,38 +434,81 @@ def processes_from_ps() -> dict[int, RunningProcess]:
         elif line.startswith("n"):
             directories[process_id] = line[1:]
     processes: dict[int, RunningProcess] = {}
-    listing = run_quietly(["ps", "-A", "-ww", "-o", "pid=,stat=,command="])
+    listing = run_quietly(["ps", "-A", "-ww", "-o", "pid=,ppid=,stat=,tty=,command="])
     for line in listing.splitlines():
-        process_id_text, state, *command = line.split(None, 2)
+        process_id_text, parent_text, state, terminal, *command = line.split(None, 4)
         if state.startswith("Z"):
             continue
         process_id = int(process_id_text)
+        # macOS's ps has no session column that holds the id ("sess" prints
+        # 0), but getsid answers for any process it is allowed to ask about.
+        session_id: int | None
+        try:
+            session_id = os.getsid(process_id)
+        except ProcessLookupError:
+            continue  # It exited while this looked.
+        except PermissionError:
+            session_id = None  # Unknown, like an unreadable working directory.
         processes[process_id] = RunningProcess(
             command=command[0] if command else "",
             working_directory=directories.get(process_id, ""),
+            parent_process_id=int(parent_text),
+            # ps shows "??" (macOS) or "?" for a process with no terminal.
+            has_terminal=terminal.strip("?") != "",
+            session_id=session_id,
         )
     return processes
 
 
-def processes_in(workspace: Path) -> dict[int, RunningProcess]:
-    """Every live process, other than this one, running from inside ``workspace``.
+def workspace_pattern(workspace: Path) -> re.Pattern[str]:
+    """What names ``workspace``, or a path under it, in a path or command line.
 
-    A process is inside when its working directory, or a path on its command
-    line, is the workspace or under it. Both spellings of the workspace count
-    (on macOS /tmp is a link to /private/tmp, and the kernel reports the
-    latter).
+    Both spellings of the workspace count (on macOS /tmp is a link to
+    /private/tmp, and the kernel reports the latter). A spelling counts only
+    as a whole path: at the start, or after a space, ``=`` or a quote, and
+    followed by ``/``, a space, a quote or the end.
     """
     roots = sorted({str(workspace), str(workspace.resolve())})
-    inside = re.compile("|".join(rf"{re.escape(root)}(?=/|\s|$)" for root in roots))
+    return re.compile(
+        "|".join(rf"(?<![^\s='\"]){re.escape(root)}(?=[/\s'\"]|$)" for root in roots)
+    )
+
+
+def this_process_and_its_ancestors(running: dict[int, RunningProcess]) -> set[int]:
+    """Ship's own process and every process above it, up to the first one.
+
+    Whatever started ship (a shell whose command names the workspace, say)
+    must never be what it stops.
+    """
+    chain = {os.getpid()}
+    process_id = os.getppid()
+    while process_id > 0 and process_id not in chain:
+        chain.add(process_id)
+        parent = running.get(process_id)
+        if parent is None:
+            break
+        process_id = parent.parent_process_id
+    return chain
+
+
+def processes_in(workspace: Path) -> dict[int, RunningProcess]:
+    """Every live process running from inside ``workspace``, but ship's own line.
+
+    A process is inside when its working directory, or a path on its command
+    line, is the workspace or under it. Ship's process and its ancestors are
+    left out.
+    """
+    inside = workspace_pattern(workspace)
     running = (
         processes_from_proc()
         if (PROC / "self" / "cwd").exists()
         else processes_from_ps()
     )
+    ancestors = this_process_and_its_ancestors(running)
     return {
         process_id: process
         for process_id, process in running.items()
-        if process_id != os.getpid()
+        if process_id not in ancestors
         and (inside.match(process.working_directory) or inside.search(process.command))
     }
 
@@ -481,7 +537,9 @@ def stop_processes_in(workspace: Path) -> None:
     webServer (the dev server) detached, in a process group of its own, and
     stops it itself, so when Playwright is killed first the server outlives
     the ship, reparented to launchd (issue #31). Anything still running from
-    the workspace is asked to stop, then killed.
+    the workspace is asked to stop, then killed; a process with a terminal
+    in another session (someone's shell, cd'd into the workspace) is left
+    alone and reported.
 
     Raises:
         ShipError: some are still running, named with their command lines.
@@ -489,11 +547,18 @@ def stop_processes_in(workspace: Path) -> None:
     found = processes_in(workspace)
     if not found:
         return
+    ship_session = os.getsid(0)
+    held_by_other_terminals = {
+        process_id
+        for process_id, process in found.items()
+        if process.has_terminal and process.session_id != ship_session
+    }
     for process_id, process in found.items():
+        action = "leaving" if process_id in held_by_other_terminals else "stopping"
         announce(
-            f"stopping {process_id}, still running in {workspace}: {process.command}"
+            f"{action} {process_id}, still running in {workspace}: {process.command}"
         )
-    refused = signal_each(found, signal.SIGTERM)
+    refused = signal_each(found.keys() - held_by_other_terminals, signal.SIGTERM)
 
     def still_running() -> dict[int, RunningProcess]:
         return {
@@ -503,10 +568,14 @@ def stop_processes_in(workspace: Path) -> None:
         }
 
     def stoppable_are_gone() -> bool:
-        return still_running().keys() <= refused
+        return still_running().keys() <= refused | held_by_other_terminals
 
     def kill_the_rest() -> None:
-        refused.update(signal_each(still_running(), signal.SIGKILL))
+        refused.update(
+            signal_each(
+                still_running().keys() - held_by_other_terminals, signal.SIGKILL
+            )
+        )
 
     wait_until_gone(stoppable_are_gone, kill_the_rest)
     survivors = still_running()
@@ -516,6 +585,11 @@ def stop_processes_in(workspace: Path) -> None:
             + "; ".join(
                 f"{process_id} {process.command}"
                 + (" (another user's)" if process_id in refused else "")
+                + (
+                    " (it has a terminal)"
+                    if process_id in held_by_other_terminals
+                    else ""
+                )
                 for process_id, process in survivors.items()
             )
         )
@@ -554,13 +628,16 @@ def watch_deploy_to_its_end(run_id: str, app: Path) -> None:
     ``gh run watch --exit-status`` exits non-zero both when the run fails and
     when one of its own requests to GitHub fails (issue #33), so after a
     non-zero exit the run's state says which: concluded, or still going. Up
-    to POLL_FAILURE_LIMIT failed requests are waited out, the wait doubling
-    from POLL_RETRY_SECONDS, before the ship gives up following.
+    to POLL_FAILURE_LIMIT such breaks are waited out, the wait doubling from
+    POLL_RETRY_SECONDS, before the ship gives up following.
 
     Raises:
         ShipError: the run concluded other than green.
-        LostTrackOfDeploy: more than POLL_FAILURE_LIMIT requests failed.
+        LostTrackOfDeploy: following broke off more than POLL_FAILURE_LIMIT
+            times.
     """
+    # Counted over the whole follow, not reset between failures: a watch that
+    # ran for ten minutes before failing still counts one.
     failed_polls = 0
     while True:
         watched = subprocess.run(
@@ -588,10 +665,10 @@ def watch_deploy_to_its_end(run_id: str, app: Path) -> None:
         failed_polls += 1
         if failed_polls > POLL_FAILURE_LIMIT:
             raise LostTrackOfDeploy(
-                f"lost track of Deploy run {run_id}: {failed_polls} requests to "
-                f"GitHub failed while following it (last: {poll_failure}). This is "
-                "not a failed deploy; the run may still be going. Check it with "
-                f"gh run view {run_id}"
+                f"lost track of Deploy run {run_id}: following it broke off "
+                f"{failed_polls} times before the run ended (last: {poll_failure}). "
+                "This is not a failed deploy; the run may still be going. Check it "
+                f"with gh run view {run_id}"
             )
         wait = POLL_RETRY_SECONDS * 2 ** (failed_polls - 1)
         announce(

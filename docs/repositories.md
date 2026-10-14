@@ -31,8 +31,10 @@ It deploys the head of `main` completely. In order, it:
 6. follows that Deploy run to its end and reads its log for what it did;
 7. stops anything still running from inside the temporary directory (the
    dev server Playwright starts runs in a process group of its own, so
-   stopping the gate does not reach it), then removes both worktrees and the
-   directory, whatever happened, including Ctrl-C or a closed terminal.
+   stopping the gate does not reach it; a process holding a terminal other
+   than ship's, such as a shell someone opened there, is reported and left
+   alone), then removes both worktrees and the directory, whatever happened,
+   including Ctrl-C or a closed terminal.
 
 It ends with one of: `<sha> is live` (exit 0); `<sha> was already live`
 (exit 0); `stopped: ...` with the reason, nothing more deployed (exit 1), which

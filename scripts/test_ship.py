@@ -7,10 +7,15 @@ npm and GitHub.
 """
 
 import contextlib
+import fcntl
+import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
+import termios
+import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -671,27 +676,46 @@ def test_processes_are_read_from_proc_where_there_is_one(
     workspace, app, elsewhere = make_workspace(tmp_path)
     proc = tmp_path / "proc"
 
-    def fake_process(name: str, state: str, cwd: Path, *arguments: str) -> None:
+    def fake_process(
+        name: str,
+        state: str,
+        cwd: Path,
+        *arguments: str,
+        parent: int = 1,
+        terminal: int = 0,
+        session: int = 1,
+    ) -> None:
         entry = proc / name
         entry.mkdir(parents=True)
-        (entry / "stat").write_text(f"{name} (a (strange) name) {state} 1 1 1\n")
+        (entry / "stat").write_text(
+            f"{name} (a (strange) name) {state} {parent} 1 {session} {terminal} 0\n"
+        )
         (entry / "cmdline").write_bytes(
             b"".join(f"{argument}\0".encode() for argument in arguments)
         )
         (entry / "cwd").symlink_to(cwd)
 
+    # Above Linux's largest process id, so no real process is one of these;
+    # except ship's parent and grandparent, whose command lines name the
+    # workspace and which must not be found.
     fake_process("self", "R", elsewhere, "python")
-    fake_process("100", "S", app, "sleep", "300")
-    fake_process("101", "Z", app, "sleep", "300")
-    fake_process("102", "S", elsewhere, "python", str(app / "serve.py"))
-    fake_process("103", "S", elsewhere, "sleep", "300")
+    fake_process("5000100", "S", app, "sleep", "300")
+    fake_process("5000101", "Z", app, "sleep", "300")
+    fake_process("5000102", "S", elsewhere, "python", str(app / "serve.py"))
+    fake_process("5000103", "S", elsewhere, "sleep", "300")
+    fake_process("5000104", "S", app, "-zsh", terminal=34816, session=5000104)
+    fake_process(str(os.getppid()), "S", app, "bash", str(app), parent=5000200)
+    fake_process("5000200", "S", app, "bash", str(app))
     monkeypatch.setattr(ship, "PROC", proc)
 
     found = ship.processes_in(workspace)
 
     assert found == {
-        100: ship.RunningProcess("sleep 300", str(app)),
-        102: ship.RunningProcess(f"python {app / 'serve.py'}", str(elsewhere)),
+        5000100: ship.RunningProcess("sleep 300", str(app), 1, False, session_id=1),
+        5000102: ship.RunningProcess(
+            f"python {app / 'serve.py'}", str(elsewhere), 1, False, session_id=1
+        ),
+        5000104: ship.RunningProcess("-zsh", str(app), 1, True, session_id=5000104),
     }
 
 
@@ -715,3 +739,264 @@ def test_a_killed_ships_processes_are_stopped_by_the_next(
     finally:
         left_running.kill()
         left_running.wait()
+
+
+def test_a_workspace_is_named_only_by_a_whole_path(tmp_path: Path) -> None:
+    workspace, *_ = make_workspace(tmp_path)
+    pattern = ship.workspace_pattern(workspace)
+
+    for named in (
+        f"{workspace}",
+        f"python {workspace}/app/serve.py",
+        f"server --root={workspace}/app",
+        f"bash -c '{workspace}/app/run dev'",
+        f'"{workspace}"',
+    ):
+        assert pattern.search(named), named
+    for not_named in (
+        f"tail /other{workspace}/app/log",
+        f"ls {workspace}-other/app",
+        f"ls {workspace}x",
+    ):
+        assert not pattern.search(not_named), not_named
+
+
+def test_a_workspace_named_through_a_link_is_found_where_it_resolves(
+    tmp_path: Path,
+) -> None:
+    # On macOS ship names /tmp/tarmar-ship-..., and the kernel reports the
+    # working directory of what runs there as /private/tmp/tarmar-ship-...
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    workspace, app, _ = make_workspace(real_parent)
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_parent)
+    running = start_detached(["sleep", "300"], cwd=app)
+    try:
+        found = ship.processes_in(linked_parent / workspace.name)
+
+        assert list(found) == [running.pid]
+        assert found[running.pid].working_directory == str(app)
+    finally:
+        running.kill()
+        running.wait()
+
+
+def test_cleanup_never_stops_what_started_ship(tmp_path: Path) -> None:
+    # A shell whose command names the workspace (ls it, then ./run ship).
+    workspace, *_ = make_workspace(tmp_path)
+    ship_code = (
+        f"import sys; sys.path.insert(0, {str(Path(ship.__file__).parent)!r}); "
+        "import ship; from pathlib import Path; "
+        f"ship.stop_processes_in(Path({str(workspace)!r})); print('survived')"
+    )
+    shell_command = (
+        f": {shlex.quote(str(workspace))}; "
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(ship_code)}; exit $?"
+    )
+
+    finished = subprocess.run(
+        ["bash", "-c", shell_command], capture_output=True, text=True, timeout=60
+    )
+
+    assert finished.returncode == 0, finished.stderr
+    assert "survived" in finished.stdout
+
+
+def test_cleanup_reports_a_process_with_a_terminal_and_leaves_it(
+    tmp_path: Path,
+) -> None:
+    # Someone's shell, cd'd into the workspace: stopping it would close their
+    # terminal.
+    workspace, app, _ = make_workspace(tmp_path)
+    controller, terminal = os.openpty()
+
+    def take_the_terminal() -> None:
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    shell = subprocess.Popen(
+        ["sleep", "300"],
+        cwd=app,
+        stdin=terminal,
+        stdout=terminal,
+        stderr=terminal,
+        start_new_session=True,
+        preexec_fn=take_the_terminal,
+    )
+    try:
+        assert ship.processes_in(workspace)[shell.pid].has_terminal
+
+        with pytest.raises(ship.ShipError, match=rf"{shell.pid} .*it has a terminal"):
+            ship.stop_processes_in(workspace)
+
+        assert shell.poll() is None
+    finally:
+        shell.kill()
+        shell.wait()
+        os.close(controller)
+        os.close(terminal)
+
+
+def test_an_interrupted_gate_leaves_its_detached_server_to_the_cleanup(
+    tmp_path: Path,
+) -> None:
+    # The real run_gate, interrupted while its stand-in gate runs a server the
+    # way Playwright does. Stopping the gate's group misses the server (the
+    # cause of issue #31); the workspace cleanup stops it.
+    workspace, app, _ = make_workspace(tmp_path)
+    server_id_file = app / "server.pid"
+    (app / "start_server.py").write_text(
+        "import pathlib, subprocess\n"
+        "server = subprocess.Popen(['sleep', '300'], start_new_session=True)\n"
+        f"pathlib.Path({str(server_id_file)!r}).write_text(str(server.pid))\n",
+        encoding="utf-8",
+    )
+    write_script(
+        app, "run", f"{shlex.quote(sys.executable)} start_server.py\nexec sleep 300"
+    )
+
+    def both_sleeps_run() -> bool:
+        # The server has recorded itself and start_server.py has exited, so
+        # all that runs is the server and the gate's own sleep.
+        found = ship.processes_in(workspace)
+        return server_id_file.exists() and [
+            process.command for process in found.values()
+        ] == ["sleep 300", "sleep 300"]
+
+    gate_returned = threading.Event()
+
+    def interrupt_once_both_run() -> None:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not both_sleeps_run():
+            if gate_returned.wait(0.1):
+                return
+        if not gate_returned.is_set():
+            os.kill(os.getpid(), signal.SIGUSR1)
+
+    previous = signal.signal(signal.SIGUSR1, ship.raise_interrupted)
+    interrupter = threading.Thread(target=interrupt_once_both_run, daemon=True)
+    try:
+        interrupter.start()
+        with pytest.raises(ship.Interrupted):
+            try:
+                ship.run_gate(app, dict(os.environ), deploy=True)
+            finally:
+                gate_returned.set()
+        server_id = int(server_id_file.read_text())
+
+        assert list(ship.processes_in(workspace)) == [server_id]
+        ship.stop_processes_in(workspace)
+        assert ship.processes_in(workspace) == {}
+    finally:
+        # The thread has signalled or never will before the handler goes, so
+        # a late SIGUSR1 cannot reach the default handler and end the worker.
+        gate_returned.set()
+        interrupter.join()
+        signal.signal(signal.SIGUSR1, previous)
+        if server_id_file.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(server_id_file.read_text()), signal.SIGKILL)
+
+
+def test_cleanup_stops_its_own_sessions_terminal_holders_but_not_others(
+    tmp_path: Path,
+) -> None:
+    # Ship run from a terminal: what uv sync or npm ci started shares that
+    # terminal and is ship's to stop. A shell in another terminal is not.
+    workspace, app, elsewhere = make_workspace(tmp_path)
+    ships_controller, ships_terminal = os.openpty()
+    others_controller, others_terminal = os.openpty()
+
+    def take_the_terminal() -> None:
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    others_shell = subprocess.Popen(
+        ["sleep", "300"],
+        cwd=app,
+        stdin=others_terminal,
+        start_new_session=True,
+        preexec_fn=take_the_terminal,
+    )
+    ship_code = f"""
+import json, subprocess, sys
+sys.path.insert(0, {str(Path(ship.__file__).parent)!r})
+import ship
+from pathlib import Path
+workspace = Path({str(workspace)!r})
+install_script = subprocess.Popen(["sleep", "300"], cwd=workspace / "app")
+seen = ship.processes_in(workspace)[install_script.pid]
+try:
+    ship.stop_processes_in(workspace)
+    reported = ""
+except ship.ShipError as failure:
+    reported = str(failure)
+print(json.dumps({{
+    "install_script": install_script.pid,
+    "install_script_has_terminal": seen.has_terminal,
+    "install_script_exit": install_script.wait(timeout=5),
+    "reported": reported,
+}}))
+"""
+    # Ship in a session of its own, with its own terminal.
+    shipping = subprocess.run(
+        [sys.executable, "-c", ship_code],
+        cwd=elsewhere,
+        stdin=ships_terminal,
+        capture_output=True,
+        text=True,
+        start_new_session=True,
+        preexec_fn=take_the_terminal,
+        timeout=60,
+    )
+    try:
+        assert shipping.returncode == 0, shipping.stderr
+        outcome = json.loads(shipping.stdout.splitlines()[-1])
+        assert outcome["install_script_has_terminal"]
+        assert outcome["install_script_exit"] == -signal.SIGTERM
+        assert (
+            f"{others_shell.pid} sleep 300 (it has a terminal)" in outcome["reported"]
+        )
+        assert str(outcome["install_script"]) not in outcome["reported"]
+        assert others_shell.poll() is None
+    finally:
+        others_shell.kill()
+        others_shell.wait()
+        for descriptor in (
+            ships_controller,
+            ships_terminal,
+            others_controller,
+            others_terminal,
+        ):
+            os.close(descriptor)
+
+
+def test_a_session_ship_may_not_read_is_not_taken_for_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # getsid can refuse; the process is then reported, not signalled, and the
+    # refusal does not escape the cleanup (or remove_stale_worktrees).
+    workspace, app, _ = make_workspace(tmp_path)
+    listings = {
+        "lsof": f"p5000100\nfcwd\nn{app}\np5000101\nfcwd\nn{app}\n",
+        "ps": "5000100 1 Ss ttys009 -zsh\n5000101 1 S ?? sleep 300\n",
+    }
+    monkeypatch.setattr(
+        ship, "run_quietly", lambda command, *, cwd=None: listings[command[0]]
+    )
+    real_getsid = os.getsid
+
+    def getsid(process_id: int) -> int:
+        if process_id == 5000100:
+            raise PermissionError(1, "Operation not permitted")
+        return 7 if process_id == 5000101 else real_getsid(process_id)
+
+    monkeypatch.setattr(ship.os, "getsid", getsid)
+    monkeypatch.setattr(ship, "PROC", tmp_path / "no-proc")
+
+    assert ship.processes_from_ps() == {
+        5000100: ship.RunningProcess("-zsh", str(app), 1, True, session_id=None),
+        5000101: ship.RunningProcess("sleep 300", str(app), 1, False, session_id=7),
+    }
+    listings["ps"] = "5000100 1 Ss ttys009 -zsh\n"
+    with pytest.raises(ship.ShipError, match=r"5000100 -zsh \(it has a terminal\)"):
+        ship.stop_processes_in(workspace)
