@@ -2139,7 +2139,12 @@ def battle_act(request, pk):
     was composed for (#644): the service refuses a submission that names a
     different one rather than applying it to whoever is awaited now.
     ``push_mana`` (optional, 0 when absent) picks a pushed cast the menu
-    offered (#960).
+    offered (#960), ``borrow`` (optional, false when absent) a borrowing
+    cast (tarmar-engine #28), ``anchor_target`` (optional, null when
+    absent) the combatant whose Runaway an anchor takes back (tarmar-engine
+    #30), and ``counter_mana`` (optional, null when absent) the mana a
+    counter commits against the caster ``target_id`` names (tarmar-engine
+    #31).
     """
     actor, battle = _actor_and_readable_battle(request, pk)
     data, err = _parse_json_body(request)
@@ -2170,6 +2175,23 @@ def battle_act(request, pk):
         push_mana = whole_number(data.get("push_mana") or 0)
     except ValueError:
         return _json_error("A numeric push_mana is required")
+    borrow = data.get("borrow", False)
+    if not isinstance(borrow, bool):
+        return _json_error("borrow is true or false")
+    anchor_target_raw = data.get("anchor_target")
+    anchor_target = None
+    if anchor_target_raw is not None:
+        try:
+            anchor_target = whole_number(anchor_target_raw)
+        except ValueError:
+            return _json_error("A numeric anchor_target is required")
+    counter_mana_raw = data.get("counter_mana")
+    counter_mana = None
+    if counter_mana_raw is not None:
+        try:
+            counter_mana = whole_number(counter_mana_raw)
+        except ValueError:
+            return _json_error("A numeric counter_mana is required")
     destination_raw = data.get("destination")
     destination = None
     if destination_raw is not None:
@@ -2193,6 +2215,9 @@ def battle_act(request, pk):
             target_id=target_id,
             spell_key=str(data.get("spell_key") or ""),
             push_mana=push_mana,
+            borrow=borrow,
+            anchor_target=anchor_target,
+            counter_mana=counter_mana,
             destination=destination,
             as_ai=as_ai,
         )

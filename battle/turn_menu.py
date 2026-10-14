@@ -60,6 +60,7 @@ from tarmar_engine.engine import (
     SPRINT_FATIGUE_COST,
 )
 from tarmar_engine.policy import (
+    ANCHOR_OPTION,
     GRAPPLE_ATTEMPT_SCORE,
     GRAPPLE_TACTICS_RATIONALE,
     HURT_THRESHOLD,
@@ -79,6 +80,7 @@ from tarmar_engine.policy import (
 from tarmar_engine.spells import get_spell
 from tarmar_engine.state import BattleState, CombatantState
 
+from .magic_rules import magic_rules
 from .persistence import TARMAR_PROFILE
 
 #: What DODGE and DEFEND guard against, in the words of the "Defending and
@@ -281,6 +283,72 @@ def _with_odds(sentence: str, rationale: str) -> str:
     return f"{sentence}: {odds}" if odds else sentence
 
 
+def _anchor_line(
+    actor: CombatantState, target: CombatantState | None
+) -> tuple[str, str]:
+    """An anchor option's sentence and cost (tarmar-engine #30).
+
+    Read from the Runaway on the figure the option names and the canon's
+    injected rules: the roll the engine will make (the caster's own, or a
+    helper's), and for a helper the mana the engine takes whatever comes of
+    it (:meth:`~tarmar_engine.magic.RunawayRules.helper_cost`) and whether a
+    failure catches them. The roll's target, less the casting penalties, is
+    the engine's, in the option's rationale.
+
+    Args:
+        actor: The figure choosing.
+        target: The figure whose Runaway the option anchors.
+
+    Returns:
+        ``(plain, cost)``, as :func:`_plain_line` gives them.
+    """
+    rules = magic_rules().runaway
+    if target is None or target.runaway is None or rules is None:
+        return "Anchor a runaway spell", ""
+    spell = get_spell(target.runaway.spell_key)
+    if target.combatant_id == actor.combatant_id:
+        roll = rules.self_anchor
+        return (
+            f"Take back control of your runaway {spell.name}: {roll.dice} at or "
+            f"under your {roll.attribute}",
+            "",
+        )
+    roll = rules.helper_anchor
+    cost = (
+        f"{rules.helper_cost(target.runaway.original_cost)} mana, paid whether "
+        "it holds or not"
+    )
+    if rules.helper_failure_catches_helper:
+        cost += f"; if it fails, {spell.name} runs away from you too"
+    return (
+        f"Help {target.name} take back their runaway {spell.name}: {roll.dice} "
+        f"at or under your {roll.attribute}",
+        cost,
+    )
+
+
+def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
+    """A counter option's sentence and cost (tarmar-engine #31).
+
+    The counter names a caster, not a spell, and meets whatever that caster
+    casts this turn; its mana is spent whether a cast comes or not (the
+    canon's ``committed_mana_is_spent``). The opposed roll and the bonus the
+    commitment buys are the engine's, in the option's rationale.
+
+    Args:
+        mana: The mana the counter commits.
+        caster: The enemy caster it opposes.
+
+    Returns:
+        ``(plain, cost)``, as :func:`_plain_line` gives them.
+    """
+    name = caster.name if caster is not None else "an enemy caster"
+    return (
+        f"Counter {name}'s spell this turn, committing {mana} mana",
+        f"{mana} mana, spent whether {name} casts or not",
+    )
+
+
 def _plain_line(
     state: BattleState,
     actor: CombatantState,
@@ -337,7 +405,12 @@ def _plain_line(
         plain = "Stand up; it takes the whole turn"
     elif option in ("h", "r") and candidate.spell_key:
         spell = get_spell(candidate.spell_key)
-        plain = f"Cast {spell.name}" + (f" at {aimed}" if aimed else "")
+        verb = (
+            f"Press your countered {spell.name} again"
+            if candidate.escalate
+            else f"Cast {spell.name}"
+        )
+        plain = verb + (f" at {aimed}" if aimed else "")
         lost_rolls = " or ".join(str(roll) for roll in sorted(CASTING_MANA_LOST_ROLLS))
         if candidate.push_mana:
             # A pushed copy of the cast (issue #960): the engine's menu offers
@@ -350,6 +423,28 @@ def _plain_line(
             )
         else:
             cost = f"{spell.level} mana, paid only if it succeeds or the roll is {lost_rolls}"
+        if candidate.borrow:
+            # A borrowing copy (tarmar-engine #28): the engine offers it for a
+            # cast the caster cannot afford, with the debt roll's working in
+            # its rationale.
+            owed = borrowed_mana(actor, candidate)
+            plain += f", borrowing the {owed} mana you lack"
+            cost += (
+                f"; paying it empties your pool and borrows the {owed} you lack "
+                "as debt, and a debt roll follows the spell"
+            )
+        if candidate.escalate:
+            # A cast pressing a countered spell again (tarmar-engine #31):
+            # the engine marks it, for a player; the opposed roll comes again
+            # if a counter meets it.
+            cost += (
+                "; a counter against it means another opposed roll, and "
+                "countered again its mana is spent with no casting roll"
+            )
+    elif option == ANCHOR_OPTION:
+        plain, cost = _anchor_line(actor, target)
+    elif option == actions.COUNTER_OPTION and candidate.counter_mana is not None:
+        plain, cost = _counter_line(candidate.counter_mana, target)
     elif option == "j":
         plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
     elif option == "k":
@@ -426,6 +521,9 @@ class DescribedCandidate(Candidate):
             ``tarmar_engine.movement.legal_destinations`` on the live state
             (#819, #866); empty for an option that takes none and for a
             classic figure's.
+        borrowed: The mana a borrowing cast borrows (tarmar-engine #28,
+            :func:`borrowed_mana`), for the battle screen's borrow control
+            to name; 0 for every other option, and then not in the payload.
     """
 
     ai_choice: bool = False
@@ -434,6 +532,7 @@ class DescribedCandidate(Candidate):
     target_name: str = ""
     described: bool = False
     destinations: tuple[tuple[int, int], ...] = ()
+    borrowed: int = 0
 
     def to_payload(self) -> dict:
         payload = super().to_payload()
@@ -442,6 +541,8 @@ class DescribedCandidate(Candidate):
             payload["plain"] = self.plain
             payload["cost"] = self.cost
             payload["target_name"] = self.target_name
+        if self.borrowed:
+            payload["borrowed"] = self.borrowed
         return payload
 
     def menu_payload(self) -> dict:
@@ -465,6 +566,30 @@ def menu_payload(candidate: Candidate) -> dict:
     return candidate.to_payload()
 
 
+def mana_short(actor: CombatantState, cost: int) -> int:
+    """The mana a casting of ``cost`` would borrow: the cost less the pool.
+
+    The studio's one reading of the shortfall (tarmar-engine #28), for the
+    menu (:func:`borrowed_mana`) and the cast stage
+    (``battle.services.caster_magic``) alike. The engine's
+    :class:`~tarmar_engine.policy.Candidate` does not carry it; the engine
+    borrows exactly this when the cast pays (``TurnRunner.cast_spell``,
+    whose action payload's ``borrowed`` ``battle.tests.test_magic_seating``
+    compares it to). 0 when the pool covers the cost.
+    """
+    return max(0, cost - actor.mana)
+
+
+def borrowed_mana(actor: CombatantState, candidate: Candidate) -> int:
+    """The mana a borrowing cast borrows: its whole cost less the pool.
+
+    0 for a cast that does not borrow.
+    """
+    if not candidate.borrow or not candidate.spell_key:
+        return 0
+    return mana_short(actor, get_spell(candidate.spell_key).level + candidate.push_mana)
+
+
 def _base_fields(candidate: Candidate) -> dict:
     """A candidate's own engine fields, to rebuild it as a described one."""
     return {
@@ -475,6 +600,10 @@ def _base_fields(candidate: Candidate) -> dict:
         "target_id": candidate.target_id,
         "spell_key": candidate.spell_key,
         "push_mana": candidate.push_mana,
+        "borrow": candidate.borrow,
+        "anchor_target": candidate.anchor_target,
+        "counter_mana": candidate.counter_mana,
+        "escalate": candidate.escalate,
         "destination": candidate.destination,
     }
 
@@ -503,6 +632,7 @@ def describe(
         cost=cost,
         target_name=target.name if target is not None else "",
         described=True,
+        borrowed=borrowed_mana(actor, candidate),
         # Every hex the engine would take for this option, from the engine's
         # own rule (tarmar_engine.movement), so the picker offers nothing the
         # engine refuses on this board.

@@ -116,8 +116,10 @@ EXPORTABLE_FIELDS = (
     # here.
     "fatigue_damage",
     "body_damage",
-    # Mana spent and not yet restored, for the same reason.
+    # Mana spent and not yet restored, for the same reason, and mana
+    # borrowed and not yet paid back (tarmar-engine #28).
     "mana_spent",
+    "mana_owed",
 )
 
 # Version stamp so future schema changes can detect old exports cleanly.

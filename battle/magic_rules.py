@@ -1,7 +1,8 @@
 """The canon's magic rules, read into the engine's ``MagicRules`` (issue #960).
 
 The engine (``tarmar_engine.magic``) carries the structure of the casting
-success tiers, Push and Channel and takes every number from a ``MagicRules``
+success tiers, Push, Channel, Borrowing (tarmar-engine #28), Runaway's
+later turns (tarmar-engine #30) and Counterspell (tarmar-engine #31) and takes every number from a ``MagicRules``
 its caller injects. The numbers are the canon's: the Tarmar canon builds them
 from its DM-only magic-mechanics pages, and the default canon ships invented
 ones. This module is the one path that sets them, and it reads only the
@@ -34,14 +35,38 @@ The file is a JSON object::
         "kind_by_spell": {<engine spell key>: <kind of magic>},
         "default_kind": str | null
       },
+      "borrowing": null | {
+        "debt_dice": str, "debt_attributes": [str, ...],
+        "penalty_per_debt": int,
+        "failure": {"key": str, "label": str, "is_runaway": bool},
+        "automatic_failure_totals": [int, ...],
+        "max_debt": int | null,
+        "refunds_pay_debt_first": bool
+      },
+      "runaway": null | {
+        "drain_multiplier_of_cost": int, "drain_flat": int,
+        "overflow_pool": "body" | "fatigue",
+        "death_multiplier_of_max": int | null,
+        "self_anchor": {"dice": str, "attribute": str},
+        "helper_anchor": {"dice": str, "attribute": str},
+        "helper_cost_multiplier_of_cost": int,
+        "helper_failure_catches_helper": bool,
+        "effect_bonus_per_turn": int
+      },
+      "counterspell": null | {
+        "opposed_dice": str, "opposed_attribute": str,
+        "mana_per_bonus": int, "ties_go_to_caster": bool,
+        "defender_min_mana": int, "defender_max_mana": int | null
+      },
       "rulings": [{"key": str, "reading": str, ...}]
     }
 
 Field names are the engine dataclass fields they fill, and every one of them
 is required: a canon states each number rather than inheriting an engine
 default. An unknown key at any level is an error, since it is most likely a
-misspelling of a known one; so is a key repeated in one object, and two tiers or
-two failure bands sharing a ``key``. ``rulings`` is optional and is the canon's own
+misspelling of a known one; so is a key repeated in one object, two tiers or
+two failure bands sharing a ``key``, and an attribute named twice in
+``borrowing.debt_attributes``. ``rulings`` is optional and is the canon's own
 record of the readings its pages left open; it is checked for shape and not
 otherwise read.
 """
@@ -49,17 +74,23 @@ otherwise read.
 import functools
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NoReturn
 
 from django.core.exceptions import ImproperlyConfigured
 from tarmar_engine.magic import (
+    BorrowingFailure,
+    BorrowingRules,
     CastingSuccessTier,
     ChannelDerivation,
     ChannelRules,
     ControlBand,
+    CounterspellRules,
     MagicRules,
     PushRules,
+    RollUnderRule,
+    RunawayRules,
     SpellEffectKind,
     spell_effect_kind,
 )
@@ -91,7 +122,44 @@ PUSH_FIELDS = (
 )
 CHANNEL_FIELDS = ("derivations", "kind_by_spell", "default_kind")
 DERIVATION_FIELDS = ("source_skill", "multiplier", "offset")
-TOP_LEVEL_FIELDS = ("casting_success_tiers", "push", "channel")
+BORROWING_FIELDS = (
+    "debt_dice",
+    "debt_attributes",
+    "penalty_per_debt",
+    "failure",
+    "automatic_failure_totals",
+    "max_debt",
+    "refunds_pay_debt_first",
+)
+BORROWING_FAILURE_FIELDS = ("key", "label", "is_runaway")
+RUNAWAY_FIELDS = (
+    "drain_multiplier_of_cost",
+    "drain_flat",
+    "overflow_pool",
+    "death_multiplier_of_max",
+    "self_anchor",
+    "helper_anchor",
+    "helper_cost_multiplier_of_cost",
+    "helper_failure_catches_helper",
+    "effect_bonus_per_turn",
+)
+ROLL_UNDER_FIELDS = ("dice", "attribute")
+COUNTERSPELL_FIELDS = (
+    "opposed_dice",
+    "opposed_attribute",
+    "mana_per_bonus",
+    "ties_go_to_caster",
+    "defender_min_mana",
+    "defender_max_mana",
+)
+TOP_LEVEL_FIELDS = (
+    "casting_success_tiers",
+    "push",
+    "channel",
+    "borrowing",
+    "runaway",
+    "counterspell",
+)
 OPTIONAL_TOP_LEVEL_FIELDS = ("rulings",)
 RULING_FIELDS = ("key", "reading")
 
@@ -203,6 +271,17 @@ class _RulesFileReader:
         if len(set(integers)) != len(integers):
             self.fail(field_path, f"repeats a total: {integers}")
         return frozenset(integers)
+
+    def text_list(self, value: Any, field_path: str) -> tuple[str, ...]:
+        """A list of non-empty strings with no repeats."""
+        items = self.json_list(value, field_path)
+        texts = tuple(
+            self.text(item, f"{field_path}[{index}]")
+            for index, item in enumerate(items)
+        )
+        if len(set(texts)) != len(texts):
+            self.fail(field_path, f"repeats an entry: {list(texts)}")
+        return texts
 
     def unique_keys(
         self, items: Sequence[CastingSuccessTier | ControlBand], field_path: str
@@ -386,6 +465,118 @@ class _RulesFileReader:
                 ),
             )
 
+    def borrowing_failure(self, value: Any, field_path: str) -> BorrowingFailure:
+        """``borrowing.failure``: what a failed debt roll does."""
+        fields = self.json_object(value, field_path, BORROWING_FAILURE_FIELDS)
+        return BorrowingFailure(
+            key=self.text(fields["key"], f"{field_path}.key"),
+            label=self.text(fields["label"], f"{field_path}.label"),
+            is_runaway=self.boolean(fields["is_runaway"], f"{field_path}.is_runaway"),
+        )
+
+    def borrowing(self, value: Any, field_path: str) -> BorrowingRules | None:
+        """``borrowing``, or ``None`` when no caster may borrow."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, BORROWING_FIELDS)
+        with self.engine_check(field_path):
+            return BorrowingRules(
+                debt_dice=self.text(fields["debt_dice"], f"{field_path}.debt_dice"),
+                debt_attributes=self.text_list(
+                    fields["debt_attributes"], f"{field_path}.debt_attributes"
+                ),
+                penalty_per_debt=self.integer(
+                    fields["penalty_per_debt"], f"{field_path}.penalty_per_debt"
+                ),
+                failure=self.borrowing_failure(
+                    fields["failure"], f"{field_path}.failure"
+                ),
+                automatic_failure_totals=self.integer_set(
+                    fields["automatic_failure_totals"],
+                    f"{field_path}.automatic_failure_totals",
+                ),
+                max_debt=self.optional_integer(
+                    fields["max_debt"], f"{field_path}.max_debt"
+                ),
+                refunds_pay_debt_first=self.boolean(
+                    fields["refunds_pay_debt_first"],
+                    f"{field_path}.refunds_pay_debt_first",
+                ),
+            )
+
+    def roll_under_rule(self, value: Any, field_path: str) -> RollUnderRule:
+        """``runaway.self_anchor`` or ``runaway.helper_anchor``: dice against
+        one attribute."""
+        fields = self.json_object(value, field_path, ROLL_UNDER_FIELDS)
+        with self.engine_check(field_path):
+            return RollUnderRule(
+                dice=self.text(fields["dice"], f"{field_path}.dice"),
+                attribute=self.text(fields["attribute"], f"{field_path}.attribute"),
+            )
+
+    def runaway(self, value: Any, field_path: str) -> RunawayRules | None:
+        """``runaway``, or ``None`` when a Runaway has no later turns."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, RUNAWAY_FIELDS)
+        integers = {
+            name: self.integer(fields[name], f"{field_path}.{name}")
+            for name in (
+                "drain_multiplier_of_cost",
+                "drain_flat",
+                "helper_cost_multiplier_of_cost",
+                "effect_bonus_per_turn",
+            )
+        }
+        with self.engine_check(field_path):
+            return RunawayRules(
+                **integers,
+                overflow_pool=self.text(
+                    fields["overflow_pool"], f"{field_path}.overflow_pool"
+                ),
+                death_multiplier_of_max=self.optional_integer(
+                    fields["death_multiplier_of_max"],
+                    f"{field_path}.death_multiplier_of_max",
+                ),
+                self_anchor=self.roll_under_rule(
+                    fields["self_anchor"], f"{field_path}.self_anchor"
+                ),
+                helper_anchor=self.roll_under_rule(
+                    fields["helper_anchor"], f"{field_path}.helper_anchor"
+                ),
+                helper_failure_catches_helper=self.boolean(
+                    fields["helper_failure_catches_helper"],
+                    f"{field_path}.helper_failure_catches_helper",
+                ),
+            )
+
+    def counterspell(self, value: Any, field_path: str) -> CounterspellRules | None:
+        """``counterspell``, or ``None`` when no spell may be countered."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, COUNTERSPELL_FIELDS)
+        with self.engine_check(field_path):
+            return CounterspellRules(
+                opposed_dice=self.text(
+                    fields["opposed_dice"], f"{field_path}.opposed_dice"
+                ),
+                opposed_attribute=self.text(
+                    fields["opposed_attribute"], f"{field_path}.opposed_attribute"
+                ),
+                mana_per_bonus=self.integer(
+                    fields["mana_per_bonus"], f"{field_path}.mana_per_bonus"
+                ),
+                ties_go_to_caster=self.boolean(
+                    fields["ties_go_to_caster"], f"{field_path}.ties_go_to_caster"
+                ),
+                defender_min_mana=self.integer(
+                    fields["defender_min_mana"], f"{field_path}.defender_min_mana"
+                ),
+                defender_max_mana=self.optional_integer(
+                    fields["defender_max_mana"], f"{field_path}.defender_max_mana"
+                ),
+            )
+
     def rulings(self, value: Any, field_path: str) -> None:
         """``rulings``: a list of objects with string ``key`` and ``reading``."""
         for index, ruling in enumerate(self.json_list(value, field_path)):
@@ -412,11 +603,21 @@ class _RulesFileReader:
         )
         self.unique_keys(tiers, "casting_success_tiers")
         with self.engine_check("casting_success_tiers"):
-            return MagicRules(
+            rules = MagicRules(
                 casting_success_tiers=tiers,
                 push=self.push(fields["push"], "push"),
                 channel=self.channel(fields["channel"], "channel"),
             )
+        # Added once the rest stands, so the engine's refusal of an uncapped
+        # Borrowing with no Channel to bound it names this field.
+        borrowing = self.borrowing(fields["borrowing"], "borrowing")
+        with self.engine_check("borrowing"):
+            rules = replace(rules, borrowing=borrowing)
+        return replace(
+            rules,
+            runaway=self.runaway(fields["runaway"], "runaway"),
+            counterspell=self.counterspell(fields["counterspell"], "counterspell"),
+        )
 
 
 def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

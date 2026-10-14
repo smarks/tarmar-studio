@@ -151,6 +151,40 @@ class FightWriteBackTest(BaseTestCase):
         [back] = fight_reports(battle, spent, full, turn=2)
         self.assertEqual(back.mana_spent, -4)
 
+    def test_a_caster_comes_on_owing_what_the_record_owes(self):
+        # Borrowing (tarmar-engine #28): the debt a fight leaves persists.
+        self.character.free_spell_points = 5
+        self.character.mana_owed = 2
+        self.character.save()
+        self.assertEqual(self.figure(self.make_battle()).debt, 2)
+
+    def test_a_debt_run_up_on_the_board_is_reported_and_handed_back(self):
+        battle = self.make_battle()
+        seat_id = self.seat(battle).pk
+        owing_one = {
+            seat_id: profiles.FigureVitals(
+                alive=True, fatigue=59, body=40, mana=2, debt=1
+            )
+        }
+        borrowed = {
+            seat_id: profiles.FigureVitals(
+                alive=True, fatigue=59, body=40, mana=0, debt=4
+            )
+        }
+        [report] = fight_reports(battle, owing_one, borrowed, turn=2, started=owing_one)
+        self.assertEqual((report.mana_spent, report.debt_incurred), (2, 3))
+        self.assertEqual(report.started_debt, 1)
+        [back] = fight_reports(battle, borrowed, owing_one, turn=2)
+        self.assertEqual(back.debt_incurred, -3)
+
+    def test_the_tarmar_vitals_carry_the_debt(self):
+        battle = self.make_battle()
+        state = tarmar_state(battle)
+        figure = state.by_id(self.seat(battle).pk)
+        figure.debt = 3
+        vitals = profiles.for_battle(battle).figure_vitals(state)
+        self.assertEqual(vitals[figure.combatant_id].debt, 3)
+
     def test_a_character_already_down_comes_on_unconscious(self):
         self.character.fatigue_damage = 59
         self.character.save()
@@ -404,6 +438,19 @@ class LobbyStartTest(BaseTestCase):
         self.assertEqual((figure.fatigue, figure.max_fatigue), (29, 59))
         self.assertEqual((figure.mana, figure.max_mana), (3, 5))
 
+    def test_a_debt_run_up_after_the_claim_comes_onto_the_board(self):
+        Character.objects.filter(pk=self.character.pk).update(mana_owed=2)
+        battle = start_battle(self.battle.pk)
+        self.assertEqual(tarmar_state(battle).by_id(self.seat.pk).debt, 2)
+
+    def test_a_debt_settled_after_the_claim_is_not_brought_on(self):
+        # Claimed owing 2, as the snapshot then said; settled before the start.
+        seat = self.battle.combatants.get(pk=self.seat.pk)
+        seat.snapshot_json = {**seat.snapshot_json, "debt": 2}
+        seat.save(update_fields=["snapshot_json"])
+        battle = start_battle(self.battle.pk)
+        self.assertEqual(tarmar_state(battle).by_id(self.seat.pk).debt, 0)
+
     def test_a_character_who_died_after_the_claim_cannot_start(self):
         Character.objects.filter(pk=self.character.pk).update(
             is_alive=False, death_cause="a fall"
@@ -534,6 +581,32 @@ class StalePoolsTest(BaseTestCase):
         note = battle.events.order_by("-sequence").first()
         assert note is not None
         self.assertIn("took the pools from the character records", note.message)
+        # Nobody owes anything here, so the line says nothing of a debt.
+        self.assertNotIn("owed", note.message)
+        advance_turn(battle.pk)
+
+    def test_a_debt_the_game_master_settles_mid_fight_is_what_the_board_owes(self):
+        # Borrowing (tarmar-engine #28): the board must not go on rolling
+        # against, capping by or paying back a debt the record forgave.
+        self.character.free_spell_points = 5
+        self.character.mana_owed = 2
+        self.character.save()
+        battle = self.make_battle()
+        seat_id = battle.combatants.get(character=self.character).pk
+        self.assertEqual(tarmar_state(battle).by_id(seat_id).debt, 2)
+        character_services.set_current_pools(
+            self.character.pk, owed=0, is_game_master=True
+        )
+
+        with self.assertRaisesMessage(StalePools, "Aldwin: the record's pools"):
+            advance_turn(battle.pk)
+
+        battle = resnapshot_pools(battle.pk, is_game_master=True)
+        self.assertEqual(tarmar_state(battle).by_id(seat_id).debt, 0)
+        note = battle.events.order_by("-sequence").first()
+        assert note is not None
+        self.assertIn("owed 2→0", note.message)
+        self.assertEqual(stale_pools(battle), [])
         advance_turn(battle.pk)
 
     def test_only_a_game_master_takes_the_pools(self):

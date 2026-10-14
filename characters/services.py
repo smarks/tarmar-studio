@@ -73,6 +73,7 @@ from .models import (
     DIE_ROLL_FIELDS,
     Character,
     CurrentCondition,
+    mana_pool_text,
 )
 from .purse import (
     PurseError,
@@ -189,10 +190,11 @@ SECRET_FIELDS: frozenset[str] = frozenset({"is_dragonborn"})
 SECRET_HISTORY_FIELD = "game_master_note"
 SECRET_HISTORY_NOTE = "a Game Master's note"
 
-#: Why a player cannot set current Fatigue and Body (issue #751).
+#: Why a player cannot set current Fatigue and Body (issue #751), nor the
+#: mana owed (tarmar-engine #28).
 POOLS_GAME_MASTER_ONLY = (
-    "Only a Game Master can set current Fatigue, Body and Mana; a fight on the "
-    "board records them on its own"
+    "Only a Game Master can set current Fatigue, Body and Mana and the mana "
+    "owed; a fight on the board records them on its own"
 )
 
 _ATTRIBUTE_REASON = (
@@ -296,6 +298,9 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "fatigue_damage": _game_master(POOLS_GAME_MASTER_ONLY),
         "body_damage": _game_master(POOLS_GAME_MASTER_ONLY),
         "mana_spent": _game_master(POOLS_GAME_MASTER_ONLY),
+        # Mana borrowed and not paid back (tarmar-engine #28): only a fight's
+        # result writes it, and a Game Master settles it, as for mana spent.
+        "mana_owed": _game_master(POOLS_GAME_MASTER_ONLY),
         # Written by the rules as a consequence of something else.
         "provenance_recorded": _nobody(),
         "location_recorded": _nobody(),
@@ -1144,12 +1149,18 @@ class FightReport:
         mana_spent: Mana the turn spent (negative when a restart hands it
             back). Spent mana stays spent on the record, like a wound, until
             a Game Master restores it: the rules publish no recovery.
+        debt_incurred: Mana the turn borrowed, less any it paid back
+            (tarmar-engine #28; negative when a refund paid more than was
+            borrowed, or a restart hands it back). It stays owed on the
+            record until a refund pays it or a Game Master settles it.
         died: The figure died this turn.
         closes: ``""`` mid-fight, else why the fight's history line is due.
         started_fatigue: The figure's Fatigue when the fight began, the
             history line's old value; ``None`` to use the record's own.
         started_body: The figure's Body when the fight began, likewise.
         started_mana: The figure's Mana when the fight began, likewise.
+        started_debt: The mana the figure owed when the fight began,
+            likewise; ``None`` under rules with no Borrowing to owe by.
         author: Whom the fight's history lines name: the Game Master
             (:data:`GAMES_MASTER_AUTHOR`) for a fight whose foes are theirs,
             so a player is never credited with marking their own death; the
@@ -1162,11 +1173,13 @@ class FightReport:
     fatigue_lost: int = 0
     body_lost: int = 0
     mana_spent: int = 0
+    debt_incurred: int = 0
     died: bool = False
     closes: str = ""
     started_fatigue: int | None = None
     started_body: int | None = None
     started_mana: int | None = None
+    started_debt: int | None = None
     author: str = ""
 
     @property
@@ -1176,6 +1189,7 @@ class FightReport:
             self.fatigue_lost
             or self.body_lost
             or self.mana_spent
+            or self.debt_incurred
             or self.died
             or self.closes
         )
@@ -1220,6 +1234,7 @@ def apply_fight_report(
     )
     character.body_damage = _add_damage(character.body_damage, report.body_lost)
     character.mana_spent = _add_damage(character.mana_spent, report.mana_spent)
+    character.mana_owed = _add_damage(character.mana_owed, report.debt_incurred)
     if report.died:
         character.is_alive = False
         # Written here, not typed: cut to the column rather than refused.
@@ -1238,7 +1253,13 @@ def apply_fight_report(
             after.body_maximum,
         )
         if pool and report.started_mana is not None:
-            old += f"; Mana {report.started_mana}/{pool}"
+            # Rules with no Borrowing owe nothing new: the record's own.
+            started_owed = (
+                character.mana_owed
+                if report.started_debt is None
+                else report.started_debt
+            )
+            old += "; " + mana_pool_text(report.started_mana, pool, started_owed)
     else:
         old = before.pools + (f"; {mana_before}" if mana_before else "")
     now = after.pools + (f"; {character.mana_text}" if character.mana_text else "")
@@ -1273,6 +1294,7 @@ def record_fight(report: FightReport) -> ChangeResult | None:
             character.fatigue_damage,
             character.body_damage,
             character.mana_spent,
+            character.mana_owed,
             character.is_alive,
         )
         line = apply_fight_report(character, report)
@@ -1280,6 +1302,7 @@ def record_fight(report: FightReport) -> ChangeResult | None:
             character.fatigue_damage,
             character.body_damage,
             character.mana_spent,
+            character.mana_owed,
             character.is_alive,
         )
         if was == now and line is None:
@@ -1287,7 +1310,7 @@ def record_fight(report: FightReport) -> ChangeResult | None:
             return None
         if line is not None:
             change.note("current pools", *line)
-        if was[3] and not character.is_alive:
+        if was[-1] and not character.is_alive:
             change.note("is_alive", True, False)
     return ChangeResult(change.character, line[1] if line else "")
 
@@ -1319,30 +1342,40 @@ def apply_current_pools(
     fatigue: int | None = None,
     body: int | None = None,
     mana: int | None = None,
+    owed: int | None = None,
     is_game_master: bool = False,
 ) -> str:
     """Set current Fatigue, Body and/or Mana, for a Game Master only (#751).
 
     A player's pools are what the fights did to them; healing, rest, mana
     restored and a blow off the board are the Game Master's to rule, and the
-    rules publish no recovery rate to apply for any of them.
+    rules publish no recovery rate to apply for any of them. The mana owed
+    (tarmar-engine #28) likewise: a fight's result writes it, and settling
+    it is the Game Master's override.
 
     Args:
         character: The character.
         fatigue: Current Fatigue, or ``None`` to leave it.
         body: Current Body, or ``None`` to leave it.
         mana: Current Mana, or ``None`` to leave it.
+        owed: The mana owed, or ``None`` to leave it.
         is_game_master: Whether a Game Master asked.
 
     Raises:
         CharacterChangeError: A player asking, pools not known yet, a value
-            above the pool's maximum, Mana below 0, or a pool further below 0
-            than the record can hold.
+            above the pool's maximum, Mana or the mana owed below 0, or a
+            pool or a debt further than the record can hold.
     """
     if not is_game_master:
         raise CharacterChangeError(POOLS_GAME_MASTER_ONLY)
-    if fatigue is None and body is None and mana is None:
-        raise CharacterChangeError("Give a current Fatigue, Body or Mana to set")
+    if fatigue is None and body is None and mana is None and owed is None:
+        raise CharacterChangeError(
+            "Give a current Fatigue, Body or Mana, or the mana owed, to set"
+        )
+    if owed is not None and not 0 <= owed <= MAX_POOL_DAMAGE:
+        raise CharacterChangeError(
+            f"The mana owed is 0 to {MAX_POOL_DAMAGE}; {owed} was given"
+        )
     maxima = pool_maxima(character)
     if (fatigue is not None or body is not None) and (
         maxima["Fatigue"] is None or maxima["Body"] is None
@@ -1371,6 +1404,8 @@ def apply_current_pools(
     for label, loss_field in POOL_LOSS_FIELDS.items():
         if label in spent:
             setattr(character, loss_field, spent[label])
+    if owed is not None:
+        character.mana_owed = owed
     condition = character.condition
     now = [condition.summary] if condition is not None else []
     if character.mana_text:
@@ -1384,6 +1419,7 @@ def set_current_pools(
     fatigue: int | None = None,
     body: int | None = None,
     mana: int | None = None,
+    owed: int | None = None,
     actor: User | None = None,
     authorize: Callable[[Character], None] | None = None,
     is_game_master: bool = False,
@@ -1405,6 +1441,7 @@ def set_current_pools(
             fatigue=fatigue,
             body=body,
             mana=mana,
+            owed=owed,
             is_game_master=is_game_master,
         )
         change.note("current pools", "; ".join(was), note)

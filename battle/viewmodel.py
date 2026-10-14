@@ -65,7 +65,9 @@ from __future__ import annotations
 from .classic_adaptation import classic_team
 from .engine import hexes
 from .engine.state import BattleState, CombatantState
+from .magic_rules import magic_rules
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE
+from .spells import get_spell
 
 #: Pointy-top hexes — vertices up and down, rows offset. The Tarmar arena.
 POINTY = "pointy"
@@ -252,7 +254,110 @@ def _tarmar_detail(combatant: CombatantState) -> dict:
     }
 
 
-def _tarmar_combatant(combatant: CombatantState, detail_ids: frozenset[int]) -> dict:
+def _figure_name(state: BattleState, combatant_id: int | str | None) -> str | None:
+    """The name of the figure on the board with this id, or ``None``."""
+    return next(
+        (
+            figure.name
+            for figure in state.combatants
+            if str(figure.combatant_id) == str(combatant_id)
+        ),
+        None,
+    )
+
+
+def _tarmar_runaway(state: BattleState, combatant: CombatantState) -> dict | None:
+    """The spell running away from this combatant, for its roster card
+    (tarmar-engine #30), or ``None`` when none is.
+
+    Everything is read from the engine's ``RunawayState`` and the canon's
+    injected rules, never worked out by the page: the turns it has fed, what
+    the next turn's drain is
+    (:meth:`~tarmar_engine.magic.RunawayRules.drain`) and where it comes
+    from, mana while any is left and the injected overflow pool after, and
+    whose Runaway a failed helper caught it from, when that figure is still
+    on the board. ``line`` is the sentence the card prints.
+    """
+    running = combatant.runaway
+    if running is None or not combatant.alive:
+        return None
+    spell = get_spell(running.spell_key)
+    rules = magic_rules().runaway
+    caught_from = (
+        None
+        if running.caught_from is None
+        else _figure_name(state, running.caught_from)
+    )
+    if running.turns_running == 0:
+        fed = "began this turn"
+    elif running.turns_running == 1:
+        fed = "has fed for 1 turn"
+    else:
+        fed = f"has fed for {running.turns_running} turns"
+    line = f"Runaway {spell.name}: {fed}"
+    if caught_from is not None:
+        line += f", caught from {caught_from}"
+    drain = None
+    draining = ""
+    if rules is not None:
+        drain = rules.drain(running.original_cost)
+        if combatant.mana >= drain:
+            draining = "mana"
+        elif combatant.mana > 0:
+            draining = f"mana, then {rules.overflow_pool}"
+        else:
+            draining = rules.overflow_pool
+        line += f"; it takes {drain} a turn from {draining}"
+    return {
+        "spell": spell.name,
+        "spell_key": running.spell_key,
+        "turns_running": running.turns_running,
+        "drain": drain,
+        "draining": draining,
+        "caught_from": caught_from,
+        "line": line,
+    }
+
+
+def _tarmar_contest(state: BattleState, combatant: CombatantState) -> dict | None:
+    """The spell of this combatant's that stands countered, for its roster
+    card (tarmar-engine #31), or ``None`` when none does.
+
+    Read from the engine's ``ContestState``: the spell, its target, who
+    countered it last and how many times it has been countered. Casting it
+    again at the same target presses it; anything else ends the contest.
+    ``line`` is the sentence the card prints.
+    """
+    contest = combatant.contest
+    if contest is None or not combatant.alive:
+        return None
+    spell = get_spell(contest.spell_key)
+    target = _figure_name(state, contest.target_id)
+    defenders = [
+        name
+        for name in (
+            _figure_name(state, defender_id) for defender_id in contest.defender_ids
+        )
+        if name is not None
+    ]
+    times = "once" if contest.turns == 1 else f"{contest.turns} times"
+    line = f"{spell.name} countered {times}"
+    if defenders:
+        line += f" by {', '.join(defenders)}"
+    line += "; cast it again" + (f" at {target}" if target else "") + " to press it"
+    return {
+        "spell": spell.name,
+        "spell_key": contest.spell_key,
+        "target": target,
+        "defenders": defenders,
+        "turns": contest.turns,
+        "line": line,
+    }
+
+
+def _tarmar_combatant(
+    state: BattleState, combatant: CombatantState, detail_ids: frozenset[int]
+) -> dict:
     faced = hexes.add((combatant.q, combatant.r), combatant.facing)
     return {
         "combatant_id": combatant.combatant_id,
@@ -278,6 +383,16 @@ def _tarmar_combatant(combatant: CombatantState, detail_ids: frozenset[int]) -> 
         ),
         # The rolls that killed it, for the roster card's links into the log.
         "fatal_chain": list(combatant.fatal_chain),
+        # A spell running away from it (tarmar-engine #30), shown to every
+        # viewer; None when none is. Where the drain comes from tells them
+        # roughly where its mana stands, as the log's drain line already does
+        # for everyone.
+        "runaway": _tarmar_runaway(state, combatant),
+        # A spell of its own that stands countered (tarmar-engine #31),
+        # shown to every viewer as the log already narrates it; None when
+        # none does. A counter held is not shown: the engine sets and clears
+        # it within the Actions phase, so no saved state carries one.
+        "contest": _tarmar_contest(state, combatant),
         # The attribute panel, for a viewer allowed this combatant's
         # numbers; ``None`` — not an empty panel — for everyone else, so
         # the page draws no disclosure at all rather than an empty one.
@@ -316,7 +431,8 @@ def tarmar_view(
             "cells": _arena_disc(state.arena_radius),
         },
         "combatants": [
-            _tarmar_combatant(combatant, detail_ids) for combatant in state.combatants
+            _tarmar_combatant(state, combatant, detail_ids)
+            for combatant in state.combatants
         ],
         "ground_weapons": _ground_weapons(state),
     }

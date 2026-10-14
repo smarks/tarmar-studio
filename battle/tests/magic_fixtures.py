@@ -12,11 +12,16 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from tarmar_engine.magic import (
+    BorrowingFailure,
+    BorrowingRules,
     ChannelDerivation,
     ChannelRules,
     ControlBand,
+    CounterspellRules,
     MagicRules,
     PushRules,
+    RollUnderRule,
+    RunawayRules,
     SpellEffectKind,
 )
 
@@ -62,6 +67,61 @@ INVENTED_RULES = MagicRules(
             STUDIED_KIND: ChannelDerivation(source_skill=None, multiplier=2, offset=0)
         },
         default_kind=STUDIED_KIND,
+    ),
+)
+
+
+#: :data:`INVENTED_RULES` with Borrowing (tarmar-engine #28): a 2d6 debt roll
+#: under WIS less two per point owed, a natural 12 failing it whatever the
+#: target, a non-Runaway failure, and a cap of three owed.
+BORROWING_RULES = replace(
+    INVENTED_RULES,
+    borrowing=BorrowingRules(
+        debt_dice="2d6",
+        debt_attributes=("WIS",),
+        penalty_per_debt=2,
+        failure=BorrowingFailure(
+            key="slip", label="Slip of the purse", is_runaway=False
+        ),
+        automatic_failure_totals=frozenset({12}),
+        max_debt=3,
+    ),
+)
+
+
+#: :data:`INVENTED_RULES` with Runaway's later turns (tarmar-engine #30): a
+#: drain of twice the original cost and 1 more a turn, moving to Body once the
+#: mana is gone, death at minus the Body maximum, a 2d8 self anchor against
+#: WIS, a 2d10 helper anchor against INT at twice the original cost, a failed
+#: helper caught, and a growth of 2 a turn.
+RUNAWAY_RULES = replace(
+    INVENTED_RULES,
+    runaway=RunawayRules(
+        drain_multiplier_of_cost=2,
+        drain_flat=1,
+        overflow_pool="body",
+        death_multiplier_of_max=1,
+        self_anchor=RollUnderRule(dice="2d8", attribute="WIS"),
+        helper_anchor=RollUnderRule(dice="2d10", attribute="INT"),
+        helper_cost_multiplier_of_cost=2,
+        helper_failure_catches_helper=True,
+        effect_bonus_per_turn=2,
+    ),
+)
+
+
+#: :data:`INVENTED_RULES` with Counterspell (tarmar-engine #31): both sides
+#: roll 2d6 plus INT, +1 per 2 mana invested, ties to the defender, and a
+#: defender commits 1 to 3 mana.
+COUNTER_RULES = replace(
+    INVENTED_RULES,
+    counterspell=CounterspellRules(
+        opposed_dice="2d6",
+        opposed_attribute="INT",
+        mana_per_bonus=2,
+        ties_go_to_caster=False,
+        defender_min_mana=1,
+        defender_max_mana=3,
     ),
 )
 

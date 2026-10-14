@@ -424,7 +424,7 @@ class ExportCarriesCurrentPoolsTest(BaseTestCase):
     def test_a_players_import_arrives_unhurt_and_a_game_masters_keeps_it(self):
         # The pool columns are the Game Master's (FIELD_RULES), so the
         # player-import allowlist built from that table drops them (#744).
-        for name in ("fatigue_damage", "body_damage", "mana_spent"):
+        for name in ("fatigue_damage", "body_damage", "mana_spent", "mana_owed"):
             self.assertNotIn(name, PLAYER_KEPT_FIELDS)
         self.character.mana_spent = 2
         self.character.save()
@@ -460,10 +460,136 @@ class PoolFieldRulesTest(BaseTestCase):
     def test_they_are_game_master_values_and_never_a_field_edit(self):
         from characters.models import CHARACTER_FIELDS
 
-        for name in ("fatigue_damage", "body_damage", "mana_spent"):
+        for name in ("fatigue_damage", "body_damage", "mana_spent", "mana_owed"):
             with self.subTest(name=name):
                 rule = services.FIELD_RULES[name]
                 self.assertIs(rule.author, services.FieldAuthor.GAME_MASTER)
                 self.assertEqual(rule.reason, services.POOLS_GAME_MASTER_ONLY)
                 self.assertNotIn(name, CHARACTER_FIELDS)
                 self.assertNotIn(name, services.update_fields_for(is_game_master=True))
+
+
+class ManaOwedTest(BaseTestCase):
+    """Mana borrowed in a fight and not paid back (tarmar-engine #28).
+
+    Who may set it: a fight's result (:func:`services.record_fight`), and a
+    Game Master's edit of the sheet as the override, as for mana spent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.owner = self.create_user("owner")
+        self.character = create_character(
+            self.owner, name="Aldwin", free_spell_points=6
+        )
+        self.url = f"/tarmar/characters/{self.character.pk}/set-pools/"
+
+    def report(self, **fields) -> FightReport:
+        return FightReport(
+            character_id=self.character.pk, fight="Wolf Road", turn=3, **fields
+        )
+
+    def test_a_fight_writes_the_debt_and_a_restart_hands_it_back(self):
+        services.record_fight(self.report(mana_spent=6, debt_incurred=2))
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.mana_owed, 2)
+        self.assertEqual(self.character.mana_text, "Mana 0/6, owes 2")
+        services.record_fight(
+            self.report(
+                mana_spent=-6, debt_incurred=-2, closes=services.FIGHT_RESTARTED
+            )
+        )
+        self.character.refresh_from_db()
+        self.assertEqual(
+            (self.character.mana_owed, self.character.mana_text), (0, "Mana 6/6")
+        )
+
+    def test_a_refund_that_pays_the_debt_lowers_it_and_never_below_nothing(self):
+        services.record_fight(self.report(debt_incurred=3))
+        services.record_fight(self.report(debt_incurred=-5))
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.mana_owed, 0)
+
+    def test_a_debt_alone_is_a_change_the_record_takes(self):
+        self.assertTrue(self.report(debt_incurred=1).changes_anything)
+        self.assertIsNotNone(services.record_fight(self.report(debt_incurred=1)))
+
+    def test_the_fights_line_says_what_was_owed_before_and_after(self):
+        services.record_fight(self.report(mana_spent=6, debt_incurred=2))
+        result = services.record_fight(
+            self.report(
+                closes=services.FIGHT_ENDED,
+                started_fatigue=59,
+                started_body=40,
+                started_mana=6,
+                started_debt=0,
+            )
+        )
+        assert result is not None
+        self.assertIn("Mana 0/6, owes 2", result.note)
+        self.character.refresh_from_db()
+        self.assertEqual(
+            self.character.history[-1]["old"], "Fatigue 59/59, Body 40/40; Mana 6/6"
+        )
+
+    def test_a_game_master_settles_the_debt_and_a_player_may_not(self):
+        self.character.mana_owed = 3
+        self.character.save()
+        with self.assertRaises(CharacterChangeError) as caught:
+            services.set_current_pools(self.character.pk, owed=0)
+        self.assertEqual(str(caught.exception), services.POOLS_GAME_MASTER_ONLY)
+        result = services.set_current_pools(
+            self.character.pk, owed=1, is_game_master=True
+        )
+        self.assertEqual(result.character.mana_owed, 1)
+        self.assertIn("Mana 6/6, owes 1", result.note)
+        self.assertIn("owes 3", result.character.history[-1]["old"])
+        with self.assertRaises(CharacterChangeError) as caught:
+            services.set_current_pools(self.character.pk, owed=-1, is_game_master=True)
+        self.assertIn("The mana owed is 0 to", str(caught.exception))
+
+    def test_the_endpoint_takes_a_game_masters_owed_and_refuses_the_owner(self):
+        self.login_as(self.owner)
+        response = self.post_json(self.url, {"owed": 0})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], services.POOLS_GAME_MASTER_ONLY)
+        self.login_as(self.create_dm())
+        mark_gate_passed(self.client)
+        response = self.post_json(self.url, {"owed": "2"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn(
+            'id="current-owed" data-pool="owed"',
+            response.json()["injury_thresholds_html"],
+        )
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.mana_owed, 2)
+
+    def test_the_sheet_shows_owes_beside_the_pool(self):
+        sheet = f"/tarmar/characters/{self.character.pk}/"
+        self.login_as(self.owner)
+        self.assertNotContains(self.client.get(sheet), 'id="current-owed"')
+        type(self.character).objects.filter(pk=self.character.pk).update(mana_owed=2)
+        response = self.client.get(sheet)
+        self.assertContains(
+            response,
+            '<strong id="current-mana">6</strong> / 6, owes <strong id="current-owed">2</strong>',
+        )
+        self.login_as(self.create_dm())
+        mark_gate_passed(self.client)
+        response = self.client.get(sheet)
+        self.assertContains(response, 'id="current-owed" data-pool="owed"')
+        self.assertContains(response, 'value="2" min="0"')
+
+    def test_the_export_round_trip_keeps_it_for_a_game_master_only(self):
+        self.character.mana_owed = 2
+        self.character.save()
+        self.assertIn("mana_owed", EXPORTABLE_FIELDS)
+        imported = validate_import_payload(
+            json.loads(generate_character_json(self.character))
+        )
+        self.assertEqual(
+            held_to_player(imported, is_game_master=False).fields["mana_owed"], 0
+        )
+        self.assertEqual(
+            held_to_player(imported, is_game_master=True).fields["mana_owed"], 2
+        )

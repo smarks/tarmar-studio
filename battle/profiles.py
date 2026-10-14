@@ -81,12 +81,15 @@ class FigureVitals:
         body: Current Body, or ``None`` likewise.
         mana: Current Mana, or ``None`` under rules whose casters spend
             something else (classic wizards spend ST).
+        debt: Mana borrowed and not paid back (tarmar-engine #28), or
+            ``None`` under rules with no Borrowing.
     """
 
     alive: bool
     fatigue: int | None = None
     body: int | None = None
     mana: int | None = None
+    debt: int | None = None
 
 
 class BattleProfile:
@@ -252,6 +255,7 @@ class TarmarProfile(BattleProfile):
                 fatigue=combatant.fatigue,
                 body=combatant.body,
                 mana=combatant.mana,
+                debt=combatant.debt,
             )
             for combatant in state.combatants
         }

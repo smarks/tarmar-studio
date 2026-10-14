@@ -14,6 +14,7 @@ them together the way ``test_rules_drift`` pins the rules docs.
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 
 from django.test import SimpleTestCase
@@ -35,9 +36,10 @@ from battle.services import (
     set_seat_ready,
     start_battle,
 )
+from battle.turn_menu import borrowed_mana
 from common.test_helpers import BaseTestCase
 
-from .magic_fixtures import INVENTED_RULES, seated_rules
+from .magic_fixtures import BORROWING_RULES, INVENTED_RULES, seated_rules
 from .test_classic_adaptation import snapshot as classic_snapshot
 from .test_state import make_combatant
 
@@ -182,6 +184,66 @@ class CasterMagicTest(SimpleTestCase):
         self.assertEqual(bolt["reason"], "costs 3 mana, past a Channel of 2 for it")
 
 
+class BorrowableSpellTest(SimpleTestCase):
+    """A spell the caster cannot afford, under Borrowing (tarmar-engine #28).
+
+    Invented rules: a cap of three owed, and a Channel of twice the
+    recorded level.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(seated_rules(BORROWING_RULES))
+
+    def row(self, state, key: str) -> dict:
+        magic = caster_magic(state, 1)
+        assert magic is not None
+        return next(spell for spell in magic["spells"] if spell["key"] == key)
+
+    def test_a_spell_short_of_mana_is_borrowable_with_its_shortfall(self):
+        bolt = self.row(wizard_state(mana=1), "lightning_bolt")
+        # Not castable: the plain cast is not on the menu; not withheld.
+        self.assertFalse(bolt["castable"])
+        self.assertTrue(bolt["borrowable"])
+        self.assertEqual(bolt["shortfall"], 2)
+        self.assertEqual(bolt["reason"], "needs 3 mana, 1 left: borrow the 2 it lacks")
+
+    def test_an_affordable_spell_borrows_nothing(self):
+        missile = self.row(wizard_state(mana=1), "fire_missile")
+        self.assertTrue(missile["castable"])
+        self.assertFalse(missile["borrowable"])
+        self.assertEqual(missile["shortfall"], 0)
+
+    def test_the_debt_cap_bounds_what_may_be_borrowed(self):
+        # Owing 2 of a cap of 3, the caster may borrow 1 more: Fire Missile
+        # yes, Lightning Bolt (3 short) no.
+        state = wizard_state(mana=0, debt=2)
+        self.assertTrue(self.row(state, "fire_missile")["borrowable"])
+        bolt = self.row(state, "lightning_bolt")
+        self.assertFalse(bolt["borrowable"])
+        self.assertEqual(bolt["reason"], "needs 3 mana, 0 left")
+
+    def test_a_spell_past_the_channel_is_not_borrowable(self):
+        bolt = self.row(
+            wizard_state(
+                mana=1, spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+            ),
+            "lightning_bolt",
+        )
+        self.assertFalse(bolt["borrowable"])
+
+    def test_no_borrowing_rules_borrow_nothing(self):
+        with seated_rules(INVENTED_RULES):
+            bolt = self.row(wizard_state(mana=1), "lightning_bolt")
+        self.assertFalse(bolt["borrowable"])
+        self.assertEqual(bolt["reason"], "needs 3 mana, 1 left")
+
+    def test_the_pool_says_what_is_owed(self):
+        magic = caster_magic(wizard_state(mana=0, debt=2), 1)
+        assert magic is not None
+        self.assertEqual(magic["owed"], 2)
+
+
 class CastableSetAgreesWithPolicyTest(SimpleTestCase):
     """The shown-castable set must equal the choosable set, exactly.
 
@@ -192,7 +254,9 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
 
     def setUp(self):
         super().setUp()
-        self.enterContext(seated_rules())
+        # With Borrowing (tarmar-engine #28), so the borrowable set is pinned
+        # to the menu's borrowing copies too.
+        self.enterContext(seated_rules(BORROWING_RULES))
 
     def assert_sets_agree(self, state):
         magic = caster_magic(state, 1)
@@ -204,18 +268,31 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
             for spell in magic["spells"]
             if spell["castable"]
         }
+        borrowable = {
+            (spell["key"], spell["target_id"]): spell["shortfall"]
+            for spell in magic["spells"]
+            if spell["borrowable"]
+        }
         # The menu as the decider builds it, with the magic rules the turn
         # runs on (issue #960): its Channel withholds casts too. A pushed
-        # variant is the same cast with more mana, not another row.
+        # variant is the same cast with more mana, not another row; a
+        # borrowing copy of a spell's plain cast is its borrowable row.
+        actor = state.by_id(1)
         menu = policy.choose_option(
-            state, state.by_id(1), magic=profiles.tarmar_engine_profile().magic
+            state, actor, magic=profiles.tarmar_engine_profile().magic
         )
         offered = {
             (candidate.spell_key, candidate.target_id)
             for candidate in menu.candidates
-            if candidate.spell_key and not candidate.push_mana
+            if candidate.spell_key and not candidate.push_mana and not candidate.borrow
+        }
+        offered_borrowing = {
+            (candidate.spell_key, candidate.target_id): borrowed_mana(actor, candidate)
+            for candidate in menu.candidates
+            if candidate.borrow and not candidate.push_mana
         }
         self.assertEqual(shown, offered)
+        self.assertEqual(borrowable, offered_borrowing)
 
     def test_agreement_with_a_full_pool(self):
         self.assert_sets_agree(wizard_state())
@@ -237,13 +314,44 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
         # No recorded level: Channel 0, every cast withheld on both sides.
         self.assert_sets_agree(wizard_state(spell_skill_levels={}))
 
+    def test_agreement_with_an_empty_pool(self):
+        self.assert_sets_agree(wizard_state(mana=0))
 
-def awaiting_wizard_battle(dm, player) -> tuple[Battle, BattleCombatant]:
+    def test_agreement_when_the_debt_cap_is_near(self):
+        self.assert_sets_agree(wizard_state(mana=0, debt=2))
+
+    def test_agreement_when_the_debt_cap_is_reached(self):
+        self.assert_sets_agree(wizard_state(mana=0, debt=3))
+
+    def test_agreement_when_the_channel_bounds_a_borrowing(self):
+        self.assert_sets_agree(
+            wizard_state(
+                mana=1, spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+            )
+        )
+
+    def test_agreement_with_no_foe_to_aim_at(self):
+        state = wizard_state(mana=0)
+        state.by_id(2).alive = False
+        self.assert_sets_agree(state)
+
+
+def awaiting_wizard_battle(
+    dm,
+    player,
+    *,
+    mana: int | None = None,
+    before_turn: Callable[[dict, BattleCombatant], None] | None = None,
+) -> tuple[Battle, BattleCombatant]:
     """A battle paused on ``player``'s seated wizard's decision.
 
     Args:
         dm: The user who creates the battle.
         player: The user who claims the one player seat, as a wizard.
+        mana: The mana the wizard has when the turn begins, or ``None`` for
+            the generated wizard's full pool.
+        before_turn: Changes the started battle's ``state_json`` in place,
+            given it and the wizard's seat, before the first turn runs.
 
     Returns:
         The paused battle and the wizard's seat.
@@ -253,7 +361,15 @@ def awaiting_wizard_battle(dm, player) -> tuple[Battle, BattleCombatant]:
     assert seat is not None
     seat = claim_seat(battle.pk, seat.pk, player, archetype="wizard")
     set_seat_ready(battle.pk, seat.pk, player, ready=True)
-    start_battle(battle.pk)
+    battle = start_battle(battle.pk)
+    if mana is not None or before_turn is not None:
+        state = battle.state_json
+        for combatant in state["combatants"]:
+            if combatant["combatant_id"] == seat.pk and mana is not None:
+                combatant["mana"] = mana
+        if before_turn is not None:
+            before_turn(state, seat)
+        Battle.objects.filter(pk=battle.pk).update(state_json=state)
     battle, _events = advance_turn(battle.pk)
     return battle, seat
 

@@ -43,12 +43,18 @@ the same way (`character`, for a character with a Mana Pool).
                    aria-label="Current Mana">
             <span class="current-pool-maximum">/ {{ character.free_spell_points }}</span>
         </label>
+        {# Mana borrowed in a fight and not paid back (tarmar-engine #28): a fight writes it, a Game Master settles it here. #}
+        <label class="current-pool">owes
+            <input type="number" class="current-pool-input" id="current-owed" data-pool="owed"
+                   value="{{ character.mana_owed }}" min="0" step="1"
+                   aria-label="Mana owed">
+        </label>
         {% endif %}
         {% else %}
         <span class="current-pool">Fatigue <strong id="current-fatigue">{{ condition.fatigue }}</strong> / {{ condition.fatigue_maximum }}</span>
         <span class="current-pool">Body <strong id="current-body">{{ condition.body }}</strong> / {{ condition.body_maximum }}</span>
         {% if character.free_spell_points %}
-        <span class="current-pool">Mana <strong id="current-mana">{{ character.current_mana }}</strong> / {{ character.free_spell_points }}</span>
+        <span class="current-pool">Mana <strong id="current-mana">{{ character.current_mana }}</strong> / {{ character.free_spell_points }}{% if character.mana_owed %}, owes <strong id="current-owed">{{ character.mana_owed }}</strong>{% endif %}</span>
         {% endif %}
         {% endif %}
         <span class="current-pools-state" id="current-pools-state">{{ condition.state|capfirst }}</span>
