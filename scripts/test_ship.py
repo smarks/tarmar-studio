@@ -1000,3 +1000,107 @@ def test_a_session_ship_may_not_read_is_not_taken_for_its_own(
     listings["ps"] = "5000100 1 Ss ttys009 -zsh\n"
     with pytest.raises(ship.ShipError, match=r"5000100 -zsh \(it has a terminal\)"):
         ship.stop_processes_in(workspace)
+
+
+def ps_listing_processes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ps: str, lsof: str = ""
+) -> dict[int, ship.RunningProcess]:
+    """What ``processes_from_ps`` makes of a ``ps`` listing, every session 7."""
+    listings = {"lsof": lsof, "ps": ps}
+    monkeypatch.setattr(
+        ship, "run_quietly", lambda command, *, cwd=None: listings[command[0]]
+    )
+    monkeypatch.setattr(ship.os, "getsid", lambda process_id: 7)
+    monkeypatch.setattr(ship, "PROC", tmp_path / "no-proc")
+    return ship.processes_from_ps()
+
+
+def test_a_command_line_holding_a_newline_is_one_process_in_the_ps_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ps prints an argument's newline as is, so the command spans more lines
+    # and the later ones start with the argument's remainder, not a process
+    # id. The remainder is joined to its command; it is not a process, and
+    # it must not stop the cleanup (a cleanup that died here left the
+    # workspace behind on 2026-10-14).
+    _workspace, app, _ = make_workspace(tmp_path)
+    assert ps_listing_processes(
+        monkeypatch,
+        tmp_path,
+        ps=(
+            '5000100 1 S ?? npm exec playwright test NOTE="first\n'
+            'second", PATH=/usr/bin TERM=xterm LANG=C\n'
+            "5000101 1 S ?? sleep 300\n"
+        ),
+        lsof=f"p5000100\nfcwd\nn{app}\n",
+    ) == {
+        5000100: ship.RunningProcess(
+            'npm exec playwright test NOTE="first second", PATH=/usr/bin '
+            "TERM=xterm LANG=C",
+            str(app),
+            1,
+            False,
+            session_id=7,
+        ),
+        5000101: ship.RunningProcess("sleep 300", "", 1, False, session_id=7),
+    }
+
+
+@pytest.mark.parametrize(
+    "remainder",
+    [
+        "2 > /dev/null",  # digits, too few fields for a row
+        "5 apples and oranges",  # digits, a parent that is not a number
+        "0 3 * * * /usr/bin/true",  # crontab text: process id 0 is never a row
+        "1 1 S ?? /sbin/launchd",  # the shape of a row, naming a listed process
+        "5000099 1 S ?? sh",  # the shape of a row, naming a listed zombie
+    ],
+)
+def test_a_remainder_that_starts_with_digits_is_still_a_remainder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remainder: str
+) -> None:
+    assert ps_listing_processes(
+        monkeypatch,
+        tmp_path,
+        ps=(
+            "1 0 Ss ?? /sbin/launchd\n5000099 1 Z ?? sh\n"
+            f"5000100 1 S ?? sh -c echo\n{remainder}\n"
+        ),
+    ) == {
+        1: ship.RunningProcess("/sbin/launchd", "", 0, False, session_id=7),
+        5000100: ship.RunningProcess(
+            f"sh -c echo {remainder}", "", 1, False, session_id=7
+        ),
+    }
+
+
+def test_a_remainder_after_a_zombie_is_dropped_and_names_no_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The zombie is left out, so its remainder has no command to join; it
+    # must not attach to the live process before it, which the workspace
+    # path in it would otherwise mark as the workspace's to stop.
+    workspace, app, _ = make_workspace(tmp_path)
+    running = ps_listing_processes(
+        monkeypatch,
+        tmp_path,
+        ps=f"5000100 1 S ?? sleep 300\n5000101 1 Z ?? sh -c echo\n{app}/manage.py\n",
+    )
+    assert running == {
+        5000100: ship.RunningProcess("sleep 300", "", 1, False, session_id=7)
+    }
+    monkeypatch.setattr(ship, "processes_from_ps", lambda: running)
+    assert ship.processes_in(workspace) == {}
+
+
+def test_a_workspace_path_after_the_newline_still_marks_the_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, app, _ = make_workspace(tmp_path)
+    running = ps_listing_processes(
+        monkeypatch,
+        tmp_path,
+        ps=f"5000100 1 S ?? python -c print\n{app}/manage.py runserver\n",
+    )
+    monkeypatch.setattr(ship, "processes_from_ps", lambda: running)
+    assert list(ship.processes_in(workspace)) == [5000100]
