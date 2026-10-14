@@ -6,8 +6,12 @@ stood in for, by stand-in scripts or functions, since they need the suites,
 npm and GitHub.
 """
 
+import contextlib
 import os
+import signal
 import subprocess
+import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -544,3 +548,170 @@ def test_follow_deploy_believes_the_run_over_a_failed_watch(
 
     assert ship.follow_deploy("9", tmp_path) == ship.DEPLOYED
     assert waits == []
+
+
+def start_detached(command: Sequence[str], *, cwd: Path) -> subprocess.Popen[bytes]:
+    """Start ``command`` as Playwright starts a webServer: in a session of its own."""
+    return subprocess.Popen(list(command), cwd=cwd, start_new_session=True)
+
+
+def make_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A ship workspace with an app folder in it, and a folder outside it."""
+    workspace = tmp_path / f"{ship.WORKSPACE_PREFIX}test"
+    app = workspace / "app"
+    app.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    return workspace, app, elsewhere
+
+
+def test_cleanup_stops_what_the_workspace_left_running(tmp_path: Path) -> None:
+    # Issue #31: Playwright's dev server runs in a process group of its own,
+    # out of reach of the signal that stops the gate's group.
+    workspace, app, elsewhere = make_workspace(tmp_path)
+    server = app / "serve.py"
+    server.write_text("import time\ntime.sleep(300)\n", encoding="utf-8")
+    running_in_workspace = start_detached(["sleep", "300"], cwd=app)
+    running_from_workspace = start_detached(
+        [sys.executable, str(server)], cwd=elsewhere
+    )
+    running_elsewhere = start_detached(["sleep", "300"], cwd=elsewhere)
+    try:
+        ship.stop_processes_in(workspace)
+
+        assert running_in_workspace.wait(timeout=5) == -signal.SIGTERM
+        assert running_from_workspace.wait(timeout=5) == -signal.SIGTERM
+        assert running_elsewhere.poll() is None
+    finally:
+        for process in (
+            running_in_workspace,
+            running_from_workspace,
+            running_elsewhere,
+        ):
+            process.kill()
+            process.wait()
+
+
+def test_cleanup_kills_what_will_not_stop_when_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, app, _ = make_workspace(tmp_path)
+    monkeypatch.setattr(ship, "STOP_GRACE_SECONDS", 0.5)
+    stubborn = start_detached(["bash", "-c", "trap '' TERM; sleep 300 & wait"], cwd=app)
+    try:
+        # The sleep starts after the trap is set, and inherits it.
+        deadline = time.monotonic() + 10
+        while not ship.processes_in(workspace).keys() - {stubborn.pid}:
+            assert time.monotonic() < deadline, "the sleep never started"
+        ship.stop_processes_in(workspace)
+
+        assert stubborn.wait(timeout=5) == -signal.SIGKILL
+        assert ship.processes_in(workspace) == {}
+    finally:
+        # The whole group, so a failure here leaves no sleep behind either.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(stubborn.pid, signal.SIGKILL)
+        stubborn.wait()
+
+
+def test_a_process_ship_cannot_stop_is_reported_as_left_behind(
+    repositories, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app, canon, workspaces, *_ = repositories
+    stand_in(monkeypatch)
+
+    def refuses(workspace: Path) -> None:
+        raise ship.ShipError("still running: 4321 ./run dev 127.0.0.1:8547")
+
+    monkeypatch.setattr(ship, "stop_processes_in", refuses)
+
+    status = ship.ship(
+        repository_root=app, canon_checkout=canon, temporary_parent=workspaces
+    )
+
+    assert status == ship.EXIT_LEFT_BEHIND
+    assert "left behind: processes: still running: 4321" in capsys.readouterr().out
+    assert_nothing_left(app, canon, workspaces)
+
+
+def test_an_interrupted_ship_leaves_no_dev_server_running(
+    repositories, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The incident in issue #31: the ship stopped during Playwright, and the
+    # dev server Playwright had started detached outlived it.
+    app, canon, workspaces, *_ = repositories
+    stand_in(monkeypatch)
+    started: list[subprocess.Popen[bytes]] = []
+
+    def gate_starts_a_server_then_is_stopped(
+        app_worktree: Path, environment: dict[str, str], *, deploy: bool
+    ) -> str:
+        started.append(start_detached(["sleep", "300"], cwd=app_worktree))
+        raise ship.Interrupted("SIGTERM")
+
+    monkeypatch.setattr(ship, "run_gate", gate_starts_a_server_then_is_stopped)
+    try:
+        status = ship.ship(
+            repository_root=app, canon_checkout=canon, temporary_parent=workspaces
+        )
+
+        assert status == ship.EXIT_INTERRUPTED
+        assert started[0].wait(timeout=5) == -signal.SIGTERM
+        assert_nothing_left(app, canon, workspaces)
+    finally:
+        for process in started:
+            process.kill()
+            process.wait()
+
+
+def test_processes_are_read_from_proc_where_there_is_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Linux's way (CI's containers may have no ps), checked on any machine.
+    workspace, app, elsewhere = make_workspace(tmp_path)
+    proc = tmp_path / "proc"
+
+    def fake_process(name: str, state: str, cwd: Path, *arguments: str) -> None:
+        entry = proc / name
+        entry.mkdir(parents=True)
+        (entry / "stat").write_text(f"{name} (a (strange) name) {state} 1 1 1\n")
+        (entry / "cmdline").write_bytes(
+            b"".join(f"{argument}\0".encode() for argument in arguments)
+        )
+        (entry / "cwd").symlink_to(cwd)
+
+    fake_process("self", "R", elsewhere, "python")
+    fake_process("100", "S", app, "sleep", "300")
+    fake_process("101", "Z", app, "sleep", "300")
+    fake_process("102", "S", elsewhere, "python", str(app / "serve.py"))
+    fake_process("103", "S", elsewhere, "sleep", "300")
+    monkeypatch.setattr(ship, "PROC", proc)
+
+    found = ship.processes_in(workspace)
+
+    assert found == {
+        100: ship.RunningProcess("sleep 300", str(app)),
+        102: ship.RunningProcess(f"python {app / 'serve.py'}", str(elsewhere)),
+    }
+
+
+def test_a_killed_ships_processes_are_stopped_by_the_next(
+    repositories, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A ship killed outright runs no cleanup; the next one finds what it left.
+    app, canon, workspaces, *_ = repositories
+    stale = workspaces / f"{ship.WORKSPACE_PREFIX}killed" / "app"
+    stale.parent.mkdir()
+    git(app, "worktree", "add", "--quiet", "--detach", str(stale), "HEAD")
+    left_running = start_detached(["sleep", "300"], cwd=stale)
+    stand_in(monkeypatch)
+    try:
+        ship.ship(
+            repository_root=app, canon_checkout=canon, temporary_parent=workspaces
+        )
+
+        assert left_running.wait(timeout=5) == -signal.SIGTERM
+        assert_nothing_left(app, canon, workspaces)
+    finally:
+        left_running.kill()
+        left_running.wait()
