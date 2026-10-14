@@ -4,11 +4,11 @@ from unittest import mock
 
 from django.urls import reverse
 
-from battle import profiles
+from battle import profiles, views
 from battle.access import Actor, detail_visible_ids
 from battle.models import Battle, BattleEvent
 from battle.services import create_battle
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, logged_exception
 
 
 class BattleAccessTest(BaseTestCase):
@@ -161,20 +161,46 @@ class BattleAdvanceTest(BaseTestCase):
         payload = roll_events[0]["payload"]
         self.assertEqual(sum(payload["faces"]), payload["total"] - payload["modifier"])
 
-    def test_advance_error_returns_json_detail(self):
-        # A failing engine turn must surface its detail to the DM as JSON,
-        # not an opaque HTML 500 (#184).
-        with mock.patch(
-            "battle.views.advance_turn",
-            side_effect=RuntimeError("state_json missing footprint"),
+    def _advance_failing_with(self, battle: Battle, secret: str):
+        """Advance ``battle`` while the engine raises an error carrying ``secret``.
+
+        Returns:
+            The response and the records the battle views logged.
+        """
+        with (
+            mock.patch("battle.views.advance_turn", side_effect=RuntimeError(secret)),
+            self.assertLogs("battle.views", "ERROR") as logs,
         ):
-            response = self.client.post(
-                reverse("battle:advance", args=[self.battle.pk])
-            )
+            response = self.client.post(reverse("battle:advance", args=[battle.pk]))
+        return response, logs.records
+
+    def test_advance_error_answers_json_without_the_exception_text(self):
+        # A failing engine turn still answers JSON, not an opaque HTML 500
+        # (#184), but with a fixed sentence: the exception's text stays in
+        # the log, with its traceback (#13).
+        secret = "DATABASE_PASSWORD=hunter2 in /srv/tarmar/state_json.py"
+
+        response, records = self._advance_failing_with(self.battle, secret)
+
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(
-            response.json()["error"], "RuntimeError: state_json missing footprint"
-        )
+        self.assertEqual(response.json()["error"], views.ADVANCE_FAILED_MESSAGE)
+        self.assertNotIn("hunter2", response.content.decode())
+        self.assertNotIn("RuntimeError", response.content.decode())
+        self.assertIn(secret, str(logged_exception(records[0])))
+
+    def test_a_player_running_a_battle_is_not_shown_the_exception_text(self):
+        """Players run battles of their own (#305): the leak was theirs (#13)."""
+        player = self.create_player()
+        self.login_as(player)
+        own_battle = create_battle(player, name="Own", count=2, seed=12)
+        secret = "SELECT secret_token FROM accounts_user"
+
+        response, records = self._advance_failing_with(own_battle, secret)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["error"], views.ADVANCE_FAILED_MESSAGE)
+        self.assertNotIn("secret_token", response.content.decode())
+        self.assertIn(secret, str(logged_exception(records[0])))
 
     def test_advance_requires_post(self):
         response = self.client.get(reverse("battle:advance", args=[self.battle.pk]))

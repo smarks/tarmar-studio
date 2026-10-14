@@ -731,7 +731,9 @@ class GMViewTest(BaseTestCase):
             self.assertEqual(response.status_code, 200)
             content = b"".join(response.streaming_content)
         self.assertIn(b"error", content)
-        self.assertIn(b"ollama exploded", content)
+        # The frame carries the fixed sentence, not the exception's text (#13).
+        self.assertIn(json.dumps(views.GM_SERVER_ERROR_MESSAGE).encode(), content)
+        self.assertNotIn(b"ollama exploded", content)
 
     @patch("gm.turn_engine.model.ollama_client.stream_chat")
     @patch("characters.dice.random.randint")

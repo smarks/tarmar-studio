@@ -173,6 +173,16 @@ GM_STREAM_TOO_SLOW_MESSAGE = (
     "message again — the next attempt is normally much faster."
 )
 
+# What the player reads when a turn or a fight fails on an exception nobody
+# wrote for them (issue #13). The exception's own text can carry file paths,
+# SQL, the model host's address or internal state, so it goes to the log with
+# its traceback and the turn's record and the page get this sentence instead.
+# It is never empty, which is what issue #663 needed from the old reason.
+GM_SERVER_ERROR_MESSAGE = (
+    "The Game Master ran into an error on the server and could not finish. "
+    "It has been logged; send your message again in a moment."
+)
+
 
 # A second message to a session whose turn is still running (issue #515).
 TURN_ALREADY_RUNNING_ERROR = (
@@ -1551,20 +1561,20 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                 too_slow["notices"] = kept
             yield _sse(_with_session_id(too_slow, session))
             return
-        except Exception as error:
+        except Exception:
             logger.exception("GM plan turn failed")
-            # An exception raised with no arguments has an empty str(), and
-            # an empty reason is no reason: it was recorded as the turn's
-            # error and streamed as {"error": ""}, which the page's
-            # `if (data.error)` read as falsy. No done frame follows a
-            # failure, so the stream simply ended and the player was left
-            # watching "Thinking" for good. The class name is what the
-            # engine already falls back to (issue #663).
-            reason = str(error) or error.__class__.__name__
+            # The player is told a fixed sentence, never the exception's text,
+            # which can carry paths, SQL or the model host (issue #13). The
+            # record keeps the same sentence, since ``gm:turn`` hands the
+            # record's error to the page that lost the stream; the engine's
+            # failed event and the log keep the real reason.
             record_failed_turn(
-                GMTurnRecord.OUTCOME_ERROR, reason, INTERRUPTED_BY_CONNECTION, []
+                GMTurnRecord.OUTCOME_ERROR,
+                GM_SERVER_ERROR_MESSAGE,
+                INTERRUPTED_BY_CONNECTION,
+                [],
             )
-            yield _sse({"error": reason})
+            yield _sse({"error": GM_SERVER_ERROR_MESSAGE})
             return
 
         turn_notices = [
@@ -2161,19 +2171,18 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
         # answering with an error. A player's /fight always asks it (#841),
         # so this is the player's to read in words, not a 500.
         logger.warning("GM fight: the foe call failed: %s", model_error)
-        recorder.finish(
-            GMTurnRecord.OUTCOME_ERROR,
-            error=str(model_error) or model_error.__class__.__name__,
-        )
+        # The record says what the player was told: ``gm:turn`` reads it back
+        # to the player, and the model error names the model host (#13).
+        recorder.finish(GMTurnRecord.OUTCOME_ERROR, error=FIGHT_MODEL_UNREACHABLE)
         return _json_error(FIGHT_MODEL_UNREACHABLE, status=503)
     except StreamDeadlinePassed as out_of_time:
         logger.warning("GM fight: the foe call passed its deadline: %s", out_of_time)
         recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=str(out_of_time))
         return _json_error(FIGHT_MODEL_TOO_SLOW, status=504)
-    except Exception as error:
-        recorder.finish(
-            GMTurnRecord.OUTCOME_ERROR, error=str(error) or error.__class__.__name__
-        )
+    except Exception:
+        # Django logs the traceback of what is raised; the record, which
+        # ``gm:turn`` reads back to the player, gets the fixed sentence (#13).
+        recorder.finish(GMTurnRecord.OUTCOME_ERROR, error=GM_SERVER_ERROR_MESSAGE)
         raise
     stored = session.history
     recorder.finish(

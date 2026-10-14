@@ -1,5 +1,6 @@
 import functools
 import json
+import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -111,6 +112,26 @@ def mark_gate_passed(client: Client) -> None:
     session = client.session
     session[PublicPathPassphraseMiddleware.SESSION_FLAG] = True
     session.save()
+
+
+def logged_exception(record: logging.LogRecord) -> BaseException:
+    """The exception a log record was written with, traceback and all (#13).
+
+    A view that keeps an exception's text from the page must still log it;
+    this is how a test reads back what was logged.
+
+    Args:
+        record: One of the records ``assertLogs`` captured.
+
+    Returns:
+        The exception logged with ``record``.
+
+    Raises:
+        AssertionError: The record was logged without an exception.
+    """
+    if record.exc_info is None or record.exc_info[1] is None:
+        raise AssertionError(f"logged without a traceback: {record.getMessage()}")
+    return record.exc_info[1]
 
 
 # Required fields for a test Beast, a plain four-legged biter. ``make_beast``

@@ -148,6 +148,15 @@ FOES_BELONG_TO_GAME_MASTER = (
     "Master, so only a Game Master can restart it or change who decides"
 )
 
+#: What anyone advancing a battle is told when the advance fails for a reason
+#: that is not a rule refusing it (issue #13). The exception's own text can
+#: carry file paths, SQL or internal state, and players run battles too, so it
+#: goes to the log with its traceback and the page gets this sentence.
+ADVANCE_FAILED_MESSAGE = (
+    "The battle could not advance because of an error on the server. It has "
+    "been logged; reload the page and try again."
+)
+
 #: The spellings a checkbox or a form-posted flag arrives as. A browser sends
 #: "on" for a checked box, script tends to send "1" or "true", and all three
 #: mean the same thing to every endpoint that reads one.
@@ -1699,11 +1708,9 @@ def battle_advance(request, pk):
             },
             status=409,
         )
-    except Exception as advance_error:  # noqa: BLE001 — logged, then surfaced to the DM
+    except Exception:  # noqa: BLE001 — logged with its traceback, never shown
         logger.exception("Advancing battle %s failed", pk)
-        return _json_error(
-            f"{type(advance_error).__name__}: {advance_error}", status=500
-        )
+        return _json_error(ADVANCE_FAILED_MESSAGE, status=500)
     return JsonResponse(battle_payload(battle, actor, events, request))
 
 
