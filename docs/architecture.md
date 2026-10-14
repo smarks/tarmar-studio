@@ -1701,6 +1701,7 @@ player can read.
 | --- | --- |
 | Audit lines (`origami.audit`) | `logs/audit.log` in the main checkout — `RotatingFileHandler`, 10 MB, 5 backups; production only |
 | Access logs and tracebacks | the systemd journal for `tarmar-blue` / `tarmar-green` (gunicorn runs `--access-logfile -` and `--error-logfile -`) |
+| The apps' own records (`gm`, `battle`, `characters` and the rest), INFO and above | the same journal, in the `server` format (timestamp, level, logger name), through the shared `server` handler in `LOGGING` (issue #38) |
 | Deploy output | the operator's terminal; `./deploy.sh status` shows each colour's revision |
 | Ollama and the ready agent | `~/Library/Logs/ollama/` on the Mac Studio |
 | GM turns | not a log — `GMTurnRecord` plus `GMEvent` rows, read with `manage.py gm_transcript <id>` or the chat page's Transcript button |

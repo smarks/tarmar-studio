@@ -316,13 +316,9 @@ for _themed_host in CLASSIC_ARENA_HOSTS:
 
 # Application definition
 
-INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
+# This repository's own apps. LOGGING below gives each one's logger a handler,
+# since every module logs under its package (``logging.getLogger(__name__)``).
+_FIRST_PARTY_APPS = [
     "accounts",
     "common",
     "characters",
@@ -334,6 +330,16 @@ INSTALLED_APPS = [
     "encounters",
     "ruins",
     "parties",
+]
+
+INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    *_FIRST_PARTY_APPS,
 ]
 
 MIDDLEWARE = [
@@ -664,9 +670,10 @@ _logging_handlers: dict[str, dict[str, str | int]] = {
     # Server errors (500s, suspicious requests) go to stderr with their
     # traceback. gunicorn runs with ``--error-logfile -`` so under systemd
     # these land in the journal, where a 500 with no trace is otherwise
-    # invisible once DEBUG is off (issue #329).
-    "server_errors": {
-        "level": "ERROR",
+    # invisible once DEBUG is off (issue #329). The apps' own records go
+    # here too (issue #38), so the handler has no level of its own: each
+    # logger below sets what it passes.
+    "server": {
         "class": "logging.StreamHandler",
         "formatter": "server",
     },
@@ -713,12 +720,12 @@ LOGGING = {
         # propagate=False, like the audit logger: the record is fully handled
         # here and must not fall through to Django's DEBUG-only console.
         "django.request": {
-            "handlers": ["server_errors"],
+            "handlers": ["server"],
             "level": "ERROR",
             "propagate": False,
         },
         "django.security": {
-            "handlers": ["server_errors"],
+            "handlers": ["server"],
             "level": "ERROR",
             "propagate": False,
         },
@@ -728,9 +735,18 @@ LOGGING = {
         # record is dropped when DEBUG is off, which would leave a broken
         # mail setup invisible (issue #929); this puts it in the journal.
         "django.contrib.auth": {
-            "handlers": ["server_errors"],
+            "handlers": ["server"],
             "level": "ERROR",
             "propagate": False,
         },
+        # The apps' own loggers (issue #38). Without a handler their records
+        # reached stderr only through logging.lastResort: unformatted, and
+        # anything below WARNING dropped. One entry per app rather than the
+        # root logger: Django's "django" logger keeps its own console handler
+        # and propagates, so a root handler would print django.* records twice
+        # under DEBUG, and it would take in every library's INFO as well (httpx
+        # logs each Ollama request). These propagate, so pytest's caplog,
+        # which listens on the root logger, still sees them.
+        **{app: {"handlers": ["server"], "level": "INFO"} for app in _FIRST_PARTY_APPS},
     },
 }
