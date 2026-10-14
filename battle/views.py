@@ -98,6 +98,7 @@ from .services import (
     MIN_COMBATANTS,
     STALE_POOLS_REFUSAL,
     TAKE_SEAT_GAME_MASTER_ONLY,
+    BattleInLobby,
     StalePools,
     add_draft_entry,
     add_draft_team,
@@ -1708,6 +1709,11 @@ def battle_advance(request, pk):
             },
             status=409,
         )
+    except BattleInLobby as refusal:
+        # A rule refusing, like the other battle views' refusals: its words,
+        # as a 400. Only this type is caught, not ValueError at large, since
+        # the engine's own ValueErrors are internal text (issue #13).
+        return _json_error(str(refusal))
     except Exception:  # noqa: BLE001 — logged with its traceback, never shown
         logger.exception("Advancing battle %s failed", pk)
         return _json_error(ADVANCE_FAILED_MESSAGE, status=500)

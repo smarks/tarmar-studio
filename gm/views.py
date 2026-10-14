@@ -177,7 +177,8 @@ GM_STREAM_TOO_SLOW_MESSAGE = (
 # wrote for them (issue #13). The exception's own text can carry file paths,
 # SQL, the model host's address or internal state, so it goes to the log with
 # its traceback and the turn's record and the page get this sentence instead.
-# It is never empty, which is what issue #663 needed from the old reason.
+# The sentence is never empty, so the page's ``if (data.error)`` check always
+# shows it (issue #663).
 GM_SERVER_ERROR_MESSAGE = (
     "The Game Master ran into an error on the server and could not finish. "
     "It has been logged; send your message again in a moment."

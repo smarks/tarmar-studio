@@ -202,6 +202,19 @@ class BattleAdvanceTest(BaseTestCase):
         self.assertNotIn("secret_token", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
 
+    def test_a_lobby_battle_answers_the_refusal_in_its_own_words(self):
+        """The lobby refusal is a rule, not a failure: its text, no error log."""
+        lobby = create_battle(self.dm, name="Lobby", count=2, seed=5, player_seats=1)
+        self.assertEqual(lobby.status, Battle.STATUS_LOBBY)
+
+        with self.assertNoLogs("battle.views", "ERROR"):
+            response = self.client.post(reverse("battle:advance", args=[lobby.pk]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(), {"error": "This battle is still in its lobby"}
+        )
+
     def test_advance_requires_post(self):
         response = self.client.get(reverse("battle:advance", args=[self.battle.pk]))
         self.assertEqual(response.status_code, 405)

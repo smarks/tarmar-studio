@@ -1653,6 +1653,15 @@ class StalePools(ValueError):
     """A record-writing fight whose figures no longer match their records."""
 
 
+class BattleInLobby(ValueError):
+    """A battle asked to advance before it has started.
+
+    Its own type, so the advance view can answer this refusal in its words
+    while every other exception the engine raises stays behind a fixed
+    message (issue #13). A ``ValueError`` still, as the refusal always was.
+    """
+
+
 def _figure_pools(combatant_state) -> tuple[int, int, int, int]:
     """A figure's Fatigue, Body, Mana and debt, as :func:`_record_pools`
     gives the record's."""
@@ -2966,7 +2975,7 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
         if battle.status in (Battle.STATUS_FINISHED, Battle.STATUS_STALEMATE):
             return battle, []
         if battle.status == Battle.STATUS_LOBBY:
-            raise ValueError("This battle is still in its lobby")
+            raise BattleInLobby("This battle is still in its lobby")
         profile = profiles.for_battle(battle)
         controllers = manual_controllers(battle)
         decide = (
