@@ -144,22 +144,30 @@ units, and `deploy.sh`'s `load_env_file` does it for the management commands.
 
 `deploy.sh` keeps the checkout current. After pulling the main checkout and
 re-running itself, and before it decides whether there is anything to deploy,
-it clones `git@github.com:smarks/tarmar-canon.git` into
-`/home/sam/dev/tarmar-canon` if the directory is absent, or fetches and
-fast-forwards it (`git pull --ff-only`) if it is a checkout, and logs the
-canon commit it now holds. A failed clone or fetch, a checkout that cannot
-fast-forward (local commits or edits on the host), or a path that is not a
-git checkout stops the deploy before anything is built. The host
-authenticates to GitHub as `smarks` over ssh, which is what lets it read the
-private repository.
+it finds the canon commit it would serve without moving the checkout: if the
+checkout exists it fetches into it and reads its upstream (`@{u}`), and if the
+directory is absent it reads the HEAD of `git@github.com:smarks/tarmar-canon.git`
+with `git ls-remote`. It logs that commit. Only once the deploy has decided to
+go ahead and the gate record has vouched for that commit (below; under
+`--force` no record is read and nothing vouches for it) does it move the
+checkout, to exactly that commit and nothing newer: `git merge --ff-only` on
+the commit it read, or `git clone --no-checkout` into
+`/home/sam/dev/tarmar-canon` followed by `git reset --hard` to it, so no
+other tree is ever written there. A failed fetch, `ls-remote` or clone, a
+checkout with no upstream, a fast-forward that fails (uncommitted edits on the
+host to files it changes; edits to other files are carried along), or a path
+that is not a git checkout stops the deploy before anything is built. Commits
+made on the host are covered below. The host authenticates to GitHub as `smarks` over
+ssh, which is what lets it read the private repository.
 
 A canon change is a change to deploy. A successful deploy records the canon
-commit it put live in `.deploy-canon` in the main checkout; when the canon
-checkout is at any other commit, the deploy goes ahead even if this
-repository has no new commit (`--force` still deploys regardless). So a
-canon change ships by pushing it to `smarks/tarmar-canon` and running
-`./deploy.sh`, and a deploy that pulled a canon change but failed leaves the
-next run still deploying it.
+commit it put live in `.deploy-canon` in the main checkout; when the checkout
+is at any other commit or absent, or origin's canon has moved past it, the
+deploy goes ahead even if this repository has no new commit (`--force` still
+deploys regardless). So a canon change ships by pushing it to
+`smarks/tarmar-canon` and running `./run ship`, which gates `main`'s head
+against the new canon and starts the deploy, and a deploy that moved the
+checkout to a canon change but failed leaves the next run still deploying it.
 
 Before it builds a release, the deploy reads `TARMAR_CANON_DIR` from `.env`
 (in a subshell, so nothing else in `.env` reaches the test step) and refuses
@@ -172,13 +180,26 @@ The gate record has to vouch for the Tarmar canon too. `deploy.sh` (unless
 `--force`) and `./run gate --check` refuse a record whose first pass ran the
 default canon, which is what a gate run without `TARMAR_CANON_DIR` records.
 The record's `canon-commit:` line names the canon commit the suites ran
-against; when the canon the deploy pulls is at another commit, the deploy
-says so in a warning and carries on, since that canon change has not been
-through the suites.
+against, and a record without one is refused. When the canon the deploy would
+serve is at another commit, the deploy stops before anything is built, naming
+both commits, since that canon change has not been through the suites and the
+canon holds rules the battle engine loads (`magic-rules.json`), not only lore.
+The check runs before the checkout moves, against the commit it would move to,
+so a refused canon never reaches the checkout the live colour reads. Run
+`./run ship` again: it gates `main`'s head against the canon's head and
+deploys. A record of `canon-commit: none` is refused like any other mismatch.
+A checkout holding commits made on the host that origin does not have is
+refused first, with its own message: `./run ship` gates origin's head and
+could never cover them, so push them to `smarks/tarmar-canon` or drop them by
+hand. The comparison is made only when the deploy would change something: with
+no new commit on `main`, the checkout at the commit `.deploy-canon` records,
+and origin's canon at or behind that commit (so the fast-forward would change
+nothing), the deploy exits 0 as up to date whatever the record says, so a run
+with nothing to do never shows red. `--force` reads no record, so it makes no comparison.
 
 Three things follow from both colours reading one checkout. The canon's pages
 are read per request, so the live colour serves canon pages from the moment
-the deploy pulls them, while its nav, maps and prompt (read at import) change
+the deploy moves the checkout to them, while its nav, maps and prompt (read at import) change
 only when it restarts. `deploy.sh rollback` switches the code back but not the
 canon. And the GM retrieval index is rebuilt by `build_gm_index` when the
 corpus hash changes, which a canon change alone does.
