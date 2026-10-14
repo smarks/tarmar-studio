@@ -14,6 +14,7 @@ them together the way ``test_rules_drift`` pins the rules docs.
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 
 from django.test import SimpleTestCase
@@ -336,7 +337,11 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
 
 
 def awaiting_wizard_battle(
-    dm, player, *, mana: int | None = None
+    dm,
+    player,
+    *,
+    mana: int | None = None,
+    before_turn: Callable[[dict, BattleCombatant], None] | None = None,
 ) -> tuple[Battle, BattleCombatant]:
     """A battle paused on ``player``'s seated wizard's decision.
 
@@ -345,6 +350,8 @@ def awaiting_wizard_battle(
         player: The user who claims the one player seat, as a wizard.
         mana: The mana the wizard has when the turn begins, or ``None`` for
             the generated wizard's full pool.
+        before_turn: Changes the started battle's ``state_json`` in place,
+            given it and the wizard's seat, before the first turn runs.
 
     Returns:
         The paused battle and the wizard's seat.
@@ -355,11 +362,13 @@ def awaiting_wizard_battle(
     seat = claim_seat(battle.pk, seat.pk, player, archetype="wizard")
     set_seat_ready(battle.pk, seat.pk, player, ready=True)
     battle = start_battle(battle.pk)
-    if mana is not None:
+    if mana is not None or before_turn is not None:
         state = battle.state_json
         for combatant in state["combatants"]:
-            if combatant["combatant_id"] == seat.pk:
+            if combatant["combatant_id"] == seat.pk and mana is not None:
                 combatant["mana"] = mana
+        if before_turn is not None:
+            before_turn(state, seat)
         Battle.objects.filter(pk=battle.pk).update(state_json=state)
     battle, _events = advance_turn(battle.pk)
     return battle, seat

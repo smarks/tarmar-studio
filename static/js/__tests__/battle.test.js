@@ -2230,6 +2230,91 @@ describe('borrowing mana for a cast (tarmar-engine #28)', () => {
     });
 });
 
+describe('a Runaway on the board (tarmar-engine #30)', () => {
+    // A caster whose spell has run away, as the server describes it: the
+    // card's line is battle.viewmodel._tarmar_runaway's, and the anchors are
+    // the engine's menu rows with the server's plain line and cost.
+    const runawayLine = 'Runaway Fire Missile: has fed for 2 turns; it takes 3 a turn from mana';
+
+    function anchorPending() {
+        return {
+            combatant_id: 4,
+            turn: 3,
+            display_name: 'Ysolde Fenner',
+            player: 'playeruser',
+            is_you: true,
+            candidates: [
+                { letter: 'k', name: 'DEFEND', score: 0.3, rationale: 'Hold',
+                  target_id: null, spell_key: '', ai_choice: false,
+                  plain: 'Defend', cost: '' },
+                { letter: 'anchor', name: 'Anchor Fire Missile', score: 10,
+                  rationale: 'anchor roll 2d8 vs WIS', target_id: 4, anchor_target: 4,
+                  spell_key: '', ai_choice: true,
+                  plain: 'Take back control of your runaway Fire Missile: 2d8 at or under your WIS',
+                  cost: '' },
+                { letter: 'anchor', name: "Anchor Bram's Shield", score: 0,
+                  rationale: 'Pay 2 mana', target_id: 7, anchor_target: 7,
+                  spell_key: '', ai_choice: false,
+                  plain: 'Help Bram take back their runaway Shield: 2d10 at or under your INT',
+                  cost: '2 mana, paid whether it holds or not' },
+            ],
+        };
+    }
+
+    test('the card shows the server\'s Runaway line, and no line without one', () => {
+        document.body.innerHTML = '<div id="roster"></div>';
+        const roster = document.getElementById('roster');
+        battle.renderRoster(roster, sampleState([
+            sampleCombatant({
+                runaway: { spell_key: 'fire_missile', line: runawayLine },
+            }),
+            sampleCombatant({ combatant_id: 2, runaway: null }),
+        ]));
+        const cards = roster.querySelectorAll('.combatant-card');
+        const line = cards[0].querySelector('.combatant-runaway');
+        expect(line.textContent).toBe(runawayLine);
+        expect(line.dataset.spell).toBe('fire_missile');
+        expect(cards[1].querySelector('.combatant-runaway')).toBeNull();
+    });
+
+    test('each anchor is a row with the server\'s line and cost', () => {
+        document.body.innerHTML = '<div id="turn-panel" hidden></div>';
+        const panel = document.getElementById('turn-panel');
+        battle.renderTurnPanel(panel, anchorPending(), { selectedIndex: null });
+        const rows = panel.querySelectorAll('.turn-option-anchor');
+        expect(rows).toHaveLength(2);
+        expect(rows[0].querySelector('.turn-option-plain').textContent)
+            .toBe('Take back control of your runaway Fire Missile: 2d8 at or under your WIS');
+        expect(rows[0].querySelector('.turn-option-cost').textContent).toBe('Costs nothing.');
+        expect(rows[0].querySelector('.turn-option-ai-pick')).not.toBeNull();
+        expect(rows[1].querySelector('.turn-option-cost').textContent)
+            .toBe('Costs 2 mana, paid whether it holds or not.');
+        // Not an anchor: DEFEND carries no anchor class.
+        expect(panel.querySelectorAll('.turn-option')).toHaveLength(3);
+    });
+
+    test('confirming an anchor sends whose Runaway it takes back', async () => {
+        const panel = mountPage(anchorPending());
+        panel.querySelectorAll('.turn-option-anchor')[1].click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 3, letter: 'anchor', target_id: 7,
+            spell_key: '', anchor_target: 7,
+        });
+    });
+
+    test('confirming any other option sends no anchor', async () => {
+        const panel = mountPage(anchorPending());
+        panel.querySelector('.turn-option').click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+            combatant_id: 4, turn: 3, letter: 'k', target_id: null, spell_key: '',
+        });
+    });
+});
+
 describe('teams (#275)', () => {
     test('teamOrderOf lists teams by first appearance, skipping the free pool', () => {
         const view = sampleState([

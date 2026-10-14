@@ -60,6 +60,7 @@ from tarmar_engine.engine import (
     SPRINT_FATIGUE_COST,
 )
 from tarmar_engine.policy import (
+    ANCHOR_OPTION,
     GRAPPLE_ATTEMPT_SCORE,
     GRAPPLE_TACTICS_RATIONALE,
     HURT_THRESHOLD,
@@ -79,6 +80,7 @@ from tarmar_engine.policy import (
 from tarmar_engine.spells import get_spell
 from tarmar_engine.state import BattleState, CombatantState
 
+from .magic_rules import magic_rules
 from .persistence import TARMAR_PROFILE
 
 #: What DODGE and DEFEND guard against, in the words of the "Defending and
@@ -281,6 +283,50 @@ def _with_odds(sentence: str, rationale: str) -> str:
     return f"{sentence}: {odds}" if odds else sentence
 
 
+def _anchor_line(
+    actor: CombatantState, target: CombatantState | None
+) -> tuple[str, str]:
+    """An anchor option's sentence and cost (tarmar-engine #30).
+
+    Read from the Runaway on the figure the option names and the canon's
+    injected rules: the roll the engine will make (the caster's own, or a
+    helper's), and for a helper the mana the engine takes whatever comes of
+    it (:meth:`~tarmar_engine.magic.RunawayRules.helper_cost`) and whether a
+    failure catches them. The roll's target, less the casting penalties, is
+    the engine's, in the option's rationale.
+
+    Args:
+        actor: The figure choosing.
+        target: The figure whose Runaway the option anchors.
+
+    Returns:
+        ``(plain, cost)``, as :func:`_plain_line` gives them.
+    """
+    rules = magic_rules().runaway
+    if target is None or target.runaway is None or rules is None:
+        return "Anchor a runaway spell", ""
+    spell = get_spell(target.runaway.spell_key)
+    if target.combatant_id == actor.combatant_id:
+        roll = rules.self_anchor
+        return (
+            f"Take back control of your runaway {spell.name}: {roll.dice} at or "
+            f"under your {roll.attribute}",
+            "",
+        )
+    roll = rules.helper_anchor
+    cost = (
+        f"{rules.helper_cost(target.runaway.original_cost)} mana, paid whether "
+        "it holds or not"
+    )
+    if rules.helper_failure_catches_helper:
+        cost += f"; if it fails, {spell.name} runs away from you too"
+    return (
+        f"Help {target.name} take back their runaway {spell.name}: {roll.dice} "
+        f"at or under your {roll.attribute}",
+        cost,
+    )
+
+
 def _plain_line(
     state: BattleState,
     actor: CombatantState,
@@ -360,6 +406,8 @@ def _plain_line(
                 f"; paying it empties your pool and borrows the {owed} you lack "
                 "as debt, and a debt roll follows the spell"
             )
+    elif option == ANCHOR_OPTION:
+        plain, cost = _anchor_line(actor, target)
     elif option == "j":
         plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
     elif option == "k":
@@ -516,6 +564,7 @@ def _base_fields(candidate: Candidate) -> dict:
         "spell_key": candidate.spell_key,
         "push_mana": candidate.push_mana,
         "borrow": candidate.borrow,
+        "anchor_target": candidate.anchor_target,
         "destination": candidate.destination,
     }
 

@@ -47,5 +47,16 @@
     "automatic_failure_totals": [12],
     "max_debt": 4,
     "refunds_pay_debt_first": true
+  },
+  "runaway": {
+    "drain_multiplier_of_cost": 1,
+    "drain_flat": 1,
+    "overflow_pool": "body",
+    "death_multiplier_of_max": 0,
+    "self_anchor": { "dice": "3d6", "attribute": "WIS" },
+    "helper_anchor": { "dice": "2d10", "attribute": "INT" },
+    "helper_cost_multiplier_of_cost": 2,
+    "helper_failure_catches_helper": true,
+    "effect_bonus_per_turn": 2
   }
 }

@@ -152,7 +152,8 @@ def event_lines(event: BattleEvent) -> list[str]:
     the battle log prints them (``battle/_event.html``). The casting success
     tier, the Control Roll and the debt roll (tarmar-engine #28) are events
     of their own, narrated by the engine with the labels the canon's rules
-    give them.
+    give them; so are a Runaway's drain, collapse, death and anchor roll
+    (tarmar-engine #30), in the engine's own words.
 
     Args:
         event: A battle log event.
