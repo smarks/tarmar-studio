@@ -500,14 +500,46 @@ if (typeof module !== 'undefined' && module.exports) {
     function noteRename(roster, combatantId, message, typed) {
         if (!roster) { return; }
         notesOf(roster).set(String(combatantId), { message, typed, announce: true });
-        paintNotes(roster);
+        keepRosterFocus(roster, () => { paintNotes(roster); });
     }
 
     /** Drop a figure's note: it is being renamed again. */
     function forgetRenameNote(roster, combatantId) {
         if (roster && notesOf(roster).delete(String(combatantId))) {
-            paintNotes(roster);
+            keepRosterFocus(roster, () => { paintNotes(roster); });
         }
+    }
+
+    /** Give the roster itself the focus, when what had it is gone. */
+    function focusRoster(roster) {
+        if (!roster.hasAttribute('tabindex')) { roster.setAttribute('tabindex', '-1'); }
+        roster.focus({ preventScroll: true });
+    }
+
+    /**
+     * Run ``redraw`` and put the keyboard focus back where it was in the
+     * roster (issue #16): a redraw empties it, and the focus fell to the
+     * page on every applied poll. Every control a card draws carries a
+     * data-focus-key (its figure's name, a seat hand-off, the attributes
+     * summary, a fatal-roll link, a note's Dismiss), the convention of the
+     * turn panel (#646) and the GM side panel's tabs, and the focus goes to
+     * the control of the same key, or to the roster when it has gone. A
+     * redraw that left the focus in the roster (a rename carried through
+     * it) is left alone, and focus elsewhere on the page is never taken.
+     * @param {Element} roster
+     * @param {function(): void} redraw
+     */
+    function keepRosterFocus(roster, redraw) {
+        const active = document.activeElement;
+        const held = Boolean(active) && active !== roster && roster.contains(active);
+        const key = held ? active.dataset.focusKey || '' : '';
+        redraw();
+        if (!held) { return; }
+        const now = document.activeElement;
+        if (now && now !== roster && roster.contains(now)) { return; }
+        const target = key ? elementByFocusKey(roster, key) : null;
+        if (target) { target.focus({ preventScroll: true }); }
+        if (document.activeElement !== target) { focusRoster(roster); }
     }
 
     /**
@@ -535,6 +567,7 @@ if (typeof module !== 'undefined' && module.exports) {
             const dismiss = document.createElement('button');
             dismiss.type = 'button';
             dismiss.className = 'battle-button battle-button-outline roster-note-dismiss';
+            dismiss.dataset.focusKey = `note-dismiss-${combatantId}`;
             dismiss.textContent = 'Dismiss';
             dismiss.addEventListener('click', () => {
                 notes.delete(combatantId);
@@ -547,8 +580,7 @@ if (typeof module !== 'undefined' && module.exports) {
                     next.focus();
                     return;
                 }
-                if (!roster.hasAttribute('tabindex')) { roster.setAttribute('tabindex', '-1'); }
-                roster.focus({ preventScroll: true });
+                focusRoster(roster);
             });
             line.append(words, ' ', dismiss);
             const card = roster.querySelector(`[data-combatant="${combatantId}"]`);
@@ -665,10 +697,12 @@ if (typeof module !== 'undefined' && module.exports) {
      */
     function renderRoster(container, view, renameOptions, seatMap, openDetail) {
         notesOf(container);
-        const renaming = takeRename(container);
-        drawRoster(container, view, renameOptions, seatMap, openDetail);
-        if (renaming) { resumeRename(container, view, renameOptions, renaming); }
-        paintNotes(container);
+        keepRosterFocus(container, () => {
+            const renaming = takeRename(container);
+            drawRoster(container, view, renameOptions, seatMap, openDetail);
+            if (renaming) { resumeRename(container, view, renameOptions, renaming); }
+            paintNotes(container);
+        });
     }
 
     /**
@@ -780,6 +814,7 @@ if (typeof module !== 'undefined' && module.exports) {
         panel.open = Boolean(openDetail && openDetail.has(combatant.combatant_id));
         const summary = document.createElement('summary');
         summary.textContent = 'Full attributes';
+        summary.dataset.focusKey = `detail-${combatant.combatant_id}`;
         panel.appendChild(summary);
         (combatant.detail.groups || []).forEach((group) => {
             const section = document.createElement('section');
@@ -830,6 +865,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
         const title = document.createElement('strong');
         title.textContent = shortName(combatant.name);
+        title.dataset.focusKey = `name-${combatant.combatant_id}`;
         // Only the figures the server says this viewer may rename (#762): in
         // a Games Master session's fight the foes are not the player's.
         const seatFacts = (seatMap || {})[combatant.combatant_id];
@@ -900,6 +936,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 handOff.className = 'battle-button battle-button-outline seat-hand-off';
                 handOff.dataset.seatUrl = seat[key];
                 handOff.dataset.seatHandOff = kind;
+                handOff.dataset.focusKey = `hand-off-${kind}-${combatant.combatant_id}`;
                 handOff.textContent = label;
                 card.appendChild(handOff);
             });
@@ -951,6 +988,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 if (index) { chain.appendChild(document.createTextNode(', ')); }
                 const link = document.createElement('a');
                 link.href = `#event-${sequence}`;
+                link.dataset.focusKey = `fatal-${combatant.combatant_id}-${sequence}`;
                 link.textContent = `#${sequence}`;
                 chain.appendChild(link);
             });

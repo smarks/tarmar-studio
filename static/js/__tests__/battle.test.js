@@ -911,6 +911,116 @@ describe('inline rename', () => {
         });
     });
 
+    describe('the keyboard focus through a redraw (issue #16 review)', () => {
+        const DETAIL = { groups: [{ label: 'Attributes', rows: [{ label: 'STR', value: '13', note: '' }] }] };
+
+        function roster2() {
+            document.body.innerHTML = '<input id="elsewhere"><div id="roster"></div>';
+            const roster = document.getElementById('roster');
+            const state = sampleState([
+                sampleCombatant({ combatant_id: 1, name: 'Kestra', detail: DETAIL }),
+                sampleCombatant({ combatant_id: 2, name: 'Bran' }),
+            ]);
+            const options = { url: '/tarmar/battles/1/rename/', csrf: 'tok', onRenamed: jest.fn() };
+            battle.renderRoster(roster, state, options);
+            return { roster, state, options };
+        }
+
+        function redrawKeeps(selector, seatMap) {
+            const { roster, state, options } = roster2();
+            battle.renderRoster(roster, state, options, seatMap);
+            const before = roster.querySelector(selector);
+            before.focus();
+            expect(document.activeElement).toBe(before);
+
+            battle.renderRoster(roster, state, options, seatMap);
+
+            const after = roster.querySelector(selector);
+            expect(after).not.toBe(before);
+            expect(document.activeElement).toBe(after);
+        }
+
+        test('a figure\'s name keeps it', () => {
+            redrawKeeps('[data-combatant="2"] .combatant-name');
+        });
+
+        test('the attributes summary keeps it', () => {
+            redrawKeeps('[data-combatant="1"] .combatant-detail summary');
+        });
+
+        test('a seat hand-off keeps it', () => {
+            redrawKeeps('[data-combatant="1"] .seat-hand-off', { 1: { take_seat_url: '/tarmar/battles/1/seat/take/' } });
+        });
+
+        test('a fatal-roll link keeps it', () => {
+            document.body.innerHTML = '<div id="roster"></div>';
+            const roster = document.getElementById('roster');
+            const state = sampleState([
+                sampleCombatant({ combatant_id: 1, alive: false, conscious: false, fatal_chain: [7, 9] }),
+            ]);
+            battle.renderRoster(roster, state);
+            roster.querySelectorAll('.fatal-chain a')[1].focus();
+
+            battle.renderRoster(roster, state);
+
+            expect(document.activeElement).toBe(roster.querySelectorAll('.fatal-chain a')[1]);
+        });
+
+        test('a note\'s Dismiss keeps it', () => {
+            const { roster, state, options } = roster2();
+            roster.querySelector('[data-combatant="1"] .combatant-name').click();
+            roster.querySelector('.combatant-rename-input').value = 'typed';
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            const dismiss = roster.querySelector('.roster-note-dismiss');
+            dismiss.focus();
+
+            battle.renderRoster(roster, state, options);
+
+            expect(roster.querySelector('.roster-note-dismiss')).not.toBe(dismiss);
+            expect(document.activeElement).toBe(roster.querySelector('.roster-note-dismiss'));
+        });
+
+        test('a note painted for a refusal leaves the focus on the Dismiss it had', async () => {
+            const { roster, state, options } = roster2();
+            roster.querySelector('[data-combatant="1"] .combatant-name').click();
+            roster.querySelector('.combatant-rename-input').value = 'typed';
+            battle.renderRoster(roster, state, options, { 1: { can_rename: false } });
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: false, json: async () => ({ success: false, error: 'Another combatant already has that name' }),
+            });
+            require('../api.js');
+            roster.querySelector('[data-combatant="2"] .combatant-name').click();
+            const input = roster.querySelector('.combatant-rename-input');
+            input.value = 'Kestra';
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            roster.querySelector('[data-focus-key="note-dismiss-1"]').focus();
+
+            await flush();
+
+            expect(roster.querySelectorAll('.roster-note-dismiss')).toHaveLength(2);
+            expect(document.activeElement.dataset.focusKey).toBe('note-dismiss-1');
+        });
+
+        test('a control whose figure has gone hands it to the roster', () => {
+            const { roster, options } = roster2();
+            roster.querySelector('[data-combatant="2"] .combatant-name').focus();
+
+            battle.renderRoster(roster, sampleState([sampleCombatant({ combatant_id: 1, name: 'Kestra' })]), options);
+
+            expect(document.activeElement).toBe(roster);
+        });
+
+        test('focus elsewhere on the page is left there', () => {
+            const { roster, state, options } = roster2();
+            const elsewhere = document.getElementById('elsewhere');
+            elsewhere.focus();
+
+            battle.renderRoster(roster, state, options);
+
+            expect(document.activeElement).toBe(elsewhere);
+        });
+    });
+
     test('a network failure shows a persistent inline error and reverts', async () => {
         const { roster } = rosterWithOptions();
         global.fetch = jest.fn().mockRejectedValue(new Error('offline'));

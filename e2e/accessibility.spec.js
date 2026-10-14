@@ -23,7 +23,7 @@
 const AxeBuilder = require('@axe-core/playwright').default;
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
-    TEST_WATCHER, postAsGameMaster, characterIdFromUrl,
+    TEST_WATCHER, postAsGameMaster, characterIdFromUrl, createBattleViaSetup,
 } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 
@@ -391,5 +391,91 @@ test.describe('the way from signing in to the journal (issues #786, #827, #828, 
                 .analyze();
             expect(found.violations, `${viewport.name}:\n${describe(found.violations)}`).toEqual([]);
         }
+    });
+});
+
+test.describe('Battle roster — a downed figure and the notes on its card (issue #16)', () => {
+    /**
+     * The roster's contrast, checked by axe, and what it measured for each
+     * piece of text on the downed card, kept as annotations on the test.
+     */
+    async function rosterContrast(page, testInfo, step) {
+        const results = await new AxeBuilder({ page })
+            .include('#battle-roster')
+            .withRules(['color-contrast'])
+            .analyze();
+        const unmeasured = (results.incomplete.find((rule) => rule.id === 'color-contrast') || { nodes: [] }).nodes;
+        unmeasured.forEach((node) => {
+            testInfo.annotations.push({
+                type: `contrast ${step} unmeasured`,
+                description: `${node.target.join(' ')} ${(node.any[0] && node.any[0].message) || ''}`,
+            });
+        });
+        const measured = (results.passes.find((rule) => rule.id === 'color-contrast') || { nodes: [] }).nodes;
+        measured.forEach((node) => {
+            const data = node.any[0] && node.any[0].data;
+            testInfo.annotations.push({
+                type: `contrast ${step}`,
+                description: `${node.target.join(' ')} ${data ? `${data.contrastRatio}:1 (${data.fgColor} on ${data.bgColor})` : ''}`,
+            });
+        });
+        return results.violations;
+    }
+
+    test('passes color-contrast with a "renamed meanwhile" note and a refusal on it', async ({ page }, testInfo) => {
+        await loginAs(page, TEST_ADMIN);
+        // A battle awaiting the DM's move, so his page polls the state.
+        await createBattleViaSetup(page, {
+            name: `E2E Down contrast ${Date.now()}`, fighters: 3, seed: 7, controlMode: 'manual',
+        });
+        const battleId = new URL(page.url()).pathname.match(/battles\/(\d+)\//)[1];
+        await page.click('#advance-turn');
+        const awaited = (await page.locator('#turn-panel .turn-prompt strong').textContent()).trim();
+
+        // One figure the turn is not waiting on goes down, on the record.
+        const cards = page.locator('#battle-roster [data-combatant]');
+        const downedCard = cards.filter({ hasNotText: awaited }).first();
+        const downedId = await downedCard.getAttribute('data-combatant');
+        const otherName = (await page
+            .locator(`#battle-roster [data-combatant]:not([data-combatant="${downedId}"]) .combatant-name`)
+            .first().textContent()).trim();
+        readDjangoShell(`
+from battle import profiles
+from battle.models import Battle
+from battle.services import dump_state
+battle = Battle.objects.get(pk=${battleId})
+state = profiles.for_battle(battle).load(battle.state_json)
+figure = next(each for each in state.combatants if each.combatant_id == ${downedId})
+figure.conscious = False
+battle.state_json = dump_state(state)
+battle.save()
+print('DOWN')
+`);
+        await page.reload();
+        const down = page.locator(`#battle-roster [data-combatant="${downedId}"]`);
+        await expect(down).toHaveClass(/is-down/);
+
+        // A rename begun on it, and the figure renamed meanwhile elsewhere:
+        // the next poll redraws the roster with the note under the field.
+        await down.locator('.combatant-name').click();
+        await page.locator('.combatant-rename-input').fill('Down and out');
+        await down.evaluate((node) => { node.dataset.beforePoll = 'yes'; });
+        readDjangoShell(`
+from battle.services import rename_combatant, set_battle_control_mode
+rename_combatant(${battleId}, ${downedId}, 'Renamed Elsewhere')
+set_battle_control_mode(${battleId}, 'manual')
+print('DONE')
+`);
+        await expect(page.locator('#battle-roster [data-before-poll]')).toHaveCount(0);
+        await expect(down.locator('.rename-changed-note')).toBeVisible();
+        const withChangedNote = await rosterContrast(page, testInfo, 'renamed-meanwhile');
+        expect(withChangedNote, describe(withChangedNote)).toEqual([]);
+
+        // Refused: the name another figure already has.
+        await page.locator('.combatant-rename-input').fill(otherName);
+        await page.keyboard.press('Enter');
+        await expect(down.locator('.roster-rename-note')).toContainText('already has that name');
+        const withRefusal = await rosterContrast(page, testInfo, 'refusal');
+        expect(withRefusal, describe(withRefusal)).toEqual([]);
     });
 });
