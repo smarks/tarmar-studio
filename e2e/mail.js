@@ -23,10 +23,22 @@ const path = require('path');
  */
 const FILE_EMAIL_BACKEND = 'common.mail_backends.OneFilePerConnectionEmailBackend';
 
+/**
+ * The port this run's dev server listens on, which names its mail directory.
+ * Digits only: the teardown removes the directory it names (issue #17), so a
+ * value such as `../x` must stop the run here rather than reach the path.
+ * @returns {string}
+ */
+function e2ePort() {
+    const port = process.env.E2E_PORT || '8000';
+    if (!/^\d+$/.test(port)) {
+        throw new Error(`E2E_PORT must be a port number (digits only), not ${JSON.stringify(port)}`);
+    }
+    return port;
+}
+
 /** Where the dev server writes each message, one file per connection. */
-const E2E_MAIL_DIRECTORY = path.join(
-    os.tmpdir(), `tarmar-e2e-mail-${process.env.E2E_PORT || '8000'}`,
-);
+const E2E_MAIL_DIRECTORY = path.join(os.tmpdir(), `tarmar-e2e-mail-${e2ePort()}`);
 
 /**
  * A quoted-printable body as the reader sees it. Django sends text bodies
@@ -87,6 +99,22 @@ function takeMessageTo(address) {
 }
 
 /**
+ * Remove a run's mail directory and every message left in it (issue #17).
+ *
+ * The dev server makes the directory when it sends its first message, and
+ * nothing else ever removed it, so each run on a new E2E_PORT -- the gate
+ * picks two from a span of 200 -- left a folder in the system temp directory.
+ * The global teardown calls this once the specs are done, pass or fail. A
+ * directory that was never made is not an error.
+ * @param {string} [directory] Defaults to this run's E2E_MAIL_DIRECTORY; a
+ *     test passes one of its own so it never empties the directory a running
+ *     spec is reading.
+ */
+function removeMailDirectory(directory = E2E_MAIL_DIRECTORY) {
+    fs.rmSync(directory, { recursive: true, force: true });
+}
+
+/**
  * What a spec says when the message never arrives, naming the usual cause.
  * @param {string} address
  * @returns {string}
@@ -100,5 +128,9 @@ function missingMailMessage(address) {
 }
 
 module.exports = {
-    E2E_MAIL_DIRECTORY, FILE_EMAIL_BACKEND, missingMailMessage, takeMessageTo,
+    E2E_MAIL_DIRECTORY,
+    FILE_EMAIL_BACKEND,
+    missingMailMessage,
+    removeMailDirectory,
+    takeMessageTo,
 };
