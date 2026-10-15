@@ -4,6 +4,7 @@
     "point_buy": { "total": 65, "minimum": 3, "maximum": 18 }
   },
   "age": { "starting": 16, "years_per_stage": 4 },
+  "attribute_roll": { "dice": "3d6" },
   "fatigue_roll": {
     "dice": "2d6",
     "attributes": ["CON", "WIS", "INT"],

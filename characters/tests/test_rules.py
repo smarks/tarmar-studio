@@ -25,6 +25,7 @@ from django.test import SimpleTestCase
 from characters.checks import CHARACTER_RULES_CHECK_ID, check_character_rules
 from characters.rules import (
     AgeRules,
+    AttributeRollRules,
     AttributeRules,
     CharacterRules,
     CharacterRulesError,
@@ -61,6 +62,7 @@ INVENTED_RULES: dict[str, Any] = {
         "point_buy": {"total": 50, "minimum": 4, "maximum": 15},
     },
     "age": {"starting": 14, "years_per_stage": 5},
+    "attribute_roll": {"dice": "4d4"},
     "fatigue_roll": {"dice": "1d8+1", "attributes": ["CON"], "best_of": []},
     "literacy_roll": {"dice": "2d10"},
     "height": {
@@ -112,6 +114,7 @@ INVENTED_CHARACTER_RULES = CharacterRules(
         maximum=25, point_buy=PointBuyRules(total=50, minimum=4, maximum=15)
     ),
     age=AgeRules(starting=14, years_per_stage=5),
+    attribute_roll=AttributeRollRules(dice="4d4"),
     fatigue_roll=FatigueRollRules(dice="1d8+1", attributes=("CON",), best_of=()),
     literacy_roll=LiteracyRollRules(dice="2d10"),
     height=HeightRules(
@@ -178,6 +181,7 @@ def rules_summary(rules: CharacterRules) -> dict[str, Any]:
         "attribute_maximum": rules.attributes.maximum,
         "point_buy": [point_buy.total, point_buy.minimum, point_buy.maximum],
         "age": [rules.age.starting, rules.age.years_per_stage],
+        "attribute_dice": rules.attribute_roll.dice,
         "fatigue_roll": [
             rules.fatigue_roll.dice,
             list(rules.fatigue_roll.attributes),
@@ -273,6 +277,9 @@ class CharacterRulesFileTest(SimpleTestCase):
         self.assertIn("['age']", str(caught.exception))
 
     def test_a_missing_key_is_refused(self) -> None:
+        self.assert_changed_refused(
+            lambda rules: rules.pop("attribute_roll"), "attribute_roll is missing"
+        )
         self.assert_changed_refused(
             lambda rules: rules["height"].pop("minimum_inches"),
             "height.minimum_inches is missing",
@@ -413,6 +420,21 @@ class CharacterRulesFileTest(SimpleTestCase):
                 lambda rules: rules["literacy_roll"].update(dice="3d6 + 1"),
                 "literacy_roll:",
                 "Invalid dice expression",
+            ),
+            (
+                lambda rules: rules["attribute_roll"].update(dice="3d"),
+                "attribute_roll:",
+                "Invalid dice expression: 3d",
+            ),
+            (
+                lambda rules: rules["attribute_roll"].update(dice="3D6"),
+                "attribute_roll:",
+                "dice '3D6' must be written '3d6'",
+            ),
+            (
+                lambda rules: rules["attribute_roll"].update(sides=6),
+                "attribute_roll.sides",
+                "not a field",
             ),
             (
                 lambda rules: rules["fatigue_roll"].update(dice=" 1D8+1 "),

@@ -399,6 +399,19 @@ class PointBuyRuleTest(SimpleTestCase):
         point_buy = DEFAULT_CHARACTER_RULES.attributes.point_buy
         self.assertIn(f"between {point_buy.minimum} and {point_buy.maximum}", text)
 
+    def test_published_attribute_dice_match_the_code(self):
+        """The rules roll each attribute on the default canon's dice, and the
+        buy's range is the range those dice produce, as the page says."""
+        text = ATTRIBUTES_RULES.read_text(encoding="utf-8")
+        attribute_roll = DEFAULT_CHARACTER_RULES.attribute_roll
+        self.assertIn(f"roll {attribute_roll.dice} to determine each attribute", text)
+        self.assertIn(f"the range {attribute_roll.dice} can produce", text)
+        point_buy = DEFAULT_CHARACTER_RULES.attributes.point_buy
+        self.assertEqual(
+            (attribute_roll.minimum, attribute_roll.maximum),
+            (point_buy.minimum, point_buy.maximum),
+        )
+
 
 class WeaponSkillRuleTest(SimpleTestCase):
     """The published weapon-skill ruling must match the code (issue #119)."""

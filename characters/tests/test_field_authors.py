@@ -598,7 +598,8 @@ class SheetRollTest(BaseTestCase):
         with patch("characters.dice.roll_d6", return_value=5):
             self.roll(character, "appearance")
         with patch(
-            "characters.services.roll_3d6_logged", return_value=(11, "3d6: 3+4+4 = 11")
+            "characters.services.roll_attribute_logged",
+            return_value=(11, "3d6: [3, 4, 4] = 11"),
         ):
             self.roll(character, "attributes")
 

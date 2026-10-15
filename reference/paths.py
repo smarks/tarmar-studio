@@ -52,7 +52,7 @@ the Games Master's world digest, all read once per process (issues #918,
 - ``character-rules.json`` (required to create a character): the numbers
   character creation reads, as the public character pages state them: the
   attribute ceiling and point buy, the starting age and aging stage, the
-  Fatigue and literacy rolls, the height and weight tables, and the
+  attribute, Fatigue and literacy rolls, the height and weight tables, and the
   provenance, location and wealth percentile tables, with an optional
   ``rulings`` list. Read by ``characters.rules``, whose docstring gives the
   full schema. Both rules files are read the one strict way
@@ -328,7 +328,7 @@ CANON_MAGIC_RULES_FILE_NAME = "magic-rules.json"
 MAGIC_RULES_FILE = DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME
 
 # The character-creation rules (issue #59): the point buy, the aging stages,
-# the Fatigue and literacy rolls, the height and weight tables and the social
+# the attribute, Fatigue and literacy rolls, the height and weight tables and the social
 # tables, read the same strict way through ``reference.rules_file`` by
 # ``characters.rules``. Every canon carries one; the default canon's holds the
 # public character pages' numbers.

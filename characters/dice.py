@@ -336,6 +336,15 @@ def roll_fatigue_logged(roller: Roller | None = None) -> tuple[int, str]:
     return roll_dice_logged(character_rules().fatigue_roll.dice, roller)
 
 
+def roll_attribute_logged(roller: Roller | None = None) -> tuple[int, str]:
+    """Roll one core attribute on the canon's dice; return (total, log_entry).
+
+    Args:
+        roller: Roll through this roller instead of the module default.
+    """
+    return roll_dice_logged(character_rules().attribute_roll.dice, roller)
+
+
 def roll_literacy_logged(roller: Roller | None = None) -> tuple[int, str]:
     """Roll the literacy roll on the canon's dice; return (total, log_entry).
 
@@ -628,7 +637,8 @@ def roll_secondary_character_stats(roller: Roller | None = None):
 
 def roll_all_character_stats(roller: Roller | None = None):
     """
-    Roll all stats for a new character, core attributes included (3d6 each).
+    Roll all stats for a new character, core attributes included, each on
+    the canon's attribute dice (3d6 on the public pages).
 
     Args:
         roller: Roll every die through this roller instead of the module
@@ -641,9 +651,9 @@ def roll_all_character_stats(roller: Roller | None = None):
     log_entries: list[str] = []
     stats: dict = {}
 
-    # Core attributes (3d6), rolled in order.
+    # Core attributes, rolled in order on the canon's attribute dice.
     for field_name, label in CORE_ATTRIBUTE_FIELDS:
-        value, entry_log = roll_3d6_logged(roller)
+        value, entry_log = roll_attribute_logged(roller)
         stats[field_name] = value
         log_entries.append(f"{label}: {entry_log}")
 

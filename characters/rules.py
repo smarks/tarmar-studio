@@ -17,6 +17,7 @@ The file is a JSON object::
         "point_buy": {"total": int, "minimum": int, "maximum": int}
       },
       "age": {"starting": int, "years_per_stage": int},
+      "attribute_roll": {"dice": str},
       "fatigue_roll": {"dice": str, "attributes": [str, ...],
                        "best_of": [str, ...]},
       "literacy_roll": {"dice": str},
@@ -51,6 +52,8 @@ What the values mean, and what else is refused:
   must lie inside ``1..maximum``, and the budget must be reachable from it.
 - ``age``: the age a character starts at, and the years between stages of
   the aging table.
+- ``attribute_roll``: the dice each core attribute is rolled on, when a
+  player rolls rather than buys.
 - ``fatigue_roll``: the dice added to the Fatigue sum, the attributes the
   sum adds (by the sheet's short names, ``STR`` ... ``CHR``), and the
   attributes of which only the highest is added (may be empty). An attribute
@@ -128,7 +131,9 @@ POINT_BUY_FIELDS = ("total", "minimum", "maximum")
 ATTRIBUTES_FIELDS = ("maximum", "point_buy")
 AGE_FIELDS = ("starting", "years_per_stage")
 FATIGUE_ROLL_FIELDS = ("dice", "attributes", "best_of")
-LITERACY_ROLL_FIELDS = ("dice",)
+#: A roll that is its dice and nothing else (``attribute_roll``,
+#: ``literacy_roll``).
+DICE_ROLL_FIELDS = ("dice",)
 HEIGHT_INTEGER_FIELDS = (
     "inches_per_extra_one",
     "inches_per_extra_six",
@@ -145,6 +150,7 @@ COIN_ROLL_FIELDS = ("base", "dice")
 TOP_LEVEL_FIELDS = (
     "attributes",
     "age",
+    "attribute_roll",
     "fatigue_roll",
     "literacy_roll",
     "height",
@@ -345,6 +351,15 @@ class FatigueRollRules(DiceRollRules):
                 f"{counted_twice} is in both attributes and best_of, so it "
                 "would count twice"
             )
+
+
+@dataclass(frozen=True)
+class AttributeRollRules(DiceRollRules):
+    """The roll each core attribute is made on, when it is rolled.
+
+    Attributes:
+        dice: The dice one attribute is rolled on.
+    """
 
 
 @dataclass(frozen=True)
@@ -627,6 +642,7 @@ class CharacterRules:
     Attributes:
         attributes: The attribute ceiling and the point buy.
         age: The starting age and the aging stage length.
+        attribute_roll: The dice each core attribute is rolled on.
         fatigue_roll: The Fatigue sum's dice and attributes.
         literacy_roll: The literacy roll's dice.
         height: The height table.
@@ -641,6 +657,7 @@ class CharacterRules:
 
     attributes: AttributeRules
     age: AgeRules
+    attribute_roll: AttributeRollRules
     fatigue_roll: FatigueRollRules
     literacy_roll: LiteracyRollRules
     height: HeightRules
@@ -723,12 +740,14 @@ class _CharacterRulesFileReader(RulesFileReader):
         with self.wrapped_value_errors(field_path):
             return FatigueRollRules(dice=dice, attributes=attributes, best_of=best_of)
 
-    def literacy_roll(self, value: Any, field_path: str) -> LiteracyRollRules:
-        """``literacy_roll``."""
-        fields = self.json_object(value, field_path, LITERACY_ROLL_FIELDS)
+    def dice_roll[Roll: DiceRollRules](
+        self, value: Any, field_path: str, roll_class: type[Roll]
+    ) -> Roll:
+        """``attribute_roll`` or ``literacy_roll``: a roll that is its dice."""
+        fields = self.json_object(value, field_path, DICE_ROLL_FIELDS)
         dice = self.text(fields["dice"], f"{field_path}.dice")
         with self.wrapped_value_errors(field_path):
-            return LiteracyRollRules(dice=dice)
+            return roll_class(dice=dice)
 
     def height(self, value: Any, field_path: str) -> HeightRules:
         """``height``."""
@@ -830,8 +849,13 @@ class _CharacterRulesFileReader(RulesFileReader):
         fields = self.file_object(value, TOP_LEVEL_FIELDS)
         attributes = self.attributes(fields["attributes"], "attributes")
         age = self.age(fields["age"], "age")
+        attribute_roll = self.dice_roll(
+            fields["attribute_roll"], "attribute_roll", AttributeRollRules
+        )
         fatigue_roll = self.fatigue_roll(fields["fatigue_roll"], "fatigue_roll")
-        literacy_roll = self.literacy_roll(fields["literacy_roll"], "literacy_roll")
+        literacy_roll = self.dice_roll(
+            fields["literacy_roll"], "literacy_roll", LiteracyRollRules
+        )
         height = self.height(fields["height"], "height")
         weight = self.weight(fields["weight"], "weight")
         tables = {
@@ -845,6 +869,7 @@ class _CharacterRulesFileReader(RulesFileReader):
             return CharacterRules(
                 attributes=attributes,
                 age=age,
+                attribute_roll=attribute_roll,
                 fatigue_roll=fatigue_roll,
                 literacy_roll=literacy_roll,
                 height=height,

@@ -23,6 +23,8 @@ from characters.dice import (
     demon_die_to_height_inches,
     literacy_check_text,
     location_effects,
+    roll_all_character_stats,
+    roll_attribute_logged,
     roll_fatigue_logged,
     roll_literacy_logged,
     roll_location_logged,
@@ -47,6 +49,8 @@ from characters.services import (
     apply_fatigue_roll,
     apply_origin_roll,
     apply_origin_skill,
+    apply_rolled_attributes,
+    apply_sheet_attribute_roll,
     apply_skill_rename,
     check_attribute,
     check_point_buy,
@@ -120,6 +124,25 @@ class AttributesAndAgeTest(SeatedRulesTestCase):
 
 
 class RollsTest(SeatedRulesTestCase):
+    def test_the_attributes_are_rolled_on_the_canons_dice(self) -> None:
+        # The invented dice are 4d4: four faces of 1 to 4, totals 4 to 16.
+        total, log = roll_attribute_logged(Roller(seed=59))
+        self.assertRegex(log, r"^4d4: \[[1-4], [1-4], [1-4], [1-4]\] = \d+$")
+        self.assertTrue(4 <= total <= 16, total)
+        stats = roll_all_character_stats(Roller(seed=59))
+        attribute_lines = stats["dice_log"].splitlines()[:6]
+        for label, line in zip(
+            ("STR", "DEX", "INT", "WIS", "CON", "CHR"), attribute_lines, strict=True
+        ):
+            with self.subTest(label=label):
+                self.assertTrue(line.startswith(f"{label}: 4d4: ["), line)
+        character = Character()
+        note = apply_rolled_attributes(character)
+        self.assertIn("strength 4d4: [", note)
+        self.assertIn("charisma: 4d4: [", character.dice_log)
+        character = Character(strength=None)
+        self.assertIn("4d4: [", apply_sheet_attribute_roll(character))
+
     def test_the_fatigue_roll_is_the_canons_dice(self) -> None:
         total, log = roll_fatigue_logged(Roller(seed=59))
         self.assertTrue(log.startswith("1d8+1: ["), log)

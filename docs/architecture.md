@@ -253,6 +253,16 @@ Notes on the edges, each checkable:
   (`reference.paths.MAGIC_RULES_FILE`) into the engine's `MagicRules`: the
   casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell and
   casting failure numbers. It is the only path that sets them.
+- `characters/rules.py` reads the canon's `character-rules.json`
+  (`reference.paths.CHARACTER_RULES_FILE`) into `CharacterRules`: every number
+  character creation uses (the attribute ceiling and point buy, the starting
+  age and aging stage, the attribute, Fatigue and literacy dice, the height
+  and weight tables, and the provenance, location and wealth tables). Callers
+  read it through the cached `character_rules()` when they run, never at
+  import, so the offline CLI's import chain stays free of Django and a canon
+  whose file is refused is reported by the `characters.E001` system check.
+  Both rules files are read by the one strict reader in
+  `reference/rules_file.py`.
 
 ### Frontend layering
 
@@ -422,14 +432,14 @@ are the state, and everything a sheet displays is a derived property.
 flowchart TD
     start(["POST /tarmar/characters/create/"]) --> which{"method"}
     which -->|"roll"| name
-    which -->|"point-buy"| parse["_parse_point_buy_attributes<br/>3 to 18, 65 points<br/>can_manage_users may exceed"]
+    which -->|"point-buy"| parse["_parse_point_buy_attributes<br/>the canon's point buy<br/>can_manage_users may exceed"]
     parse --> name["_creation_name<br/>Character.clean_field_value('name')<br/>blank: refused, or the account name<br/>for can_manage_users"]
-    name -->|"roll"| rollall["dice.roll_all_character_stats"]
+    name -->|"roll"| rollall["dice.roll_all_character_stats<br/>the canon's attribute dice"]
     name -->|"point-buy"| build["dice.build_point_buy_character_stats"]
     rollall --> sec
     build --> sec["dice.roll_secondary_character_stats"]
     sec --> feat["roll_physical_features<br/>appearance, height, weight demon dice"]
-    sec --> fat["roll_2d6_logged -> fatigue_roll"]
+    sec --> fat["roll_fatigue_logged -> fatigue_roll"]
     sec --> prov["roll_provenance_logged<br/>class then detail table"]
     sec --> loc["roll_location_logged + location_effects<br/>grants a starting skill"]
     sec --> wealth["roll_wealth_logged<br/>starting_coin_for_wealth"]
@@ -446,9 +456,13 @@ flowchart TD
 submit button; the server re-parses every value. The name (issue #786) is
 checked after the buy and before any dice, by the rule the sheet's rename and
 the import use; a refused buy or name re-renders the page with the reason and
-creates nothing. Bounds live once, in
-`characters/constants.py`: `POINT_BUY_TOTAL = 65`, `POINT_BUY_MIN_ATTRIBUTE = 3`,
-`POINT_BUY_MAX_ATTRIBUTE = 18`, `MAX_ATTRIBUTE_VALUE = 30`.
+creates nothing. Every number the flow uses (the point buy's budget and
+bounds, the attribute ceiling, the dice, the tables) lives once, in the loaded
+canon's `character-rules.json`, read through `characters.rules.character_rules()`
+(issue #59). The default canon's file states the public pages' numbers, which
+the drift tests in `characters/tests/test_rules_consistency.py` and
+`test_dice_fidelity.py` hold to the pages; `characters/tests/test_rules_seated.py`
+seats invented rules to prove every caller reads them.
 
 ### The derived-stat pipeline
 
@@ -463,8 +477,8 @@ flowchart TD
     base --> eff
     aging --> eff
 
-    fatroll["fatigue_roll - 2d6"]
-    fat["fatigue<br/>eff CON + WIS + INT + max of DEX and STR + roll"]
+    fatroll["fatigue_roll - the canon's Fatigue dice"]
+    fat["fatigue<br/>FatigueRollRules.total: the canon's attributes,<br/>the best of its best_of, and the roll"]
     body["body = ceil of fatigue times 2 over 3"]
     inj["injury_thresholds<br/>minus_one_at, unconscious_at,<br/>survival_save_at, survival_save_target"]
     eff --> fat
@@ -661,7 +675,7 @@ erDiagram
         int wisdom "nullable"
         int constitution "nullable"
         int charisma "nullable"
-        int fatigue_roll "nullable, 2d6"
+        int fatigue_roll "nullable, the canon's dice"
         string appearance_roll "demon die"
         string height_roll "demon die"
         string weight_roll "demon die"

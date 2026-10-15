@@ -1,9 +1,11 @@
 """Django system checks for the characters app (issue #59).
 
-The canon's ``character-rules.json`` is read the first time a character is
-created or rolled. A file the loader refuses, or a canon without one, would
-otherwise surface only then, as an error in the middle of somebody's
-character creation. Checked here, it fails ``manage.py check`` and the
+The canon's ``character-rules.json`` is read the first time any character
+code asks for it: constructing a ``Character`` (its age default), rendering a
+sheet, building the Games Master's extraction schema, importing a character,
+creating or rolling one. A file the loader refuses, or a canon without one,
+would otherwise surface only then, as an error in the middle of whichever of
+those came first. Checked here, it fails ``manage.py check`` and the
 deploy's ``migrate`` (which runs the system checks) before anyone builds a
 character.
 """

@@ -49,6 +49,7 @@ from .dice import (
     location_effects,
     location_skill_choices,
     roll_3d6_logged,
+    roll_attribute_logged,
     roll_d6_logged,
     roll_demon_die_logged,
     roll_expression,
@@ -842,7 +843,8 @@ def check_first_roll(already_rolled: bool, what: str, is_game_master: bool) -> N
 def apply_rolled_attributes(
     character: Character, *, is_game_master: bool = False
 ) -> str:
-    """Roll 3d6 for each of the six attributes and record them (issue #590).
+    """Roll each of the six attributes on the canon's dice and record them
+    (issue #590; 3d6 on the public pages).
 
     Code owns the dice: the faces go into the character's dice log.
     """
@@ -854,7 +856,7 @@ def apply_rolled_attributes(
     rolled = []
     logs = []
     for name in ATTRIBUTE_NAMES:
-        total, log = roll_3d6_logged()
+        total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
         logs.append(f"{name}: {log}")
@@ -2841,7 +2843,8 @@ def apply_sheet_attribute_roll(
 ) -> str:
     """The sheet's attribute roll: the missing scores, or all six again.
 
-    A character with scores missing (#571) rolls 3d6 for each missing one:
+    A character with scores missing (#571) rolls the canon's attribute dice
+    for each missing one:
     the rules roll a score nobody has recorded. A player who has bought any
     score is held to the buy instead (:func:`bought_scores`). With all six
     recorded it is :func:`apply_rolled_attributes`, which only a Game Master
@@ -2854,7 +2857,7 @@ def apply_sheet_attribute_roll(
         raise CharacterChangeError(BOUGHT_NOT_ROLLED_REASON)
     rolled = []
     for name in missing:
-        total, log = roll_3d6_logged()
+        total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
         _append_dice_log(character, f"{name}: {log}")
