@@ -91,7 +91,7 @@ def parse_json_text(
         text: The request body or uploaded file's bytes, or decoded text.
         object_pairs_hook: Passed through to ``json.loads``: builds each
             object from its key-value pairs, and may raise ``ValueError`` to
-            refuse one (``battle.magic_rules`` refuses a repeated key).
+            refuse one (``reference.rules_file`` refuses a repeated key).
 
     Returns:
         The parsed JSON value.

@@ -319,6 +319,13 @@ DEFAULT_MAGIC_PROMPT_FILE = DEFAULT_CANON_DIR / CANON_PROMPT_DIR_NAME / "magic.m
 CANON_MAGIC_RULES_FILE_NAME = "magic-rules.json"
 MAGIC_RULES_FILE = DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME
 
+# The character-creation rules (issue #59): the point buy, the aging stages,
+# the Fatigue and literacy rolls, the height and weight tables and the social
+# tables, read the same strict way through ``reference.rules_file``. No canon
+# carries the file yet; once its loader lands every canon must.
+CANON_CHARACTER_RULES_FILE_NAME = "character-rules.json"
+CHARACTER_RULES_FILE = DM_RULES_DIR / CANON_CHARACTER_RULES_FILE_NAME
+
 # The rest of what a canon directory may hold beside its pages (issue #921):
 # the author's documents, the guides generated from the canon, the Tarmar-only
 # tests' expectations, and the canon repository's README. Like
