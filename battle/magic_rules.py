@@ -73,8 +73,8 @@ default. An unknown key at any level is an error, since it is most likely a
 misspelling of a known one; so is a key repeated in one object, two tiers or
 two failure bands sharing a ``key``, and an attribute named twice in
 ``borrowing.debt_attributes``. ``rulings`` is optional and is the canon's own
-record of the readings its pages left open; it is checked for shape and not
-otherwise read.
+record of the readings its pages left open; like every canon rules file's, it
+is checked for shape and not otherwise read (``reference.rules_file``).
 """
 
 import functools
@@ -166,8 +166,6 @@ TOP_LEVEL_FIELDS = (
     "counterspell",
     "casting_failure",
 )
-OPTIONAL_TOP_LEVEL_FIELDS = ("rulings",)
-RULING_FIELDS = ("key", "reading")
 
 
 class MagicRulesError(RulesFileError):
@@ -265,12 +263,7 @@ class _MagicRulesFileReader(RulesFileReader):
             return None
         fields = self.json_object(value, field_path, PUSH_FIELDS)
         bands_path = f"{field_path}.failure_bands"
-        bands = tuple(
-            self.control_band(band, f"{bands_path}[{index}]")
-            for index, band in enumerate(
-                self.json_list(fields["failure_bands"], bands_path)
-            )
-        )
+        bands = self.entries(fields["failure_bands"], bands_path, self.control_band)
         self.unique_keys(bands, bands_path)
         with self.wrapped_value_errors(field_path):
             return PushRules(
@@ -480,25 +473,13 @@ class _MagicRulesFileReader(RulesFileReader):
                 ),
             )
 
-    def rulings(self, value: Any, field_path: str) -> None:
-        """``rulings``: a list of objects with string ``key`` and ``reading``."""
-        for index, ruling in enumerate(self.json_list(value, field_path)):
-            ruling_path = f"{field_path}[{index}]"
-            if not isinstance(ruling, dict):
-                self.fail(ruling_path, f"must be an object, got {ruling!r}")
-            for name in RULING_FIELDS:
-                self.text(ruling.get(name), f"{ruling_path}.{name}")
-
     def magic_rules(self, value: Any) -> MagicRules:
         """The whole file."""
-        fields = self.file_object(value, TOP_LEVEL_FIELDS, OPTIONAL_TOP_LEVEL_FIELDS)
-        if "rulings" in fields:
-            self.rulings(fields["rulings"], "rulings")
-        tiers = tuple(
-            self.casting_success_tier(tier, f"casting_success_tiers[{index}]")
-            for index, tier in enumerate(
-                self.json_list(fields["casting_success_tiers"], "casting_success_tiers")
-            )
+        fields = self.file_object(value, TOP_LEVEL_FIELDS)
+        tiers = self.entries(
+            fields["casting_success_tiers"],
+            "casting_success_tiers",
+            self.casting_success_tier,
         )
         self.unique_keys(tiers, "casting_success_tiers")
         with self.wrapped_value_errors("casting_success_tiers"):

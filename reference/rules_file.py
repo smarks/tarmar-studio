@@ -11,13 +11,23 @@ author's mistake stops the server instead of becoming a quiet default:
 - an object must carry every field its schema requires and nothing else,
   since an unknown key is most likely a misspelling of a known one;
 - integers are not booleans, texts are not empty, and a list that stands
-  for a set repeats nothing.
+  for a set repeats nothing;
+- every file may carry an optional top-level ``rulings`` list, the canon's
+  own record of the readings its pages left open: objects with a non-empty
+  string ``key`` and ``reading`` and whatever else the author records
+  (``page``, ``for_spencer``), checked for shape and not otherwise read.
 
 This module holds that machinery once. A rules module subclasses
 :class:`RulesFileReader` with its own block parsers and error class, and
 reads its file with :meth:`RulesFileReader.parsed_file` before handing the
 data to its own parsers. Every refusal names the file and, for a field, the
 field path, e.g. ``push.failure_bands[1].highest_margin``.
+
+Free of Django on purpose, like ``reference.paths``: ``characters.dice`` is in
+``gm.engine``'s import chain, which the offline CLI imports with no Django
+configured, and ``characters.rules``, which reads its file through here, is
+where ``characters.dice`` takes its numbers from once issue #59 seats them
+(``gm.tests``' ``test_engine_imports_without_django`` holds both to that).
 """
 
 from collections.abc import Callable, Iterator, Sequence
@@ -25,17 +35,24 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar, NoReturn, Protocol
 
-from django.core.exceptions import ImproperlyConfigured
+from common.json_text import parse_json_text
 
-from common.helpers import parse_json_text
+#: The optional top-level field every rules file may carry (see above).
+RULINGS_FIELD = "rulings"
+#: The fields each entry of ``rulings`` must carry as non-empty strings.
+RULING_FIELDS = ("key", "reading")
 
 
-class RulesFileError(ImproperlyConfigured):
+class RulesFileError(Exception):
     """A canon rules file is missing or malformed.
 
     The message names the file and the field at fault. Each rules file has a
     subclass of its own (``battle.magic_rules.MagicRulesError``), so a caller
     may catch one file's refusal without the others'.
+
+    A plain ``Exception``: not Django's ``ImproperlyConfigured``, which would
+    pull Django into this module, and not a ``ValueError``, which
+    :meth:`RulesFileReader.wrapped_value_errors` would wrap a second time.
     """
 
 
@@ -142,10 +159,19 @@ class RulesFileReader:
         required_fields: tuple[str, ...],
         optional_fields: tuple[str, ...] = (),
     ) -> dict[str, Any]:
-        """The whole file: a JSON object, checked as :meth:`json_object` does."""
+        """The whole file: a JSON object, checked as :meth:`json_object` does.
+
+        ``rulings`` is accepted beside ``optional_fields`` and, when present,
+        checked by :meth:`rulings`.
+        """
         if not isinstance(value, dict):
             self.fail("the file", f"must hold a JSON object, got {value!r}")
-        return self.json_object(value, "", required_fields, optional_fields)
+        fields = self.json_object(
+            value, "", required_fields, (*optional_fields, RULINGS_FIELD)
+        )
+        if RULINGS_FIELD in fields:
+            self.rulings(fields[RULINGS_FIELD], RULINGS_FIELD)
+        return fields
 
     def json_object(
         self,
@@ -206,24 +232,32 @@ class RulesFileReader:
             self.fail(field_path, f"must be a non-empty string or null, got {value!r}")
         return value
 
+    def entries[Value](
+        self,
+        value: Any,
+        field_path: str,
+        read_entry: Callable[[Any, str], Value],
+    ) -> tuple[Value, ...]:
+        """A list, each entry read by ``read_entry`` at ``field_path[index]``."""
+        return tuple(
+            read_entry(item, f"{field_path}[{index}]")
+            for index, item in enumerate(self.json_list(value, field_path))
+        )
+
+    def integer_list(self, value: Any, field_path: str) -> tuple[int, ...]:
+        """A list of integers, in order; repeats allowed."""
+        return self.entries(value, field_path, self.integer)
+
     def integer_set(self, value: Any, field_path: str) -> frozenset[int]:
         """A list of integers with no repeats."""
-        items = self.json_list(value, field_path)
-        integers = [
-            self.integer(item, f"{field_path}[{index}]")
-            for index, item in enumerate(items)
-        ]
+        integers = list(self.integer_list(value, field_path))
         if len(set(integers)) != len(integers):
             self.fail(field_path, f"repeats a total: {integers}")
         return frozenset(integers)
 
     def text_list(self, value: Any, field_path: str) -> tuple[str, ...]:
         """A list of non-empty strings with no repeats."""
-        items = self.json_list(value, field_path)
-        texts = tuple(
-            self.text(item, f"{field_path}[{index}]")
-            for index, item in enumerate(items)
-        )
+        texts = self.entries(value, field_path, self.text)
         if len(set(texts)) != len(texts):
             self.fail(field_path, f"repeats an entry: {list(texts)}")
         return texts
@@ -250,3 +284,12 @@ class RulesFileReader:
                 self.fail(field_path, "has an empty key")
             entries[key] = read_entry(entry, f"{field_path}.{key}")
         return entries
+
+    def rulings(self, value: Any, field_path: str) -> None:
+        """``rulings``: a list of objects with string ``key`` and ``reading``."""
+        for index, ruling in enumerate(self.json_list(value, field_path)):
+            ruling_path = f"{field_path}[{index}]"
+            if not isinstance(ruling, dict):
+                self.fail(ruling_path, f"must be an object, got {ruling!r}")
+            for name in RULING_FIELDS:
+                self.text(ruling.get(name), f"{ruling_path}.{name}")

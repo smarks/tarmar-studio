@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
     BorrowingFailure,
@@ -39,6 +38,7 @@ from reference.paths import (
     DM_RULES_DIR,
     MAGIC_RULES_FILE,
 )
+from reference.rules_file import RulesFileError
 
 # A complete file with invented numbers: every field present, both kinds of
 # Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell,
@@ -331,8 +331,11 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             load_magic_rules(self.write_rules(rules)), INVENTED_MAGIC_RULES
         )
 
-    def test_the_error_is_a_configuration_error(self) -> None:
-        self.assertTrue(issubclass(MagicRulesError, ImproperlyConfigured))
+    def test_the_error_is_a_rules_file_error(self) -> None:
+        # Not Django's ImproperlyConfigured: the shared reader stays Django-free
+        # so the offline CLI's gm.engine chain can reach the canon rules files
+        # (gm/tests.py's test_engine_imports_without_django).
+        self.assertTrue(issubclass(MagicRulesError, RulesFileError))
 
     def test_a_missing_file_is_refused(self) -> None:
         with self.assertRaises(MagicRulesError) as caught:

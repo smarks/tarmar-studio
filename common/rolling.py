@@ -55,6 +55,45 @@ def parse_dice_specification(specification: str) -> tuple[int, int, int]:
     return parse_dice_expression(specification)
 
 
+def standard_dice_specification(specification: str) -> str:
+    """The one way of writing a dice specification: ``NdS``, or ``NdS±M``.
+
+    No whitespace, a lower-case ``d``, no leading zeros, and no ``+0``, so
+    ``" 2D6 "``, ``"02d06"`` and ``"2d6+0"`` are all ``"2d6"``. A caller that
+    stores dice (a canon rules file, issue #59) compares a written
+    specification with this to refuse any other spelling.
+
+    Args:
+        specification: A dice specification :func:`parse_dice_specification`
+            accepts.
+
+    Returns:
+        The specification in standard form.
+
+    Raises:
+        ValueError: If the specification does not parse or is out of bounds.
+    """
+    count, sides, modifier = parse_dice_specification(specification)
+    return f"{count}d{sides}{modifier:+d}" if modifier else f"{count}d{sides}"
+
+
+def dice_total_range(specification: str) -> tuple[int, int]:
+    """The lowest and highest totals a dice specification can roll.
+
+    Args:
+        specification: ``NdS`` or ``NdS±M``, e.g. ``"2d6"``.
+
+    Returns:
+        ``(lowest, highest)``: every die showing 1, and every die showing its
+        top face, each with the modifier added.
+
+    Raises:
+        ValueError: If the specification does not parse or is out of bounds.
+    """
+    count, sides, modifier = parse_dice_specification(specification)
+    return count + modifier, count * sides + modifier
+
+
 @dataclass(frozen=True)
 class RollRecord:
     """One resolved die roll, complete enough to display or replay.

@@ -261,12 +261,14 @@ class GMServiceTest(TestCase):
         """``gm.engine``'s import chain must stay Django-free (the CLI needs it).
 
         ``roll_dice`` now delegates to ``characters.dice``, which pulls
-        ``characters.constants`` in with it — a fresh interpreter proves
-        neither drags Django along. Run out-of-process because this test
-        runner has Django loaded already.
+        ``characters.constants`` in with it, and ``characters.rules`` (read
+        through the shared rules-file reader) is where ``characters.dice``
+        takes its numbers from once issue #59 seats them — a fresh
+        interpreter proves none of them drags Django along. Run out-of-process because this test runner has Django loaded
+        already.
         """
         script = (
-            "import sys, gm.engine\n"
+            "import sys, gm.engine, characters.rules\n"
             "loaded = sorted(m for m in sys.modules if m.split('.')[0] == 'django')\n"
             "assert not loaded, loaded\n"
         )

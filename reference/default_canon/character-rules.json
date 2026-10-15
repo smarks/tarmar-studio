@@ -1,0 +1,110 @@
+{
+  "attributes": {
+    "maximum": 30,
+    "point_buy": { "total": 65, "minimum": 3, "maximum": 18 }
+  },
+  "age": { "starting": 16, "years_per_stage": 4 },
+  "fatigue_roll": {
+    "dice": "2d6",
+    "attributes": ["CON", "WIS", "INT"],
+    "best_of": ["DEX", "STR"]
+  },
+  "literacy_roll": { "dice": "3d6" },
+  "height": {
+    "base_inches_by_face": [56, 60, 64, 68, 72, 76],
+    "inches_per_extra_one": -4,
+    "inches_per_extra_six": 4,
+    "minimum_inches": 24
+  },
+  "weight": {
+    "stones_by_face": [8, 9, 10, 11, 12, 13],
+    "pounds_per_stone": 14,
+    "strength_divisor": 2
+  },
+  "social_class": [
+    { "up_to": 10, "label": "nobility" },
+    { "up_to": 30, "label": "merchant" },
+    { "up_to": 100, "label": "commoner" }
+  ],
+  "nobility": [
+    { "up_to": 1, "label": "Monarch" },
+    { "up_to": 5, "label": "Royal Family" },
+    { "up_to": 12, "label": "Duke" },
+    { "up_to": 30, "label": "March/Border Lords" },
+    { "up_to": 40, "label": "Count/Earl" },
+    { "up_to": 46, "label": "Viscount" },
+    { "up_to": 60, "label": "Baron" },
+    { "up_to": 85, "label": "Baronet" },
+    { "up_to": 100, "label": "Knights and Warrior Nobility" }
+  ],
+  "merchant": [
+    { "up_to": 70, "label": "Retail" },
+    { "up_to": 95, "label": "Wholesale" },
+    { "up_to": 100, "label": "Specialty" }
+  ],
+  "commoner": [
+    { "up_to": 70, "label": "Laborer" },
+    { "up_to": 100, "label": "Crafts" }
+  ],
+  "location": {
+    "skill_points": 1,
+    "rows": [
+      {
+        "up_to": 20,
+        "label": "City",
+        "skills": ["Street Smarts"],
+        "literacy_modifier": 0
+      },
+      {
+        "up_to": 70,
+        "label": "Village",
+        "skills": ["Street Smarts", "Survival"],
+        "literacy_modifier": 2
+      },
+      {
+        "up_to": 99,
+        "label": "Rural",
+        "skills": ["Survival"],
+        "literacy_modifier": 4
+      },
+      {
+        "up_to": 100,
+        "label": "Consult GM",
+        "skills": [],
+        "literacy_modifier": null
+      }
+    ]
+  },
+  "wealth": [
+    { "up_to": 15, "label": "Subsistence", "coin": 10 },
+    { "up_to": 70, "label": "Moderate", "coin": 100 },
+    { "up_to": 95, "label": "Merchant", "coin": { "base": 100, "dice": "1d100" } },
+    { "up_to": 100, "label": "Rich", "coin": null }
+  ],
+  "rulings": [
+    {
+      "key": "height_chain_counts_every_one_and_six",
+      "reading": "attributes.md's height table says to roll again on a 1 and subtract 4 inches each time, and to roll again on a 6 and add 4 inches each time, so it describes a chain that starts with a 1 or a 6. Ruled: after the first face, every further 1 takes 4 inches off and every further 6 adds 4, whatever the first face was, so 6.1.3 gives 72 inches and 1.6.3 gives 60.",
+      "page": "public-rules/characters/attributes.md",
+      "for_spencer": true
+    },
+    {
+      "key": "village_grants_street_smarts_first",
+      "reading": "location.md gives a Village origin 'Street smarts OR survival (choose)'. The location is rolled after the creation form is sent, so the grant goes to the first listed skill, Street Smarts, and the player moves it to Survival on the sheet (issue #754).",
+      "page": "public-rules/characters/location.md",
+      "for_spencer": true
+    },
+    {
+      "key": "height_floor",
+      "reading": "attributes.md takes 4 inches off for each further 1 on the height die and states no floor. Ruled: a height never goes below 24 inches (minimum_inches), so a long chain of 1s, or an edited one, cannot give a negative or absurd height.",
+      "page": "public-rules/characters/attributes.md",
+      "for_spencer": true
+    },
+    {
+      "key": "strength_halved_rounds_down",
+      "reading": "attributes.md adds STR ÷ 2 stones to the base weight without saying how a half is rounded. Ruled: rounded down (strength_divisor 2, whole stones).",
+      "page": "public-rules/characters/attributes.md",
+      "for_spencer": true
+    }
+  ]
+}

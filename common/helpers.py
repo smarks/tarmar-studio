@@ -5,14 +5,13 @@ re-exported here, except the body parser: ``origami_common``'s catches only
 ``JSONDecodeError``, so a body of invalid UTF-8 or deep nesting raised out of
 every JSON endpoint (issue #767). The guarded parser and the number readers
 below are the one path request data takes here until the package catches
-the same cases. ``_can_edit_object`` is tarmar-studio-specific (it reaches
+the same cases; the parser itself lives in the Django-free
+``common.json_text`` and is re-exported here. ``_can_edit_object`` is tarmar-studio-specific (it reaches
 into the domain object's ``user`` ownership) so it stays local.
 """
 
 import hmac
 import ipaddress
-import json
-from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
@@ -25,6 +24,7 @@ from origami_common.helpers import (
     _require_field,
 )
 
+from common.json_text import parse_json_text
 from common.theme import Theme, theme_for_host
 
 __all__ = [
@@ -72,37 +72,6 @@ def column_length(model: type[models.Model], field_name: str) -> int:
     if not isinstance(max_length, int):
         raise TypeError(f"{model.__name__}.{field_name} has no max_length")
     return max_length
-
-
-def parse_json_text(
-    text: bytes | str,
-    *,
-    object_pairs_hook: Callable[[list[tuple[str, Any]]], Any] | None = None,
-) -> object:
-    """``json.loads`` for text a user sent, with every refusal a ``ValueError``.
-
-    ``json.loads`` raises ``JSONDecodeError`` for malformed text, but also
-    ``UnicodeDecodeError`` for bytes that are not UTF-8, ``ValueError`` for
-    an integer longer than Python's digit limit, and ``RecursionError`` for
-    deep nesting (``"[" * 100000``). The first three are ``ValueError``s;
-    the last is not, so it is turned into one here.
-
-    Args:
-        text: The request body or uploaded file's bytes, or decoded text.
-        object_pairs_hook: Passed through to ``json.loads``: builds each
-            object from its key-value pairs, and may raise ``ValueError`` to
-            refuse one (``reference.rules_file`` refuses a repeated key).
-
-    Returns:
-        The parsed JSON value.
-
-    Raises:
-        ValueError: The text is not JSON this server can read.
-    """
-    try:
-        return json.loads(text, object_pairs_hook=object_pairs_hook)
-    except RecursionError:
-        raise ValueError("The JSON is nested too deeply") from None
 
 
 def _parse_json_body(request: HttpRequest) -> tuple[dict, JsonResponse | None]:

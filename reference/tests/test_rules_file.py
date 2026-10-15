@@ -1,8 +1,9 @@
 """The shared strict reader for canon rules files (issue #59).
 
 Read through a tiny invented schema, so these tests pin the reader itself
-rather than any one canon file. ``battle/tests/test_magic_rules.py`` covers
-the same primitives again through ``magic-rules.json``.
+rather than any one canon file. ``battle/tests/test_magic_rules.py`` and
+``characters/tests/test_rules.py`` cover the same primitives again through
+``magic-rules.json`` and ``character-rules.json``.
 """
 
 import json
@@ -12,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 
 from reference.rules_file import RulesFileError, RulesFileReader
@@ -44,6 +44,7 @@ class InventedRules:
     motto: str | None
     rounds_up: bool
     lucky_totals: frozenset[int]
+    faces: tuple[int, ...]
     attributes: tuple[str, ...]
     bonuses: dict[str, int]
     stages: tuple[InventedStage, ...]
@@ -57,6 +58,7 @@ TOP_LEVEL_FIELDS = (
     "motto",
     "rounds_up",
     "lucky_totals",
+    "faces",
     "attributes",
     "bonuses",
     "stages",
@@ -81,10 +83,7 @@ class InventedRulesReader(RulesFileReader):
     def invented_rules(self, value: Any) -> InventedRules:
         """The whole file."""
         fields = self.file_object(value, TOP_LEVEL_FIELDS, OPTIONAL_TOP_LEVEL_FIELDS)
-        stages = tuple(
-            self.stage(stage, f"stages[{index}]")
-            for index, stage in enumerate(self.json_list(fields["stages"], "stages"))
-        )
+        stages = self.entries(fields["stages"], "stages", self.stage)
         self.unique_keys(stages, "stages")
         return InventedRules(
             ceiling=self.integer(fields["ceiling"], "ceiling"),
@@ -93,6 +92,7 @@ class InventedRulesReader(RulesFileReader):
             motto=self.optional_text(fields["motto"], "motto"),
             rounds_up=self.boolean(fields["rounds_up"], "rounds_up"),
             lucky_totals=self.integer_set(fields["lucky_totals"], "lucky_totals"),
+            faces=self.integer_list(fields["faces"], "faces"),
             attributes=self.text_list(fields["attributes"], "attributes"),
             bonuses=self.mapping(fields["bonuses"], "bonuses", self.integer),
             stages=stages,
@@ -106,10 +106,14 @@ INVENTED_FILE: dict[str, Any] = {
     "motto": None,
     "rounds_up": True,
     "lucky_totals": [3, 18],
+    "faces": [4, 4, 6],
     "attributes": ["STR", "DEX"],
     "bonuses": {"damage": 2},
     "stages": [{"key": "young", "years": 10}, {"key": "old", "years": 20}],
     "notes": "optional, and not read",
+    "rulings": [
+        {"key": "ceiling", "reading": "Ruled 18.", "page": "invented.md"},
+    ],
 }
 
 INVENTED_LOADED = InventedRules(
@@ -119,6 +123,7 @@ INVENTED_LOADED = InventedRules(
     motto=None,
     rounds_up=True,
     lucky_totals=frozenset({3, 18}),
+    faces=(4, 4, 6),
     attributes=("STR", "DEX"),
     bonuses={"damage": 2},
     stages=(InventedStage("young", 10), InventedStage("old", 20)),
@@ -173,8 +178,12 @@ class RulesFileReaderTest(SimpleTestCase):
             self.assertIn(expected_text, message)
         return caught.exception
 
-    def test_the_error_is_a_configuration_error(self) -> None:
-        self.assertTrue(issubclass(RulesFileError, ImproperlyConfigured))
+    def test_the_error_is_a_plain_exception(self) -> None:
+        # Not Django's ImproperlyConfigured, so this module loads no Django and
+        # the offline CLI's gm.engine chain can reach it (gm/tests.py's
+        # test_engine_imports_without_django); not a ValueError, which
+        # wrapped_value_errors would wrap a second time.
+        self.assertEqual(RulesFileError.__bases__, (Exception,))
 
     def test_a_reader_without_its_own_error_raises_the_base_error(self) -> None:
         reader = RulesFileReader(self.rules_file)
@@ -230,6 +239,33 @@ class RulesFileReaderTest(SimpleTestCase):
         self.assert_refused(
             invented_file(attributes=["STR", "STR"]), "attributes", "repeats an entry"
         )
+
+    def test_an_ordered_list_keeps_its_repeats_and_refuses_a_non_integer(
+        self,
+    ) -> None:
+        self.assertEqual(
+            self.load(self.write_text(json.dumps(invented_file(faces=[2, 2])))).faces,
+            (2, 2),
+        )
+        self.assert_refused(invented_file(faces=[1, "2"]), "faces[1]", "an integer")
+
+    def test_rulings_are_optional_on_every_file(self) -> None:
+        contents = invented_file()
+        del contents["rulings"]
+        self.assertEqual(
+            self.load(self.write_text(json.dumps(contents))), INVENTED_LOADED
+        )
+
+    def test_a_malformed_ruling_is_refused(self) -> None:
+        cases = (
+            ({}, "rulings", "must be a list"),
+            (["Ruled 18."], "rulings[0]", "must be an object"),
+            ([{"key": "ceiling"}], "rulings[0].reading", "non-empty string"),
+            ([{"key": "", "reading": "r"}], "rulings[0].key", "non-empty string"),
+        )
+        for rulings, field_path, problem in cases:
+            with self.subTest(field_path):
+                self.assert_refused(invented_file(rulings=rulings), field_path, problem)
 
     def test_a_nested_value_that_is_not_an_object_is_refused(self) -> None:
         self.assert_refused(invented_file(stages=[5]), "stages[0]", "must be an object")
