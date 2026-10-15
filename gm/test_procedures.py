@@ -26,7 +26,7 @@ from characters.skills import (
 from common.test_helpers import BaseTestCase
 
 from .engine import SECTION_OUTCOMES
-from .ledger import DRAFT_DEFAULTS
+from .ledger import draft_defaults
 from .testing import character_values, gm_replies, run_actions, session_with_character
 
 CAMPAIGNER_TARGET = int(TRACK_DATA["campaigner"]["survivability"])
@@ -47,7 +47,7 @@ ATTRIBUTES = {
 def built_draft(**overrides):
     """A character with its six attributes and a Fatigue roll settled."""
     return {
-        **DRAFT_DEFAULTS,
+        **draft_defaults(),
         **ATTRIBUTES,
         "fatigue_roll": 7,
         "name": "Kael",
@@ -124,7 +124,7 @@ class PlayYearsTest(BaseTestCase):
             stored["free_skill_points"],
             calculate_skill_points_from_xp(CAMPAIGNER_XP_PER_YEAR),
         )
-        self.assertEqual(stored["age"], DRAFT_DEFAULTS["age"] + 1)
+        self.assertEqual(stored["age"], draft_defaults()["age"] + 1)
 
     def test_a_run_cut_short_says_how_many_years_it_played(self):
         dice = patch(
@@ -146,7 +146,7 @@ class PlayYearsTest(BaseTestCase):
 
     def test_a_refusal_is_reported_and_changes_nothing(self):
         blank = session_with_character(
-            self.create_user("blank"), {**DRAFT_DEFAULTS, "name": "Blank"}
+            self.create_user("blank"), {**draft_defaults(), "name": "Blank"}
         )
         (result,) = run_actions(
             blank,
@@ -339,4 +339,4 @@ class YearsTurnTest(BaseTestCase):
         calls, _payloads = self.play(12, "You have points to spend.")
         state = calls[0][-1]["content"]
         self.assertIn(f"XP {CAMPAIGNER_XP_PER_YEAR} (level", state)
-        self.assertIn(f"age {DRAFT_DEFAULTS['age'] + 1};", state)
+        self.assertIn(f"age {draft_defaults()['age'] + 1};", state)

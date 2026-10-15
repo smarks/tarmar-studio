@@ -27,14 +27,10 @@ from characters.constants import (
     SEVERE_INJURY_BAND_TOP,
     SEVERE_INJURY_ROLL_PENALTY,
 )
-from characters.dice import (
-    LOCATION_LITERACY_MODIFIER,
-    LOCATION_SKILL_CHOICES,
-    STARTING_COIN,
-    WEALTH_TABLE,
-)
+from characters.rules import CoinRoll, character_rules
 from characters.skills import (
     AGING_TABLE,
+    STAGES_PER_MENTAL_AGING_STEP,
     SURVIVAL_AUTO_DEATH_ROLL,
     SURVIVAL_AUTO_SURVIVE_ROLL,
     SURVIVAL_DICE_COUNT,
@@ -149,43 +145,52 @@ def _aging(_narrowing: str = "") -> str:
             )
             steps.append(f"{age_for_aging_stage(stage)} {said}")
         before = totals
+    age_rules = character_rules().age
     return (
-        "Aging, keyed to age from 16, as cumulative lifetime totals, each "
-        "replacing the last: "
+        f"Aging, keyed to age from {age_rules.starting}, as cumulative lifetime "
+        "totals, each replacing the last: "
         + "; ".join(steps)
-        + "; after that STR, DEX and CON lose 1 more every 4 years and INT and "
-        "WIS every 8. An aged score never goes below 0; play uses it, and only "
-        "the literacy check and the weight from STR use the base score."
+        + "; after that STR, DEX and CON lose 1 more every "
+        f"{age_rules.years_per_stage} years and INT and WIS every "
+        f"{STAGES_PER_MENTAL_AGING_STEP * age_rules.years_per_stage}. An aged "
+        "score never goes below 0; "
+        "play uses it, and only the literacy check and the weight from STR use "
+        "the base score."
     )
 
 
 def _origins(_narrowing: str = "") -> str:
-    """What each Origin gives, from ``characters.dice`` (#807)."""
+    """What each Origin gives, from the canon's location table (#807, #59)."""
+    rules = character_rules()
     rows = []
-    for origin, skills in LOCATION_SKILL_CHOICES.items():
-        modifier = LOCATION_LITERACY_MODIFIER[origin]
-        check = "3d6 ≤ INT" + (f" − {modifier}" if modifier else "")
-        rows.append(f"{origin}: {' or '.join(skills)}, literacy check {check}")
+    for row in rules.location.rows:
+        if row.literacy_modifier is None:
+            rows.append(
+                f"{row.label}: the Game Master decides what it gives and whether "
+                "the character can read"
+            )
+            continue
+        check = rules.literacy_roll.check_text(row.literacy_modifier)
+        rows.append(f"{row.label}: {' or '.join(row.skills)}, literacy check {check}")
     return (
         "Origins: "
         + "; ".join(rows)
-        + "; Consult GM: the Game Master decides what it gives and whether the "
-        "character can read. The literacy check decides whether a character "
-        "can read at all; the Literacy skill is only how well."
+        + ". The literacy check decides whether a character can read at all; "
+        "the Literacy skill is only how well."
     )
 
 
 def _starting_coin(_narrowing: str = "") -> str:
-    """Starting coin by wealth level, from ``characters.dice`` (#807)."""
+    """Starting coin by wealth level, from the canon's wealth table (#807, #59)."""
     rows = []
-    for _threshold, level in WEALTH_TABLE:
-        coin = STARTING_COIN.get(level)
-        if coin is not None:
-            rows.append(f"{level} {coin}")
-        elif level == "Merchant":
-            rows.append(f"{level} 100 + percentile dice")
+    for row in character_rules().wealth.rows:
+        coin = row.coin
+        if isinstance(coin, CoinRoll):
+            rows.append(f"{row.label} {coin.base} + {coin.dice_in_words}")
+        elif coin is not None:
+            rows.append(f"{row.label} {coin}")
         else:
-            rows.append(f"{level}: the Game Master sets it")
+            rows.append(f"{row.label}: the Game Master sets it")
     return "Starting coin, rolled with the wealth level, once: " + "; ".join(rows) + "."
 
 

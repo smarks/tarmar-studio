@@ -23,9 +23,9 @@ is imported only on the path that raises it, so a correct configuration loads
 no Django module at all (``gm.tests`` holds ``gm.engine``'s import chain to
 that).
 
-A canon directory holds the ``dm-rules/`` pages plus four JSON files and
+A canon directory holds the ``dm-rules/`` pages plus five JSON files and
 the Games Master's world digest, all read once per process (issues #918,
-#919 and #960; ``reference.apps`` has ``runserver`` watch them):
+#919, #960 and #59; ``reference.apps`` has ``runserver`` watch them):
 
 - ``canon.json`` (optional): ``{"name": "tarmar" | "default"}``, which canon
   this is, as :data:`CANON_NAME` reports it. Without the file a directory is
@@ -49,6 +49,14 @@ the Games Master's world digest, all read once per process (issues #918,
   left open. Every field but ``rulings`` is named exactly as the engine
   dataclass field it fills. Read by ``battle.magic_rules``, whose docstring
   gives the full schema.
+- ``character-rules.json`` (required to create a character): the numbers
+  character creation reads, as the public character pages state them: the
+  attribute ceiling and point buy, the starting age and aging stage, the
+  attribute, Fatigue and literacy rolls, the height and weight tables, and the
+  provenance, location and wealth percentile tables, with an optional
+  ``rulings`` list. Read by ``characters.rules``, whose docstring gives the
+  full schema. Both rules files are read the one strict way
+  ``reference.rules_file`` holds.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's
   system prompt, used verbatim less its trailing newlines. Without it
   ``gm.engine`` uses a one-paragraph built-in fallback and logs a warning.
@@ -126,8 +134,8 @@ CANON_NAV_FILE_NAME = "nav.json"
 CANON_MAPS_FILE_NAME = "maps.json"
 # The canon JSON files the reference search index fingerprints
 # (``reference.search_index``): an edit to one rebuilds the index.
-# ``magic-rules.json`` is not among them, since no page or nav entry
-# depends on it.
+# ``magic-rules.json`` and ``character-rules.json`` are not among them,
+# since no page or nav entry depends on either.
 CANON_JSON_FILE_NAMES: tuple[str, ...] = (
     CANON_MANIFEST_FILE_NAME,
     CANON_NAV_FILE_NAME,
@@ -318,6 +326,14 @@ DEFAULT_MAGIC_PROMPT_FILE = DEFAULT_CANON_DIR / CANON_PROMPT_DIR_NAME / "magic.m
 # invented numbers.
 CANON_MAGIC_RULES_FILE_NAME = "magic-rules.json"
 MAGIC_RULES_FILE = DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME
+
+# The character-creation rules (issue #59): the point buy, the aging stages,
+# the attribute, Fatigue and literacy rolls, the height and weight tables and the social
+# tables, read the same strict way through ``reference.rules_file`` by
+# ``characters.rules``. Every canon carries one; the default canon's holds the
+# public character pages' numbers.
+CANON_CHARACTER_RULES_FILE_NAME = "character-rules.json"
+CHARACTER_RULES_FILE = DM_RULES_DIR / CANON_CHARACTER_RULES_FILE_NAME
 
 # The rest of what a canon directory may hold beside its pages (issue #921):
 # the author's documents, the guides generated from the canon, the Tarmar-only

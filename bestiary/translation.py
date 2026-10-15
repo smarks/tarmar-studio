@@ -12,8 +12,11 @@ Everything here is pure: no Django models, no randomness.
 
 import math
 import re
+from collections.abc import Mapping
 
 from django.utils.text import slugify
+
+from characters.rules import character_rules, scores_by_short_name
 
 # --- categories -------------------------------------------------------------
 # The book's table-of-contents sections, grouped into the catalog's families.
@@ -167,10 +170,16 @@ CATEGORY_CHARISMA: dict[str, int] = {
     "legendary": 8,
 }
 
-# The Character fatigue formula uses a rolled 2d6; beasts get its midpoint so
-# the mapping stays deterministic. Body is the same 2/3 derivation Characters
-# use — the pools land on the scale the injury-threshold rules assume.
-FIXED_FATIGUE_ROLL = 7
+
+def fixed_fatigue_roll() -> int:
+    """The Fatigue roll a beast is given: the midpoint of the canon's dice.
+
+    The Character fatigue formula uses a rolled 2d6 (on the public pages);
+    beasts get its midpoint, 7, so the mapping stays deterministic.
+    """
+    fatigue_roll = character_rules().fatigue_roll
+    return (fatigue_roll.minimum + fatigue_roll.maximum) // 2
+
 
 # Natural-attack keyword → Tarmar weapon class (keys of combat.MATRIX).
 # First match in order wins; the default is Striking.
@@ -406,21 +415,21 @@ def parse_armour(armor_text: str | None) -> tuple[str, int]:
     return tier_for_stops(stops), stops
 
 
-def derive_pools(
-    strength: int, dexterity: int, intelligence: int, wisdom: int, constitution: int
-) -> tuple[int, int]:
+def derive_pools(scores: Mapping[str, int]) -> tuple[int, int]:
     """Fatigue and body pools via the Character formulas, deterministic.
 
-    Fatigue: ``CON + WIS + INT + max(DEX, STR) + FIXED_FATIGUE_ROLL`` — the
-    same derivation as ``Character.fatigue`` with the 2d6 pinned to its
-    midpoint. Body: ``ceil(fatigue * 2/3)``, exactly ``Character.body``.
+    Fatigue: the canon's Fatigue sum (on the public pages ``CON + WIS + INT
+    + max(DEX, STR)``) plus :func:`fixed_fatigue_roll` — the same derivation
+    as ``Character.fatigue`` with the roll pinned to its midpoint. Body:
+    ``ceil(fatigue * 2/3)``, exactly ``Character.body``, so the pools land on
+    the scale the injury-threshold rules assume.
+
+    Args:
+        scores: The six core attributes by field name (``"strength"``);
+            other keys are ignored.
     """
-    fatigue = (
-        constitution
-        + wisdom
-        + intelligence
-        + max(dexterity, strength)
-        + FIXED_FATIGUE_ROLL
+    fatigue = character_rules().fatigue_roll.total(
+        scores_by_short_name(scores), fixed_fatigue_roll()
     )
     return fatigue, math.ceil(fatigue * 2 / 3)
 
@@ -429,17 +438,18 @@ def translate(entry: dict, description: str = "") -> dict:
     """One source-stats record → a full Beast field dict (deterministic)."""
     category = SECTION_CATEGORY[entry["tft_section"]]
     strength = max(1, entry["st"])
-    dexterity = max(1, entry["dx"])
-    intelligence = max(1, entry["iq"])
-    wisdom = CATEGORY_WISDOM[category]
-    constitution = strength
-    charisma = CATEGORY_CHARISMA[category]
+    attributes = {
+        "strength": strength,
+        "dexterity": max(1, entry["dx"]),
+        "intelligence": max(1, entry["iq"]),
+        "wisdom": CATEGORY_WISDOM[category],
+        "constitution": strength,
+        "charisma": CATEGORY_CHARISMA[category],
+    }
 
     movement, movement_note = parse_movement(entry["ma"])
     armour_tier, stops = parse_armour(entry.get("armor"))
-    fatigue_pool, body_pool = derive_pools(
-        strength, dexterity, intelligence, wisdom, constitution
-    )
+    fatigue_pool, body_pool = derive_pools(attributes)
 
     ability_parts = [
         part
@@ -454,12 +464,7 @@ def translate(entry: dict, description: str = "") -> dict:
         "slug": slugify(entry["name"]),
         "category": category,
         "description": description,
-        "strength": strength,
-        "dexterity": dexterity,
-        "intelligence": intelligence,
-        "wisdom": wisdom,
-        "constitution": constitution,
-        "charisma": charisma,
+        **attributes,
         "fatigue_pool": fatigue_pool,
         "body_pool": body_pool,
         "armour_tier": armour_tier,

@@ -830,11 +830,11 @@ def test_an_origin_change_with_no_reroll_is_caught():
 
 
 def _background_ledger(**values):
-    from gm.ledger import DRAFT_DEFAULTS, DraftLedger
+    from gm.ledger import DraftLedger, draft_defaults
 
     return DraftLedger.from_draft(
         {
-            **DRAFT_DEFAULTS,
+            **draft_defaults(),
             "location": "Rural",
             "skills": {"survival": 1},
             **values,

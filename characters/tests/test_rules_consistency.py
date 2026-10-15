@@ -34,23 +34,11 @@ from pathlib import Path
 from django.test import SimpleTestCase
 
 from characters import combat
-from characters.constants import (
-    POINT_BUY_MAX_ATTRIBUTE,
-    POINT_BUY_MIN_ATTRIBUTE,
-    POINT_BUY_TOTAL,
-    SEVERE_INJURY_BAND_TOP,
-)
-from characters.dice import (
-    COMMONER_TABLE,
-    LOCATION_LITERACY_MODIFIER,
-    LOCATION_STARTING_SKILL,
-    MERCHANT_TABLE,
-    NOBILITY_TABLE,
-    SOCIAL_CLASS_TABLE,
-)
+from characters.constants import SEVERE_INJURY_BAND_TOP
 from characters.equipment import EQUIPMENT_CATALOG
 from characters.models import Character
 from characters.movement import GAIT_BASE_DISTANCES
+from characters.rules import RollTable
 from characters.skills import (
     AGING_TABLE,
     ARCANE_SKILL_NAME,
@@ -70,6 +58,8 @@ from characters.skills import (
 from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.markdown_tables import is_separator_row, split_table_row
 from reference.paths import CONTENT_DIR, DM_RULES_DIR
+
+from .rules_fixtures import DEFAULT_CHARACTER_RULES, seated_character_rules
 
 REFERENCE_CONTENT = CONTENT_DIR
 PUBLIC_RULES = REFERENCE_CONTENT / "public-rules"
@@ -158,19 +148,43 @@ def _parse_roll_range(cell: str) -> tuple[int, int]:
     return value, value
 
 
-def _ranges_from_thresholds(table: list[tuple[int, str]]) -> list[tuple[int, int, str]]:
-    """Turn a dice.py ``(threshold, label)`` table into non-overlapping ranges.
+def _ranges_from_thresholds(table: RollTable) -> list[tuple[int, int, str]]:
+    """Turn a percentile table's rows into non-overlapping ranges.
 
-    Mirrors ``characters.dice.lookup_table``'s ``roll <= threshold`` semantics:
-    the first entry covers 1..threshold, and each following entry covers
-    (previous threshold + 1)..threshold.
+    Mirrors :meth:`characters.rules.PercentileTable.row_for`'s
+    ``roll <= up_to`` semantics: the first row covers 1..up_to, and each
+    following row covers (previous up_to + 1)..up_to.
     """
     ranges = []
     lo = 1
-    for threshold, label in table:
-        ranges.append((lo, threshold, label))
-        lo = threshold + 1
+    for row in table.rows:
+        ranges.append((lo, row.up_to, row.label))
+        lo = row.up_to + 1
     return ranges
+
+
+def _default_aging_stage(age: int) -> int:
+    """The aging stage of ``age`` under the default canon's rules."""
+    with seated_character_rules():
+        return aging_stage_for_age(age)
+
+
+def _granted_skills() -> dict[str, str]:
+    """Each origin's granted skill in the default canon, origins granting one."""
+    return {
+        row.label: row.granted_skill
+        for row in DEFAULT_CHARACTER_RULES.location.rows
+        if row.granted_skill is not None
+    }
+
+
+def _literacy_modifiers() -> dict[str, int]:
+    """Each origin's literacy modifier in the default canon, where it has one."""
+    return {
+        row.label: row.literacy_modifier
+        for row in DEFAULT_CHARACTER_RULES.location.rows
+        if row.literacy_modifier is not None
+    }
 
 
 class RulesConsistencyTest(SimpleTestCase):
@@ -231,30 +245,39 @@ class RulesConsistencyTest(SimpleTestCase):
                 parsed[age][attribute] = int(_normalize_number(value))
 
         self.assertEqual(
-            parsed, {age: AGING_TABLE[aging_stage_for_age(age)] for age in ages}
+            parsed, {age: AGING_TABLE[_default_aging_stage(age)] for age in ages}
         )
 
     def test_aging_age_columns_step_four_years_from_the_start_age(self):
-        """aging.md's age columns must be start_age + 4*stage (issues #124, #221).
+        """aging.md's age columns must be start_age + step*stage (issues #124,
+        #221, #59).
 
-        Tied to the real ``Character.age`` field default rather than a
-        hardcoded 16, so a change to the starting age would fail this test
-        instead of silently drifting from the printed table.
+        Tied to the default canon's starting age and stage length rather than
+        a hardcoded 16 and 4, so a change to either would fail this test
+        instead of silently drifting from the printed table; the stages are
+        the code's own (:func:`aging_stage_for_age`) under those rules.
         """
-        start_age = Character._meta.get_field("age").default
+        age_rules = DEFAULT_CHARACTER_RULES.age
 
         rows = _table_rows(PRIOR_EXPERIENCE / "aging.md")
         ages = [int(value) for value in rows[0][1:]]
 
         steps = {ages[i + 1] - ages[i] for i in range(len(ages) - 1)}
         self.assertEqual(
-            steps, {4}, "aging.md age columns are not a uniform 4-year step"
+            steps,
+            {age_rules.years_per_stage},
+            "aging.md age columns are not a uniform step of the canon's stage",
         )
 
-        for age in ages:
-            stage = aging_stage_for_age(age)
-            self.assertEqual(age, start_age + 4 * stage, f"age {age}")
-            self.assertEqual(age_for_aging_stage(stage), age)
+        with seated_character_rules():
+            for age in ages:
+                stage = aging_stage_for_age(age)
+                self.assertEqual(
+                    age,
+                    age_rules.starting + age_rules.years_per_stage * stage,
+                    f"age {age}",
+                )
+                self.assertEqual(age_for_aging_stage(stage), age)
 
     def test_survivability_states_the_survival_dice(self):
         """survivability.md must print the dice the simulator actually rolls."""
@@ -270,7 +293,8 @@ class RulesConsistencyTest(SimpleTestCase):
         doc's prose examples ("age 76 totals STR/DEX/CON at -4 and INT/WIS at
         -2...") are parsed and checked against the code.
         """
-        last_tabulated_age = age_for_aging_stage(max(AGING_TABLE))
+        with seated_character_rules():
+            last_tabulated_age = age_for_aging_stage(max(AGING_TABLE))
         text = (PRIOR_EXPERIENCE / "aging.md").read_text(encoding="utf-8")
         pattern = re.compile(
             r"age (\d+) totals\s+STR/DEX/CON at ([−-]\d+)\s+and INT/WIS at ([−-]\d+)"
@@ -288,7 +312,7 @@ class RulesConsistencyTest(SimpleTestCase):
             physical = int(_normalize_number(physical_str))
             mental = int(_normalize_number(mental_str))
             with self.subTest(age=age):
-                penalties = get_aging_penalties(aging_stage_for_age(age))
+                penalties = get_aging_penalties(_default_aging_stage(age))
                 assert penalties is not None
                 self.assertEqual(penalties["strength"], physical)
                 self.assertEqual(penalties["dexterity"], physical)
@@ -358,19 +382,34 @@ def _glossary_level_row(label: str) -> dict[int, str]:
 
 
 class PointBuyRuleTest(SimpleTestCase):
-    """The published point-buy budget must match the code (issue #123)."""
+    """The published point-buy budget must match the default canon's (issues
+    #123, #59)."""
 
     def test_published_budget_matches_the_code(self):
-        """The rules' point total is the one character creation enforces."""
+        """The rules' point total is the one the default canon states."""
         text = ATTRIBUTES_RULES.read_text(encoding="utf-8")
         budgets = re.findall(r"divide \*\*(\d+) points\*\*", text)
-        self.assertEqual(budgets, [str(POINT_BUY_TOTAL)])
+        self.assertEqual(
+            budgets, [str(DEFAULT_CHARACTER_RULES.attributes.point_buy.total)]
+        )
 
     def test_published_bounds_match_the_code(self):
-        """The rules state the per-attribute range the form enforces."""
+        """The rules state the per-attribute range the default canon does."""
         text = ATTRIBUTES_RULES.read_text(encoding="utf-8")
-        self.assertIn(
-            f"between {POINT_BUY_MIN_ATTRIBUTE} and {POINT_BUY_MAX_ATTRIBUTE}", text
+        point_buy = DEFAULT_CHARACTER_RULES.attributes.point_buy
+        self.assertIn(f"between {point_buy.minimum} and {point_buy.maximum}", text)
+
+    def test_published_attribute_dice_match_the_code(self):
+        """The rules roll each attribute on the default canon's dice, and the
+        buy's range is the range those dice produce, as the page says."""
+        text = ATTRIBUTES_RULES.read_text(encoding="utf-8")
+        attribute_roll = DEFAULT_CHARACTER_RULES.attribute_roll
+        self.assertIn(f"roll {attribute_roll.dice} to determine each attribute", text)
+        self.assertIn(f"the range {attribute_roll.dice} can produce", text)
+        point_buy = DEFAULT_CHARACTER_RULES.attributes.point_buy
+        self.assertEqual(
+            (attribute_roll.minimum, attribute_roll.maximum),
+            (point_buy.minimum, point_buy.maximum),
         )
 
 
@@ -705,8 +744,8 @@ class LocationEffectsRuleTest(SimpleTestCase):
 
     def test_every_published_origin_has_coded_effects(self):
         printed = self._published_effects()
-        self.assertEqual(set(printed), set(LOCATION_STARTING_SKILL))
-        self.assertEqual(set(printed), set(LOCATION_LITERACY_MODIFIER))
+        self.assertEqual(set(printed), set(_granted_skills()))
+        self.assertEqual(set(printed), set(_literacy_modifiers()))
 
     def test_granted_skill_matches_the_published_effect(self):
         # Village prints "Street smarts OR survival (choose)", so this passes for
@@ -715,7 +754,7 @@ class LocationEffectsRuleTest(SimpleTestCase):
         # rewording of the line, not the choice.
         for origin, line in self._published_effects().items():
             with self.subTest(origin=origin):
-                self.assertIn(LOCATION_STARTING_SKILL[origin].lower(), line.lower())
+                self.assertIn(_granted_skills()[origin].lower(), line.lower())
 
     def test_literacy_modifier_matches_the_published_effect(self):
         for origin, line in self._published_effects().items():
@@ -724,25 +763,30 @@ class LocationEffectsRuleTest(SimpleTestCase):
                 if match is None:
                     self.fail(f"{origin} lost its literacy-check effect")
                 printed = int(match.group(1) or 0)
-                self.assertEqual(printed, LOCATION_LITERACY_MODIFIER[origin])
+                self.assertEqual(printed, _literacy_modifiers()[origin])
 
     def test_published_effects_state_the_modifier_is_a_penalty(self):
         """The rules must say which way the modifier cuts, not just its size."""
         section = self._effects_section()
         self.assertIn("penalty", section.lower())
-        for origin, modifier in LOCATION_LITERACY_MODIFIER.items():
+        dice = DEFAULT_CHARACTER_RULES.literacy_roll.dice
+        self.assertIn(f"{dice} literacy roll", section)
+        for origin, modifier in _literacy_modifiers().items():
             with self.subTest(origin=origin):
-                printed = "3d6 ≤ INT" if not modifier else f"3d6 ≤ INT − {modifier}"
+                printed = (
+                    f"{dice} ≤ INT" if not modifier else f"{dice} ≤ INT − {modifier}"
+                )
                 self.assertIn(printed, section)
 
     def test_literacy_check_display_matches_the_published_form(self):
         """The sheet prints each origin's check exactly as the rules write it."""
         section = self._effects_section()
         character = Character(strength=10)
-        for origin in LOCATION_LITERACY_MODIFIER:
-            with self.subTest(origin=origin):
-                character.location = origin
-                self.assertIn(character.location_literacy_check, section)
+        with seated_character_rules():
+            for origin in _literacy_modifiers():
+                with self.subTest(origin=origin):
+                    character.location = origin
+                    self.assertIn(character.location_literacy_check, section)
 
 
 class ProvenanceRuleTest(SimpleTestCase):
@@ -750,7 +794,7 @@ class ProvenanceRuleTest(SimpleTestCase):
 
     The printed tables used to overlap at their boundaries (e.g. "6-12 Duke"
     next to "12-30 March/Border Lords") while the code resolved ties via
-    ``lookup_table``'s ``roll <= threshold`` semantics. Issue #142's ruling:
+    the table lookup's ``roll <= threshold`` semantics. Issue #142's ruling:
     the code's reading wins, so the tables are rewritten to match it exactly
     and this guard keeps them from drifting apart again.
 
@@ -758,18 +802,19 @@ class ProvenanceRuleTest(SimpleTestCase):
     "March/Border Lord" and "Knight" where provenance.md (and the fuller
     nobility-titles.md rank headings) said "March/Border Lords" and "Knights
     and Warrior Nobility". Issue #167 picked the md's fuller spelling as
-    canon and updated dice.py's ``NOBILITY_TABLE`` to match verbatim; this
-    guard now checks label text, not just ranges, so they can't drift apart
-    again.
+    canon and updated the code's nobility table to match verbatim (the
+    canon's ``character-rules.json`` since #59); this guard now checks
+    label text, not just ranges, so they can't drift apart again.
     """
 
     def test_class_split_headings_match_social_class_thresholds(self):
-        """The '## N-M ClassName' headings must match SOCIAL_CLASS_TABLE."""
+        """The '## N-M ClassName' headings must match the social class table."""
         text = PROVENANCE_RULES.read_text(encoding="utf-8")
         headings = re.findall(r"^## (\d+)-(\d+) (\w+)", text, re.MULTILINE)
-        self.assertEqual(len(headings), len(SOCIAL_CLASS_TABLE))
+        social_class = DEFAULT_CHARACTER_RULES.social_class
+        self.assertEqual(len(headings), len(social_class.rows))
 
-        expected = _ranges_from_thresholds(SOCIAL_CLASS_TABLE)
+        expected = _ranges_from_thresholds(social_class)
         for (lo_str, hi_str, name), (exp_lo, exp_hi, exp_class) in zip(
             headings, expected
         ):
@@ -788,9 +833,7 @@ class ProvenanceRuleTest(SimpleTestCase):
                 return _rows_from_text(body)
         raise AssertionError(f"no '## {heading_prefix}...' section found")
 
-    def _assert_table_matches(
-        self, rows: list[list[str]], table: list[tuple[int, str]]
-    ):
+    def _assert_table_matches(self, rows: list[list[str]], table: RollTable):
         data_rows = rows[1:]  # drop the "| Roll | ... |" header row
         expected = _ranges_from_thresholds(table)
         self.assertEqual(len(data_rows), len(expected), data_rows)
@@ -801,23 +844,23 @@ class ProvenanceRuleTest(SimpleTestCase):
                 self.assertEqual(cells[1], exp_label)
 
     def test_nobility_table_ranges_and_labels_match_dice_thresholds(self):
-        self._assert_table_matches(self._section_rows("1-10 Nobility"), NOBILITY_TABLE)
+        self._assert_table_matches(
+            self._section_rows("1-10 Nobility"), DEFAULT_CHARACTER_RULES.nobility
+        )
 
     def test_merchant_table_ranges_and_labels_match_dice_thresholds(self):
-        self._assert_table_matches(self._section_rows("11-30 Merchant"), MERCHANT_TABLE)
+        self._assert_table_matches(
+            self._section_rows("11-30 Merchant"), DEFAULT_CHARACTER_RULES.merchant
+        )
 
     def test_commoner_table_ranges_and_labels_match_dice_thresholds(self):
         self._assert_table_matches(
-            self._section_rows("31-100 Commoner"), COMMONER_TABLE
+            self._section_rows("31-100 Commoner"), DEFAULT_CHARACTER_RULES.commoner
         )
 
     def test_ranges_within_each_table_are_non_overlapping(self):
         """Belt-and-suspenders: no two rows in any table may share a roll."""
-        for heading_prefix, table in (
-            ("1-10 Nobility", NOBILITY_TABLE),
-            ("11-30 Merchant", MERCHANT_TABLE),
-            ("31-100 Commoner", COMMONER_TABLE),
-        ):
+        for heading_prefix in ("1-10 Nobility", "11-30 Merchant", "31-100 Commoner"):
             rows = self._section_rows(heading_prefix)[1:]  # drop header row
             ranges = [_parse_roll_range(cells[0]) for cells in rows]
             for (lo_a, hi_a), (lo_b, hi_b) in zip(ranges, ranges[1:]):

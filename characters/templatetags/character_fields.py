@@ -25,12 +25,12 @@ from django import template
 from django.db.models import Model
 
 from characters import services
-from characters.constants import POINT_BUY_MAX_ATTRIBUTE, POINT_BUY_MIN_ATTRIBUTE
 from characters.models import (
-    CHARACTER_INT_FIELD_MAX,
-    CHARACTER_INT_FIELD_MIN,
     Character,
+    character_int_field_maximum,
+    character_int_field_minimum,
 )
+from characters.rules import character_rules
 from common.helpers import column_length
 
 register = template.Library()
@@ -95,10 +95,10 @@ def accessible_name(character: Model, field: str, label: str = "") -> str:
     return verbose[:1].upper() + verbose[1:]
 
 
-# What an attribute may be. The template repeated these six times; they are one
-# rule about one kind of number, so they live here.
+# The least an attribute may be. The template repeated its bounds six times;
+# they are one rule about one kind of number, so they live here, the ceiling
+# being the canon's (``attributes.maximum``).
 ATTRIBUTE_MINIMUM = 1
-ATTRIBUTE_MAXIMUM = 30
 
 
 @register.inclusion_tag("characters/_editable_attribute.html", takes_context=True)
@@ -113,14 +113,21 @@ def editable_attribute(context, character, field, can_edit, label=""):
         verbose name. Becomes the input's accessible name (issue #696).
     """
     # A Game Master may state any score a character can hold; a player types
-    # only a missing score, held to the buy's 3 to 18 (#748 review).
+    # only a missing score, held to the buy's range (3 to 18, #748 review).
     is_game_master = bool(context.get("is_game_master", False))
+    attribute_rules = character_rules().attributes
     return {
         "field": field,
         "value": getattr(character, field),
         **cell_state(context, character, field, can_edit),
-        "minimum": ATTRIBUTE_MINIMUM if is_game_master else POINT_BUY_MIN_ATTRIBUTE,
-        "maximum": ATTRIBUTE_MAXIMUM if is_game_master else POINT_BUY_MAX_ATTRIBUTE,
+        "minimum": (
+            ATTRIBUTE_MINIMUM if is_game_master else attribute_rules.point_buy.minimum
+        ),
+        "maximum": (
+            attribute_rules.maximum
+            if is_game_master
+            else attribute_rules.point_buy.maximum
+        ),
         "label": accessible_name(character, field, label),
     }
 
@@ -130,7 +137,7 @@ def editable_number(context, character, field, can_edit, label="", empty="—"):
     """One whole-number cell (starting coin, total XP): an input, or the number.
 
     The input's bounds are the field-update endpoint's own
-    (``CHARACTER_INT_FIELD_MIN`` / ``_MAX``). The read-only number carries
+    (``character_int_field_minimum`` / ``_maximum``). The read-only number carries
     ``data-readonly-field`` so the page can repaint it after a roll or a run.
 
     :param character: The character being shown.
@@ -145,8 +152,8 @@ def editable_number(context, character, field, can_edit, label="", empty="—"):
         "value": getattr(character, field),
         "empty": empty,
         **cell_state(context, character, field, can_edit),
-        "minimum": CHARACTER_INT_FIELD_MIN[field],
-        "maximum": CHARACTER_INT_FIELD_MAX[field],
+        "minimum": character_int_field_minimum(field),
+        "maximum": character_int_field_maximum(field),
         "label": accessible_name(character, field, label),
     }
 

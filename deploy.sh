@@ -261,8 +261,9 @@ resolve_canon() {
 
 # Refuse a canon the gate record cannot vouch for, before the checkout moves:
 # both colours read that checkout, the live one per request, so a refused
-# canon must never reach it. The canon holds rules the battle engine loads
-# (magic-rules.json), not only lore, so an ungated canon can break a battle.
+# canon must never reach it. The canon holds rules the code loads
+# (magic-rules.json, character-rules.json), not only lore, so an ungated canon
+# can break a battle or character creation.
 # With no record read (--force) GATE_CANON_COMMIT is empty and nothing is
 # compared. Commits made on the host and absent from origin are refused first,
 # since './run ship' gates origin's head and could never cover them.

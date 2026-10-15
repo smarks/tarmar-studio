@@ -18,6 +18,7 @@ carried at that age".
 from unittest.mock import patch
 
 from characters import services
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase, create_character
 
 #: aging.md's table, read straight off the published page as
@@ -198,10 +199,8 @@ class ExperienceRunWriteBackTest(BaseTestCase):
         self.assertEqual(len(character.experience_log[0]["years"]), 3)
 
     def test_an_attribute_gain_still_stops_at_the_storage_cap(self):
-        """Three points at once cannot carry a score past MAX_ATTRIBUTE_VALUE."""
-        from characters.constants import MAX_ATTRIBUTE_VALUE
-
-        character = self._character(strength=MAX_ATTRIBUTE_VALUE - 1)
+        """Three points at once cannot carry a score past the attribute ceiling."""
+        character = self._character(strength=character_rules().attributes.maximum - 1)
         with (
             patch("characters.skills.roll_survival_dice", return_value=(6, 6, 5, 17)),
             patch("characters.skills.roll_d20", return_value=10),
@@ -210,7 +209,7 @@ class ExperienceRunWriteBackTest(BaseTestCase):
         character.save()
         character.refresh_from_db()
 
-        self.assertEqual(character.strength, MAX_ATTRIBUTE_VALUE)
+        self.assertEqual(character.strength, character_rules().attributes.maximum)
 
     def test_a_run_that_crosses_an_age_boundary_stores_that_ages_penalties(self):
         """Ages 34 to 38 crosses 36, which aging.md gives STR -1 and DEX -1."""

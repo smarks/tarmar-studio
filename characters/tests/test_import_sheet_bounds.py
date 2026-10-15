@@ -108,7 +108,7 @@ class GameMasterImportHeldToTheSheetTest(BaseTestCase):
                     self._refused(**{field_name: ceiling + 1}),
                     f"Import failed: {field_name}: Value must be {ceiling} or fewer",
                 )
-                # The age's floor is STARTING_AGE (#958); test_age_floor
+                # The age's floor is the starting age (#958); test_age_floor
                 # holds it by name, so a raised floor on any other count
                 # still gets its below-floor check here.
                 if field_name != "age":

@@ -21,10 +21,10 @@ from common.test_helpers import BaseTestCase
 from . import roster
 from .engine import MODE_AIDE
 from .ledger import (
-    DRAFT_DEFAULTS,
     GAME_MASTER_SKILL_POINTS_KEY,
     DraftLedger,
     draft_character,
+    draft_defaults,
     draft_values,
     skill_point_account,
 )
@@ -50,7 +50,7 @@ ATTRIBUTES = (
 
 def _with_points(free: int):
     """A character with every attribute set and ``free`` skill points to spend."""
-    character = draft_character(dict(DRAFT_DEFAULTS))
+    character = draft_character(draft_defaults())
     for name in ATTRIBUTES:
         setattr(character, name, 12)
     character.free_skill_points = free
@@ -167,7 +167,7 @@ class AuthorityFromTheAccountTest(BaseTestCase):
 
     def _play(self, user, actions: list[dict], **values):
         session = session_with_character(
-            user, {**DRAFT_DEFAULTS, "name": "Kael", **values}, name="Authority"
+            user, {**draft_defaults(), "name": "Kael", **values}, name="Authority"
         )
         character_id = session.attached_characters().get().pk
         for action in actions:

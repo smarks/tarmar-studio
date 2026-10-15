@@ -128,9 +128,9 @@ class WorkbenchCardTest(BaseTestCase):
         self.assertIn('id="workbench-aging-preview">STR -1, DEX -1 at age 36<', html)
 
     def test_past_the_horizon_the_preview_shows_the_escalation_note(self):
-        from characters.views.characters import AGING_PREVIEW_HORIZON_AGE
+        from characters.views.characters import aging_preview_horizon_age
 
-        html = self._html(age=AGING_PREVIEW_HORIZON_AGE + 4)
+        html = self._html(age=aging_preview_horizon_age() + 4)
         self.assertIn("Continues to escalate past age", html)
 
     def test_the_card_copy_explains_what_rolling_years_does(self):

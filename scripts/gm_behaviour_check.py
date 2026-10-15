@@ -90,7 +90,7 @@ from django.urls import reverse  # noqa: E402
 
 from characters import skills  # noqa: E402
 from characters.combat import MATRIX  # noqa: E402
-from characters.dice import DICE_IN_TEXT, LOCATION_SKILL_CHOICES  # noqa: E402
+from characters.dice import DICE_IN_TEXT, location_skill_choices  # noqa: E402
 from characters.skills import (  # noqa: E402
     SURVIVAL_RULE_DESCRIPTION,
     normalize_skill_name,
@@ -4824,8 +4824,7 @@ class BackgroundRecord:
         An Origin that grants none (Consult GM) holds it trivially.
         """
         choices = {
-            normalize_skill_name(name)
-            for name in LOCATION_SKILL_CHOICES.get(self.origin, ())
+            normalize_skill_name(name) for name in location_skill_choices(self.origin)
         }
         held = {normalize_skill_name(name) for name in self.skills}
         return not choices or bool(choices & held)

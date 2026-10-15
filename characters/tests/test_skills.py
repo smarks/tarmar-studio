@@ -10,6 +10,7 @@ import time
 from django.test import TestCase
 
 from characters.models import Character
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 
@@ -899,14 +900,12 @@ class SurvivalModifierTest(BaseTestCase):
 
     def test_an_attribute_gain_stops_at_the_storage_cap(self):
         """The running score respects the same ceiling the endpoint applies."""
-        from characters.constants import MAX_ATTRIBUTE_VALUE
-
         result = self._run(
             years=3,
             age=16,
             track="laborer",
             attributes={
-                "strength": MAX_ATTRIBUTE_VALUE,
+                "strength": character_rules().attributes.maximum,
                 "dexterity": 10,
                 "intelligence": 10,
                 "wisdom": 10,

@@ -450,7 +450,7 @@ class GameMasterOriginChangeTest(ExecutorTestCase):
         character.save()
 
         with patch(
-            "characters.services.roll_3d6_logged",
+            "characters.services.roll_literacy_logged",
             return_value=(5, "3d6: [1, 1, 3] = 5"),
         ):
             outcome, *_rest = self.play(

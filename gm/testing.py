@@ -15,10 +15,10 @@ from unittest.mock import patch
 from characters.models import Character
 
 from .ledger import (
-    DRAFT_DEFAULTS,
     DRAFT_FIELDS,
     GAME_MASTER_SKILL_POINTS_KEY,
     LABEL_KEY,
+    draft_defaults,
 )
 from .maps import MAP_AREAS, MapScope
 from .models import GMSession, SessionCharacter
@@ -43,7 +43,8 @@ def add_character(
     """
     values = dict(values or {})
     label = label or str(values.get(LABEL_KEY) or "")
-    fields = {field: values.get(field, DRAFT_DEFAULTS[field]) for field in DRAFT_FIELDS}
+    defaults = draft_defaults()
+    fields = {field: values.get(field, defaults[field]) for field in DRAFT_FIELDS}
     fields["name"] = fields["name"] or label or "Unnamed character"
     character = Character.objects.create(user=session.user, **fields)
     session.characters.add(character)
@@ -69,11 +70,12 @@ def session_with_character(
     values = dict(values or {})
     # Several characters, written the way the retired JSON roster nested them.
     others = values.pop("_others", {}) or {}
+    defaults = draft_defaults()
     started = (
         label
         or values.get(LABEL_KEY)
         or any(
-            field in values and values[field] != DRAFT_DEFAULTS[field]
+            field in values and values[field] != defaults[field]
             for field in DRAFT_FIELDS
         )
     )
@@ -109,7 +111,7 @@ def recorded(who: str = "", score: int = 18) -> dict[str, Any]:
     Named and labelled ``who``, as a record started by that recording is.
     """
     return {
-        **DRAFT_DEFAULTS,
+        **draft_defaults(),
         **dict.fromkeys(
             (
                 "strength",

@@ -24,7 +24,7 @@ from common.test_helpers import BaseTestCase
 
 from . import roster
 from .engine import MODE_PLAY, SECTION_PLAN_SCHEMA
-from .ledger import DRAFT_DEFAULTS, DraftLedger, draft_character
+from .ledger import DraftLedger, draft_character, draft_defaults
 from .models import GMSession
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .testing import add_character, recorded, session_with_character
@@ -325,7 +325,7 @@ class BackgroundLedgerTest(SimpleTestCase):
 
     def test_the_ledger_carries_the_background_and_its_status(self):
         ledger = DraftLedger.from_draft(
-            {**DRAFT_DEFAULTS, "location": "Rural", "wealth_recorded": False}
+            {**draft_defaults(), "location": "Rural", "wealth_recorded": False}
         )
         self.assertTrue(ledger.location_recorded)
         self.assertTrue(ledger.provenance_recorded)

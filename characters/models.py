@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -17,24 +17,20 @@ from .constants import (
     ATTRIBUTE_BONUS_FIELDS,
     CHARACTER_ATTRIBUTE_FIELDS,
     CHARACTER_NAME_PATTERN,
-    FATIGUE_ROLL_MAXIMUM,
-    FATIGUE_ROLL_MINIMUM,
-    LITERACY_ROLL_MAXIMUM,
-    LITERACY_ROLL_MINIMUM,
-    MAX_ATTRIBUTE_VALUE,
+    CORE_ATTRIBUTE_FIELDS,
     MAX_CHARACTER_NAME_LENGTH,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_SKILL_NAME_LENGTH,
     MINOR_INJURY_ROLL_PENALTY,
     SEVERE_INJURY_BAND_TOP,
     SEVERE_INJURY_ROLL_PENALTY,
-    STARTING_AGE,
     too_long,
 )
 from .dice import (
     calculate_final_weight_lbs,
     demon_die_to_height_inches,
     format_height,
+    location_literacy_modifier,
     parse_dice_expression,
 )
 from .equipment import (
@@ -53,6 +49,7 @@ from .equipment import (
 )
 from .movement import GAIT_ORDER, compute_gaits
 from .movement import movement_modifier as _movement_modifier
+from .rules import character_rules, scores_by_short_name
 from .skills import specialised_skill_for_granted
 from .weapon_skill import weapon_skill_for_granted
 
@@ -114,8 +111,86 @@ class HistoryEntry:
         )
 
 
-# Validators for character attributes (1-30 range)
-ATTRIBUTE_VALIDATORS = [MinValueValidator(1), MaxValueValidator(30)]
+# The canon's numbers on a column (issue #59). Each is a named function that
+# reads ``character_rules()`` when it runs, so a migration records the
+# function's import path and never a number: the migrations are the same
+# whichever canon generated them. A MinValueValidator(2) written into a
+# migration would be a second copy of the Fatigue dice, and one that differed
+# under the Tarmar canon. Keep these importable as long as a migration names
+# them.
+
+
+def validate_attribute_maximum(value: int) -> None:
+    """A core attribute no higher than the canon's attribute ceiling.
+
+    The ceiling is what experience can raise STR, DEX or CON to, so it holds
+    a Game Master's numbers as well as a player's.
+
+    Raises:
+        ValidationError: ``value`` is above the ceiling.
+    """
+    maximum = character_rules().attributes.maximum
+    if value > maximum:
+        raise ValidationError(f"Attribute max is {maximum}")
+
+
+def validate_fatigue_roll(value: int) -> None:
+    """A Fatigue roll the canon's dice can produce (issue #653).
+
+    The bounds are on the column because they are what the dice can produce,
+    not a presentation choice: without them the field took anything up to the
+    smallint ceiling and a stated 30000 reached Fatigue, Body, the injury
+    thresholds and battle seating. Unlike a stated attribute, this is a die
+    roll rather than a build choice, so there is no Game Master override:
+    code owns the dice.
+
+    Raises:
+        ValidationError: The dice cannot produce ``value``.
+    """
+    refusal = character_rules().fatigue_roll.refusal("The Fatigue roll", value)
+    if refusal is not None:
+        raise ValidationError(refusal)
+
+
+def validate_literacy_roll(value: int) -> None:
+    """A literacy roll the canon's dice can produce (issue #741).
+
+    Like the Fatigue roll, a die roll rather than a build choice, so the
+    column holds what the dice can produce and nothing wider.
+
+    Raises:
+        ValidationError: The dice cannot produce ``value``.
+    """
+    refusal = character_rules().literacy_roll.refusal("The literacy roll", value)
+    if refusal is not None:
+        raise ValidationError(refusal)
+
+
+def starting_age() -> int:
+    """The age every character starts at: the age column's default."""
+    return character_rules().age.starting
+
+
+def validate_starting_age(value: int) -> None:
+    """An age no younger than the starting age (issue #958).
+
+    Every character starts at the canon's starting age and ages only
+    forward, so none is younger.
+
+    Raises:
+        ValidationError: ``value`` is below the starting age.
+    """
+    starting = starting_age()
+    if value < starting:
+        raise ValidationError(
+            f"Every character starts at {starting}, so the age must be at least "
+            f"{starting}; {value} was given"
+        )
+
+
+# Validators for character attributes: at least 1, at most the canon's
+# ceiling (experience can raise STR, DEX and CON past creation's range).
+ATTRIBUTE_VALIDATORS = [MinValueValidator(1), validate_attribute_maximum]
 
 # Per-character JSON growth bounds. Prevents runaway writes from bloating rows.
 MAX_SKILL_ENTRIES = 200
@@ -547,17 +622,11 @@ class Character(models.Model):
     height_roll = models.CharField(max_length=50, blank=True, default="", db_default="")
     weight_roll = models.CharField(max_length=50, blank=True, default="", db_default="")
 
-    # Fatigue roll (2d6 component, 2-12); null until rolled (issue #571).
-    # The bounds are on the column because they are what the dice can produce,
-    # not a presentation choice: without them the field took anything up to the
-    # smallint ceiling and a stated 30000 reached Fatigue, Body, the injury
-    # thresholds and battle seating (issue #653).
+    # Fatigue roll (the canon's dice, 2d6 on the public pages); null until
+    # rolled (issue #571). Bounded to what the dice can produce
+    # (validate_fatigue_roll, issue #653).
     fatigue_roll = models.PositiveSmallIntegerField(
-        null=True,
-        validators=[
-            MinValueValidator(FATIGUE_ROLL_MINIMUM),
-            MaxValueValidator(FATIGUE_ROLL_MAXIMUM),
-        ],
+        null=True, validators=[validate_fatigue_roll]
     )
 
     # Provenance (social class)
@@ -610,14 +679,9 @@ class Character(models.Model):
     # current origin and INT give, so a corrected INT re-reads the same roll.
     # Once it is rolled a player may not change the origin, and a Game Master
     # who does rolls it again (services.apply_origin_to_literacy). Bounded to
-    # what 3d6 can produce, like the Fatigue roll (issue #653).
+    # what the canon's dice can produce, like the Fatigue roll (issue #653).
     literacy_roll = models.PositiveSmallIntegerField(
-        null=True,
-        blank=True,
-        validators=[
-            MinValueValidator(LITERACY_ROLL_MINIMUM),
-            MaxValueValidator(LITERACY_ROLL_MAXIMUM),
-        ],
+        null=True, blank=True, validators=[validate_literacy_roll]
     )
     # Whether literacy has ever been rolled for this character (#741). The
     # player's Origin lock and their one roll hang on this, not on a roll being
@@ -733,11 +797,12 @@ class Character(models.Model):
 
     # Experience tracking
     total_xp = models.PositiveIntegerField(default=0)
-    # Every character starts at STARTING_AGE and ages only forward, so none is
-    # younger (issue #958). The floor is on the column so the import, the
-    # chat's extraction and the admin share it with CHARACTER_INT_FIELD_MIN.
+    # Every character starts at the canon's starting age and ages only
+    # forward, so none is younger (issue #958). The floor is on the column so
+    # the import, the chat's extraction and the admin share it with
+    # character_int_field_minimum.
     age = models.PositiveSmallIntegerField(
-        default=STARTING_AGE, validators=[MinValueValidator(STARTING_AGE)]
+        default=starting_age, validators=[validate_starting_age]
     )
     # One per prior-experience run recorded in the log. Runs used to be fixed
     # 4-year terms, which is why the field is named this way; since issue #221
@@ -1099,20 +1164,21 @@ class Character(models.Model):
                 value = whole_number(value)
             except ValueError:
                 raise ValidationError("Invalid number") from None
-            min_value = CHARACTER_INT_FIELD_MIN[field]
+            min_value = character_int_field_minimum(field)
             if value < min_value:
                 # Every field here but fatigue_roll and age has a floor of 0
                 # or 1, and "positive" says that plainly; the Fatigue roll's
-                # floor is the lowest 2d6 can produce (issue #653) and the
-                # age's is STARTING_AGE (issue #958), which need naming.
+                # floor is the lowest its dice can produce (issue #653) and
+                # the age's is the starting age (issue #958), which need
+                # naming.
                 raise ValidationError(
                     "Value must be positive"
                     if min_value <= 1
                     else f"Value must be {min_value} or more"
                 )
-            if field in CHARACTER_ATTRIBUTE_FIELDS and value > MAX_ATTRIBUTE_VALUE:
-                raise ValidationError(f"Attribute max is {MAX_ATTRIBUTE_VALUE}")
-            field_max = CHARACTER_INT_FIELD_MAX[field]
+            if field in CHARACTER_ATTRIBUTE_FIELDS:
+                validate_attribute_maximum(value)
+            field_max = character_int_field_maximum(field)
             if value > field_max:
                 raise ValidationError(f"Value must be {field_max} or fewer")
 
@@ -1135,7 +1201,8 @@ class Character(models.Model):
         if attribute_field is None:
             return
         current_score = getattr(self, attribute_field)
-        setattr(self, attribute_field, min(MAX_ATTRIBUTE_VALUE, current_score + points))
+        maximum = character_rules().attributes.maximum
+        setattr(self, attribute_field, min(maximum, current_score + points))
 
     def apply_experience_run(self, run_result, track: str, skill_points_from_xp: int):
         """Apply a simulated run's results to this character (caller saves).
@@ -1207,33 +1274,29 @@ class Character(models.Model):
 
     @property
     def fatigue(self):
-        """Calculate fatigue: CON + WIS + INT + max(DEX, STR) + 2d6 roll.
+        """Calculate fatigue: the canon's Fatigue sum over the attributes.
+
+        On the public pages, CON + WIS + INT + max(DEX, STR) + 2d6 roll; the
+        attributes and the dice are the canon's (``fatigue_roll`` in
+        ``character-rules.json``), the sum's shape is
+        :meth:`characters.rules.FatigueRollRules.total`.
 
         Reads effective (aged) scores, per the ruling on #773: aging lowers an
-        attribute everywhere except the creation-time checks. The 2d6 Fatigue
+        attribute everywhere except the creation-time checks. The Fatigue
         roll itself is made once, at creation, and aging never touches it.
         """
-        constitution = self.effective_constitution
-        wisdom = self.effective_wisdom
-        intelligence = self.effective_intelligence
-        dexterity = self.effective_dexterity
-        strength = self.effective_strength
-        if (
-            constitution is None
-            or wisdom is None
-            or intelligence is None
-            or dexterity is None
-            or strength is None
-            or self.fatigue_roll is None
-        ):
-            return None
-        return (
-            constitution
-            + wisdom
-            + intelligence
-            + max(dexterity, strength)
-            + self.fatigue_roll
+        scores = scores_by_short_name(
+            {
+                field_name: getattr(self, f"effective_{field_name}")
+                for field_name, _short_name in CORE_ATTRIBUTE_FIELDS
+            }
         )
+        recorded = {name: score for name, score in scores.items() if score is not None}
+        fatigue_roll = character_rules().fatigue_roll
+        read = {*fatigue_roll.attributes, *fatigue_roll.best_of}
+        if self.fatigue_roll is None or not read.issubset(recorded):
+            return None
+        return fatigue_roll.total(recorded, self.fatigue_roll)
 
     @property
     def body(self):
@@ -1495,6 +1558,16 @@ class Character(models.Model):
         return self._effective_attribute(self.constitution, self.aging_con_penalty)
 
     @property
+    def effective_charisma(self) -> int | None:
+        """Charisma as play reads it, or None if unrecorded.
+
+        Aging never reaches Charisma (aging.md), so it is the recorded score;
+        the property exists so every core attribute has an effective score
+        and a reader can walk ``CORE_ATTRIBUTE_FIELDS`` for them.
+        """
+        return self.charisma
+
+    @property
     def physical(self):
         """Physical: half the sum of effective STR, DEX, and CON, rounded up.
 
@@ -1539,9 +1612,7 @@ class Character(models.Model):
         Derived from the current location rather than stored, so a GM who edits
         the origin on the sheet gets the matching check without a second edit.
         """
-        from .dice import LOCATION_LITERACY_MODIFIER
-
-        return LOCATION_LITERACY_MODIFIER.get(self.location)
+        return location_literacy_modifier(self.location)
 
     @property
     def location_literacy_check(self):
@@ -1554,9 +1625,7 @@ class Character(models.Model):
         modifier = self.location_literacy_modifier
         if modifier is None:
             return "Consult GM"
-        if modifier == 0:
-            return "3d6 ≤ INT"
-        return f"3d6 ≤ INT − {modifier}"
+        return character_rules().literacy_roll.check_text(modifier)
 
     @property
     def literacy_threshold(self) -> int | None:
@@ -2310,9 +2379,9 @@ CHARACTER_INT_FIELD_MAX = {
     "wisdom": MAX_SMALLINT_FIELD_VALUE,
     "constitution": MAX_SMALLINT_FIELD_VALUE,
     "charisma": MAX_SMALLINT_FIELD_VALUE,
-    # The 2d6 the roll is made of, not the column's ceiling: a stated 30000
-    # used to reach Fatigue, Body and the injury thresholds intact (#653).
-    "fatigue_roll": FATIGUE_ROLL_MAXIMUM,
+    # The column's ceiling; the dice the roll is made of hold it far lower
+    # (character_int_field_maximum, #653).
+    "fatigue_roll": MAX_SMALLINT_FIELD_VALUE,
     "starting_coin": MAX_INT_FIELD_VALUE,
     "total_xp": MAX_INT_FIELD_VALUE,
     # The wounds carried (issue #751). Not in CHARACTER_FIELDS, so the
@@ -2342,8 +2411,10 @@ CHARACTER_NULLABLE_INT_FIELDS = {"starting_coin"}
 # CHARACTER_INT_FIELD_MAX above -- not every field's floor is the same. The
 # six core attributes carry an explicit MinValueValidator(1) in
 # ATTRIBUTE_VALIDATORS above: 0 STR isn't a valid character. The Fatigue roll
-# floors at the lowest 2d6 (#653) and the age at STARTING_AGE (#958), each
-# from its own validator. Every other int field here is a plain
+# floors at the lowest its dice can roll (#653) and the age at the starting
+# age (#958), each the canon's: they have no entry here, so a direct read of
+# either raises, and character_int_field_minimum reads the rule when asked.
+# Every other int field here is a plain
 # Positive(Small)IntegerField with no such validator, so 0 is genuinely
 # storable and must round-trip. This used to be a flat
 # "everything but starting_coin needs >=1" rule, which rejected a
@@ -2357,20 +2428,51 @@ CHARACTER_INT_FIELD_MIN = {
     "wisdom": MIN_ATTRIBUTE_VALUE,
     "constitution": MIN_ATTRIBUTE_VALUE,
     "charisma": MIN_ATTRIBUTE_VALUE,
-    "fatigue_roll": FATIGUE_ROLL_MINIMUM,
     "starting_coin": 0,
     "total_xp": 0,
     "fatigue_damage": 0,
     "body_damage": 0,
     "mana_spent": 0,
     "mana_owed": 0,
-    "age": STARTING_AGE,
     "experience_terms": 0,
     "free_skill_points": 0,
     "free_spell_points": 0,
     "skill_points_owed": 0,
     "money_earned": 0,
 }
+
+
+def character_int_field_minimum(field: str) -> int:
+    """The lowest value ``field`` may hold, the canon's rules applied.
+
+    :data:`CHARACTER_INT_FIELD_MIN` holds what the column can store; the
+    Fatigue roll's floor is the lowest its dice can roll and the age's is the
+    starting age, read from the loaded canon when asked (issue #59).
+
+    Args:
+        field: A key of :data:`CHARACTER_INT_FIELD_MIN`.
+    """
+    rules = character_rules()
+    if field == "fatigue_roll":
+        return rules.fatigue_roll.minimum
+    if field == "age":
+        return rules.age.starting
+    return CHARACTER_INT_FIELD_MIN[field]
+
+
+def character_int_field_maximum(field: str) -> int:
+    """The highest value ``field`` may hold, the canon's rules applied.
+
+    :data:`CHARACTER_INT_FIELD_MAX` holds what the column can store; the
+    Fatigue roll's ceiling is the highest its dice can roll (#653), read from
+    the loaded canon when asked (issue #59).
+
+    Args:
+        field: A key of :data:`CHARACTER_INT_FIELD_MAX`.
+    """
+    if field == "fatigue_roll":
+        return character_rules().fatigue_roll.maximum
+    return CHARACTER_INT_FIELD_MAX[field]
 
 
 # Max lengths for string fields, read off the model's own columns so the

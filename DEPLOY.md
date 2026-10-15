@@ -183,7 +183,8 @@ The record's `canon-commit:` line names the canon commit the suites ran
 against, and a record without one is refused. When the canon the deploy would
 serve is at another commit, the deploy stops before anything is built, naming
 both commits, since that canon change has not been through the suites and the
-canon holds rules the battle engine loads (`magic-rules.json`), not only lore.
+canon holds rules the code loads (`magic-rules.json` for battles,
+`character-rules.json` for character creation), not only lore.
 The check runs before the checkout moves, against the commit it would move to,
 so a refused canon never reaches the checkout the live colour reads. Run
 `./run ship` again: it gates `main`'s head against the canon's head and

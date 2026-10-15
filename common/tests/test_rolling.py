@@ -9,7 +9,14 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from common.rolling import Roller, RollRecord, parse_dice_specification, pinned_dice
+from common.rolling import (
+    Roller,
+    RollRecord,
+    dice_total_range,
+    parse_dice_specification,
+    pinned_dice,
+    standard_dice_specification,
+)
 
 
 class ParseDiceSpecificationTest(SimpleTestCase):
@@ -44,6 +51,31 @@ class ParseDiceSpecificationTest(SimpleTestCase):
         with self.assertRaises(ValueError) as caught:
             parse_dice_specification("0d6")
         self.assertEqual(str(caught.exception), "Dice expression out of range: 0d6")
+
+
+class DiceSpecificationFormTest(SimpleTestCase):
+    """The standard spelling of a specification, and the totals it can roll."""
+
+    def test_every_spelling_of_one_roll_has_one_standard_form(self):
+        for specification, standard in (
+            ("2d6", "2d6"),
+            (" 2D6 ", "2d6"),
+            ("02d06", "2d6"),
+            ("2d6+0", "2d6"),
+            ("1d100+05", "1d100+5"),
+            ("3d6-2", "3d6-2"),
+        ):
+            with self.subTest(specification=specification):
+                self.assertEqual(standard_dice_specification(specification), standard)
+
+    def test_a_specification_that_does_not_parse_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "Invalid dice expression"):
+            standard_dice_specification("2x6")
+
+    def test_the_total_range_runs_from_all_ones_to_all_top_faces(self):
+        self.assertEqual(dice_total_range("2d6"), (2, 12))
+        self.assertEqual(dice_total_range("3d6-2"), (1, 16))
+        self.assertEqual(dice_total_range("1d100+100"), (101, 200))
 
 
 class RollRecordTest(SimpleTestCase):

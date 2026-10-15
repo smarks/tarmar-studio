@@ -1,8 +1,9 @@
-"""Issue #958: no character is younger than ``STARTING_AGE``.
+"""Issue #958: no character is younger than the starting age.
 
-Every character starts at 16 and ages only forward, so the floor is on the
-column (``MinValueValidator(STARTING_AGE)``), and the importer, the chat's
-extraction schema and the sheet's writers all read the one constant.
+Every character starts at the canon's starting age (16 on the public pages)
+and ages only forward, so the floor is on the column
+(``characters.models.validate_starting_age``), and the importer, the chat's
+extraction schema and the sheet's writers all read the one rule.
 """
 
 import random
@@ -10,21 +11,26 @@ import random
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
-from characters.constants import STARTING_AGE
 from characters.import_service import (
     CharacterImportError,
     held_to_player,
     save_imported_character,
     validate_import_payload,
 )
-from characters.models import CHARACTER_FIELDS, CHARACTER_INT_FIELD_MIN
+from characters.models import (
+    CHARACTER_FIELDS,
+    character_int_field_minimum,
+    starting_age,
+)
 from characters.skills import ALL_TRACKS, simulate_experience_years
 from common.test_helpers import BaseTestCase, create_character
 from gm.character_schema import character_json_schema, extraction_to_import_payload
 
 from .test_import import _build_payload
 
-BELOW_STARTING_AGE_REFUSAL = f"Import failed: age: Value must be {STARTING_AGE} or more"
+BELOW_STARTING_AGE_REFUSAL = (
+    f"Import failed: age: Value must be {starting_age()} or more"
+)
 
 
 class AgeFloorTest(BaseTestCase):
@@ -35,9 +41,9 @@ class AgeFloorTest(BaseTestCase):
         self.game_master = self.create_dm("age-floor-dm")
 
     def test_the_model_refuses_an_age_below_the_starting_age(self):
-        character = create_character(self.game_master, age=STARTING_AGE - 1)
+        character = create_character(self.game_master, age=starting_age() - 1)
         self.assertIn("age", self._field_errors(character))
-        character.age = STARTING_AGE
+        character.age = starting_age()
         self.assertNotIn("age", self._field_errors(character))
 
     @staticmethod
@@ -50,31 +56,33 @@ class AgeFloorTest(BaseTestCase):
         return {}
 
     def test_the_importers_floor_is_the_starting_age(self):
-        self.assertEqual(CHARACTER_INT_FIELD_MIN["age"], STARTING_AGE)
+        self.assertEqual(character_int_field_minimum("age"), starting_age())
 
     def test_the_file_import_refuses_fifteen_and_keeps_sixteen(self):
         with self.assertRaises(CharacterImportError) as refused:
-            validate_import_payload(_build_payload(overrides={"age": STARTING_AGE - 1}))
+            validate_import_payload(
+                _build_payload(overrides={"age": starting_age() - 1})
+            )
         self.assertEqual(str(refused.exception), BELOW_STARTING_AGE_REFUSAL)
 
         imported = held_to_player(
-            validate_import_payload(_build_payload(overrides={"age": STARTING_AGE})),
+            validate_import_payload(_build_payload(overrides={"age": starting_age()})),
             is_game_master=True,
             importer=self.game_master,
         )
         character = save_imported_character(self.game_master, imported)
-        self.assertEqual(character.age, STARTING_AGE)
+        self.assertEqual(character.age, starting_age())
 
     def test_the_chats_extraction_refuses_fifteen_and_keeps_sixteen(self):
         payload = extraction_to_import_payload(
-            {"name": "Extracted", "age": STARTING_AGE - 1}
+            {"name": "Extracted", "age": starting_age() - 1}
         )
         with self.assertRaises(CharacterImportError) as refused:
             validate_import_payload(payload)
         self.assertEqual(str(refused.exception), BELOW_STARTING_AGE_REFUSAL)
 
-        payload["data"]["age"] = STARTING_AGE
-        self.assertEqual(validate_import_payload(payload).fields["age"], STARTING_AGE)
+        payload["data"]["age"] = starting_age()
+        self.assertEqual(validate_import_payload(payload).fields["age"], starting_age())
 
 
 class AgeFloorSchemaTest(SimpleTestCase):
@@ -86,8 +94,8 @@ class AgeFloorSchemaTest(SimpleTestCase):
                 field = character_json_schema(for_game_master=for_game_master)[
                     "properties"
                 ]["age"]
-                self.assertEqual(field["minimum"], STARTING_AGE)
-                self.assertEqual(field["minimum"], CHARACTER_INT_FIELD_MIN["age"])
+                self.assertEqual(field["minimum"], starting_age())
+                self.assertEqual(field["minimum"], character_int_field_minimum("age"))
 
 
 class NoSheetPathLowersTheAgeTest(SimpleTestCase):
@@ -116,7 +124,7 @@ class NoSheetPathLowersTheAgeTest(SimpleTestCase):
                     result = simulate_experience_years(
                         years_requested=4,
                         years_completed=0,
-                        current_age=STARTING_AGE,
+                        current_age=starting_age(),
                         track=track,
                         charisma=3,
                         **attributes,
@@ -124,7 +132,7 @@ class NoSheetPathLowersTheAgeTest(SimpleTestCase):
                     ages = [year["age"] for year in result["years"]]
                     self.assertEqual(
                         ages,
-                        list(range(STARTING_AGE + 1, STARTING_AGE + 1 + len(ages))),
+                        list(range(starting_age() + 1, starting_age() + 1 + len(ages))),
                     )
                     deaths += not result["alive"]
         self.assertGreater(deaths, 0, "no run died, so the early stop went untested")

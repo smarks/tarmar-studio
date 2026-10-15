@@ -99,13 +99,7 @@ def generate_variant(base: Beast, rng: random.Random | None = None) -> Beast:
     """Save and return a ±15% variant of ``base``, flagged as generated."""
     rng = rng or random.Random()
     varied = {stat: _varied(getattr(base, stat), rng) for stat in _VARIED_STATS}
-    fatigue_pool, body_pool = derive_pools(
-        varied["strength"],
-        varied["dexterity"],
-        varied["intelligence"],
-        varied["wisdom"],
-        varied["constitution"],
-    )
+    fatigue_pool, body_pool = derive_pools(varied)
     armour_tier = tier_for_stops(varied["stops"])
     variant_number = base.variants.count() + 1
     return Beast.objects.create(

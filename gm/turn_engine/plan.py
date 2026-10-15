@@ -28,8 +28,6 @@ from typing import Any, TypeIs
 from characters.constants import (
     CHARACTER_TEXT_LIMITS,
     CORE_ATTRIBUTE_FIELDS,
-    FATIGUE_ROLL_MAXIMUM,
-    FATIGUE_ROLL_MINIMUM,
     MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
     MAX_ARMOR_STOPS,
     MAX_EQUIPMENT_DAMAGE_LENGTH,
@@ -37,6 +35,7 @@ from characters.constants import (
     MAX_SKILL_NAME_LENGTH,
 )
 from characters.purse import CUSTOM_COMBAT_CATEGORIES, MAX_COIN_MOVEMENT
+from characters.rules import character_rules
 from characters.skill_checks import (
     ATTRIBUTE_CHECK_MAXIMUM,
     ATTRIBUTE_CHECK_MINIMUM,
@@ -663,8 +662,9 @@ def _read_action(
     elif name == "roll_fatigue":
         reader.target()
         if reader.given("value"):
+            fatigue_roll = character_rules().fatigue_roll
             fields["fatigue_value"] = reader.whole(
-                "value", FATIGUE_ROLL_MINIMUM, FATIGUE_ROLL_MAXIMUM
+                "value", fatigue_roll.minimum, fatigue_roll.maximum
             )
     elif name in (
         "roll_literacy",

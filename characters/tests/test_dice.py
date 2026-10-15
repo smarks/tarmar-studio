@@ -28,15 +28,6 @@ class DiceRollingTest(TestCase):
             self.assertGreaterEqual(result, 3)
             self.assertLessEqual(result, 18)
 
-    def test_roll_2d6_range(self):
-        """roll_2d6 should return values between 2 and 12."""
-        from characters.dice import roll_2d6
-
-        for _ in range(100):
-            result = roll_2d6()
-            self.assertGreaterEqual(result, 2)
-            self.assertLessEqual(result, 12)
-
     def test_roll_demon_die_format(self):
         """roll_demon_die should return a dot-separated string."""
         from characters.dice import roll_demon_die
@@ -63,7 +54,7 @@ class DiceRollingTest(TestCase):
         """demon_die_to_height_inches should calculate correct heights.
 
         Per attributes.md's Height table (issue #295): the FIRST roll sets
-        the base height from HEIGHT_TABLE. Each additional 1 in the chain
+        the base height from the canon's height table. Each additional 1 in the chain
         subtracts 4" and each additional 6 adds 4". The final 2-5 roll only
         stops the chain -- it is not itself a base or an adjustment unless
         it was the only roll.
@@ -188,14 +179,19 @@ class DiceRollingTest(TestCase):
         self.assertLessEqual(result, 18)
         self.assertIn("3d6:", log)
 
-    def test_roll_2d6_logged(self):
-        """roll_2d6_logged should return result and log."""
-        from characters.dice import roll_2d6_logged
+    def test_roll_dice_logged_writes_what_dice_in_text_reads_back(self):
+        """A canon's dice may carry a modifier (issue #59); the log line the
+        roll writes is still read back whole, modifier and all."""
+        from characters.dice import DICE_IN_TEXT, roll_dice_logged
+        from common.rolling import Roller
 
-        result, log = roll_2d6_logged()
-        self.assertGreaterEqual(result, 2)
-        self.assertLessEqual(result, 12)
-        self.assertIn("2d6:", log)
+        for specification in ("2d6", "1d8+1", "3d6-2"):
+            with self.subTest(specification=specification):
+                total, log = roll_dice_logged(specification, Roller(seed=59))
+                ((expression, faces, read_total),) = DICE_IN_TEXT.findall(log)
+                self.assertEqual(expression, specification)
+                self.assertEqual(int(read_total), total)
+                self.assertTrue(faces.strip())
 
     def test_roll_demon_die_logged(self):
         """roll_demon_die_logged should return result and log."""
@@ -252,41 +248,37 @@ class DiceRollingTest(TestCase):
         self.assertIn("Wealth:", log)
 
     def test_lookup_table(self):
-        """lookup_table should return correct value for roll."""
-        from characters.dice import lookup_table
+        """A percentile table's lookup returns the row a roll lands on."""
+        from characters.rules import RollTable, TableRow
 
-        table = [(10, "first"), (20, "second"), (100, "third")]
-        self.assertEqual(lookup_table(5, table), "first")
-        self.assertEqual(lookup_table(10, table), "first")
-        self.assertEqual(lookup_table(15, table), "second")
-        self.assertEqual(lookup_table(100, table), "third")
+        table = RollTable(
+            rows=(TableRow(10, "first"), TableRow(20, "second"), TableRow(100, "third"))
+        )
+        self.assertEqual(table.lookup(5), "first")
+        self.assertEqual(table.lookup(10), "first")
+        self.assertEqual(table.lookup(15), "second")
+        self.assertEqual(table.lookup(100), "third")
 
     def test_provenance_classes(self):
-        """roll_provenance_logged should return valid class and detail."""
-        from characters.dice import (
-            COMMONER_TABLE,
-            MERCHANT_TABLE,
-            NOBILITY_TABLE,
-            lookup_table,
-        )
+        """The default canon's provenance tables give the published details."""
+        from .rules_fixtures import DEFAULT_CHARACTER_RULES
 
-        # Test lookup for each class
-        nobility_details = [v for _, v in NOBILITY_TABLE]
-        merchant_details = [v for _, v in MERCHANT_TABLE]
-        commoner_details = [v for _, v in COMMONER_TABLE]
+        nobility = DEFAULT_CHARACTER_RULES.nobility
+        merchant = DEFAULT_CHARACTER_RULES.merchant
+        commoner = DEFAULT_CHARACTER_RULES.commoner
 
         # Test specific lookups
-        self.assertEqual(lookup_table(1, NOBILITY_TABLE), "Monarch")
-        self.assertEqual(lookup_table(50, NOBILITY_TABLE), "Baron")
-        self.assertEqual(lookup_table(50, MERCHANT_TABLE), "Retail")
-        self.assertEqual(lookup_table(96, MERCHANT_TABLE), "Specialty")
-        self.assertEqual(lookup_table(50, COMMONER_TABLE), "Laborer")
-        self.assertEqual(lookup_table(80, COMMONER_TABLE), "Crafts")
+        self.assertEqual(nobility.lookup(1), "Monarch")
+        self.assertEqual(nobility.lookup(50), "Baron")
+        self.assertEqual(merchant.lookup(50), "Retail")
+        self.assertEqual(merchant.lookup(96), "Specialty")
+        self.assertEqual(commoner.lookup(50), "Laborer")
+        self.assertEqual(commoner.lookup(80), "Crafts")
 
         # Verify all details exist
-        self.assertIn("Knights and Warrior Nobility", nobility_details)
-        self.assertIn("Wholesale", merchant_details)
-        self.assertIn("Crafts", commoner_details)
+        self.assertIn("Knights and Warrior Nobility", nobility.labels)
+        self.assertIn("Wholesale", merchant.labels)
+        self.assertIn("Crafts", commoner.labels)
 
     def test_roll_provenance_logged_all_classes(self):
         """roll_provenance_logged should handle all social classes."""

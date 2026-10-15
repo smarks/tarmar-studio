@@ -18,10 +18,10 @@ from characters.skills import ALL_TRACKS, calculate_skill_points_from_xp
 from common.test_helpers import BaseTestCase
 from gm.ledger import (
     ATTRIBUTE_FIELDS,
-    DRAFT_DEFAULTS,
     DRAFT_FIELDS,
     DraftLedger,
     draft_character,
+    draft_defaults,
     draft_values,
 )
 from gm.models import GMSession
@@ -54,7 +54,7 @@ def survives_every_year():
 
 
 def empty_draft() -> dict:
-    return dict(DRAFT_DEFAULTS)
+    return draft_defaults()
 
 
 def built_draft(**overrides):

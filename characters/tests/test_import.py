@@ -9,7 +9,7 @@ from character_export.export_utils import (
     EXPORTABLE_FIELDS,
     generate_character_json,
 )
-from characters.constants import CORE_ATTRIBUTE_FIELDS, STARTING_AGE
+from characters.constants import CORE_ATTRIBUTE_FIELDS
 from characters.dice import location_effects
 from characters.import_service import (
     IMPORT_NOTICE_KEY,
@@ -18,6 +18,7 @@ from characters.import_service import (
     player_import_notice,
 )
 from characters.models import NEEDS_ATTRIBUTES, NEEDS_FATIGUE_ROLL, Character
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 
@@ -914,7 +915,7 @@ class PlayerImportArrivesUnrolledTest(BaseTestCase):
                 character.free_skill_points,
                 character.free_spell_points,
             ),
-            (0, 1, STARTING_AGE, 0, [], 0, 0, 0),
+            (0, 1, character_rules().age.starting, 0, [], 0, 0, 0),
         )
         # The skill a new Village character is granted; a new character's
         # background, appearance and coin, with nothing rolled for them.

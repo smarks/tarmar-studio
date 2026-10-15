@@ -34,11 +34,11 @@ function sessionIdFrom(output) {
 const SEED_PROCEDURE = `
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
-from gm.ledger import DRAFT_DEFAULTS
+from gm.ledger import draft_defaults
 from gm.testing import run_actions, session_with_character
 from gm.turn_engine.history import procedure_entry
 user = get_user_model().objects.get(username='${TEST_USER.username}')
-draft = dict(DRAFT_DEFAULTS)
+draft = draft_defaults()
 draft.update({'name': 'Kael', 'strength': 13, 'dexterity': 12, 'intelligence': 11, 'wisdom': 10, 'constitution': 13, 'charisma': 9, 'fatigue_roll': 7})
 session = session_with_character(user, draft, name='Procedure E2E')
 dice = patch('characters.skills.roll_survival_dice', return_value=(6, 6, 6, 18))

@@ -994,7 +994,7 @@ class CharacterViewsTest(BaseTestCase):
         """A wealth_level outside the model's choices 400s instead of 500ing.
 
         Regression test for the bogus-wealth_level crash: previously this
-        looked up the value in STARTING_COIN and raised an unhandled
+        looked up the value in the starting-coin table and raised an unhandled
         KeyError.
         """
         self.login_as(self.user)
