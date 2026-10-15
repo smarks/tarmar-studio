@@ -58,9 +58,6 @@ from ..constants import (
     MAX_EQUIPMENT_MODIFIER,
     MAX_EQUIPMENT_QUANTITY,
     MAX_EQUIPMENT_WEIGHT_LBS,
-    POINT_BUY_MAX_ATTRIBUTE,
-    POINT_BUY_MIN_ATTRIBUTE,
-    POINT_BUY_TOTAL,
     UNNAMED_CHARACTER,
     name_within_rule,
     too_long,
@@ -87,6 +84,7 @@ from ..models import (
 )
 from ..pickers import owner_filter_picker
 from ..purse import format_coin, format_purse
+from ..rules import character_rules
 from ..services import CharacterChangeError
 from ..skill_checks import (
     ATTRIBUTES,
@@ -429,14 +427,16 @@ def _creation_name(
 
 
 def _point_buy_defaults() -> list[int]:
-    """Spread POINT_BUY_TOTAL across the core six as evenly as it divides.
+    """Spread the canon's point-buy budget across the core six as evenly as it
+    divides.
 
     Returns:
         One starting value per core attribute, in CORE_ATTRIBUTE_FIELDS order,
-        summing to exactly POINT_BUY_TOTAL.
+        summing to exactly the budget.
     """
     attribute_count = len(CORE_ATTRIBUTE_FIELDS)
-    even_share, remainder = divmod(POINT_BUY_TOTAL, attribute_count)
+    budget = character_rules().attributes.point_buy.total
+    even_share, remainder = divmod(budget, attribute_count)
     return [
         even_share + 1 if index < remainder else even_share
         for index in range(attribute_count)
@@ -469,6 +469,7 @@ def _character_create_context(
         The template context.
     """
     defaults = _point_buy_defaults()
+    point_buy = character_rules().attributes.point_buy
     return {
         "next_url": next_url,
         # The name (issue #786), echoed back like the visibility below so a
@@ -489,9 +490,9 @@ def _character_create_context(
             step("New character"),
         ),
         "active_page": "characters",
-        "point_buy_total": POINT_BUY_TOTAL,
-        "point_buy_min": POINT_BUY_MIN_ATTRIBUTE,
-        "point_buy_max": POINT_BUY_MAX_ATTRIBUTE,
+        "point_buy_total": point_buy.total,
+        "point_buy_min": point_buy.minimum,
+        "point_buy_max": point_buy.maximum,
         "point_buy_error": error,
         "can_exceed_point_buy": can_exceed_point_buy,
         "core_attributes": [
@@ -522,7 +523,7 @@ def _parse_point_buy_attributes(
 
     Args:
         submitted: The POST data carrying one value per core attribute.
-        allow_off_budget: When true, a total other than ``POINT_BUY_TOTAL`` is
+        allow_off_budget: When true, a total other than the budget is
             accepted instead of refused (issue #299 — admins and DMs building
             NPCs). The per-attribute range still binds: it mirrors what 3d6 can
             produce, which is a different rule from the budget.
@@ -530,6 +531,7 @@ def _parse_point_buy_attributes(
     Returns:
         ``(attributes, error_message)`` with exactly one of the two set.
     """
+    point_buy = character_rules().attributes.point_buy
     attributes: dict[str, int] = {}
     for field_name, label in CORE_ATTRIBUTE_FIELDS:
         raw_value = str(submitted.get(field_name, "")).strip()
@@ -537,17 +539,17 @@ def _parse_point_buy_attributes(
             value = int(raw_value)
         except ValueError:
             return None, f"{label} must be a whole number."
-        if not POINT_BUY_MIN_ATTRIBUTE <= value <= POINT_BUY_MAX_ATTRIBUTE:
+        if not point_buy.minimum <= value <= point_buy.maximum:
             return None, (
-                f"{label} must be between {POINT_BUY_MIN_ATTRIBUTE} and "
-                f"{POINT_BUY_MAX_ATTRIBUTE}; you entered {value}."
+                f"{label} must be between {point_buy.minimum} and "
+                f"{point_buy.maximum}; you entered {value}."
             )
         attributes[field_name] = value
 
     spent = sum(attributes.values())
-    if spent != POINT_BUY_TOTAL and not allow_off_budget:
+    if spent != point_buy.total and not allow_off_budget:
         return None, (
-            f"The six core attributes must total exactly {POINT_BUY_TOTAL}; "
+            f"The six core attributes must total exactly {point_buy.total}; "
             f"yours total {spent}."
         )
     return attributes, None
@@ -602,7 +604,8 @@ def character_create(request) -> HttpResponse:
         return creation_page(
             request.POST,
             "The form did not say whether to roll the attributes or buy "
-            f"them with {POINT_BUY_TOTAL} points. Use one of the two "
+            f"them with {character_rules().attributes.point_buy.total} points. "
+            "Use one of the two "
             "buttons below.",
             status=400,
         )
@@ -720,7 +723,18 @@ def character_import(request):
 # still take real, uncapped aging on the server; the preview notes the ongoing
 # rate instead of listing every further stage (issue #163).
 AGING_PREVIEW_HORIZON_STAGE = 20
-AGING_PREVIEW_HORIZON_AGE = age_for_aging_stage(AGING_PREVIEW_HORIZON_STAGE)
+
+
+def aging_preview_horizon_age() -> int:
+    """The age :data:`AGING_PREVIEW_HORIZON_STAGE` begins at (96 on the public
+    pages).
+
+    A function, not a module constant: the age is the canon's
+    (``characters.rules``), read when a page asks, so importing this module
+    (and the URL configuration with it) never loads the canon and a bad file
+    is reported by the ``characters.E001`` system check (issue #59).
+    """
+    return age_for_aging_stage(AGING_PREVIEW_HORIZON_STAGE)
 
 
 def attack_weapon_choices(character) -> tuple[list[dict], list[str]]:
@@ -960,7 +974,7 @@ class CharacterEditView(
         context["survival_dice"] = f"{SURVIVAL_DICE_COUNT}d6"
         context["next_year_number"] = self.object.experience_years + 1
         context["next_run_age"] = self.object.age + DEFAULT_RUN_YEARS
-        context["aging_preview_horizon_age"] = AGING_PREVIEW_HORIZON_AGE
+        context["aging_preview_horizon_age"] = aging_preview_horizon_age()
         context["track_options"] = list(TRACK_LABELS.items())
         # The equipment pickers' options, from characters/equipment.py rather
         # than typed into the template a second time (issue #338 item 21).
@@ -986,7 +1000,7 @@ class CharacterEditView(
         context["next_aging_change_penalties"] = (
             next_aging_change[1] if next_aging_change else {}
         )
-        context["past_aging_horizon"] = self.object.age >= AGING_PREVIEW_HORIZON_AGE
+        context["past_aging_horizon"] = self.object.age >= aging_preview_horizon_age()
         # Aging change points, keyed by the age they land at, for the live
         # preview: every age at which the cumulative totals move, up to the
         # horizon. Short attribute names, because that is how the card prints
@@ -1022,7 +1036,7 @@ class CharacterEditView(
             "survivalTargets": SURVIVAL_TARGETS,
             "trackLabels": TRACK_LABELS,
             "agingByAge": aging_by_age,
-            "agingHorizonAge": AGING_PREVIEW_HORIZON_AGE,
+            "agingHorizonAge": aging_preview_horizon_age(),
             # The record keeps the latest runs only; so does the page's
             # Experience History when a run joins it (issue #903).
             "maxExperienceLogEntries": MAX_EXPERIENCE_LOG_ENTRIES,

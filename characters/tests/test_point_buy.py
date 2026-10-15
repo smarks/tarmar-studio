@@ -5,14 +5,10 @@ between the six core attributes". These cover the buy path, its server-side
 validation, and that the rolled path still behaves exactly as it did.
 """
 
-from characters.constants import (
-    CORE_ATTRIBUTE_FIELDS,
-    POINT_BUY_MAX_ATTRIBUTE,
-    POINT_BUY_MIN_ATTRIBUTE,
-    POINT_BUY_TOTAL,
-)
-from characters.dice import STARTING_COIN, build_point_buy_character_stats
+from characters.constants import CORE_ATTRIBUTE_FIELDS
+from characters.dice import build_point_buy_character_stats, starting_coin_for_wealth
 from characters.models import Character
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 CREATE_URL = "/tarmar/characters/create/"
@@ -66,7 +62,9 @@ class PointBuyCreationTest(BaseTestCase):
 
     def test_valid_buy_sums_to_the_budget(self):
         """The fixture buy is actually legal — guards the other tests."""
-        self.assertEqual(sum(VALID_BUY.values()), POINT_BUY_TOTAL)
+        self.assertEqual(
+            sum(VALID_BUY.values()), character_rules().attributes.point_buy.total
+        )
 
     def test_create_page_offers_both_options(self):
         """GET shows the roll option and the point-buy form."""
@@ -74,7 +72,7 @@ class PointBuyCreationTest(BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "characters/character_create.html")
         self.assertContains(response, "Roll 3d6")
-        self.assertContains(response, str(POINT_BUY_TOTAL))
+        self.assertContains(response, str(character_rules().attributes.point_buy.total))
         self.assertContains(response, 'value="point-buy"')
         for field_name, label in CORE_ATTRIBUTE_FIELDS:
             self.assertContains(response, f'name="{field_name}"')
@@ -88,10 +86,12 @@ class PointBuyCreationTest(BaseTestCase):
         defaults = [
             attribute["value"] for attribute in response.context["core_attributes"]
         ]
-        self.assertEqual(sum(defaults), POINT_BUY_TOTAL)
+        self.assertEqual(sum(defaults), character_rules().attributes.point_buy.total)
         for value in defaults:
-            self.assertGreaterEqual(value, POINT_BUY_MIN_ATTRIBUTE)
-            self.assertLessEqual(value, POINT_BUY_MAX_ATTRIBUTE)
+            self.assertGreaterEqual(
+                value, character_rules().attributes.point_buy.minimum
+            )
+            self.assertLessEqual(value, character_rules().attributes.point_buy.maximum)
 
     def test_valid_buy_creates_character_with_bought_attributes(self):
         """A legal buy stores exactly the submitted attributes."""
@@ -125,7 +125,8 @@ class PointBuyCreationTest(BaseTestCase):
             self.assertGreater(character.starting_coin, 100)  # 100 + d100
         else:
             self.assertEqual(
-                character.starting_coin, STARTING_COIN[character.wealth_level]
+                character.starting_coin,
+                starting_coin_for_wealth(character.wealth_level)[0],
             )
 
     def test_valid_buy_records_point_buy_in_the_dice_log(self):
@@ -187,24 +188,24 @@ class PointBuyValidationTest(BaseTestCase):
         """19 is outside what 3d6 can produce."""
         self.assert_rejected(
             buy_post(strength=19, dexterity=7),
-            f"STR must be between {POINT_BUY_MIN_ATTRIBUTE} and "
-            f"{POINT_BUY_MAX_ATTRIBUTE}",
+            f"STR must be between {character_rules().attributes.point_buy.minimum} and "
+            f"{character_rules().attributes.point_buy.maximum}",
         )
 
     def test_rejects_an_attribute_below_the_minimum(self):
         """2 is outside what 3d6 can produce."""
         self.assert_rejected(
             buy_post(charisma=2, strength=18),
-            f"CHR must be between {POINT_BUY_MIN_ATTRIBUTE} and "
-            f"{POINT_BUY_MAX_ATTRIBUTE}",
+            f"CHR must be between {character_rules().attributes.point_buy.minimum} and "
+            f"{character_rules().attributes.point_buy.maximum}",
         )
 
     def test_rejects_a_zero_attribute(self):
         """Zero is rejected by the range check, not silently coerced."""
         self.assert_rejected(
             buy_post(wisdom=0, strength=18, dexterity=17),
-            f"WIS must be between {POINT_BUY_MIN_ATTRIBUTE} and "
-            f"{POINT_BUY_MAX_ATTRIBUTE}",
+            f"WIS must be between {character_rules().attributes.point_buy.minimum} and "
+            f"{character_rules().attributes.point_buy.maximum}",
         )
 
     def test_rejects_a_fractional_attribute(self):
@@ -335,7 +336,7 @@ class OffBudgetBuyForPrivilegedUsersTest(BaseTestCase):
         body = buy_post(strength=18, dexterity=18, intelligence=17)
         total = sum(int(body[field]) for field, _label in CORE_ATTRIBUTE_FIELDS)
         self.assertEqual(total, 80)
-        self.assertNotEqual(total, POINT_BUY_TOTAL)
+        self.assertNotEqual(total, character_rules().attributes.point_buy.total)
 
     def test_a_dm_can_create_an_over_budget_character(self):
         dm = self.create_dm()
@@ -384,7 +385,9 @@ class OffBudgetBuyForPrivilegedUsersTest(BaseTestCase):
         character = Character.objects.get(user=dm)
         self.assertIn("STR: point-buy = 18", character.dice_log)
         self.assertIn("80", character.dice_log)
-        self.assertIn(str(POINT_BUY_TOTAL), character.dice_log)
+        self.assertIn(
+            str(character_rules().attributes.point_buy.total), character.dice_log
+        )
         self.assertIn("over", character.dice_log.lower())
 
     def test_an_under_budget_character_logs_it_as_under(self):

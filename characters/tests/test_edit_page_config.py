@@ -27,9 +27,9 @@ from characters.skills import (
     next_aging_change_after_age,
 )
 from characters.views.characters import (
-    AGING_PREVIEW_HORIZON_AGE,
     AGING_PREVIEW_HORIZON_STAGE,
     CHARACTER_NUMBER_LIMITS,
+    aging_preview_horizon_age,
 )
 from common.test_helpers import BaseTestCase
 
@@ -179,7 +179,7 @@ class CharacterEditConfigBlockTest(BaseTestCase):
         config = self._config()
         self.assertEqual(config["survivalTargets"], SURVIVAL_TARGETS)
         self.assertEqual(config["survivalDice"], f"{SURVIVAL_DICE_COUNT}d6")
-        self.assertEqual(config["agingHorizonAge"], AGING_PREVIEW_HORIZON_AGE)
+        self.assertEqual(config["agingHorizonAge"], aging_preview_horizon_age())
         self.assertEqual(config["defaultRunYears"], DEFAULT_RUN_YEARS)
         self.assertEqual(config["maxRunYears"], MAX_EXPERIENCE_YEARS_PER_RUN)
         # Aging change points keyed by the age they land at, 3-letter attrs.
@@ -210,7 +210,7 @@ class CharacterEditConfigBlockTest(BaseTestCase):
         )
         # Nothing is precomputed past the horizon.
         self.assertTrue(
-            all(int(age) <= AGING_PREVIEW_HORIZON_AGE for age in config["agingByAge"])
+            all(int(age) <= aging_preview_horizon_age() for age in config["agingByAge"])
         )
 
     def test_config_carries_the_characters_current_state(self):

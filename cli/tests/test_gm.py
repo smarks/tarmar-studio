@@ -372,9 +372,9 @@ class CharacterCommandTest(TestCase):
     def test_sends_the_schema_and_writes_the_importable_document(self):
         from characters.constants import CHARACTER_EXPORT_FORMAT
         from gm.character_schema import (
-            EXTRACTION_PROMPT,
             EXTRACTION_TEMPERATURE,
             character_json_schema,
+            extraction_prompt,
         )
 
         history = [
@@ -402,7 +402,7 @@ class CharacterCommandTest(TestCase):
         self.assertEqual(kwargs["response_format"], character_json_schema())
         self.assertEqual(kwargs["options"]["temperature"], EXTRACTION_TEMPERATURE)
         self.assertEqual(kwargs["base_url"], cli_gm.OLLAMA_BASE_URL)
-        self.assertEqual(messages[-1]["content"], EXTRACTION_PROMPT)
+        self.assertEqual(messages[-1]["content"], extraction_prompt())
         self.assertEqual(messages[0]["content"], SYSTEM_PROMPT)
 
         assert written is not None

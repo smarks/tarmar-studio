@@ -13,16 +13,16 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
-from characters.constants import LITERACY_ROLL_MAXIMUM, LITERACY_ROLL_MINIMUM
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 from .character_schema import (
-    CHARACTER_FIELDS,
+    character_fields,
     character_json_schema,
     extraction_to_import_payload,
 )
 from .engine import MODE_PLAY, SECTION_PLAN_SCHEMA
-from .ledger import DRAFT_DEFAULTS, DraftLedger
+from .ledger import DraftLedger, draft_defaults
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .testing import add_character, recorded, session_with_character
 from .turn_engine.plan import read_plan
@@ -35,9 +35,9 @@ from .turn_engine.state import key_figures
 
 
 def rolled(total: int):
-    """Patch the literacy service's 3d6 to come up ``total``."""
+    """Patch the literacy service's roll to come up ``total``."""
     return patch(
-        "characters.services.roll_3d6_logged",
+        "characters.services.roll_literacy_logged",
         return_value=(total, f"3d6: [{total - 2}, 1, 1] = {total}"),
     )
 
@@ -46,13 +46,13 @@ class LiteracyLedgerTest(TestCase):
     """The ledger carries the literacy line the saved sheet already does."""
 
     def test_an_unrolled_character_reads_its_check_and_not_rolled(self):
-        ledger = DraftLedger.from_draft({**DRAFT_DEFAULTS, "intelligence": 11})
+        ledger = DraftLedger.from_draft({**draft_defaults(), "intelligence": 11})
         self.assertEqual(ledger.literacy, "3d6 ≤ INT − 2, Not rolled")
 
     def test_a_rolled_character_reads_its_roll_against_the_check(self):
         ledger = DraftLedger.from_draft(
             {
-                **DRAFT_DEFAULTS,
+                **draft_defaults(),
                 "intelligence": 11,
                 "literacy_roll": 7,
                 "literacy_rolled": True,
@@ -64,7 +64,7 @@ class LiteracyLedgerTest(TestCase):
         """A session character ruled at Consult GM (#743) shows the ruling,
         not "Not rolled": the snapshot carries the ruling field."""
         ledger = DraftLedger.from_draft(
-            {**DRAFT_DEFAULTS, "location": "Consult GM", "literacy_ruling": False}
+            {**draft_defaults(), "location": "Consult GM", "literacy_ruling": False}
         )
         self.assertEqual(
             ledger.literacy, "Consult GM, Illiterate (Game Master's ruling)"
@@ -118,12 +118,15 @@ class LiteracySchemaTest(SimpleTestCase):
                 self.assertEqual(field["type"], ["integer", "null"])
                 self.assertEqual(
                     (field["minimum"], field["maximum"]),
-                    (LITERACY_ROLL_MINIMUM, LITERACY_ROLL_MAXIMUM),
+                    (
+                        character_rules().literacy_roll.minimum,
+                        character_rules().literacy_roll.maximum,
+                    ),
                 )
 
     def test_the_roll_reaches_the_import_payload_by_its_export_name(self):
         """The importer reads export field names, so the schema uses one."""
-        self.assertIn("literacy_roll", {field.name for field in CHARACTER_FIELDS})
+        self.assertIn("literacy_roll", {field.name for field in character_fields()})
         payload = extraction_to_import_payload({"name": "Gorn", "literacy_roll": 9})
         self.assertEqual(payload["data"]["literacy_roll"], 9)
 

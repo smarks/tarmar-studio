@@ -9,6 +9,10 @@ values are its own ``tests/expectations.json``'s.
 """
 
 import json
+import os
+import shutil
+import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -38,12 +42,15 @@ from characters.rules import (
     WeightRules,
     character_rules,
     load_character_rules,
+    scores_by_short_name,
 )
 from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.paths import (
     CANON_CHARACTER_RULES_FILE_NAME,
+    CANON_DIR_ENV,
     CHARACTER_RULES_FILE,
     DEFAULT_CANON_DIR,
+    REPO_ROOT,
 )
 from reference.rules_file import RulesFileError
 
@@ -64,7 +71,7 @@ INVENTED_RULES: dict[str, Any] = {
     },
     "weight": {
         "stones_by_face": [7, 8, 9, 10, 11, 12],
-        "pounds_per_stone": 14,
+        "pounds_per_stone": 10,
         "strength_divisor": 3,
     },
     "social_class": [
@@ -114,7 +121,7 @@ INVENTED_CHARACTER_RULES = CharacterRules(
         minimum_inches=30,
     ),
     weight=WeightRules(
-        stones_by_face=(7, 8, 9, 10, 11, 12), pounds_per_stone=14, strength_divisor=3
+        stones_by_face=(7, 8, 9, 10, 11, 12), pounds_per_stone=10, strength_divisor=3
     ),
     social_class=RollTable(
         rows=(
@@ -509,13 +516,88 @@ class CharacterRulesValuesTest(SimpleTestCase):
             CoinRoll(base=50, dice="2d6"),
         )
 
-    def test_a_roll_past_every_row_takes_the_last_as_lookup_table_does(self) -> None:
+    def test_a_roll_past_every_row_takes_the_last_row(self) -> None:
         self.assertEqual(INVENTED_CHARACTER_RULES.commoner.lookup(101), "Smith")
 
     def test_an_origin_grants_its_first_skill(self) -> None:
         port, ask_the_gm = INVENTED_CHARACTER_RULES.location.rows
         self.assertEqual(port.granted_skill, "Sailing")
         self.assertIsNone(ask_the_gm.granted_skill)
+
+
+class CharacterRulesHelpersTest(SimpleTestCase):
+    """The procedures the rules carry, on invented values."""
+
+    def test_a_roll_refuses_only_what_its_dice_cannot_give(self) -> None:
+        fatigue_roll = INVENTED_CHARACTER_RULES.fatigue_roll  # 1d8+1: 2 to 9
+        self.assertIsNone(fatigue_roll.refusal("The Fatigue roll", 2))
+        self.assertIsNone(fatigue_roll.refusal("The Fatigue roll", 9))
+        self.assertEqual(
+            fatigue_roll.refusal("The Fatigue roll", 1),
+            "The Fatigue roll is 1d8+1, so it must be between 2 and 9; 1 was given",
+        )
+        self.assertEqual(
+            fatigue_roll.refusal("The Fatigue roll", 10),
+            "The Fatigue roll is 1d8+1, so it must be between 2 and 9; 10 was given",
+        )
+
+    def test_the_fatigue_sum_adds_the_attributes_the_best_of_and_the_roll(
+        self,
+    ) -> None:
+        scores = {"STR": 9, "DEX": 14, "INT": 11, "WIS": 12, "CON": 13, "CHR": 8}
+        only_con = FatigueRollRules(dice="2d6", attributes=("CON",), best_of=())
+        self.assertEqual(only_con.total(scores, 7), 13 + 7)
+        public = FatigueRollRules(
+            dice="2d6", attributes=("CON", "WIS", "INT"), best_of=("DEX", "STR")
+        )
+        self.assertEqual(public.total(scores, 7), 13 + 12 + 11 + 14 + 7)
+        self.assertEqual(public.total({**scores, "STR": 16}, 7), 13 + 12 + 11 + 16 + 7)
+
+    def test_a_row_is_found_by_its_label(self) -> None:
+        location = INVENTED_CHARACTER_RULES.location
+        port = location.row_labelled("Port")
+        assert port is not None
+        self.assertEqual(port.skills, ("Sailing", "Swimming"))
+        self.assertIsNone(location.row_labelled("Village"))
+
+    def test_a_social_class_names_its_detail_table(self) -> None:
+        self.assertIs(
+            INVENTED_CHARACTER_RULES.detail_table("merchant"),
+            INVENTED_CHARACTER_RULES.merchant,
+        )
+        with self.assertRaises(KeyError):
+            INVENTED_CHARACTER_RULES.detail_table("gentry")
+
+    def test_the_literacy_check_reads_as_a_penalty(self) -> None:
+        literacy_roll = INVENTED_CHARACTER_RULES.literacy_roll
+        self.assertEqual(literacy_roll.check_text(0), "2d10 ≤ INT")
+        self.assertEqual(literacy_roll.check_text(3), "2d10 ≤ INT − 3")
+
+    def test_coin_dice_are_written_as_the_log_and_the_rules_say_them(self) -> None:
+        percentile = CoinRoll(base=100, dice="1d100")
+        self.assertTrue(percentile.is_percentile)
+        self.assertEqual(
+            (percentile.dice_label, percentile.dice_in_words),
+            ("d100", "percentile dice"),
+        )
+        other = CoinRoll(base=50, dice="2d6")
+        self.assertFalse(other.is_percentile)
+        self.assertEqual((other.dice_label, other.dice_in_words), ("2d6", "2d6"))
+
+    def test_scores_are_keyed_by_the_files_short_names(self) -> None:
+        scores = {
+            "strength": 1,
+            "dexterity": 2,
+            "intelligence": 3,
+            "wisdom": 4,
+            "constitution": 5,
+            "charisma": 6,
+            "movement": 9,
+        }
+        self.assertEqual(
+            scores_by_short_name(scores),
+            {"STR": 1, "DEX": 2, "INT": 3, "WIS": 4, "CON": 5, "CHR": 6},
+        )
 
 
 class CanonCharacterRulesTest(SimpleTestCase):
@@ -575,3 +657,49 @@ class TarmarCharacterRulesTest(SimpleTestCase):
             rules_summary(load_character_rules(CHARACTER_RULES_FILE)),
             CANON_EXPECTATIONS["character_rules"],
         )
+
+
+class CanonReadOnlyWhenAskedTest(SimpleTestCase):
+    """No import reads the canon's character rules (issue #59).
+
+    A module-level read would load the file while Django imports the URL
+    configuration, so a canon without the file would crash ``manage.py
+    check`` with a traceback instead of reporting ``characters.E001``. Run
+    out of process: this test runner has every module imported already.
+    """
+
+    def run_python(self, *arguments: str, canon_dir: Path | None = None) -> str:
+        """Run ``python *arguments`` from the repository root; its output."""
+        environment = {**os.environ, "DEBUG": "true"}
+        if canon_dir is not None:
+            environment[CANON_DIR_ENV] = str(canon_dir)
+        completed = subprocess.run(
+            [sys.executable, *arguments],
+            cwd=REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return completed.stdout + completed.stderr
+
+    def test_importing_the_url_configuration_reads_no_rules(self) -> None:
+        script = (
+            "import os, django\n"
+            "os.environ.setdefault('DJANGO_SETTINGS_MODULE', "
+            "'tarmar_studio.settings')\n"
+            "django.setup()\n"
+            "import tarmar_studio.urls, characters.urls\n"
+            "from characters.rules import character_rules\n"
+            "print('misses', character_rules.cache_info().misses)\n"
+        )
+        self.assertIn("misses 0", self.run_python("-c", script))
+
+    def test_a_canon_without_the_file_is_a_check_error_not_a_crash(self) -> None:
+        canon_dir = Path(self.enterContext(tempfile.TemporaryDirectory())) / "canon"
+        shutil.copytree(DEFAULT_CANON_DIR, canon_dir)
+        (canon_dir / CANON_CHARACTER_RULES_FILE_NAME).unlink()
+        output = self.run_python("manage.py", "check", canon_dir=canon_dir)
+        self.assertIn(CHARACTER_RULES_CHECK_ID, output)
+        self.assertIn("is missing; every canon must carry one", output)
+        self.assertNotIn("Traceback", output)

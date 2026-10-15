@@ -6,9 +6,6 @@ import re
 
 from .constants import (
     ATTRIBUTE_BONUS_FIELDS,
-    MAX_ATTRIBUTE_VALUE,
-    STARTING_AGE,
-    YEARS_PER_AGING_STAGE,
     strip_control_characters,
 )
 
@@ -18,6 +15,7 @@ from .constants import (
 # survival log stores.
 from .dice import roll_3d6_faces as roll_survival_dice
 from .dice import roll_d20
+from .rules import character_rules
 
 # Survival roll shape (issue #223). Three dice, so the natural-roll overrides
 # are triple ones and triple sixes rather than 2d6's snake eyes and boxcars.
@@ -345,8 +343,9 @@ def calculate_skill_points_in_range(xp_before: int, xp_after: int) -> int:
 
 # Aging table: aging *stage* -> TOTAL cumulative penalties at that stage.
 #
-# A stage is four years of life counted from STARTING_AGE, so stage N is
-# reached at age ``STARTING_AGE + 4N`` -- 16, 20, 24, ... Decline starts at
+# A stage is the canon's ``age.years_per_stage`` years of life (four on the
+# public pages) counted from its starting age (16), so stage N is reached at
+# age ``16 + 4N`` -- 16, 20, 24, ... Decline starts at
 # stage 5 (age 36). Before issue #221 the key was the experience *term*
 # number, which came to the same thing only because a term was exactly four
 # years; keying it to age makes the schedule identical whether a character
@@ -431,6 +430,11 @@ AGING_TABLE: dict[int, dict[str, int]] = {
 # public-rules/characters/prior-experience/aging.md.
 _LAST_TABULATED_AGING_STAGE = max(AGING_TABLE)  # 13
 
+# Past the table, INT and WIS lose 1 every this many stages, STR, DEX and CON
+# every stage. Read by the escalation below and by the rules lookup that
+# states it (``gm.rules_lookup``).
+STAGES_PER_MENTAL_AGING_STEP = 2
+
 # The first stage that carries any penalty at all.
 FIRST_AGING_STAGE = 5
 
@@ -438,16 +442,19 @@ FIRST_AGING_STAGE = 5
 def aging_stage_for_age(age: int) -> int:
     """The aging stage a character of `age` has reached.
 
-    Stage N spans the four years ending at ``STARTING_AGE + 4N``: a character
-    is stage 5 from age 36 through 39, stage 6 from 40, and so on. Ages below
-    the starting age give a negative stage, which carries no aging.
+    Stage N spans the years from the starting age plus N stages (the
+    canon's ``age``; on the public pages 16 + 4N): a character is stage 5
+    from age 36 through 39, stage 6 from 40, and so on. Ages below the
+    starting age give a negative stage, which carries no aging.
     """
-    return (age - STARTING_AGE) // YEARS_PER_AGING_STAGE
+    age_rules = character_rules().age
+    return (age - age_rules.starting) // age_rules.years_per_stage
 
 
 def age_for_aging_stage(stage: int) -> int:
     """The age at which `stage` begins -- the inverse of `aging_stage_for_age`."""
-    return STARTING_AGE + YEARS_PER_AGING_STAGE * stage
+    age_rules = character_rules().age
+    return age_rules.starting + age_rules.years_per_stage * stage
 
 
 def get_aging_penalties(stage_number: int) -> dict[str, int] | None:
@@ -465,7 +472,9 @@ def get_aging_penalties(stage_number: int) -> dict[str, int] | None:
         stages_past_table = stage_number - _LAST_TABULATED_AGING_STAGE
         last = AGING_TABLE[_LAST_TABULATED_AGING_STAGE]
         physical_penalty = last["strength"] - stages_past_table
-        mental_penalty = last["intelligence"] - (stages_past_table // 2)
+        mental_penalty = last["intelligence"] - (
+            stages_past_table // STAGES_PER_MENTAL_AGING_STEP
+        )
         return {
             "strength": physical_penalty,
             "dexterity": physical_penalty,
@@ -1102,7 +1111,8 @@ def simulate_experience_years(
             attribute_field = ATTRIBUTE_BONUS_FIELDS.get(skill[3:].strip())
             if attribute_field:
                 running_attributes[attribute_field] = min(
-                    MAX_ATTRIBUTE_VALUE, running_attributes[attribute_field] + 1
+                    character_rules().attributes.maximum,
+                    running_attributes[attribute_field] + 1,
                 )
         else:
             # A chosen Maker Skill or Knowledge already held takes the point

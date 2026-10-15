@@ -22,10 +22,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from characters.constants import (
-    STARTING_AGE,
-)
 from characters.models import Character
+from characters.rules import character_rules
 from characters.skills import (
     calculate_attribute_modifier,
     calculate_skill_points_from_xp,
@@ -92,48 +90,54 @@ ATTRIBUTE_FIELDS: tuple[tuple[str, str], ...] = tuple(
     (label, base_field) for label, base_field, _effective in ATTRIBUTE_LABELS
 )
 
-# What an empty draft holds before the player has decided anything. Every
-# value is ``Character``'s own field default; the attributes and the Fatigue
-# roll have no default on the model and stay ``None`` until rolled, which is
-# what lets the ledger say "not set yet" instead of inventing a number.
-DRAFT_DEFAULTS: dict[str, Any] = {
-    "name": "",
-    "strength": None,
-    "dexterity": None,
-    "intelligence": None,
-    "wisdom": None,
-    "constitution": None,
-    "charisma": None,
-    "fatigue_roll": None,
-    "provenance_class": "commoner",
-    "provenance_detail": "Laborer",
-    "location": "Village",
-    "provenance_recorded": True,
-    "location_recorded": True,
-    "wealth_recorded": True,
-    "origin_skill": "",
-    "literacy_roll": None,
-    "literacy_rolled": False,
-    "literacy_ruling": None,
-    "wealth_level": "Moderate",
-    "starting_coin": 100,
-    "skills": {},
-    "free_skill_points": 0,
-    "free_spell_points": 0,
-    "equipment": [],
-    "total_xp": 0,
-    "age": STARTING_AGE,
-    "experience_terms": 0,
-    "experience_log": [],
-    "money_earned": 0,
-    "aging_str_penalty": 0,
-    "aging_dex_penalty": 0,
-    "aging_int_penalty": 0,
-    "aging_wis_penalty": 0,
-    "aging_con_penalty": 0,
-    "is_alive": True,
-    "death_cause": "",
-}
+
+def draft_defaults() -> dict[str, Any]:
+    """What an empty draft holds before the player has decided anything.
+
+    Every value is ``Character``'s own field default; the attributes and the
+    Fatigue roll have no default on the model and stay ``None`` until rolled,
+    which is what lets the ledger say "not set yet" instead of inventing a
+    number. The age is the loaded canon's starting age (issue #59), read when
+    asked, so this is a function rather than a module constant.
+    """
+    return {
+        "name": "",
+        "strength": None,
+        "dexterity": None,
+        "intelligence": None,
+        "wisdom": None,
+        "constitution": None,
+        "charisma": None,
+        "fatigue_roll": None,
+        "provenance_class": "commoner",
+        "provenance_detail": "Laborer",
+        "location": "Village",
+        "provenance_recorded": True,
+        "location_recorded": True,
+        "wealth_recorded": True,
+        "origin_skill": "",
+        "literacy_roll": None,
+        "literacy_rolled": False,
+        "literacy_ruling": None,
+        "wealth_level": "Moderate",
+        "starting_coin": 100,
+        "skills": {},
+        "free_skill_points": 0,
+        "free_spell_points": 0,
+        "equipment": [],
+        "total_xp": 0,
+        "age": character_rules().age.starting,
+        "experience_terms": 0,
+        "experience_log": [],
+        "money_earned": 0,
+        "aging_str_penalty": 0,
+        "aging_dex_penalty": 0,
+        "aging_int_penalty": 0,
+        "aging_wis_penalty": 0,
+        "aging_con_penalty": 0,
+        "is_alive": True,
+        "death_cause": "",
+    }
 
 
 # Key on a draft holding what the conversation called the character before,
@@ -394,7 +398,8 @@ def draft_character(values: Mapping[str, Any]) -> Character:
     Returns:
         An unsaved ``Character`` carrying the draft's values.
     """
-    fields = {field: values.get(field, DRAFT_DEFAULTS[field]) for field in DRAFT_FIELDS}
+    defaults = draft_defaults()
+    fields = {field: values.get(field, defaults[field]) for field in DRAFT_FIELDS}
     return Character(**fields)
 
 
@@ -405,8 +410,9 @@ def draft_values(character: Character) -> dict[str, Any]:
 
 def attributes_known(values: Mapping[str, Any]) -> bool:
     """Whether all six core attributes have been decided on this draft."""
+    defaults = draft_defaults()
     return all(
-        values.get(field, DRAFT_DEFAULTS[field]) is not None
+        values.get(field, defaults[field]) is not None
         for _label, field in ATTRIBUTE_FIELDS
     )
 

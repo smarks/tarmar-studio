@@ -9,23 +9,15 @@ importing the other.
 
 import re
 
-# Attribute caps (Strength/Dex/Con can rise to 30 via experience).
-MAX_ATTRIBUTE_VALUE = 30
-
-# The age every character starts at, before any prior experience. One number,
-# read by ``Character.age``'s field default, by the aging schedule's zero point
-# (``characters.skills.aging_stage_for_age``), and by the printed rules test.
-STARTING_AGE = 16
+# The numbers character creation reads -- the attribute ceiling, the point
+# buy, the starting age and aging step, the Fatigue and literacy dice, the
+# height, weight and percentile tables -- are the loaded canon's
+# ``character-rules.json``, read by ``characters.rules.character_rules()``
+# (issue #59). None of them is restated here.
 
 # The "_format" marker on a character export document; the importer (and the
 # GM's /character command, issue #344) accept only documents carrying it.
 CHARACTER_EXPORT_FORMAT = "tarmar-character"
-
-# The aging schedule advances one stage every this many years of life. Prior
-# experience used to be sold in 4-year terms and aging was keyed to the term
-# number; since issue #221 experience is bought a year at a time and aging is
-# keyed to age, so this is what turns an age into a stage of the aging table.
-YEARS_PER_AGING_STAGE = 4
 
 # The attribute a "+1 STR"/"+1 DEX"/"+1 CON" experience result raises, keyed by
 # the short name the result carries. Lives here rather than in ``skills.py``
@@ -51,15 +43,6 @@ CORE_ATTRIBUTE_FIELDS = (
     ("charisma", "CHR"),
 )
 
-# Point-buy character creation. The rules let a player either roll 3d6 per
-# attribute or "divide 65 points between the six core attributes". The per
-# attribute bounds mirror what 3d6 can produce, so a bought character starts in
-# the same range as a rolled one. (The model validators allow 1-30 because
-# experience can push STR/DEX/CON past 18 later; that is not a starting range.)
-POINT_BUY_TOTAL = 65
-POINT_BUY_MIN_ATTRIBUTE = 3
-POINT_BUY_MAX_ATTRIBUTE = 18
-
 
 def point_buy_budget_note(spent: int) -> str | None:
     """How far a bought set of attributes sits off the point budget.
@@ -75,32 +58,18 @@ def point_buy_budget_note(spent: int) -> str | None:
     Returns:
         The sentence, or ``None`` when ``spent`` is exactly on budget.
     """
-    if spent == POINT_BUY_TOTAL:
+    # Deferred: characters.rules imports this module for the attribute names.
+    from .rules import character_rules
+
+    budget = character_rules().attributes.point_buy.total
+    if spent == budget:
         return None
-    direction = "over" if spent > POINT_BUY_TOTAL else "under"
+    direction = "over" if spent > budget else "under"
     return (
-        f"Point-buy total: {spent} — {abs(spent - POINT_BUY_TOTAL)} "
-        f"{direction} the {POINT_BUY_TOTAL}-point budget."
+        f"Point-buy total: {spent} — {abs(spent - budget)} "
+        f"{direction} the {budget}-point budget."
     )
 
-
-# The Fatigue roll is the 2d6 component of the Fatigue pool
-# (reference/content/public-rules/characters/derived-pools.md: "Fatigue = CON +
-# WIS + INT + (DEX or STR, whichever is higher) + 2d6"), so those two dice are
-# the whole of what the field can hold. It used to be bounded only by the
-# smallint ceiling, and 30000 flowed straight into Fatigue, Body, the injury
-# thresholds and battle seating (issue #653). Unlike a stated attribute, this
-# is a die roll rather than a build choice, so there is no Game Master override:
-# code owns the dice.
-FATIGUE_ROLL_MINIMUM = 2
-FATIGUE_ROLL_MAXIMUM = 12
-
-# The literacy roll's bounds: the 3d6 an origin's literacy check is made on
-# (reference/content/public-rules/characters/location.md, issue #741). Like the
-# Fatigue roll, a die roll rather than a build choice, so the column holds what
-# the dice can produce and nothing wider.
-LITERACY_ROLL_MINIMUM = 3
-LITERACY_ROLL_MAXIMUM = 18
 
 # Injury thresholds. Both pools take -2 to all rolls from 5 down to 1 -- a flat
 # band, not a fraction of the pool -- so it is the same number for every

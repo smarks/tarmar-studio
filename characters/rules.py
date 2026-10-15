@@ -80,6 +80,7 @@ highest totals each roll can give are derived from its dice, not stored.
 """
 
 import functools
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -95,6 +96,27 @@ from .constants import CORE_ATTRIBUTE_FIELDS
 ATTRIBUTE_SHORT_NAMES: tuple[str, ...] = tuple(
     short_name for _field_name, short_name in CORE_ATTRIBUTE_FIELDS
 )
+
+
+def scores_by_short_name[Score](
+    scores_by_field: Mapping[str, Score],
+) -> dict[str, Score]:
+    """The six core attributes' scores keyed by short name, as the file names
+    them.
+
+    Args:
+        scores_by_field: Scores by model field name (``"strength"``); other
+            keys are ignored.
+
+    Returns:
+        The same scores by short name (``"STR"``).
+    """
+    return {
+        short_name: scores_by_field[field_name]
+        for field_name, short_name in CORE_ATTRIBUTE_FIELDS
+    }
+
+
 #: Faces on the d6 the height and weight tables are rolled on.
 D6_FACES = 6
 #: The highest percentile roll, which every table's last row must reach.
@@ -253,6 +275,28 @@ class DiceRollRules:
         """The highest total the dice can roll."""
         return dice_total_range(self.dice)[1]
 
+    def refusal(self, roll_name: str, value: int) -> str | None:
+        """Why ``value`` cannot be this roll's total, or ``None`` when it can.
+
+        The one wording of the refusal, for the model's validator and the
+        services that record a stated roll alike. A roll is dice, not a build
+        choice, so no Game Master override reaches past it (issue #653).
+
+        Args:
+            roll_name: The roll as the sentence names it, e.g. ``"The Fatigue
+                roll"``.
+            value: The stated total.
+
+        Returns:
+            The sentence, or ``None`` when the dice can produce ``value``.
+        """
+        if self.minimum <= value <= self.maximum:
+            return None
+        return (
+            f"{roll_name} is {self.dice}, so it must be between {self.minimum} "
+            f"and {self.maximum}; {value} was given"
+        )
+
 
 @dataclass(frozen=True)
 class FatigueRollRules(DiceRollRules):
@@ -266,6 +310,22 @@ class FatigueRollRules(DiceRollRules):
 
     attributes: tuple[str, ...]
     best_of: tuple[str, ...]
+
+    def total(self, scores: Mapping[str, int], roll: int) -> int:
+        """The Fatigue sum: the attributes, the best of ``best_of``, the roll.
+
+        The one statement of the sum's shape; the Character sheet and the
+        bestiary's pools both come through here.
+
+        Args:
+            scores: Every core attribute's score, by short name (``"STR"``).
+            roll: The Fatigue roll's total.
+
+        Returns:
+            The Fatigue pool.
+        """
+        best = max((scores[name] for name in self.best_of), default=0)
+        return sum(scores[name] for name in self.attributes) + best + roll
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -294,6 +354,18 @@ class LiteracyRollRules(DiceRollRules):
     Attributes:
         dice: The dice the roll is made on.
     """
+
+    def check_text(self, modifier: int) -> str:
+        """The check as the sheet and the rules print it, e.g. "3d6 ≤ INT − 2".
+
+        Written in the rulebook's form for a penalized check, so the penalty
+        reads in the direction it cuts rather than looking like a bonus.
+
+        Args:
+            modifier: An origin's literacy modifier.
+        """
+        check = f"{self.dice} ≤ INT"
+        return f"{check} − {modifier}" if modifier else check
 
 
 def _check_faces(name: str, values: tuple[int, ...]) -> None:
@@ -408,7 +480,7 @@ class PercentileTable[Row: TableRow]:
         """The row a roll lands on.
 
         The first row whose ``up_to`` the roll does not pass; a roll past
-        every row takes the last, as ``characters.dice.lookup_table`` does.
+        every row takes the last.
 
         Args:
             roll: The d100 roll.
@@ -420,6 +492,23 @@ class PercentileTable[Row: TableRow]:
             if roll <= row.up_to:
                 return row
         return self.rows[-1]
+
+    def row_labelled(self, label: str) -> Row | None:
+        """The row carrying ``label``, or ``None`` when no row does.
+
+        A character's record holds the label it rolled or was given, so the
+        row is found again by it (its skills, its coin).
+
+        Args:
+            label: A row's label, e.g. ``"Village"``.
+
+        Returns:
+            The row, or ``None`` for a label the table does not have.
+        """
+        for row in self.rows:
+            if row.label == label:
+                return row
+        return None
 
 
 @dataclass(frozen=True)
@@ -473,6 +562,11 @@ class LocationTable(PercentileTable[LocationRow]):
         _require_at_least("skill_points", self.skill_points, 0)
 
 
+#: Percentile dice, which the logs write ``d100`` and the rules "percentile
+#: dice".
+PERCENTILE_DICE = "1d100"
+
+
 @dataclass(frozen=True)
 class CoinRoll:
     """Starting coin rolled on top of a base.
@@ -484,6 +578,21 @@ class CoinRoll:
 
     base: int
     dice: str
+
+    @property
+    def is_percentile(self) -> bool:
+        """Whether the dice are percentile dice (``1d100``)."""
+        return self.dice == PERCENTILE_DICE
+
+    @property
+    def dice_label(self) -> str:
+        """The dice as the dice log writes them: ``d100`` for percentile."""
+        return "d100" if self.is_percentile else self.dice
+
+    @property
+    def dice_in_words(self) -> str:
+        """The dice as a rules answer says them: "percentile dice"."""
+        return "percentile dice" if self.is_percentile else self.dice
 
     def __post_init__(self) -> None:
         _require_at_least("base", self.base, 0)
@@ -542,6 +651,21 @@ class CharacterRules:
     commoner: RollTable
     location: LocationTable
     wealth: WealthTable
+
+    def detail_table(self, social_class: str) -> RollTable:
+        """The table a ``social_class`` result is rolled on next.
+
+        Args:
+            social_class: A label of ``social_class``, e.g. ``"merchant"``.
+
+        Raises:
+            KeyError: ``social_class`` names no detail table.
+        """
+        if social_class not in SOCIAL_CLASS_DETAIL_TABLES:
+            raise KeyError(social_class)
+        # The detail tables are the fields named for them.
+        table: RollTable = getattr(self, social_class)
+        return table
 
     def __post_init__(self) -> None:
         if sorted(self.social_class.labels) != sorted(SOCIAL_CLASS_DETAIL_TABLES):

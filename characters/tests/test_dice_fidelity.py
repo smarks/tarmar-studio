@@ -28,21 +28,15 @@ from pathlib import Path
 from django.conf import settings
 from django.test import SimpleTestCase
 
-from characters.dice import (
-    HEIGHT_TABLE,
-    LOCATION_TABLE,
-    STARTING_COIN,
-    WEALTH_TABLE,
-    WEIGHT_TABLE,
-    lookup_table,
-    starting_coin_for_wealth,
-)
+from characters.dice import starting_coin_for_wealth
 from characters.equipment import ARMOR, SHIELDS, WEAPONS, get_shield_bonus
 from characters.models import Character
 from characters.skills import calculate_attribute_modifier
 from common.rolling import Roller
 from reference.markdown_tables import table_rows_under_heading as _table_rows
 from reference.paths import PUBLIC_RULES_DIR
+
+from .rules_fixtures import DEFAULT_CHARACTER_RULES, seated_character_rules
 
 RULES = PUBLIC_RULES_DIR
 ATTRIBUTES_MD = RULES / "characters" / "attributes.md"
@@ -88,7 +82,7 @@ class AttributeModifierDocTest(SimpleTestCase):
 
 
 class HeightWeightDocTest(SimpleTestCase):
-    """attributes.md's height and weight d6 tables vs the code tables.
+    """attributes.md's height and weight d6 tables vs the default canon's.
 
     The height *base* values are guarded here. The demon-die chain semantics
     (what a leading 1/6 does to the base) are pinned by
@@ -107,27 +101,44 @@ class HeightWeightDocTest(SimpleTestCase):
         markdown = ATTRIBUTES_MD.read_text()
         rows = _table_rows(markdown, "**Height:** Choose or roll 1d6:")[1:]
         documented = {int(row[0]): self._imperial_to_inches(row[2]) for row in rows}
-        self.assertEqual(documented, HEIGHT_TABLE)
+        height = DEFAULT_CHARACTER_RULES.height
+        self.assertEqual(
+            documented,
+            dict(enumerate(height.base_inches_by_face, start=1)),
+        )
 
     def test_height_reroll_rule_is_still_documented(self):
         # The ±4" explode wording the demon die implements.
         markdown = ATTRIBUTES_MD.read_text()
-        self.assertIn('Roll again on 1: subtract 4" each time', markdown)
-        self.assertIn('Roll again on 6: add 4" each time', markdown)
+        height = DEFAULT_CHARACTER_RULES.height
+        self.assertIn(
+            f'Roll again on 1: subtract {-height.inches_per_extra_one}" each time',
+            markdown,
+        )
+        self.assertIn(
+            f'Roll again on 6: add {height.inches_per_extra_six}" each time', markdown
+        )
 
     def test_weight_table_matches_code(self):
         markdown = ATTRIBUTES_MD.read_text()
         rows = _table_rows(markdown, "**Weight:** Base weight")[1:]
         documented_stones = {int(row[0]): int(row[1]) for row in rows}
-        self.assertEqual(documented_stones, WEIGHT_TABLE)
-        # The lbs column is the stones column at 14 lbs per stone — the
-        # conversion ``calculate_final_weight_lbs`` uses.
+        weight = DEFAULT_CHARACTER_RULES.weight
+        self.assertEqual(
+            documented_stones, dict(enumerate(weight.stones_by_face, start=1))
+        )
+        # The lbs column is the stones column at the canon's pounds per stone
+        # — the conversion ``calculate_final_weight_lbs`` uses.
+        self.assertIn(f"A stone is {weight.pounds_per_stone} pounds", markdown)
         for row in rows:
-            self.assertEqual(int(row[2]), int(row[1]) * 14)
+            self.assertEqual(int(row[2]), int(row[1]) * weight.pounds_per_stone)
 
     def test_final_weight_formula_is_still_documented(self):
         markdown = ATTRIBUTES_MD.read_text()
-        self.assertIn("Final weight = Base weight + (STR ÷ 2) stones", markdown)
+        divisor = DEFAULT_CHARACTER_RULES.weight.strength_divisor
+        self.assertIn(
+            f"Final weight = Base weight + (STR ÷ {divisor}) stones", markdown
+        )
 
     def test_weight_is_figured_from_the_attribute_the_page_names(self):
         """The page says STR, so Character.weight_lbs must read STR (#691).
@@ -151,28 +162,32 @@ class HeightWeightDocTest(SimpleTestCase):
             fatigue_roll=7,
             age=68,  # aging.md: STR -2, so effective STR is 12
         )
-        character.reconcile_aging_penalties()
-        self.assertEqual(character.effective_strength, 12)
-        # 10 stones of base weight + 14 // 2 = 17 stones, at 14 lbs a stone.
-        self.assertEqual(character.weight_lbs, 17 * 14)
+        with seated_character_rules():
+            character.reconcile_aging_penalties()
+            self.assertEqual(character.effective_strength, 12)
+            # 10 stones of base weight + 14 // 2 = 17 stones, at 14 lbs a stone.
+            self.assertEqual(character.weight_lbs, 17 * 14)
 
 
 class WealthDocTest(SimpleTestCase):
-    """wealth.md's percentile table vs WEALTH_TABLE and STARTING_COIN."""
+    """wealth.md's percentile table vs the default canon's wealth table."""
 
     def test_wealth_bands_match_code(self):
         markdown = WEALTH_MD.read_text()
         rows = _table_rows(markdown, "# Wealth")[1:]
         for percentile_cell, level, coin_cell in rows:
             low, high = (int(part) for part in percentile_cell.split("-"))
+            wealth = DEFAULT_CHARACTER_RULES.wealth
             for roll in range(max(low, 1), high + 1):
                 self.assertEqual(
-                    lookup_table(roll, WEALTH_TABLE),
+                    wealth.row_for(roll).label,
                     level,
                     f"d100={roll} should be {level} per wealth.md",
                 )
             if coin_cell.isdigit():
-                self.assertEqual(STARTING_COIN[level], int(coin_cell))
+                row = wealth.row_labelled(level)
+                assert row is not None
+                self.assertEqual(row.coin, int(coin_cell))
 
     def test_merchant_coin_is_100_plus_percentile(self):
         markdown = WEALTH_MD.read_text()
@@ -180,13 +195,14 @@ class WealthDocTest(SimpleTestCase):
         # Two identically seeded rollers produce the same d100, so the
         # expected bonus is known without stubbing the roll service.
         bonus = Roller(seed=290).roll("1d100", purpose="d100").total
-        coin, detail = starting_coin_for_wealth("Merchant", Roller(seed=290))
+        with seated_character_rules():
+            coin, detail = starting_coin_for_wealth("Merchant", Roller(seed=290))
         self.assertEqual(coin, 100 + bonus)
         self.assertEqual(detail, f"100 + d100({bonus}) = {100 + bonus}")
 
 
 class LocationDocTest(SimpleTestCase):
-    """location.md's percentile table vs LOCATION_TABLE.
+    """location.md's percentile table vs the default canon's location table.
 
     The location *effects* (granted skill, literacy modifier, display form)
     are already guarded by ``test_rules_consistency.LocationEffectsRuleTest``;
@@ -201,7 +217,7 @@ class LocationDocTest(SimpleTestCase):
             low, high = parts[0], parts[-1]
             for roll in range(max(low, 1), high + 1):
                 self.assertEqual(
-                    lookup_table(roll, LOCATION_TABLE),
+                    DEFAULT_CHARACTER_RULES.location.row_for(roll).label,
                     location,
                     f"d100={roll} should be {location} per location.md",
                 )
@@ -227,15 +243,19 @@ class DerivedPoolFormulaTest(SimpleTestCase):
 
     def test_fatigue_formula_is_documented_and_matched(self):
         markdown = DERIVED_POOLS_MD.read_text()
+        fatigue_roll = DEFAULT_CHARACTER_RULES.fatigue_roll
         self.assertIn(
-            "Fatigue = CON + WIS + INT + (DEX or STR, whichever is higher) + 2d6",
+            f"Fatigue = {' + '.join(fatigue_roll.attributes)} + "
+            f"({' or '.join(fatigue_roll.best_of)}, whichever is higher) + "
+            f"{fatigue_roll.dice}",
             markdown,
         )
-        character = self._character()
-        self.assertEqual(character.fatigue, 15 + 13 + 11 + max(14, 12) + 7)
-        # "Whichever is higher": swap so STR wins.
-        strong = self._character(strength=17, dexterity=9)
-        self.assertEqual(strong.fatigue, 15 + 13 + 11 + 17 + 7)
+        with seated_character_rules():
+            character = self._character()
+            self.assertEqual(character.fatigue, 15 + 13 + 11 + max(14, 12) + 7)
+            # "Whichever is higher": swap so STR wins.
+            strong = self._character(strength=17, dexterity=9)
+            self.assertEqual(strong.fatigue, 15 + 13 + 11 + 17 + 7)
 
     def test_body_formula_is_documented_and_matched(self):
         """Body against literals, so it can fail independently of Fatigue.
@@ -249,6 +269,7 @@ class DerivedPoolFormulaTest(SimpleTestCase):
         """
         markdown = DERIVED_POOLS_MD.read_text()
         self.assertIn("Body = 2/3 x Fatigue (round up)", markdown)
+        self.enterContext(seated_character_rules())
         character = self._character()
         # CON 15 + WIS 13 + INT 11 + DEX 14 (higher than STR 12) + 7 = 60.
         self.assertEqual(character.fatigue, 60)

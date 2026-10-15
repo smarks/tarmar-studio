@@ -16,19 +16,15 @@ from django.test import SimpleTestCase
 
 from characters.constants import (
     CORE_ATTRIBUTE_FIELDS,
-    MAX_ATTRIBUTE_VALUE,
 )
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 from .character_schema import (
-    CREATION_ATTRIBUTE_MAXIMUM,
-    CREATION_ATTRIBUTE_MINIMUM,
-    EXTRACTION_PROMPT,
-    GAME_MASTER_ATTRIBUTE_MAXIMUM,
     GAME_MASTER_ATTRIBUTE_MINIMUM,
-    GAME_MASTER_EXTRACTION_PROMPT,
     character_json_schema,
     extraction_messages,
+    extraction_prompt,
 )
 from .engine import (
     DM_SYSTEM_PROMPT,
@@ -194,21 +190,25 @@ class ExtractionSchemaLatitudeTest(SimpleTestCase):
     def test_a_players_attributes_are_still_the_creation_range(self):
         self.assertEqual(
             self._strength_bounds(for_game_master=False),
-            (CREATION_ATTRIBUTE_MINIMUM, CREATION_ATTRIBUTE_MAXIMUM),
+            (
+                character_rules().attributes.point_buy.minimum,
+                character_rules().attributes.point_buy.maximum,
+            ),
         )
 
     def test_a_game_masters_attributes_are_bounded_only_by_storage(self):
         self.assertEqual(
             self._strength_bounds(for_game_master=True),
-            (GAME_MASTER_ATTRIBUTE_MINIMUM, GAME_MASTER_ATTRIBUTE_MAXIMUM),
+            (GAME_MASTER_ATTRIBUTE_MINIMUM, character_rules().attributes.maximum),
         )
-        self.assertEqual(GAME_MASTER_ATTRIBUTE_MAXIMUM, MAX_ATTRIBUTE_VALUE)
 
     def test_every_attribute_widens_together(self):
         schema = character_json_schema(for_game_master=True)["properties"]
         for field_name, _label in CORE_ATTRIBUTE_FIELDS:
             with self.subTest(field=field_name):
-                self.assertEqual(schema[field_name]["maximum"], MAX_ATTRIBUTE_VALUE)
+                self.assertEqual(
+                    schema[field_name]["maximum"], character_rules().attributes.maximum
+                )
 
     def test_the_two_schemas_differ_only_in_those_bounds(self):
         player = character_json_schema()
@@ -223,11 +223,12 @@ class ExtractionSchemaLatitudeTest(SimpleTestCase):
 
     def test_the_ask_tells_the_model_not_to_normalise_a_gm_character(self):
         ask = extraction_messages([], for_game_master=True)[-1]["content"]
-        self.assertEqual(ask, GAME_MASTER_EXTRACTION_PROMPT)
+        self.assertEqual(ask, extraction_prompt(for_game_master=True))
         self.assertIn("do not cap, round", ask)
+        self.assertTrue(ask.startswith(extraction_prompt()))
         self.assertEqual(
             extraction_messages([])[-1]["content"],
-            EXTRACTION_PROMPT,
+            extraction_prompt(),
         )
 
     def test_the_schema_in_prompt_fallback_carries_the_same_bounds(self):
@@ -235,7 +236,11 @@ class ExtractionSchemaLatitudeTest(SimpleTestCase):
         ask = extraction_messages([], schema_in_prompt=True, for_game_master=True)[-1][
             "content"
         ]
-        self.assertIn(f'"maximum": {MAX_ATTRIBUTE_VALUE}', ask)
+        self.assertIn(f'"maximum": {character_rules().attributes.maximum}', ask)
         player_ask = extraction_messages([], schema_in_prompt=True)[-1]["content"]
-        self.assertIn(f'"maximum": {CREATION_ATTRIBUTE_MAXIMUM}', player_ask)
-        self.assertNotIn(f'"maximum": {MAX_ATTRIBUTE_VALUE}', player_ask)
+        self.assertIn(
+            f'"maximum": {character_rules().attributes.point_buy.maximum}', player_ask
+        )
+        self.assertNotIn(
+            f'"maximum": {character_rules().attributes.maximum}', player_ask
+        )

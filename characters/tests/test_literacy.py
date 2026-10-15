@@ -33,9 +33,9 @@ VILLAGE_THRESHOLD = 8
 
 
 def rolled(total: int):
-    """Patch the service's 3d6 to come up ``total``."""
+    """Patch the service's literacy roll to come up ``total``."""
     return patch(
-        "characters.services.roll_3d6_logged",
+        "characters.services.roll_literacy_logged",
         return_value=(total, f"3d6: [{total - 2}, 1, 1] = {total}"),
     )
 

@@ -50,7 +50,7 @@ from .constants import (
     MAX_EQUIPMENT_QUANTITY,
     MAX_EQUIPMENT_WEIGHT_LBS,
 )
-from .dice import LOCATION_LITERACY_MODIFIER, location_effects
+from .dice import location_effects, location_literacy_modifier
 from .equipment import get_item, settle_worn_armour
 from .equipment_service import custom_equipment_item
 from .models import CHARACTER_INT_FIELDS, DIE_ROLL_FIELDS, Character
@@ -385,7 +385,7 @@ def validate_import_payload(payload: object) -> ImportedCharacter:
     # at any other origin the check is rolled, so a ruling there is dropped,
     # whoever imports it.
     location = fields.get("location", Character._meta.get_field("location").default)
-    if LOCATION_LITERACY_MODIFIER.get(location) is not None:
+    if location_literacy_modifier(location) is not None:
         fields.pop("literacy_ruling", None)
 
     # Enforce the same per-field integer caps the single-field edit endpoint

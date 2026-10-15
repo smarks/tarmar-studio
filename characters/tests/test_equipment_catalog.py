@@ -9,7 +9,6 @@ from django.test import SimpleTestCase
 from characters.constants import (
     CHARACTER_NAME_PATTERN,
     DAMAGE_DICE_PATTERN,
-    MAX_ATTRIBUTE_VALUE,
     MAX_EQUIPMENT_MODIFIER,
 )
 from characters.equipment import (
@@ -26,6 +25,8 @@ from characters.equipment import (
     get_movement_restrictions,
     get_restrictive_armor_names,
 )
+from characters.rules import load_character_rules
+from reference.paths import CANON_CHARACTER_RULES_FILE_NAME, DEFAULT_CANON_DIR
 
 
 class EquipmentCatalogTests(SimpleTestCase):
@@ -177,7 +178,11 @@ class ArmorMovementRestrictionTests(SimpleTestCase):
 
 class ConstantsTests(SimpleTestCase):
     def test_max_attribute_value(self):
-        self.assertEqual(MAX_ATTRIBUTE_VALUE, 30)
+        # The default canon's ceiling, as the public attributes page states it.
+        default_rules = load_character_rules(
+            DEFAULT_CANON_DIR / CANON_CHARACTER_RULES_FILE_NAME
+        )
+        self.assertEqual(default_rules.attributes.maximum, 30)
 
     def test_max_modifier_magnitude(self):
         self.assertEqual(MAX_EQUIPMENT_MODIFIER, 10)

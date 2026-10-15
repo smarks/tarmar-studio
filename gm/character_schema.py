@@ -21,69 +21,76 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from characters.constants import (
-    CHARACTER_EXPORT_FORMAT,
-    FATIGUE_ROLL_MAXIMUM,
-    FATIGUE_ROLL_MINIMUM,
-    LITERACY_ROLL_MAXIMUM,
-    LITERACY_ROLL_MINIMUM,
-    MAX_ATTRIBUTE_VALUE,
-    STARTING_AGE,
-)
+from characters.constants import CHARACTER_EXPORT_FORMAT
 from characters.equipment import EQUIPMENT_CATALOG
+from characters.rules import CharacterRules, DiceRollRules, character_rules
 from characters.skills import normalize_skill_name
 from common.services.sse import strip_thinking
 
-# What the model is told when the player runs /character. The numbers it
-# must not produce (Fatigue, Body) are named so it does not fold them into
-# the fields it does produce.
-EXTRACTION_PROMPT = (
-    "The player wants to save the character you have been creating together "
-    "in this conversation. Report that character as JSON matching the schema "
-    "you were given, using exactly the values the conversation settled on. "
-    "Rules: fatigue_roll is only the 2d6 rolled for Fatigue (2-12), never the "
-    "Fatigue total; literacy_roll is only the 3d6 rolled for the literacy "
-    "check (3-18), or null when it was never rolled; literacy_ruling is the "
-    "Game Master's ruling at an Origin of Consult GM, or null; do not report "
-    "Fatigue, "
-    "Body, modifiers or whether the character can read -- they are "
-    "computed from the attributes. Attributes are the values before any "
-    "aging. Skills are the skills the character has with their points; "
-    "equipment is what they carry; age, total_xp and money_earned reflect "
-    "any prior experience bought. Where the conversation never decided a "
-    "field, use the schema's sensible default rather than inventing a value."
-)
 
-# Appended to the ask when the person at the table is a DM or admin (issue
-# #352). Their character may hold values no player could roll or buy, and the
-# extraction must carry those through rather than tidy them back into range.
-GAME_MASTER_EXTRACTION_NOTE = (
-    " This character was built by the Game Master, who may set any value they "
-    "like. Report exactly the numbers the conversation settled on, including "
-    "attributes above 18 and skills no experience paid for; do not cap, round "
-    "or normalise them."
-)
+def _roll_text(name: str, roll: DiceRollRules) -> str:
+    """A roll as the ask and the schema name it: "the 2d6 rolled for
+    Fatigue (2-12)" on the public pages, the canon's dice and range."""
+    return f"the {roll.dice} rolled for {name} ({roll.minimum}-{roll.maximum})"
 
-GAME_MASTER_EXTRACTION_PROMPT = EXTRACTION_PROMPT + GAME_MASTER_EXTRACTION_NOTE
+
+def extraction_prompt(*, for_game_master: bool = False) -> str:
+    """What the model is told when the player runs /character.
+
+    The numbers it must not produce (Fatigue, Body) are named so it does not
+    fold them into the fields it does produce. The rolls' dice and ranges are
+    the loaded canon's (issue #59), read when asked.
+
+    Args:
+        for_game_master: True when the person at the table is a DM or admin
+            (issue #352). Their character may hold values no player could
+            roll or buy, and the extraction must carry those through rather
+            than tidy them back into range, so a note says so.
+    """
+    rules = character_rules()
+    prompt = (
+        "The player wants to save the character you have been creating together "
+        "in this conversation. Report that character as JSON matching the schema "
+        "you were given, using exactly the values the conversation settled on. "
+        f"Rules: fatigue_roll is only {_roll_text('Fatigue', rules.fatigue_roll)}, "
+        "never the Fatigue total; literacy_roll is only "
+        f"{_roll_text('the literacy check', rules.literacy_roll)}, or null when "
+        "it was never rolled; literacy_ruling is the Game Master's ruling at an "
+        "Origin of Consult GM, or null; do not report Fatigue, "
+        "Body, modifiers or whether the character can read -- they are "
+        "computed from the attributes. Attributes are the values before any "
+        "aging. Skills are the skills the character has with their points; "
+        "equipment is what they carry; age, total_xp and money_earned reflect "
+        "any prior experience bought. Where the conversation never decided a "
+        "field, use the schema's sensible default rather than inventing a value."
+    )
+    if not for_game_master:
+        return prompt
+    return prompt + (
+        " This character was built by the Game Master, who may set any value "
+        "they like. Report exactly the numbers the conversation settled on, "
+        f"including attributes above {rules.attributes.point_buy.maximum} and "
+        "skills no experience paid for; do not cap, round or normalise them."
+    )
+
 
 # Extraction wants the one right answer, not a creative one.
 EXTRACTION_TEMPERATURE = 0
 
-PROVENANCE_CLASSES = ("nobility", "merchant", "commoner")
-LOCATIONS = ("City", "Village", "Rural", "Consult GM")
-WEALTH_LEVELS = ("Subsistence", "Moderate", "Merchant", "Rich")
-
-# Creation bounds. The importer enforces the storage bounds (1-32767 for an
-# attribute); these are the values a character can be *created* with, which
-# is what the model is describing.
-CREATION_ATTRIBUTE_MINIMUM = 3
-CREATION_ATTRIBUTE_MAXIMUM = 18
-# What a DM or admin may set (issue #352): the storage bounds themselves,
-# which is what ``characters.models.ATTRIBUTE_VALIDATORS`` enforces on save.
-# Narrowing the schema below these would cap the Game Master's own numbers
-# before the importer ever saw them.
+# The provenance, location and wealth choices, the creation bounds, the rolls'
+# ranges and the starting age are the loaded canon's (``characters.rules``,
+# issue #59), read when a schema is built: this module is imported by the
+# offline CLI, and a canon that will not load is reported by the system
+# check, not by an import.
+#
+# Creation bounds: the point buy's range, the values a character can be
+# *created* with, which is what the model is describing. The importer
+# enforces the storage bounds. What a DM or admin may set (issue #352) is the
+# storage floor below and the canon's attribute ceiling, which is what
+# ``characters.models.ATTRIBUTE_VALIDATORS`` enforces on save; narrowing the
+# schema below these would cap the Game Master's own numbers before the
+# importer ever saw them.
 GAME_MASTER_ATTRIBUTE_MINIMUM = 1
-GAME_MASTER_ATTRIBUTE_MAXIMUM = MAX_ATTRIBUTE_VALUE
 
 
 @dataclass(frozen=True)
@@ -158,13 +165,13 @@ EQUIPMENT_FIELDS: tuple[SchemaField, ...] = (
 
 
 def _character_fields(
-    attribute_minimum: int, attribute_maximum: int
+    rules: CharacterRules, attribute_minimum: int, attribute_maximum: int
 ) -> tuple[SchemaField, ...]:
     """Every property of the extraction schema, with the given attribute bounds.
 
-    One statement of the field list; the two bound sets below are the only
-    difference between what a player's character and the Game Master's may
-    hold (issue #352).
+    One statement of the field list; the two bound sets
+    (:func:`character_fields`) are the only difference between what a
+    player's character and the Game Master's may hold (issue #352).
     """
     return (
         SchemaField("name", "string", "The character's name"),
@@ -192,15 +199,16 @@ def _character_fields(
         SchemaField(
             "fatigue_roll",
             "integer",
-            "Only the 2d6 rolled for Fatigue, 2-12 -- NOT the Fatigue total",
-            minimum=FATIGUE_ROLL_MINIMUM,
-            maximum=FATIGUE_ROLL_MAXIMUM,
+            f"Only {_roll_text('Fatigue', rules.fatigue_roll)} -- NOT the "
+            "Fatigue total",
+            minimum=rules.fatigue_roll.minimum,
+            maximum=rules.fatigue_roll.maximum,
         ),
         SchemaField(
             "provenance_class",
             "string",
             "Social class of birth",
-            enum=PROVENANCE_CLASSES,
+            enum=rules.social_class.labels,
         ),
         SchemaField(
             "provenance_detail",
@@ -208,7 +216,10 @@ def _character_fields(
             "The family's trade or station, e.g. Laborer, Minor noble house",
         ),
         SchemaField(
-            "location", "string", "Where the character grew up", enum=LOCATIONS
+            "location",
+            "string",
+            "Where the character grew up",
+            enum=rules.location.labels,
         ),
         # Named as the export names it, because the importer reads export
         # field names: the one record of the literacy check (issue #742).
@@ -216,10 +227,10 @@ def _character_fields(
         SchemaField(
             "literacy_roll",
             "integer",
-            "Only the 3d6 rolled for the literacy check, 3-18; null if it was "
-            "never rolled",
-            minimum=LITERACY_ROLL_MINIMUM,
-            maximum=LITERACY_ROLL_MAXIMUM,
+            f"Only {_roll_text('the literacy check', rules.literacy_roll)}; null "
+            "if it was never rolled",
+            minimum=rules.literacy_roll.minimum,
+            maximum=rules.literacy_roll.maximum,
             nullable=True,
         ),
         # A Game Master's ruling at "Consult GM", which has no check (#743):
@@ -231,7 +242,9 @@ def _character_fields(
             "the character literate, false if illiterate; null if he did not rule",
             nullable=True,
         ),
-        SchemaField("wealth_level", "string", "Family wealth", enum=WEALTH_LEVELS),
+        SchemaField(
+            "wealth_level", "string", "Family wealth", enum=rules.wealth.labels
+        ),
         SchemaField(
             "starting_coin",
             "integer",
@@ -259,8 +272,8 @@ def _character_fields(
         SchemaField(
             "age",
             "integer",
-            f"Current age; {STARTING_AGE} with no prior experience",
-            minimum=STARTING_AGE,
+            f"Current age; {rules.age.starting} with no prior experience",
+            minimum=rules.age.starting,
         ),
         SchemaField(
             "total_xp",
@@ -277,21 +290,25 @@ def _character_fields(
     )
 
 
-# Built once at import, like the two prompts: the player's schema and the
-# Game Master's, never a schema assembled per request.
-CHARACTER_FIELDS: tuple[SchemaField, ...] = _character_fields(
-    CREATION_ATTRIBUTE_MINIMUM, CREATION_ATTRIBUTE_MAXIMUM
-)
+def character_fields(*, for_game_master: bool = False) -> tuple[SchemaField, ...]:
+    """The extraction schema's properties, bounded for whoever is saving.
 
-GAME_MASTER_CHARACTER_FIELDS: tuple[SchemaField, ...] = _character_fields(
-    GAME_MASTER_ATTRIBUTE_MINIMUM, GAME_MASTER_ATTRIBUTE_MAXIMUM
-)
+    Built from the loaded canon's rules when asked (issue #59), never at
+    import; the same rules give the same fields, so the schema a model sees
+    does not change between turns.
 
-CHARACTER_SCHEMA: dict[str, Any] = _object_schema(CHARACTER_FIELDS)
-
-GAME_MASTER_CHARACTER_SCHEMA: dict[str, Any] = _object_schema(
-    GAME_MASTER_CHARACTER_FIELDS
-)
+    Args:
+        for_game_master: True when a DM or admin is saving: attributes are
+            bounded by storage and the attribute ceiling rather than by the
+            point buy's range (issue #352).
+    """
+    rules = character_rules()
+    if for_game_master:
+        return _character_fields(
+            rules, GAME_MASTER_ATTRIBUTE_MINIMUM, rules.attributes.maximum
+        )
+    point_buy = rules.attributes.point_buy
+    return _character_fields(rules, point_buy.minimum, point_buy.maximum)
 
 
 def character_json_schema(*, for_game_master: bool = False) -> dict[str, Any]:
@@ -303,7 +320,7 @@ def character_json_schema(*, for_game_master: bool = False) -> dict[str, Any]:
             creation allows, so the numbers they set survive extraction
             (issue #352). Everything else about the two schemas is identical.
     """
-    return GAME_MASTER_CHARACTER_SCHEMA if for_game_master else CHARACTER_SCHEMA
+    return _object_schema(character_fields(for_game_master=for_game_master))
 
 
 # Appended to the ask when the runner cannot constrain the output itself
@@ -335,7 +352,7 @@ def extraction_messages(
             does not take it as ``format``.
         for_game_master: True when a DM or admin is saving.
     """
-    ask = GAME_MASTER_EXTRACTION_PROMPT if for_game_master else EXTRACTION_PROMPT
+    ask = extraction_prompt(for_game_master=for_game_master)
     if schema_in_prompt:
         ask += (
             f"\n\n{SCHEMA_IN_PROMPT_PREAMBLE}\n"
@@ -428,7 +445,7 @@ def extraction_to_import_payload(extracted: Any) -> dict[str, Any]:
     source: dict[str, Any] = extracted if isinstance(extracted, dict) else {}
     data: dict[str, Any] = {
         field.name: source[field.name]
-        for field in CHARACTER_FIELDS
+        for field in character_fields()
         if field.name in source
     }
     skills = source.get("skills")

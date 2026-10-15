@@ -28,6 +28,7 @@ import re
 from common.rolling import Roller, RollRecord, parse_dice_specification
 
 from .constants import CORE_ATTRIBUTE_FIELDS, point_buy_budget_note
+from .rules import CoinRoll, character_rules
 
 # The module-default roller every helper below rolls through. Unseeded, so it
 # draws from the module-global ``random`` (see ``common.rolling.Roller``).
@@ -69,10 +70,7 @@ def roll_3d6_logged(roller: Roller | None = None) -> tuple[int, str]:
     Args:
         roller: Roll through this roller instead of the module default.
     """
-    record = (roller or _DEFAULT_ROLLER).roll("3d6", purpose="3d6")
-    faces = ", ".join(str(face) for face in record.faces)
-    log = f"3d6: [{faces}] = {record.total}"
-    return record.total, log
+    return roll_dice_logged("3d6", roller)
 
 
 def roll_3d6_faces() -> tuple[int, int, int, int]:
@@ -87,11 +85,6 @@ def roll_3d6_faces() -> tuple[int, int, int, int]:
     return first_die, second_die, third_die, record.total
 
 
-def roll_2d6():
-    """Roll 2d6 and return the sum (2-12)."""
-    return _DEFAULT_ROLLER.roll("2d6", purpose="2d6").total
-
-
 def roll_2d6_faces(roller: Roller | None = None) -> tuple[int, int, int]:
     """Roll 2d6 and return (die1, die2, total).
 
@@ -104,17 +97,6 @@ def roll_2d6_faces(roller: Roller | None = None) -> tuple[int, int, int]:
     record = (roller or _DEFAULT_ROLLER).roll("2d6", purpose="2d6")
     first_die, second_die = record.faces
     return first_die, second_die, record.total
-
-
-def roll_2d6_logged(roller: Roller | None = None) -> tuple[int, str]:
-    """Roll 2d6 and return (result, log_entry).
-
-    Args:
-        roller: Roll through this roller instead of the module default.
-    """
-    first_die, second_die, result = roll_2d6_faces(roller)
-    log = f"2d6: [{first_die}, {second_die}] = {result}"
-    return result, log
 
 
 def roll_d6_logged(roller: Roller | None = None) -> tuple[int, str]:
@@ -142,7 +124,8 @@ parse_dice_expression = parse_dice_specification
 
 
 #: Reads a roll back out of the text the ``_logged`` helpers and
-#: :mod:`characters.services` write, e.g. ``3d6: [5, 6, 1] = 12`` or the
+#: :mod:`characters.services` write, e.g. ``3d6: [5, 6, 1] = 12``,
+#: ``1d8+1: [4] = 5`` (a canon's dice may carry a modifier, issue #59) or the
 #: survival line's ``3d6 [4, 6, 2] = 12`` (the separator differs between the
 #: two producers, so it is optional here).
 #:
@@ -151,7 +134,7 @@ parse_dice_expression = parse_dice_specification
 #: the server rolled -- ``scripts/gm_behaviour_check.py`` does -- has to read
 #: them out of prose. Keeping the pattern here, next to the writers, means the
 #: two cannot drift apart unnoticed (issue #604).
-DICE_IN_TEXT = re.compile(r"(\d*d\d+)\s*:?\s*\[([\d,\s]+)\]\s*=\s*(\d+)")
+DICE_IN_TEXT = re.compile(r"(\d*d\d+(?:[+-]\d+)?)\s*:?\s*\[([\d,\s]+)\]\s*=\s*(\d+)")
 
 
 def roll_expression_record(
@@ -263,43 +246,32 @@ def parse_demon_die(roll_str):
         return [3]  # Return average on parse failure
 
 
-# Height table: roll -> base height in inches
-HEIGHT_TABLE = {
-    1: 56,  # 4'8"
-    2: 60,  # 5'0"
-    3: 64,  # 5'4"
-    4: 68,  # 5'8"
-    5: 72,  # 6'0"
-    6: 76,  # 6'4"
-}
-
-
 def demon_die_to_height_inches(roll_str):
     """
     Convert a demon die roll to height in inches.
 
     Base height from the FIRST roll (attributes.md's Height table -- issue
-    #295), then each additional roll beyond that first one:
-    - Each extra 1 in the chain: -4"
-    - Each extra 6 in the chain: +4"
-    A terminating 2-5 roll only stops the chain; it isn't itself a base or
-    an adjustment unless it was the only roll.
+    #295), then each additional roll beyond that first one adds the canon's
+    ``height.inches_per_extra_one`` for a 1 and ``inches_per_extra_six`` for
+    a 6 (the public pages: -4" and +4"). A terminating 2-5 roll only stops
+    the chain; it isn't itself a base or an adjustment unless it was the
+    only roll.
     """
+    height = character_rules().height
     rolls = parse_demon_die(roll_str)
-    first_roll = rolls[0]
-    base_height = HEIGHT_TABLE[first_roll]
+    base_height = height.base_inches_by_face[rolls[0] - 1]
 
     # Count 1s and 6s in the chain beyond the first roll.
     adjustment = 0
     for r in rolls[1:]:
         if r == 1:
-            adjustment -= 4
+            adjustment += height.inches_per_extra_one
         elif r == 6:
-            adjustment += 4
+            adjustment += height.inches_per_extra_six
 
     # Floor the result: a long all-1s chain (possible via an edited/imported
     # height_roll string) must not yield a negative or absurd height.
-    return max(24, base_height + adjustment)
+    return max(height.minimum_inches, base_height + adjustment)
 
 
 def format_height(inches):
@@ -309,143 +281,110 @@ def format_height(inches):
     return f"{feet}'{remaining_inches}\""
 
 
-# Weight table: roll -> base weight in stones
-WEIGHT_TABLE = {
-    1: 8,  # 112 lbs
-    2: 9,  # 126 lbs
-    3: 10,  # 140 lbs
-    4: 11,  # 154 lbs
-    5: 12,  # 168 lbs
-    6: 13,  # 182 lbs
-}
-
-
 def weight_roll_to_stones(roll_str):
     """
     Convert a base weight roll to stones.
 
-    Rules: base weight is the player's choice between 8-13 stones, or a
-    plain 1d6 roll mapped straight into that band via WEIGHT_TABLE. No
+    Rules: base weight is the player's choice within the canon's band, or a
+    plain 1d6 roll mapped straight into it by ``weight.stones_by_face``. No
     exploding chain, no per-die adjustment. A stored value with a legacy
     demon-die chain (from before this was a plain 1d6) is parsed for its
     final digit only, so old character data still resolves sensibly.
     """
     rolls = parse_demon_die(roll_str)
     final_roll = rolls[-1]
-    return WEIGHT_TABLE[final_roll]
+    return character_rules().weight.stones_by_face[final_roll - 1]
 
 
 def calculate_final_weight_lbs(roll_str, strength):
     """
     Calculate final weight in pounds.
 
-    Final weight = Base weight + (STR / 2) stones
-    1 stone = 14 lbs
+    Final weight = Base weight + (STR / ``weight.strength_divisor``) stones,
+    rounded down, at ``weight.pounds_per_stone`` pounds a stone.
     """
+    weight = character_rules().weight
     base_stones = weight_roll_to_stones(roll_str)
-    str_bonus_stones = strength // 2
+    str_bonus_stones = strength // weight.strength_divisor
     total_stones = base_stones + str_bonus_stones
-    return total_stones * 14
+    return total_stones * weight.pounds_per_stone
 
 
-# Provenance tables
-SOCIAL_CLASS_TABLE = [
-    (10, "nobility"),
-    (30, "merchant"),
-    (100, "commoner"),
-]
+def roll_dice_logged(
+    specification: str, roller: Roller | None = None
+) -> tuple[int, str]:
+    """Roll a dice specification and return (total, log_entry).
 
-NOBILITY_TABLE = [
-    (1, "Monarch"),
-    (5, "Royal Family"),
-    (12, "Duke"),
-    (30, "March/Border Lords"),
-    (40, "Count/Earl"),
-    (46, "Viscount"),
-    (60, "Baron"),
-    (85, "Baronet"),
-    (100, "Knights and Warrior Nobility"),
-]
+    The log reads ``"2d6: [3, 4] = 7"``, the shape every ``_logged`` helper
+    here writes and :data:`DICE_IN_TEXT` reads back.
 
-MERCHANT_TABLE = [
-    (70, "Retail"),
-    (95, "Wholesale"),
-    (100, "Specialty"),
-]
-
-COMMONER_TABLE = [
-    (70, "Laborer"),
-    (100, "Crafts"),
-]
+    Args:
+        specification: ``NdS`` or ``NdS±M``, as the canon's rules state it.
+        roller: Roll through this roller instead of the module default.
+    """
+    record = (roller or _DEFAULT_ROLLER).roll(specification, purpose=specification)
+    faces = ", ".join(str(face) for face in record.faces)
+    return record.total, f"{specification}: [{faces}] = {record.total}"
 
 
-# Location table
-LOCATION_TABLE = [
-    (20, "City"),
-    (70, "Village"),
-    (99, "Rural"),
-    (100, "Consult GM"),
-]
+def roll_fatigue_logged(roller: Roller | None = None) -> tuple[int, str]:
+    """Roll the Fatigue roll on the canon's dice; return (total, log_entry).
 
-# Location effects, from reference/content/public-rules/characters/location.md.
-#
-# Each origin grants one starting skill at 1 point and sets the modifier on the
-# INT check to be literate (City has no modifier, Village +2, Rural +4). "Consult
-# GM" is in neither table: the rules print no effects for it, so it grants no
-# skill and carries no published literacy modifier.
+    Args:
+        roller: Roll through this roller instead of the module default.
+    """
+    return roll_dice_logged(character_rules().fatigue_roll.dice, roller)
+
+
+def roll_literacy_logged(roller: Roller | None = None) -> tuple[int, str]:
+    """Roll the literacy roll on the canon's dice; return (total, log_entry).
+
+    Args:
+        roller: Roll through this roller instead of the module default.
+    """
+    return roll_dice_logged(character_rules().literacy_roll.dice, roller)
+
+
+# Location effects come from the canon's ``location`` table: each origin's
+# skills (the one granted first), the points the grant starts at, and the
+# modifier on the INT check to be literate. "Consult GM" grants no skill and
+# carries no published literacy modifier.
 #
 # Village reads "Street smarts OR survival (choose)". The location is rolled
 # server-side during creation, after the player has already submitted the form,
-# so there is nowhere to ask them at the moment of the choice. It grants street
-# smarts and the player switches it to survival with the rename-skill control on
-# the sheet; the Location help text says so.
-#
-# The skills each origin's grant may be held in, the one granted first (issue
-# #754): an Origin that changes moves its grant, and a Village character who
-# took Survival holds the Village grant, and the Rural one, in it.
-LOCATION_SKILL_CHOICES: dict[str, tuple[str, ...]] = {
-    "City": ("Street Smarts",),
-    "Village": ("Street Smarts", "Survival"),
-    "Rural": ("Survival",),
-}
-LOCATION_STARTING_SKILL = {
-    origin: choices[0] for origin, choices in LOCATION_SKILL_CHOICES.items()
-}
-
-LOCATION_LITERACY_MODIFIER = {
-    "City": 0,
-    "Village": 2,
-    "Rural": 4,
-}
-
-# Points a location's granted skill starts at.
-LOCATION_SKILL_POINTS = 1
-
-# Wealth table
-WEALTH_TABLE = [
-    (15, "Subsistence"),
-    (70, "Moderate"),
-    (95, "Merchant"),
-    (100, "Rich"),
-]
-
-# Starting coin by wealth level
-STARTING_COIN = {
-    "Subsistence": 10,
-    "Moderate": 100,
-    "Merchant": None,  # 100 + d100, calculated dynamically
-    # "Consult GM" (wealth.md): the table gives no number, so the coin is left
-    # unset for a Game Master to decide rather than stored as 0 (issue #749).
-    "Rich": None,
-}
+# so there is nowhere to ask them at the moment of the choice. It grants the
+# first listed skill and the player switches it with the rename-skill control
+# on the sheet; the Location help text says so, and the canon records the
+# reading as a ruling (issue #754: an Origin that changes moves its grant, and
+# a Village character who took Survival holds the Village grant in it).
 
 
-def lookup_table(roll, table):
-    """Look up a roll result in a table of (threshold, value) tuples."""
-    for threshold, value in table:
-        if roll <= threshold:
-            return value
-    return table[-1][1]  # Fallback to last entry
+def location_skill_choices(location: str) -> tuple[str, ...]:
+    """The skills an origin's grant may be held in, the granted one first.
+
+    Args:
+        location: A location table label, e.g. ``"Village"``.
+
+    Returns:
+        The skills; empty for an origin with no grant or a label the table
+        does not have.
+    """
+    row = character_rules().location.row_labelled(location)
+    return row.skills if row is not None else ()
+
+
+def location_literacy_modifier(location: str) -> int | None:
+    """The penalty an origin sets on the literacy roll.
+
+    Args:
+        location: A location table label.
+
+    Returns:
+        The modifier, or ``None`` where the table publishes none ("Consult
+        GM", or a label the table does not have).
+    """
+    row = character_rules().location.row_labelled(location)
+    return row.literacy_modifier if row is not None else None
 
 
 def roll_location_logged(roller: Roller | None = None) -> tuple[str, str]:
@@ -458,7 +397,7 @@ def roll_location_logged(roller: Roller | None = None) -> tuple[str, str]:
     Returns (location, log_entry).
     """
     roll = roll_d100(roller)
-    location = lookup_table(roll, LOCATION_TABLE)
+    location = character_rules().location.row_for(roll).label
     log = f"Location: d100={roll} -> {location}"
     return location, log
 
@@ -467,7 +406,7 @@ def location_effects(location: str) -> tuple[dict[str, int], str]:
     """The skills a location grants a new character, plus a log line.
 
     Args:
-        location: One of the LOCATION_TABLE values.
+        location: One of the location table's labels.
 
     Returns:
         ``(skills, log_entry)`` where ``skills`` maps the normalized skill name
@@ -478,14 +417,17 @@ def location_effects(location: str) -> tuple[dict[str, int], str]:
     # scope would be circular.
     from .skills import normalize_skill_name
 
-    skill_name = LOCATION_STARTING_SKILL.get(location)
+    location_table = character_rules().location
+    row = location_table.row_labelled(location)
+    skill_name = row.granted_skill if row is not None else None
 
     if skill_name is None:
         return {}, f"Location effects: {location}"
 
-    skills = {normalize_skill_name(skill_name): LOCATION_SKILL_POINTS}
+    skill_points = location_table.skill_points
+    skills = {normalize_skill_name(skill_name): skill_points}
     log = (
-        f"Location effects: {skill_name} {LOCATION_SKILL_POINTS} point, "
+        f"Location effects: {skill_name} {skill_points} point, "
         f"{literacy_check_text(location)}"
     )
     return skills, log
@@ -496,10 +438,10 @@ def literacy_check_text(location: str) -> str:
 
     The modifier is a penalty, so the log takes it off INT rather than
     printing a bare "+2" that reads like a bonus. The roll itself is spelled
-    out on the sheet, not here: the log stays free of "3d6" so the point-buy
-    path's log carries no dice notation at all.
+    out on the sheet, not here: the log stays free of dice notation so the
+    point-buy path's log carries none at all.
     """
-    literacy_modifier = LOCATION_LITERACY_MODIFIER.get(location)
+    literacy_modifier = location_literacy_modifier(location)
     literacy = "Literacy check INT"
     if literacy_modifier:
         literacy = f"{literacy} - {literacy_modifier}"
@@ -509,9 +451,11 @@ def literacy_check_text(location: str) -> str:
 def wealth_gives_coin(wealth_level: str) -> bool:
     """Whether the wealth table gives this level a coin figure (issue #749).
 
-    Every level but Rich does; Rich is "Consult GM".
+    Every level but the one whose coin is ``null`` in the canon does; on the
+    public pages that is Rich, "Consult GM".
     """
-    return wealth_level == "Merchant" or STARTING_COIN.get(wealth_level) is not None
+    row = character_rules().wealth.row_labelled(wealth_level)
+    return row is not None and row.coin is not None
 
 
 def starting_coin_for_wealth(
@@ -519,21 +463,35 @@ def starting_coin_for_wealth(
 ) -> tuple[int | None, str]:
     """Starting coin for a wealth level, with a human-readable detail string.
 
-    Merchant rolls a d100 bonus on top of a base of 100; Rich is "Consult GM"
-    and gives no number (``None``); every other level uses the fixed
-    STARTING_COIN table. Single source for this rule (the character roller,
-    the wealth roll on the sheet and a Game Master's first wealth setting).
+    The canon's ``wealth`` table gives each level a fixed coin, a base plus
+    dice (on the public pages, Merchant's 100 + d100), or ``null`` for the
+    Game Master to set (Rich, "Consult GM", which gives ``None``). Single
+    source for this rule (the character roller, the wealth roll on the sheet
+    and a Game Master's first wealth setting).
 
     Args:
-        wealth_level: One of the WEALTH_TABLE values.
-        roller: Roll the Merchant bonus through this roller instead of the
+        wealth_level: One of the wealth table's labels.
+        roller: Roll a level's dice through this roller instead of the
             module default. Ignored for the fixed levels, which roll nothing.
+
+    Raises:
+        KeyError: ``wealth_level`` is not a label of the wealth table.
     """
-    if wealth_level == "Merchant":
-        bonus_roll = roll_d100(roller)
-        coin = 100 + bonus_roll
-        return coin, f"100 + d100({bonus_roll}) = {coin}"
-    coin = STARTING_COIN[wealth_level]
+    row = character_rules().wealth.row_labelled(wealth_level)
+    if row is None:
+        raise KeyError(wealth_level)
+    coin = row.coin
+    if isinstance(coin, CoinRoll):
+        # Percentile dice are rolled through roll_d100, the one d100 every
+        # table roll here makes; the log writes them as it always has
+        # ("100 + d100(57) = 157").
+        if coin.is_percentile:
+            bonus_roll = roll_d100(roller)
+        else:
+            record = (roller or _DEFAULT_ROLLER).roll(coin.dice, purpose=coin.dice)
+            bonus_roll = record.total
+        total = coin.base + bonus_roll
+        return total, f"{coin.base} + {coin.dice_label}({bonus_roll}) = {total}"
     if coin is None:
         return None, "Consult GM"
     return coin, str(coin)
@@ -549,7 +507,7 @@ def roll_wealth_logged(roller: Roller | None = None) -> tuple[str, int | None, s
     Returns (wealth_level, starting_coin, log_entry).
     """
     roll = roll_d100(roller)
-    wealth_level = lookup_table(roll, WEALTH_TABLE)
+    wealth_level = character_rules().wealth.row_for(roll).label
     starting_coin, detail = starting_coin_for_wealth(wealth_level, roller)
     log = f"Wealth: d100={roll} -> {wealth_level}, starting coin = {detail}"
     return wealth_level, starting_coin, log
@@ -559,33 +517,24 @@ def roll_provenance_logged(roller: Roller | None = None) -> tuple[str, str, str]
     """
     Roll provenance (social class and detail).
 
+    The class table's labels name the table its detail is rolled on next
+    (``characters.rules`` holds them to ``nobility``, ``merchant`` and
+    ``commoner``).
+
     Args:
         roller: Roll through this roller instead of the module default.
 
     Returns (class, detail, log_entry).
     """
+    rules = character_rules()
     class_roll = roll_d100(roller)
-    social_class = lookup_table(class_roll, SOCIAL_CLASS_TABLE)
-
-    if social_class == "nobility":
-        detail_roll = roll_d100(roller)
-        detail = lookup_table(detail_roll, NOBILITY_TABLE)
-        log = (
-            f"Provenance: d100={class_roll} -> Nobility, d100={detail_roll} -> {detail}"
-        )
-    elif social_class == "merchant":
-        detail_roll = roll_d100(roller)
-        detail = lookup_table(detail_roll, MERCHANT_TABLE)
-        log = (
-            f"Provenance: d100={class_roll} -> Merchant, d100={detail_roll} -> {detail}"
-        )
-    else:  # commoner
-        detail_roll = roll_d100(roller)
-        detail = lookup_table(detail_roll, COMMONER_TABLE)
-        log = (
-            f"Provenance: d100={class_roll} -> Commoner, d100={detail_roll} -> {detail}"
-        )
-
+    social_class = rules.social_class.lookup(class_roll)
+    detail_roll = roll_d100(roller)
+    detail = rules.detail_table(social_class).lookup(detail_roll)
+    log = (
+        f"Provenance: d100={class_roll} -> {social_class.capitalize()}, "
+        f"d100={detail_roll} -> {detail}"
+    )
     return social_class, detail, log
 
 
@@ -645,7 +594,7 @@ def roll_secondary_character_stats(roller: Roller | None = None):
     stats.update(physical)
     log_entries.extend(physical_log)
 
-    fatigue_value, fatigue_log = roll_2d6_logged(roller)
+    fatigue_value, fatigue_log = roll_fatigue_logged(roller)
     stats["fatigue_roll"] = fatigue_value
     log_entries.append(f"Fatigue: {fatigue_log}")
 

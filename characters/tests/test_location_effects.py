@@ -11,8 +11,6 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 from characters.dice import (
-    LOCATION_LITERACY_MODIFIER,
-    LOCATION_SKILL_POINTS,
     build_point_buy_character_stats,
     location_effects,
     roll_all_character_stats,
@@ -20,6 +18,7 @@ from characters.dice import (
 )
 from characters.help_text import HELP_TEXT
 from characters.models import Character
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 CREATE_URL = "/tarmar/characters/create/"
@@ -49,7 +48,9 @@ class LocationEffectsTableTest(SimpleTestCase):
     def test_city_grants_street_smarts_and_an_unmodified_literacy_check(self):
         skills, log = location_effects("City")
 
-        self.assertEqual(skills, {"street smarts": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            skills, {"street smarts": character_rules().location.skill_points}
+        )
         self.assertIn("Street Smarts", log)
         self.assertIn("Literacy check INT", log)
         # No modifier for a City upbringing, so nothing is taken off INT.
@@ -58,13 +59,15 @@ class LocationEffectsTableTest(SimpleTestCase):
     def test_village_grants_street_smarts_and_plus_two(self):
         skills, log = location_effects("Village")
 
-        self.assertEqual(skills, {"street smarts": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            skills, {"street smarts": character_rules().location.skill_points}
+        )
         self.assertIn("Literacy check INT - 2", log)
 
     def test_rural_grants_survival_and_plus_four(self):
         skills, log = location_effects("Rural")
 
-        self.assertEqual(skills, {"survival": LOCATION_SKILL_POINTS})
+        self.assertEqual(skills, {"survival": character_rules().location.skill_points})
         self.assertIn("Survival", log)
         self.assertIn("Literacy check INT - 4", log)
 
@@ -78,7 +81,7 @@ class LocationEffectsTableTest(SimpleTestCase):
         """Grants must use the same keys the skills system already writes."""
         from characters.skills import normalize_skill_name
 
-        for location in LOCATION_LITERACY_MODIFIER:
+        for location in character_rules().location.labels:
             skills, _log = location_effects(location)
             for name in skills:
                 self.assertEqual(name, normalize_skill_name(name))
@@ -92,7 +95,9 @@ class SecondaryStatsCarryLocationSkillsTest(SimpleTestCase):
             stats, log_entries = roll_secondary_character_stats()
 
         self.assertEqual(stats["location"], "Rural")
-        self.assertEqual(stats["skills"], {"survival": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            stats["skills"], {"survival": character_rules().location.skill_points}
+        )
         self.assertTrue(
             any("Location effects" in entry for entry in log_entries),
             msg="the dice log should record the location's effects",
@@ -102,14 +107,18 @@ class SecondaryStatsCarryLocationSkillsTest(SimpleTestCase):
         with fixed_location("City"):
             stats = roll_all_character_stats()
 
-        self.assertEqual(stats["skills"], {"street smarts": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            stats["skills"], {"street smarts": character_rules().location.skill_points}
+        )
         self.assertIn("Location effects", stats["dice_log"])
 
     def test_point_buy_path_carries_the_grant(self):
         with fixed_location("City"):
             stats = build_point_buy_character_stats(VALID_BUY)
 
-        self.assertEqual(stats["skills"], {"street smarts": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            stats["skills"], {"street smarts": character_rules().location.skill_points}
+        )
 
 
 class LocationGrantOnCreationTest(BaseTestCase):
@@ -131,14 +140,18 @@ class LocationGrantOnCreationTest(BaseTestCase):
             character = self._create({"method": "roll"})
 
         self.assertEqual(character.location, "Village")
-        self.assertEqual(character.skills, {"street smarts": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            character.skills, {"street smarts": character_rules().location.skill_points}
+        )
 
     def test_point_buy_character_gets_the_location_skill(self):
         with fixed_location("Rural"):
             character = self._create({"method": "point-buy", **VALID_BUY})
 
         self.assertEqual(character.location, "Rural")
-        self.assertEqual(character.skills, {"survival": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            character.skills, {"survival": character_rules().location.skill_points}
+        )
 
     def test_consult_gm_character_gets_no_skill(self):
         with fixed_location("Consult GM"):
@@ -150,7 +163,10 @@ class LocationGrantOnCreationTest(BaseTestCase):
         with fixed_location("City"):
             character = self._create({"method": "roll"})
 
-        self.assertEqual(character.total_allocated_skill_points, LOCATION_SKILL_POINTS)
+        self.assertEqual(
+            character.total_allocated_skill_points,
+            character_rules().location.skill_points,
+        )
 
     def test_the_granted_skill_is_on_the_sheet_immediately_after_creation(self):
         """The redirect target itself must show the grant, not just the row.
@@ -224,7 +240,9 @@ class ExistingCharactersUntouchedTest(BaseTestCase):
         self.assertEqual(response.status_code, 200)
         character.refresh_from_db()
         self.assertEqual(character.location, "Rural")
-        self.assertEqual(character.skills, {"survival": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            character.skills, {"survival": character_rules().location.skill_points}
+        )
 
 
 class LiteracyCheckDisplayTest(BaseTestCase):

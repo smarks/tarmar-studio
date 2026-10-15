@@ -10,10 +10,10 @@ from bestiary.models import CATEGORY_CHOICES
 from bestiary.translation import (
     CATEGORY_CHARISMA,
     CATEGORY_WISDOM,
-    FIXED_FATIGUE_ROLL,
     SECTION_CATEGORY,
     classify_attack,
     derive_pools,
+    fixed_fatigue_roll,
     infer_size_hexes,
     parse_armour,
     parse_attacks,
@@ -193,8 +193,17 @@ class SizeTest(SimpleTestCase):
 
 class PoolsTest(SimpleTestCase):
     def test_matches_character_formula_with_midpoint_roll(self):
-        fatigue, body = derive_pools(16, 12, 5, 5, 16)
-        expected_fatigue = 16 + 5 + 5 + max(12, 16) + FIXED_FATIGUE_ROLL
+        fatigue, body = derive_pools(
+            {
+                "strength": 16,
+                "dexterity": 12,
+                "intelligence": 5,
+                "wisdom": 5,
+                "constitution": 16,
+                "charisma": 3,
+            }
+        )
+        expected_fatigue = 16 + 5 + 5 + max(12, 16) + fixed_fatigue_roll()
         self.assertEqual(fatigue, expected_fatigue)
         self.assertEqual(body, math.ceil(expected_fatigue * 2 / 3))
 

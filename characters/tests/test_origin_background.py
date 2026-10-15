@@ -26,8 +26,8 @@ from django.urls import reverse
 
 from character_export.export_utils import generate_character_json
 from characters import services
-from characters.dice import LOCATION_SKILL_POINTS
 from characters.models import Character
+from characters.rules import character_rules
 from characters.services import (
     BACKGROUND_ALREADY_ROLLED,
     ORIGIN_FIXED_REASON,
@@ -92,7 +92,9 @@ class OriginSkillFollowsTheOriginTest(BaseTestCase):
 
         self.move(character, "Rural")
 
-        self.assertEqual(character.skills, {"survival": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            character.skills, {"survival": character_rules().location.skill_points}
+        )
         self.assertEqual(character.origin_skill, "survival")
 
     def test_rural_to_city_swaps_survival_for_street_smarts(self):
@@ -100,7 +102,9 @@ class OriginSkillFollowsTheOriginTest(BaseTestCase):
 
         self.move(character, "City")
 
-        self.assertEqual(character.skills, {"street smarts": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            character.skills, {"street smarts": character_rules().location.skill_points}
+        )
 
     def test_points_bought_past_the_grant_stay_and_nothing_leaks(self):
         """Street Smarts 2 is the City's point and one bought. Only the grant
@@ -214,7 +218,7 @@ class OriginSkillFollowsTheOriginTest(BaseTestCase):
         )
 
         with patch(
-            "characters.services.roll_3d6_logged",
+            "characters.services.roll_literacy_logged",
             return_value=(5, "3d6: [3, 1, 1] = 5"),
         ):
             result = services.set_background(
@@ -300,7 +304,9 @@ class BackgroundRollTest(BaseTestCase):
         self.assertTrue(character.location_recorded)
         self.assertTrue(character.wealth_recorded)
         self.assertEqual(character.starting_coin, 100)
-        self.assertEqual(character.skills, {"survival": LOCATION_SKILL_POINTS})
+        self.assertEqual(
+            character.skills, {"survival": character_rules().location.skill_points}
+        )
         log = character.dice_log.splitlines()
         # The lines the creation page writes, in its order.
         self.assertEqual(log[0], "Appearance: 1d6: 3")
@@ -372,7 +378,7 @@ class BackgroundRollTest(BaseTestCase):
         with (
             d100(*RURAL_MODERATE_COMMONER),
             patch(
-                "characters.services.roll_3d6_logged",
+                "characters.services.roll_literacy_logged",
                 return_value=(6, "3d6: [4, 1, 1] = 6"),
             ),
         ):

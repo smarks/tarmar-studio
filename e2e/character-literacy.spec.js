@@ -29,7 +29,7 @@ const ROLLED_ORIGIN_SEED = 7;
 /** What creation's location roll gives on that seed. */
 const SEEDED_ORIGIN = 'Rural';
 
-/** The check each origin prints, from characters/dice.py's modifiers. */
+/** The check each origin prints, from the default canon's location table (character-rules.json). */
 const CHECKS = {
     City: '3d6 ≤ INT',
     Village: '3d6 ≤ INT − 2',

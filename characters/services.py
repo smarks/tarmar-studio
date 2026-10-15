@@ -38,27 +38,21 @@ from django.db.models import Q
 from accounts.models import User
 
 from .constants import (
-    FATIGUE_ROLL_MAXIMUM,
-    FATIGUE_ROLL_MINIMUM,
-    MAX_ATTRIBUTE_VALUE,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
     MAX_SKILL_NAME_LENGTH,
-    POINT_BUY_MAX_ATTRIBUTE,
-    POINT_BUY_MIN_ATTRIBUTE,
-    POINT_BUY_TOTAL,
     too_long,
 )
 from .dice import (
-    LOCATION_SKILL_CHOICES,
-    LOCATION_SKILL_POINTS,
     Roller,
     literacy_check_text,
     location_effects,
+    location_skill_choices,
     roll_3d6_logged,
     roll_d6_logged,
     roll_demon_die_logged,
     roll_expression,
+    roll_literacy_logged,
     roll_location_logged,
     roll_provenance_logged,
     roll_wealth_logged,
@@ -83,6 +77,7 @@ from .purse import (
     charge_for_more_of_custom_item,
     hold_purchase_to_wealth,
 )
+from .rules import character_rules
 from .skills import (
     ALL_TRACKS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
@@ -464,16 +459,17 @@ def check_point_buy(character: Character, name: str, value: int) -> str:
         CharacterChangeError: A score outside what the buy leaves room for.
     """
     check_attribute(name, value, is_game_master=False)
+    point_buy = character_rules().attributes.point_buy
     others = [getattr(character, other) for other in ATTRIBUTE_NAMES if other != name]
     recorded = sum(score for score in others if score is not None)
     missing_after = sum(1 for score in others if score is None)
     lowest = max(
-        POINT_BUY_MIN_ATTRIBUTE,
-        POINT_BUY_TOTAL - recorded - POINT_BUY_MAX_ATTRIBUTE * missing_after,
+        point_buy.minimum,
+        point_buy.total - recorded - point_buy.maximum * missing_after,
     )
     highest = min(
-        POINT_BUY_MAX_ATTRIBUTE,
-        POINT_BUY_TOTAL - recorded - POINT_BUY_MIN_ATTRIBUTE * missing_after,
+        point_buy.maximum,
+        point_buy.total - recorded - point_buy.minimum * missing_after,
     )
     if lowest > highest:
         # A buyer may not roll the rest (bought_scores), so only a Game Master
@@ -484,12 +480,12 @@ def check_point_buy(character: Character, name: str, value: int) -> str:
             else "roll the missing ones instead"
         )
         raise CharacterChangeError(
-            f"The scores already recorded leave no {POINT_BUY_TOTAL}-point buy "
+            f"The scores already recorded leave no {point_buy.total}-point buy "
             f"for the rest; {instead}"
         )
     if not lowest <= value <= highest:
         raise CharacterChangeError(
-            f"Typed scores are a {POINT_BUY_TOTAL}-point buy: with the scores "
+            f"Typed scores are a {point_buy.total}-point buy: with the scores "
             f"recorded, {name} can be {lowest} to {highest}; {value} was given"
         )
     return f"{name}: {POINT_BUY_LOG_MARKER}{value} (typed on the sheet)"
@@ -780,20 +776,22 @@ def check_attribute(name: str, value: int, is_game_master: bool) -> str:
     """
     if name not in ATTRIBUTE_NAMES:
         raise CharacterChangeError(f"{name} is not a core attribute")
-    if not 1 <= value <= MAX_ATTRIBUTE_VALUE:
+    attribute_rules = character_rules().attributes
+    point_buy = attribute_rules.point_buy
+    if not 1 <= value <= attribute_rules.maximum:
         raise CharacterChangeError(
-            f"{name} must be between 1 and {MAX_ATTRIBUTE_VALUE}, the most a "
+            f"{name} must be between 1 and {attribute_rules.maximum}, the most a "
             f"character can hold; {value} was given"
         )
-    if POINT_BUY_MIN_ATTRIBUTE <= value <= POINT_BUY_MAX_ATTRIBUTE:
+    if point_buy.minimum <= value <= point_buy.maximum:
         return ""
     if not is_game_master:
         raise CharacterChangeError(
-            f"{name} must be between {POINT_BUY_MIN_ATTRIBUTE} and "
-            f"{POINT_BUY_MAX_ATTRIBUTE} for a player; {value} was given"
+            f"{name} must be between {point_buy.minimum} and "
+            f"{point_buy.maximum} for a player; {value} was given"
         )
     return (
-        f" (outside the {POINT_BUY_MIN_ATTRIBUTE}-{POINT_BUY_MAX_ATTRIBUTE} a player "
+        f" (outside the {point_buy.minimum}-{point_buy.maximum} a player "
         "may set: the Game Master's call)"
     )
 
@@ -865,7 +863,10 @@ def apply_rolled_attributes(
 
 
 def apply_fatigue_roll(character: Character, value: int | None = None) -> str:
-    """Record the 2d6 Fatigue roll: rolled by the server, or as stated.
+    """Record the Fatigue roll: rolled by the server, or as stated.
+
+    The dice are the canon's (``fatigue_roll.dice``, 2d6 on the public
+    pages).
 
     Args:
         character: The character.
@@ -873,23 +874,21 @@ def apply_fatigue_roll(character: Character, value: int | None = None) -> str:
             code owns the dice.
 
     Raises:
-        CharacterChangeError: A stated roll outside what 2d6 can produce
+        CharacterChangeError: A stated roll outside what the dice can produce
             (issue #653). There is no Game Master override here, unlike
             ``check_attribute``: this is a die roll, not a build choice.
     """
+    fatigue_roll = character_rules().fatigue_roll
     if value is not None:
-        if not FATIGUE_ROLL_MINIMUM <= value <= FATIGUE_ROLL_MAXIMUM:
-            raise CharacterChangeError(
-                f"The Fatigue roll is 2d6, so it must be between "
-                f"{FATIGUE_ROLL_MINIMUM} and {FATIGUE_ROLL_MAXIMUM}; "
-                f"{value} was given"
-            )
+        refusal = fatigue_roll.refusal("The Fatigue roll", value)
+        if refusal is not None:
+            raise CharacterChangeError(refusal)
         character.fatigue_roll = value
-        return f"Fatigue roll (2d6) set to {value}"
-    rolls, total = roll_expression("2d6")
+        return f"Fatigue roll ({fatigue_roll.dice}) set to {value}"
+    rolls, total = roll_expression(fatigue_roll.dice)
     character.fatigue_roll = total
     faces = " and ".join(str(face) for face in rolls)
-    return f"Fatigue roll (2d6) rolled {faces} = {total}"
+    return f"Fatigue roll ({fatigue_roll.dice}) rolled {faces} = {total}"
 
 
 def can_roll_literacy(character: Character, *, is_game_master: bool) -> bool:
@@ -988,7 +987,7 @@ def apply_literacy_ruling(
 
 
 def apply_literacy_roll(character: Character, *, is_game_master: bool = False) -> str:
-    """Roll the 3d6 literacy check and record the dice (issue #741).
+    """Roll the literacy check on the canon's dice and record them (issue #741).
 
     The rule, from reference/content/public-rules/characters/location.md:
 
@@ -1038,7 +1037,7 @@ def apply_literacy_roll(character: Character, *, is_game_master: bool = False) -
                 *granted,
             ]
         )
-    total, log = roll_3d6_logged()
+    total, log = roll_literacy_logged()
     character.literacy_roll = total
     character.literacy_rolled = True
     note = f"rolled the literacy check ({character.location_literacy_check}), {log}"
@@ -1850,20 +1849,23 @@ RENAME_REFUSED_REASON = (
 
 
 def _village_choice(character: Character, old_skill: str, new_skill: str) -> bool:
-    """Whether this rename is the Village origin's choice (location.md).
+    """Whether this rename is the Origin's choice of skill (location.md).
 
     "Village: Street smarts OR survival (choose)": the one point the Origin
-    granted (``origin_skill``) moves to the other of the two, and nothing
-    else rides with it.
+    granted (``origin_skill``) moves to another skill its grant may be held
+    in, and nothing else rides with it. Any origin whose row in the canon's
+    location table names more than one skill offers the choice; on the
+    public pages that is Village alone.
     """
-    choices = _grant_skills("Village")
+    choices = _grant_skills(character.location)
     return (
-        character.location == "Village"
+        len(choices) > 1
         and character.origin_skill == old_skill
         and old_skill in choices
         and new_skill in choices
         and old_skill != new_skill
-        and int((character.skills or {}).get(old_skill, 0)) == LOCATION_SKILL_POINTS
+        and int((character.skills or {}).get(old_skill, 0))
+        == character_rules().location.skill_points
     )
 
 
@@ -1919,7 +1921,7 @@ def apply_skill_rename(
         # The Origin's point joins a Survival or Street Smarts the character
         # already holds from a track (location.md: "choose").
         del skills[old_skill]
-        skills[new_skill] += LOCATION_SKILL_POINTS
+        skills[new_skill] += character_rules().location.skill_points
         character.skills = skills
         character.origin_skill = new_skill
         return new_skill, skills[new_skill]
@@ -2276,9 +2278,7 @@ def apply_origin_to_literacy(
 
 def _grant_skills(origin: str) -> tuple[str, ...]:
     """The skills ``origin``'s grant may be held in, the granted one first."""
-    return tuple(
-        normalize_skill_name(name) for name in LOCATION_SKILL_CHOICES.get(origin, ())
-    )
+    return tuple(normalize_skill_name(name) for name in location_skill_choices(origin))
 
 
 def held_origin_skill(origin: str, skills: object) -> str:
@@ -2309,7 +2309,8 @@ def apply_origin_skill(
     """Move the point the Origin grants to follow the Origin (issue #754).
 
     location.md: "City: Street smarts ... Village: Street smarts OR survival
-    (choose) ... Rural: Survival", one point each (``LOCATION_SKILL_POINTS``).
+    (choose) ... Rural: Survival", one point each (the canon's
+    ``location.skill_points``).
     The grant was made at creation and never again, so a City character moved
     to Rural kept Street Smarts and got no Survival.
 
@@ -2338,6 +2339,7 @@ def apply_origin_skill(
     if old_origin == new_origin:
         return []
     new_choices = _grant_skills(new_origin)
+    skill_points = character_rules().location.skill_points
     held = character.origin_skill
     skills = dict(character.skills or {})
     if held and held in new_choices and held in skills:
@@ -2345,14 +2347,14 @@ def apply_origin_skill(
     lines: list[tuple[str, object, str]] = []
     if held and held in skills:
         before = dict(skills)
-        skills[held] -= LOCATION_SKILL_POINTS
+        skills[held] -= skill_points
         if skills[held] <= 0:
             del skills[held]
         lines.append(
             (
                 "skills",
                 before,
-                f"{held} {LOCATION_SKILL_POINTS} taken back: the "
+                f"{held} {skill_points} taken back: the "
                 f"{old_origin or 'earlier'} origin's grant, which the "
                 f"{new_origin} origin does not give",
             )
@@ -2361,13 +2363,13 @@ def apply_origin_skill(
     if new_choices:
         before = dict(skills)
         granted = new_choices[0]
-        skills[granted] = skills.get(granted, 0) + LOCATION_SKILL_POINTS
+        skills[granted] = skills.get(granted, 0) + skill_points
         character.origin_skill = granted
         lines.append(
             (
                 "skills",
                 before,
-                f"{granted} {LOCATION_SKILL_POINTS} granted by the {new_origin} origin",
+                f"{granted} {skill_points} granted by the {new_origin} origin",
             )
         )
     character.skills = skills
@@ -2628,7 +2630,8 @@ def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> 
     else:
         _append_dice_log(
             character,
-            f"Location effects: {character.origin_skill} {LOCATION_SKILL_POINTS} "
+            f"Location effects: {character.origin_skill} "
+            f"{character_rules().location.skill_points} "
             f"point kept from before, {literacy_check_text(location)}",
         )
     return "; ".join([f"rolled the origin: {log}", *(line for *_, line in followed)])

@@ -47,10 +47,10 @@ function sessionIdFrom(output) {
 const SEED_DRAFT = `
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
-from gm.ledger import DRAFT_DEFAULTS
+from gm.ledger import draft_defaults
 from gm.testing import run_actions, session_with_character
 user = get_user_model().objects.get(username='${TEST_USER.username}')
-draft = dict(DRAFT_DEFAULTS)
+draft = draft_defaults()
 draft.update(name='Wren', strength=13, dexterity=12, intelligence=11, wisdom=10, constitution=14, charisma=9, fatigue_roll=7)
 session = session_with_character(user, draft, name='Ledger E2E')
 wren = session.attached_characters().get().pk

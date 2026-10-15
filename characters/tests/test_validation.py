@@ -6,16 +6,19 @@ most of its imports inline inside test methods.
 
 import re
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.test import TestCase
 
-from characters.constants import FATIGUE_ROLL_MAXIMUM
 from characters.models import (
     CHARACTER_INT_FIELD_MAX,
     CHARACTER_INT_FIELD_MIN,
     Character,
+    character_int_field_maximum,
+    character_int_field_minimum,
 )
+from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
 
@@ -288,27 +291,8 @@ class IntFieldMaxMatchesModelFieldTypeTest(TestCase):
         models.PositiveIntegerField: 2147483647,
     }
 
-    # Fields whose own rule caps them below what their column could store,
-    # so the column type is not the thing to compare against. Each entry names
-    # the constant that is the single source of truth for that rule, so a
-    # change to the rule and a stale CHARACTER_INT_FIELD_MAX still cannot
-    # drift apart.
-    EXPECTED_CAP_BY_FIELD = {
-        # The Fatigue roll is 2d6 and nothing wider (issue #653).
-        "fatigue_roll": FATIGUE_ROLL_MAXIMUM,
-    }
-
     def test_cap_matches_actual_model_field_type(self):
         for field_name, configured_cap in CHARACTER_INT_FIELD_MAX.items():
-            if field_name in self.EXPECTED_CAP_BY_FIELD:
-                self.assertEqual(
-                    configured_cap,
-                    self.EXPECTED_CAP_BY_FIELD[field_name],
-                    f"{field_name} is capped by a rule of its own, and "
-                    "CHARACTER_INT_FIELD_MAX no longer matches the constant "
-                    "that states it",
-                )
-                continue
             field_class = Character._meta.get_field(field_name).__class__
             self.assertIn(
                 field_class,
@@ -325,6 +309,22 @@ class IntFieldMaxMatchesModelFieldTypeTest(TestCase):
                 f"{expected_cap}) but CHARACTER_INT_FIELD_MAX caps it at "
                 f"{configured_cap} -- update the dict in characters/models.py",
             )
+
+    def test_a_roll_is_capped_by_its_dice_not_its_column(self):
+        """The Fatigue roll is its dice and nothing wider (issue #653): the
+        cap the endpoint and the import apply is the canon's, read when asked."""
+        self.assertEqual(
+            character_int_field_maximum("fatigue_roll"),
+            character_rules().fatigue_roll.maximum,
+        )
+        for field_name in CHARACTER_INT_FIELD_MAX:
+            if field_name == "fatigue_roll":
+                continue
+            with self.subTest(field=field_name):
+                self.assertEqual(
+                    character_int_field_maximum(field_name),
+                    CHARACTER_INT_FIELD_MAX[field_name],
+                )
 
 
 class IntFieldMinMatchesModelValidatorTest(TestCase):
@@ -778,3 +778,30 @@ class JSONFieldTypeValidatorTest(TestCase):
 
         with self.assertRaises(ValidationError):
             validate_history_size({"not": "a list"})
+
+
+class CanonRuledIntFieldFloorTest(TestCase):
+    """The Fatigue roll's and the age's floors are the canon's (issue #59).
+
+    Their columns carry named validators that read the loaded rules, so no
+    MinValueValidator states a number and :data:`CHARACTER_INT_FIELD_MIN`
+    holds the column's 0; :func:`character_int_field_minimum` applies the
+    rule, the one the validators hold the column to.
+    """
+
+    def test_the_floor_is_read_from_the_rules(self):
+        rules = character_rules()
+        self.assertEqual(
+            character_int_field_minimum("fatigue_roll"), rules.fatigue_roll.minimum
+        )
+        self.assertEqual(character_int_field_minimum("age"), rules.age.starting)
+        self.assertEqual(character_int_field_minimum("total_xp"), 0)
+
+    def test_the_column_refuses_what_the_floor_refuses(self):
+        for field_name in ("fatigue_roll", "age"):
+            floor = character_int_field_minimum(field_name)
+            field = Character._meta.get_field(field_name)
+            with self.subTest(field=field_name):
+                field.run_validators(floor)
+                with self.assertRaises(ValidationError):
+                    field.run_validators(floor - 1)
