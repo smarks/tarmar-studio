@@ -23,9 +23,9 @@ is imported only on the path that raises it, so a correct configuration loads
 no Django module at all (``gm.tests`` holds ``gm.engine``'s import chain to
 that).
 
-A canon directory holds the ``dm-rules/`` pages plus five JSON files and
+A canon directory holds the ``dm-rules/`` pages plus six JSON files and
 the Games Master's world digest, all read once per process (issues #918,
-#919, #960 and #59; ``reference.apps`` has ``runserver`` watch them):
+#919, #960, #59 and #70; ``reference.apps`` has ``runserver`` watch them):
 
 - ``canon.json`` (optional): ``{"name": "tarmar" | "default"}``, which canon
   this is, as :data:`CANON_NAME` reports it. Without the file a directory is
@@ -55,8 +55,16 @@ the Games Master's world digest, all read once per process (issues #918,
   attribute, Fatigue and literacy rolls, the height and weight tables, and the
   provenance, location and wealth percentile tables, with an optional
   ``rulings`` list. Read by ``characters.rules``, whose docstring gives the
-  full schema. Both rules files are read the one strict way
-  ``reference.rules_file`` holds.
+  full schema.
+- ``skill-rules.json`` (required for skills and prior experience): the
+  numbers the skills and experience code reads, as the public prior
+  experience, attributes and skills pages state them: the skill tracks and
+  their d20 tables, the experience ladder, the Arcane cost multiplier, the
+  survival roll, the aging table, the attribute modifier table, and the skill
+  and attribute checks, with an optional ``rulings`` list. Read by
+  ``characters.skill_rules``, whose docstring gives the full schema. The
+  three rules files are read the one strict way ``reference.rules_file``
+  holds.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's
   system prompt, used verbatim less its trailing newlines. Without it
   ``gm.engine`` uses a one-paragraph built-in fallback and logs a warning.
@@ -134,8 +142,8 @@ CANON_NAV_FILE_NAME = "nav.json"
 CANON_MAPS_FILE_NAME = "maps.json"
 # The canon JSON files the reference search index fingerprints
 # (``reference.search_index``): an edit to one rebuilds the index.
-# ``magic-rules.json`` and ``character-rules.json`` are not among them,
-# since no page or nav entry depends on either.
+# ``magic-rules.json``, ``character-rules.json`` and ``skill-rules.json`` are
+# not among them, since no page or nav entry depends on any of them.
 CANON_JSON_FILE_NAMES: tuple[str, ...] = (
     CANON_MANIFEST_FILE_NAME,
     CANON_NAV_FILE_NAME,
@@ -334,6 +342,14 @@ MAGIC_RULES_FILE = DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME
 # public character pages' numbers.
 CANON_CHARACTER_RULES_FILE_NAME = "character-rules.json"
 CHARACTER_RULES_FILE = DM_RULES_DIR / CANON_CHARACTER_RULES_FILE_NAME
+
+# The skills and experience rules (issue #70): the skill tracks, the
+# experience ladder, the skill cost, the survival roll, the aging table, the
+# attribute modifiers and the skill and attribute checks, read the same strict
+# way by ``characters.skill_rules``. Every canon carries one; the default
+# canon's holds the public pages' numbers.
+CANON_SKILL_RULES_FILE_NAME = "skill-rules.json"
+SKILL_RULES_FILE = DM_RULES_DIR / CANON_SKILL_RULES_FILE_NAME
 
 # The rest of what a canon directory may hold beside its pages (issue #921):
 # the author's documents, the guides generated from the canon, the Tarmar-only

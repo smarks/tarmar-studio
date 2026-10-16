@@ -1,9 +1,11 @@
 """The strict reader every canon rules file shares (issue #59).
 
 A canon carries its rules as JSON files beside its pages:
-``magic-rules.json`` (``battle.magic_rules``) and, from issue #59,
-``character-rules.json``. Each is read the same strict way, so a canon
-author's mistake stops the server instead of becoming a quiet default:
+``magic-rules.json`` (``battle.magic_rules``), from issue #59
+``character-rules.json`` (``characters.rules``) and from issue #70
+``skill-rules.json`` (``characters.skill_rules``). Each is read the same
+strict way, so a canon author's mistake stops the server instead of becoming
+a quiet default:
 
 - a missing or unreadable file, or one that is not JSON, is refused;
 - a key repeated in one object is refused (``json.loads`` alone keeps the
@@ -26,8 +28,9 @@ field path, e.g. ``push.failure_bands[1].highest_margin``.
 Free of Django on purpose, like ``reference.paths``: ``characters.dice`` is in
 ``gm.engine``'s import chain, which the offline CLI imports with no Django
 configured, and ``characters.rules``, which reads its file through here, is
-where ``characters.dice`` takes its numbers from once issue #59 seats them
-(``gm.tests``' ``test_engine_imports_without_django`` holds both to that).
+where ``characters.dice`` takes its numbers from once issue #59 seats them;
+``characters.skill_rules`` is read the same way (``gm.tests``'
+``test_engine_imports_without_django`` holds all three to that).
 """
 
 from collections.abc import Callable, Iterator, Sequence
@@ -203,6 +206,15 @@ class RulesFileReader:
         if not isinstance(value, int) or isinstance(value, bool):
             self.fail(field_path, f"must be an integer, got {value!r}")
         return value
+
+    def integers(
+        self, fields: dict[str, Any], field_path: str, names: tuple[str, ...]
+    ) -> dict[str, int]:
+        """The integer fields ``names`` of one object read by
+        :meth:`json_object`, by name."""
+        return {
+            name: self.integer(fields[name], f"{field_path}.{name}") for name in names
+        }
 
     def optional_integer(self, value: Any, field_path: str) -> int | None:
         """An integer or ``null``."""

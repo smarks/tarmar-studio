@@ -2097,7 +2097,7 @@ class NormalizeSkillNamePatternsTest(TestCase):
         # whitespace runs the function would have collapsed, so each stays
         # linear on its own. The inputs marked "guard" were fast for the old
         # code too; they hold the new code's own paths to the same bound.
-        from characters.skills import (
+        from characters.skill_names import (
             _BONUS_IN_PARENTHESES,
             _PARENTHESES,
             _ROMAN_NUMERAL_SUFFIX,

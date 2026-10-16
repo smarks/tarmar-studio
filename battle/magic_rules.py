@@ -393,15 +393,16 @@ class _MagicRulesFileReader(RulesFileReader):
         if value is None:
             return None
         fields = self.json_object(value, field_path, RUNAWAY_FIELDS)
-        integers = {
-            name: self.integer(fields[name], f"{field_path}.{name}")
-            for name in (
+        integers = self.integers(
+            fields,
+            field_path,
+            (
                 "drain_multiplier_of_cost",
                 "drain_flat",
                 "helper_cost_multiplier_of_cost",
                 "effect_bonus_per_turn",
-            )
-        }
+            ),
+        )
         with self.wrapped_value_errors(field_path):
             return RunawayRules(
                 **integers,

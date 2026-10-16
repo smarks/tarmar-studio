@@ -29,6 +29,7 @@ from common.rolling import Roller, RollRecord, parse_dice_specification
 
 from .constants import CORE_ATTRIBUTE_FIELDS, point_buy_budget_note
 from .rules import CoinRoll, character_rules
+from .skill_names import normalize_skill_name
 
 # The module-default roller every helper below rolls through. Unseeded, so it
 # draws from the module-global ``random`` (see ``common.rolling.Roller``).
@@ -422,10 +423,6 @@ def location_effects(location: str) -> tuple[dict[str, int], str]:
         to its starting points (empty for "Consult GM"), and ``log_entry``
         records both the grant and the literacy-check modifier for the dice log.
     """
-    # Deferred: characters.skills imports this module, so importing it at module
-    # scope would be circular.
-    from .skills import normalize_skill_name
-
     location_table = character_rules().location
     row = location_table.row_labelled(location)
     skill_name = row.granted_skill if row is not None else None

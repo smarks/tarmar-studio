@@ -474,9 +474,10 @@ ATTRIBUTE_CHECK_MAXIMUM = 18
 #: The widest situational modifier a Game Master may set on an attribute
 #: check's target, either way (#953): a situational call, separate from the
 #: survival save's penalty in injury-thresholds-death.md, which only
-#: ``survival_save`` applies. Past ten the check is decided before the dice
-#: fall (a score of 3 to 18 against a 3d6 of 3 to 18), so a Game Master who
-#: means that rules it rather than rolls it.
+#: ``survival_save`` applies. The limit is a ruling, not where the dice settle
+#: the check: at +10 a score of 8 or more cannot fail, but a score of 3 needs
+#: +15 before the result is certain. A Game Master who means a result to be
+#: certain rules it rather than rolls it.
 MAX_ATTRIBUTE_CHECK_MODIFIER = 10
 
 
