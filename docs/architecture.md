@@ -979,7 +979,7 @@ as the name of the chip frame a record-changing action produces
 (`ActionResult.procedure`, `GMTurnRecord.procedures`, the SSE key `procedure`).
 
 The 24 action names live once, in `gm/turn_engine/policy.py::ACTION_NAMES`, and
-are declared to the model by `gm/engine.py::_plan_schema_section`:
+are declared to the model by `gm/engine.py::section_plan_schema`:
 
 | Group | Actions |
 | --- | --- |
@@ -1085,12 +1085,15 @@ graph TD
     last --> ollama["ollama_client.stream_chat<br/>think false, GM_MODEL, GM_NUM_CTX"]
 ```
 
-The prompt is built from four cached constants, never assembled per request:
-`SYSTEM_PROMPT`, `AIDE_SYSTEM_PROMPT`, `DM_PLAY_SYSTEM_PROMPT`,
-`DM_SYSTEM_PROMPT`, selected by
-`SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE[(is_game_master, mode)]`. The schema
-section is last on purpose so the growing prefix stays cacheable on the Ollama
-side.
+The prompt is one of four cached builders, each assembled the first time a
+turn asks and the same string for the life of the process, never per request:
+`system_prompt()`, `aide_system_prompt()`, `dm_play_system_prompt()`,
+`dm_system_prompt()`, selected by
+`system_prompts_by_authority_and_mode()[(is_game_master, mode)]`. They are
+built on first use rather than at import because two sections are built from
+tables that move to the canon's `skill-rules.json` (issue #70), which no module
+may read while it imports. The schema section is last on purpose so the growing
+prefix stays cacheable on the Ollama side.
 
 ### Canon retrieval (rules lookup, issues #605 and #333)
 
@@ -1746,8 +1749,8 @@ player can read.
 | Who may control a seat | `battle/access.py::decides_for` / `can_control`, `battle/control.py` |
 | A new rules profile | `battle/profiles.py` (`BattleProfile` subclass), `battle/persistence.py::PROFILE_CHOICES`, `battle/viewmodel.py` |
 | What the arena draws | `battle/viewmodel.py` for the payload, `static/js/battle.js` for the drawing, `battle/templates/battle/_arena.html` |
-| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants and `SYSTEM_PROMPT_SECTIONS` |
-| Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::_plan_schema_section` |
+| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, `section_core()`, `section_plan_schema()` and `system_prompt_sections()` |
+| Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::section_plan_schema` |
 | What the model is told about the session | `gm/turn_engine/state.py::state_block` |
 | The two model calls' wording | `gm/turn_engine/messages.py` |
 | Refusals and who may do what | `gm/turn_engine/policy.py::TurnPolicy` |

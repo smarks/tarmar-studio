@@ -22,10 +22,10 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 - **Two separate Ollama integrations:** the web app (`gm/` + `common/services/
   ollama_client.py`, httpx) and the offline CLI (`cli/`), which speak to Ollama
   through that same client.
-  Both send `gm.engine.SYSTEM_PROMPT` as the system message to the model named
-  by `GM_MODEL` (default `qwen3:32b`), with `GM_NUM_CTX`/`GM_TEMPERATURE` as
-  options and `think: false` — see `gm/model_config.py`. There is no custom
-  model or Modelfile.
+  Both send the prompt `gm.engine.system_prompt_for` chooses as the system
+  message to the model named by `GM_MODEL` (default `qwen3:32b`), with
+  `GM_NUM_CTX`/`GM_TEMPERATURE` as options and `think: false` — see
+  `gm/model_config.py`. There is no custom model or Modelfile.
 - **Rules content lives in two places:** `reference/content/` (markdown served
   by the reference site) and whatever `settings.RULES_DIR` points at (consumed by
   the GM). Both the web GM (`settings.RULES_DIR` default) and the offline CLI
@@ -92,7 +92,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 ### `gm/` — AI Game Master
 - `models.py` — `GMSession`: persists a conversation as JSON history; `message_count` excludes system messages.
 - `views.py` — `GMChatView` (page), `gm_stream` (SSE: streams Ollama tokens, strips `<think>`, persists on completion, handles `state`/`rules`/`roll` commands; logs failures), `gm_save`/`gm_delete`.
-- `engine.py` — framework-free pieces shared with the offline CLI (`cli/gm.py`): `SYSTEM_PROMPT` (the full GM prompt: role, rules digest with code-rendered matrix/crit/fumble fragments, magic, equipment, a world digest of `reference/content/`, GM guidelines), `roll_dice`, `DEFAULT_RULES_DIR` (canonical `reference/content/public-rules`), `load_rules_from_dir` (reads a rules dir into one string).
+- `engine.py` — framework-free pieces shared with the offline CLI (`cli/gm.py`): `system_prompt()` and its three siblings, chosen by `system_prompt_for` (the full GM prompt, built on first use and cached: role, rules digest with code-rendered matrix/crit/fumble fragments, magic, equipment, a world digest of `reference/content/`, GM guidelines), `roll_dice`, `DEFAULT_RULES_DIR` (canonical `reference/content/public-rules`), `load_rules_from_dir` (reads a rules dir into one string).
 - `model_config.py` — Django-free `GMModelConfig`: env names and defaults for `GM_MODEL`, `GM_NUM_CTX`, `GM_TEMPERATURE`, read by `settings.py` and by `cli/gm.py`.
 - `services.py` — `get_gm_model`/`get_gm_options` (from `settings.GM_MODEL`/`GM_NUM_CTX`/`GM_TEMPERATURE`), `get_system_message`, `load_rules` (calls `engine.load_rules_from_dir` against `settings.RULES_DIR`), `roll_dice` (`NdM±K`), message builders.
 - `urls.py` — chat, stream, save, delete. `admin.py` — registers `GMSession`.

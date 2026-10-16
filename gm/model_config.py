@@ -68,7 +68,7 @@ DEFAULT_GM_TEMPERATURE = 0.8
 #: sooner each time the prompt grows.
 #:
 #: Reference figures, 2026-10-09: under the Tarmar canon the shortest prompt
-#: (``SYSTEM_PROMPT``) estimates at 9,685 tokens, and the deploy warm-up's
+#: (``system_prompt()``) estimates at 9,685 tokens, and the deploy warm-up's
 #: probe, which sends it with a one-line question, measured 10,280 prompt
 #: tokens from Ollama -- the four-characters-per-token estimate runs about 6%
 #: under the model's tokenizer. The longest of the four prompts (a DM consulting

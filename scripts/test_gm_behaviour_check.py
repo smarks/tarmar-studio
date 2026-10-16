@@ -279,19 +279,19 @@ def test_both_of_a_game_masters_modes_are_covered():
 def test_each_persona_expects_the_prompt_its_role_and_mode_produce():
     """check_mode's four states, named the way the engine names them."""
     from gm.engine import (
-        AIDE_SYSTEM_PROMPT,
-        DM_PLAY_SYSTEM_PROMPT,
-        DM_SYSTEM_PROMPT,
-        SYSTEM_PROMPT,
+        aide_system_prompt,
+        dm_play_system_prompt,
+        dm_system_prompt,
+        system_prompt,
     )
 
-    assert harness.PLAYER.expected_prompt is SYSTEM_PROMPT
-    assert harness.GAME_MASTER.expected_prompt is DM_SYSTEM_PROMPT
-    assert harness.GAME_MASTER_PLAYING.expected_prompt is DM_PLAY_SYSTEM_PROMPT
-    assert harness.prompt_name(AIDE_SYSTEM_PROMPT) == "AIDE_SYSTEM_PROMPT"
-    assert harness.prompt_name(DM_PLAY_SYSTEM_PROMPT) == "DM_PLAY_SYSTEM_PROMPT"
+    assert harness.PLAYER.expected_prompt is system_prompt()
+    assert harness.GAME_MASTER.expected_prompt is dm_system_prompt()
+    assert harness.GAME_MASTER_PLAYING.expected_prompt is dm_play_system_prompt()
+    assert harness.prompt_name(aide_system_prompt()) == "aide_system_prompt()"
+    assert harness.prompt_name(dm_play_system_prompt()) == "dm_play_system_prompt()"
     assert (
-        harness.prompt_name("nothing") == "a prompt that is none of the known constants"
+        harness.prompt_name("nothing") == "a prompt that is none of the known builders"
     )
 
 

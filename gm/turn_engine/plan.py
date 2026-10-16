@@ -60,8 +60,16 @@ from .policy import ACTION_NAMES, TurnPolicy, already_refused_error
 #: The six attributes, written in full as the schema asks.
 ATTRIBUTE_NAMES: tuple[str, ...] = tuple(name for name, _short in CORE_ATTRIBUTE_FIELDS)
 
-#: Every track a plan may name; ``random`` lets the rules choose.
-TRACK_NAMES: tuple[str, ...] = (*ALL_TRACKS, "random")
+
+def track_names() -> tuple[str, ...]:
+    """Every track a plan may name; ``random`` lets the rules choose.
+
+    Asked when a plan is read, not fixed at import, because the tracks move
+    to the canon's ``skill-rules.json`` (issue #70), which no module may read
+    while it imports.
+    """
+    return (*ALL_TRACKS, "random")
+
 
 #: The most actions one plan may hold. A turn asking for more is a plan gone
 #: wrong, not a table's real request.
@@ -742,8 +750,9 @@ def _read_action(
             if isinstance(track, str)
             else ""
         )
-        if normalised not in TRACK_NAMES:
-            reader.fail("track must be one of " + ", ".join(TRACK_NAMES))
+        allowed_tracks = track_names()
+        if normalised not in allowed_tracks:
+            reader.fail("track must be one of " + ", ".join(allowed_tracks))
         fields["track"] = normalised
         fields["years"] = reader.whole("years", 1, MAX_EXPERIENCE_YEARS_PER_RUN)
     elif name == "spend_skill_points":

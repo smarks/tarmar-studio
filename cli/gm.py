@@ -54,7 +54,7 @@ from .ui import Spinner
 # Model, context window and temperature come from GM_MODEL / GM_NUM_CTX /
 # GM_TEMPERATURE -- the same variables and defaults the web GM reads
 # (gm/model_config.py is the single source of truth). There is no custom
-# ``tarmar-gm`` model any more; the full GM prompt is SYSTEM_PROMPT below.
+# ``tarmar-gm`` model any more; the full GM prompt is ``system_prompt_for``'s below.
 GM_CONFIG = GMModelConfig.from_environ()
 MODEL = GM_CONFIG.model
 # Same canonical rules tree the web GM defaults to (settings.RULES_DIR) --

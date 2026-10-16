@@ -86,7 +86,7 @@ class GlossaryDriftTest(BaseTestCase):
             attack_rolls,
         )
         self.assertNotIn("General skill checks, attribute checks,", attack_rolls)
-        prompt = engine.SECTION_CORE + engine.SECTION_COMBAT
+        prompt = engine.section_core() + engine.SECTION_COMBAT
         self.assertIn(
             "A skill check rolls 2d6 + the governing attribute's modifier + the "
             "skill level",

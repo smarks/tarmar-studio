@@ -19,7 +19,7 @@ from characters.skills import (
     SURVIVAL_TARGETS,
 )
 from gm import rules_lookup
-from gm.engine import SECTION_PLAN_SCHEMA
+from gm.engine import section_plan_schema
 
 
 class LookUpTest(SimpleTestCase):
@@ -28,7 +28,7 @@ class LookUpTest(SimpleTestCase):
         for subject in rules_lookup.subjects():
             with self.subTest(subject=subject):
                 self.assertTrue(rules_lookup.look_up(subject))
-                self.assertIn(subject, SECTION_PLAN_SCHEMA)
+                self.assertIn(subject, section_plan_schema())
 
     def test_a_track_gets_its_own_target_from_the_rules(self):
         for track, target in SURVIVAL_TARGETS.items():

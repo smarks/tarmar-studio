@@ -27,7 +27,7 @@ from common.test_helpers import (
 )
 from gm import summary as folding
 from gm import views
-from gm.engine import SECTION_PLAN_SCHEMA, system_prompt_for
+from gm.engine import section_plan_schema, system_prompt_for
 from gm.models import GMEvent, GMSession, GMTurnRecord
 from gm.retrieval import CANON_KIND, RECAP_KIND
 from gm.services import RecapOutOfTime, save_fold, write_fold, write_session_recap
@@ -401,7 +401,7 @@ class TheSystemPromptSurvivesAFoldTest(PlanTurnTestCase):
             with self.subTest(call=name):
                 self.assertEqual(call[0]["role"], "system")
                 self.assertEqual(call[0]["content"], expected_prompt)
-                self.assertIn(SECTION_PLAN_SCHEMA, call[0]["content"])
+                self.assertIn(section_plan_schema(), call[0]["content"])
 
     def test_the_recap_follows_the_prompt_and_is_the_only_other_preamble(self):
         session, calls = self.play_a_folded_session()

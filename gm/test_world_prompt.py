@@ -185,7 +185,7 @@ class WorldSectionFromCanonTest(SimpleTestCase):
         completed = self.import_the_engine_on_a_canon_without_prompt_files(
             "from gm import engine\n"
             "assert engine.SECTION_WORLD == engine.FALLBACK_WORLD_SECTION\n"
-            "assert engine.FALLBACK_WORLD_SECTION in engine.SYSTEM_PROMPT\n",
+            "assert engine.FALLBACK_WORLD_SECTION in engine.system_prompt()\n",
             canon_json='{"name": "default"}',
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)

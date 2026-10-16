@@ -65,6 +65,7 @@ and 0 with a SKIPPED banner when Ollama is unreachable. It is never part of
 """
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -1084,12 +1085,20 @@ def _track_pattern(track: str) -> str:
     return r"[\s_-]".join(re.escape(part) for part in track.split("_"))
 
 
-_TRACK_NAME = re.compile(
-    r"\b("
-    + "|".join(_track_pattern(track) for track in skills.SURVIVAL_TARGETS)
-    + r")",
-    re.IGNORECASE,
-)
+def _tracks_alternation() -> str:
+    """Every track as prose writes it, as one regex alternation."""
+    return "|".join(_track_pattern(track) for track in skills.SURVIVAL_TARGETS)
+
+
+@functools.cache
+def _track_name() -> re.Pattern[str]:
+    """A track named in prose.
+
+    Compiled when first asked, not at import, because the tracks move to
+    the canon's ``skill-rules.json`` (issue #70), which no module may read
+    while it imports.
+    """
+    return re.compile(r"\b(" + _tracks_alternation() + r")", re.IGNORECASE)
 
 
 def _track_key(said: str) -> str:
@@ -1097,13 +1106,14 @@ def _track_key(said: str) -> str:
     return re.sub(r"[\s-]", "_", said.casefold())
 
 
-_FIGURE_FOR_TRACK = re.compile(
-    r"(\d{1,2})\s*(?:\+|or\s+(?:more|higher|better|above))?\s+(?:for|on)\s+"
-    r"(?:the\s+)?("
-    + "|".join(_track_pattern(track) for track in skills.SURVIVAL_TARGETS)
-    + r")",
-    re.IGNORECASE,
-)
+@functools.cache
+def _figure_for_track() -> re.Pattern[str]:
+    """A figure followed by the track it is for: "8 for Underworld"."""
+    return re.compile(
+        r"(\d{1,2})\s*(?:\+|or\s+(?:more|higher|better|above))?\s+(?:for|on)\s+"
+        r"(?:the\s+)?(" + _tracks_alternation() + r")",
+        re.IGNORECASE,
+    )
 
 
 def _nearest_track(clause: str, position: int) -> str | None:
@@ -1118,15 +1128,15 @@ def _nearest_track(clause: str, position: int) -> str | None:
     whatever came before it: "(8 for Underworld, 12 for Campaigners)" puts
     the 12 on the campaigner track (fourth review of #760).
     """
-    named_after = _FIGURE_FOR_TRACK.match(clause, position)
+    named_after = _figure_for_track().match(clause, position)
     if named_after is not None:
         return _track_key(named_after.group(2))
     before = [
-        match for match in _TRACK_NAME.finditer(clause) if match.start() < position
+        match for match in _track_name().finditer(clause) if match.start() < position
     ]
     if before:
         return _track_key(before[-1].group(1))
-    after = _TRACK_NAME.search(clause, position)
+    after = _track_name().search(clause, position)
     return _track_key(after.group(1)) if after else None
 
 
@@ -1222,16 +1232,21 @@ def _as_survival_target(figure: int, bound: str, outcome: str) -> int:
     return figure
 
 
-#: A track named beside its figure: "Campaigner 9", "campaigner: 9", a table
-#: row "| Campaigner | 12 |". The lookup's all-tracks answer, and tables of
-#: it, put the targets this way; neither was read (review of #760).
-_TRACK_FIGURE = re.compile(
-    r"\b("
-    + "|".join(_track_pattern(track) for track in skills.SURVIVAL_TARGETS)
-    + r")(?:\s+track)?\s*[:|=–-]?\s*\|?\s*(\d{1,2})\b"
-    + _COUNTED_NOUN,
-    re.IGNORECASE,
-)
+@functools.cache
+def _track_figure() -> re.Pattern[str]:
+    """A track named beside its figure.
+
+    "Campaigner 9", "campaigner: 9", a table row "| Campaigner | 12 |". The
+    lookup's all-tracks answer, and tables of it, put the targets this way;
+    neither was read (review of #760).
+    """
+    return re.compile(
+        r"\b("
+        + _tracks_alternation()
+        + r")(?:\s+track)?\s*[:|=–-]?\s*\|?\s*(\d{1,2})\b"
+        + _COUNTED_NOUN,
+        re.IGNORECASE,
+    )
 
 
 @dataclass(frozen=True)
@@ -1275,11 +1290,11 @@ def read_clause(clause: str) -> ClauseReading:
             found.append(
                 (match.start(1), figure, _nearest_track(blanked, match.start(1)))
             )
-    for match in _TRACK_FIGURE.finditer(blanked):
+    for match in _track_figure().finditer(blanked):
         found.append((match.start(2), int(match.group(2)), _track_key(match.group(1))))
     # "(8 for Underworld, 12 for Campaigners)": the figure first, then its
     # track (fourth review of #760).
-    for match in _FIGURE_FOR_TRACK.finditer(blanked):
+    for match in _figure_for_track().finditer(blanked):
         found.append((match.start(1), int(match.group(1)), _track_key(match.group(2))))
     comparison = _DICE_COMPARISON.search(blanked)
     if comparison is not None and comparison.group(3):
@@ -1411,7 +1426,7 @@ def survival_sentences(text: str) -> Iterator[str]:
         about_survival = any(word in paragraph.lower() for word in _SURVIVAL_CONTEXT)
         for sentence in _survival_sentence_split(paragraph):
             if any(word in sentence.lower() for word in _SURVIVAL_CONTEXT) or (
-                about_survival and _TRACK_FIGURE.search(sentence)
+                about_survival and _track_figure().search(sentence)
             ):
                 yield sentence
 
@@ -1811,18 +1826,18 @@ class Persona:
 
 
 def prompt_name(prompt: str) -> str:
-    """Name the constant ``prompt`` is, for a report that reads like the code."""
+    """Name the builder ``prompt`` came from, for a report that reads like the code."""
     from gm import engine
 
-    for name in (
-        "SYSTEM_PROMPT",
-        "AIDE_SYSTEM_PROMPT",
-        "DM_PLAY_SYSTEM_PROMPT",
-        "DM_SYSTEM_PROMPT",
+    for builder in (
+        engine.system_prompt,
+        engine.aide_system_prompt,
+        engine.dm_play_system_prompt,
+        engine.dm_system_prompt,
     ):
-        if getattr(engine, name) == prompt:
-            return name
-    return "a prompt that is none of the known constants"
+        if builder() == prompt:
+            return f"{builder.__name__}()"
+    return "a prompt that is none of the known builders"
 
 
 PLAYER = Persona(

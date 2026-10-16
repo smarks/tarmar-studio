@@ -24,7 +24,7 @@ from reference.paths import (
     TARMAR_CANON_NAME,
 )
 
-from .engine import SECTION_MAGIC, SYSTEM_PROMPT, load_magic_section
+from .engine import SECTION_MAGIC, load_magic_section, system_prompt
 from .turn_record import prompt_hash
 
 # ``prompt_hash`` of the old ``SECTION_MAGIC`` constant, as it stood in
@@ -75,7 +75,7 @@ class MagicSectionFromCanonTest(SimpleTestCase):
         self.assertEqual(
             SECTION_MAGIC, MAGIC_PROMPT_FILE.read_text(encoding="utf-8").rstrip("\n")
         )
-        self.assertIn(SECTION_MAGIC, SYSTEM_PROMPT)
+        self.assertIn(SECTION_MAGIC, system_prompt())
 
     def test_the_files_trailing_newlines_do_not_reach_the_prompt(self) -> None:
         magic_file = self.temporary_directory / "magic.md"

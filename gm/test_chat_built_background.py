@@ -23,7 +23,7 @@ from characters.services import BACKGROUND_ALREADY_ROLLED
 from common.test_helpers import BaseTestCase
 
 from . import roster
-from .engine import MODE_PLAY, SECTION_PLAN_SCHEMA
+from .engine import MODE_PLAY, section_plan_schema
 from .ledger import DraftLedger, draft_character, draft_defaults
 from .models import GMSession
 from .test_turn_engine_executor import ExecutorTestCase, plan
@@ -315,7 +315,7 @@ class BackgroundPlanTest(SimpleTestCase):
         self.assertIn("roll_background", ACTION_NAMES)
         self.assertEqual(ACTION_STATUS["roll_background"], "rolling the background")
         self.assertIn(
-            '{"action": "roll_background", "character_id": 41}', SECTION_PLAN_SCHEMA
+            '{"action": "roll_background", "character_id": 41}', section_plan_schema()
         )
 
 
