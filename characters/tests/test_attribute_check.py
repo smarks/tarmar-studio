@@ -6,28 +6,10 @@ injury table's -1/-2 lowers the target here, and nobody names a direction
 it could be counted in backwards.
 """
 
-from dataclasses import replace
-
 from characters.services import CharacterChangeError
-from characters.skill_checks import (
-    MAX_ATTRIBUTE_CHECK_MODIFIER,
-    AttributeCheck,
-    attribute_check,
-)
-from common.rolling import Roller
-from common.test_helpers import BaseTestCase, create_character
-
-
-class ThreeFacesRoller(Roller):
-    """A dice-module roller whose 3d6 lands on the faces given."""
-
-    def __init__(self, *faces: int) -> None:
-        super().__init__(seed=0)
-        self.faces_to_give = faces
-
-    def roll(self, specification, *, purpose, **kwargs):
-        record = super().roll(specification, purpose=purpose, **kwargs)
-        return replace(record, faces=self.faces_to_give, total=sum(self.faces_to_give))
+from characters.skill_checks import AttributeCheck, attribute_check
+from characters.skill_rules import skill_rules
+from common.test_helpers import BaseTestCase, FacesRoller, create_character
 
 
 def hurt_to(character, *, fatigue_left: int) -> None:
@@ -49,7 +31,7 @@ class AttributeCheckTest(BaseTestCase):
         return attribute_check(
             self.character,
             "constitution",
-            roller=ThreeFacesRoller(*faces),
+            roller=FacesRoller(*faces),
             **options,
         )
 
@@ -139,7 +121,7 @@ class AGameMastersModifierTest(BaseTestCase):
         return attribute_check(
             self.character,
             "constitution",
-            roller=ThreeFacesRoller(*faces),
+            roller=FacesRoller(*faces),
             **options,
         )
 
@@ -184,21 +166,17 @@ class AGameMastersModifierTest(BaseTestCase):
                 self.check(4, 4, 4, modifier=modifier)
 
     def test_the_modifier_is_held_to_its_bound(self) -> None:
-        for edge in (-MAX_ATTRIBUTE_CHECK_MODIFIER, MAX_ATTRIBUTE_CHECK_MODIFIER):
+        limit = skill_rules().attribute_check.game_master_modifier_limit
+        for edge in (-limit, limit):
             with self.subTest(modifier=edge):
                 check = self.check(4, 4, 4, modifier=edge, is_game_master=True)
                 self.assertEqual(check.target, 12 + edge)
-        for past in (
-            -MAX_ATTRIBUTE_CHECK_MODIFIER - 1,
-            MAX_ATTRIBUTE_CHECK_MODIFIER + 1,
-        ):
+        for past in (-limit - 1, limit + 1):
             with (
                 self.subTest(modifier=past),
                 self.assertRaisesMessage(
                     CharacterChangeError,
-                    "modifier must be a whole number from "
-                    f"-{MAX_ATTRIBUTE_CHECK_MODIFIER} to "
-                    f"{MAX_ATTRIBUTE_CHECK_MODIFIER}",
+                    f"modifier must be a whole number from -{limit} to {limit}",
                 ),
             ):
                 self.check(4, 4, 4, modifier=past, is_game_master=True)

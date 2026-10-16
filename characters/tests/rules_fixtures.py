@@ -15,12 +15,12 @@ from unittest.mock import patch
 
 from characters.rules import CharacterRules, character_rules, load_character_rules
 from characters.skill_rules import SkillRules, load_skill_rules, skill_rules
-from gm.engine import clear_prompt_caches
 from reference.paths import (
     CANON_CHARACTER_RULES_FILE_NAME,
     CANON_SKILL_RULES_FILE_NAME,
     DEFAULT_CANON_DIR,
 )
+from reference.rules_file import forget_values_derived_from_rules
 
 #: The default canon's rules: the numbers the public character pages state.
 DEFAULT_CHARACTER_RULES: CharacterRules = load_character_rules(
@@ -35,16 +35,16 @@ DEFAULT_SKILL_RULES: SkillRules = load_skill_rules(
 
 
 def _forget_loaded_rules() -> None:
-    """Forget both rules files and every prompt built from them.
+    """Forget both rules files and every value built from them.
 
-    The Games Master's prompts are built from the loaded rules once and held
-    for the process (``gm.engine.clear_prompt_caches``), so a seated test that
-    reads a prompt reads one built from the seated rules, and no later test
-    reads one built from them.
+    The Games Master's prompts, and the patterns naming the canon's skills and
+    tracks, are built from the loaded rules once and held for the process
+    (:func:`reference.rules_file.derived_from_rules`), so a seated test reads
+    values built from the seated rules, and no later test reads those.
     """
     character_rules.cache_clear()
     skill_rules.cache_clear()
-    clear_prompt_caches()
+    forget_values_derived_from_rules()
 
 
 @contextmanager

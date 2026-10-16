@@ -22,7 +22,6 @@ from unittest.mock import patch
 from django.core.checks import Error, run_checks
 from django.test import SimpleTestCase
 
-from characters import skill_checks
 from characters.checks import SKILL_RULES_CHECK_ID, check_skill_rules
 from characters.skill_rules import (
     AGING_ATTRIBUTES,
@@ -133,7 +132,7 @@ INVENTED_RULES: dict[str, Any] = {
     "attribute_modifier": {"lowest_score": 2, "modifiers": [-2, -1, 0, 1, 2]},
     "skill_check": {
         "dice": "3d4",
-        "natural_success": 12,
+        "natural_success": 11,
         "natural_failure": 3,
         "focused_field_bonus": 2,
         "governing_attributes": {
@@ -217,7 +216,7 @@ INVENTED_SKILL_RULES = SkillRules(
     ),
     skill_check=SkillCheckRules(
         dice="3d4",
-        natural_success=12,
+        natural_success=11,
         natural_failure=3,
         focused_field_bonus=2,
         governing_attributes={
@@ -616,9 +615,9 @@ class SkillRulesFileTest(SimpleTestCase):
                 "natural_failure is 3d4, so it must be between 3 and 12; 2 was given",
             ),
             (
-                lambda rules: rules["skill_check"].update(natural_failure=12),
+                lambda rules: rules["skill_check"].update(natural_failure=11),
                 "skill_check:",
-                "natural_failure 12 must be below natural_success 12",
+                "natural_failure 11 must be below natural_success 11",
             ),
             (
                 lambda rules: rules["skill_check"].update(focused_field_bonus=-1),
@@ -859,52 +858,6 @@ class CanonSkillRulesTest(SimpleTestCase):
         with seated_skill_rules(INVENTED_SKILL_RULES):
             self.assertIs(skill_rules(), INVENTED_SKILL_RULES)
         self.assertEqual(skill_rules(), load_skill_rules(SKILL_RULES_FILE))
-
-
-class DefaultSkillRulesMatchTheCodeTablesTest(SimpleTestCase):
-    """The default canon's checks state what ``characters.skill_checks`` does.
-
-    Slice A of issue #70 proved the whole default file equal to the Python
-    tables. Slice B seated the tracks, the ladder, the skill cost, the
-    survival roll, the aging table and the modifier table and deleted their
-    tables; the drift tests in ``characters/tests/test_rules_consistency.py``
-    and ``test_dice_fidelity.py`` now hold those parts of the default file to
-    the pages. The checks are seated next, and this holds them until then.
-    """
-
-    rules = DEFAULT_SKILL_RULES
-
-    def test_the_checks_are_the_code_s(self) -> None:
-        skill_check = self.rules.skill_check
-        self.assertEqual(
-            (skill_check.minimum, skill_check.maximum),
-            (skill_checks.SKILL_CHECK_MINIMUM, skill_checks.SKILL_CHECK_MAXIMUM),
-        )
-        self.assertEqual(skill_check.natural_success, skill_checks.NATURAL_SUCCESS)
-        self.assertEqual(skill_check.natural_failure, skill_checks.NATURAL_FAILURE)
-        self.assertEqual(
-            skill_check.focused_field_bonus, skill_checks.FOCUSED_FIELD_BONUS
-        )
-        self.assertEqual(
-            list(skill_check.governing_attributes.items()),
-            list(skill_checks.GOVERNING_ATTRIBUTES.items()),
-        )
-        self.assertEqual(
-            dict(skill_check.implied_governing_attributes),
-            skill_checks.IMPLIED_GOVERNING_ATTRIBUTES,
-        )
-        attribute_check = self.rules.attribute_check
-        self.assertEqual(
-            (attribute_check.minimum, attribute_check.maximum),
-            (
-                skill_checks.ATTRIBUTE_CHECK_MINIMUM,
-                skill_checks.ATTRIBUTE_CHECK_MAXIMUM,
-            ),
-        )
-        self.assertEqual(
-            attribute_check.game_master_modifier_limit,
-            skill_checks.MAX_ATTRIBUTE_CHECK_MODIFIER,
-        )
 
 
 class SkillRulesCheckTest(SimpleTestCase):

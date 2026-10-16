@@ -113,6 +113,7 @@ from gm.models import (  # noqa: E402
     TableRuling,
 )
 from gm.services import get_system_message  # noqa: E402
+from reference.rules_file import derived_from_rules  # noqa: E402
 
 User = get_user_model()
 
@@ -1104,6 +1105,7 @@ def _tracks_alternation() -> str:
     return "|".join(_track_pattern(track) for track in skills.track_keys())
 
 
+@derived_from_rules
 @functools.cache
 def _track_name() -> re.Pattern[str]:
     """A track named in prose.
@@ -1120,6 +1122,7 @@ def _track_key(said: str) -> str:
     return re.sub(r"[\s-]", "_", said.casefold())
 
 
+@derived_from_rules
 @functools.cache
 def _figure_for_track() -> re.Pattern[str]:
     """A figure followed by the track it is for: "8 for Underworld"."""
@@ -1246,6 +1249,7 @@ def _as_survival_target(figure: int, bound: str, outcome: str) -> int:
     return figure
 
 
+@derived_from_rules
 @functools.cache
 def _track_figure() -> re.Pattern[str]:
     """A track named beside its figure.

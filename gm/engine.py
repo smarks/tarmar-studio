@@ -32,6 +32,7 @@ from reference.paths import (
     TARMAR_CANON_NAME,
     WORLD_PROMPT_FILE,
 )
+from reference.rules_file import derived_from_rules
 
 from . import rules_lookup
 
@@ -221,6 +222,7 @@ SECTION_NOT_DND = (
 )
 
 
+@derived_from_rules
 @functools.cache
 def section_core() -> str:
     """The core resolution section, built the first time a prompt needs it.
@@ -349,6 +351,7 @@ def _render_levels_fragment() -> str:
     )
 
 
+@derived_from_rules
 @functools.cache
 def section_character_creation() -> str:
     """The character creation section, built on first use for its ladder.
@@ -1006,6 +1009,7 @@ TIMES_OF_DAY: tuple[tuple[str, str], ...] = (
 )
 
 
+@derived_from_rules
 @functools.cache
 def section_plan_schema() -> str:
     """The plan format, last in every plan prompt so it stays in the cache.
@@ -1134,6 +1138,7 @@ def section_plan_schema() -> str:
     )
 
 
+@derived_from_rules
 @functools.cache
 def system_prompt_sections() -> tuple[str, ...]:
     """Every section the four prompts share, in the order they are sent."""
@@ -1158,12 +1163,14 @@ def _prompt(*addenda: str) -> str:
     return "\n\n".join((*system_prompt_sections(), *addenda))
 
 
+@derived_from_rules
 @functools.cache
 def system_prompt() -> str:
     """A player running a game."""
     return _prompt()
 
 
+@derived_from_rules
 @functools.cache
 def aide_system_prompt() -> str:
     """A player running a game for friends, answered as an aide.
@@ -1174,18 +1181,21 @@ def aide_system_prompt() -> str:
     return _prompt(SECTION_DM_AIDE)
 
 
+@derived_from_rules
 @functools.cache
 def dm_play_system_prompt() -> str:
     """A DM or admin playing a game."""
     return _prompt(SECTION_DM_AUTHORITY)
 
 
+@derived_from_rules
 @functools.cache
 def dm_system_prompt() -> str:
     """A DM or admin consulting the aide -- their default mode."""
     return _prompt(SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
 
 
+@derived_from_rules
 @functools.cache
 def system_prompts_by_authority_and_mode() -> Mapping[tuple[bool, str], str]:
     """The 2x2 itself, by ``(is_game_master, mode)``.
@@ -1202,32 +1212,6 @@ def system_prompts_by_authority_and_mode() -> Mapping[tuple[bool, str], str]:
             (True, MODE_AIDE): dm_system_prompt(),
         }
     )
-
-
-#: Every cached prompt builder, in the order they build on one another.
-PROMPT_BUILDERS = (
-    section_core,
-    section_character_creation,
-    section_plan_schema,
-    system_prompt_sections,
-    system_prompt,
-    aide_system_prompt,
-    dm_play_system_prompt,
-    dm_system_prompt,
-    system_prompts_by_authority_and_mode,
-)
-
-
-def clear_prompt_caches() -> None:
-    """Forget every built prompt, so the next turn builds them afresh.
-
-    The prompts are built from the loaded canon's rules and then held for the
-    life of the process. A test that seats other rules
-    (``characters.tests.rules_fixtures``) calls this so the prompts it reads
-    are built from them, and again afterwards so no later test reads them.
-    """
-    for builder in PROMPT_BUILDERS:
-        builder.cache_clear()
 
 
 def system_prompt_for(is_game_master: bool, mode: str | None = None) -> str:

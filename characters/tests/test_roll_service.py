@@ -42,11 +42,11 @@ class DiceModuleDelegationTest(SimpleTestCase):
             replayed = (dice.roll_d6(), dice.roll_d20(), dice.roll_d100())
         self.assertEqual(rolled, replayed)
 
-    def test_roll_2d6_faces_returns_both_faces_and_the_total(self):
-        from characters.dice import roll_2d6_faces
+    def test_roll_dice_faces_returns_every_face_and_the_total(self):
+        from characters.dice import roll_dice_faces
 
         with patch("characters.dice.random.randint", side_effect=[3, 4]):
-            self.assertEqual(roll_2d6_faces(), (3, 4, 7))
+            self.assertEqual(roll_dice_faces("2d6+1"), ((3, 4), 8))
 
     def test_the_survival_roll_returns_every_face_and_the_total(self):
         from characters.dice import roll_survival_dice

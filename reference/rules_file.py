@@ -31,6 +31,11 @@ configured, and ``characters.rules``, which reads its file through here, is
 where ``characters.dice`` takes its numbers from once issue #59 seats them;
 ``characters.skill_rules`` is read the same way (``gm.tests``'
 ``test_engine_imports_without_django`` holds all three to that).
+
+A value built from a loaded rules file and then cached (a Games Master prompt,
+a pattern naming the canon's skills) registers its cache with
+:func:`derived_from_rules`, so :func:`forget_values_derived_from_rules` can
+clear every one of them when a test seats other rules (issue #70).
 """
 
 from collections.abc import Callable, Iterator, Sequence
@@ -44,6 +49,67 @@ from common.json_text import parse_json_text
 RULINGS_FIELD = "rulings"
 #: The fields each entry of ``rulings`` must carry as non-empty strings.
 RULING_FIELDS = ("key", "reading")
+
+
+class CacheCounts(Protocol):
+    """What a cache reports of itself: ``functools.cache``'s ``cache_info()``."""
+
+    @property
+    def misses(self) -> int: ...
+
+    @property
+    def currsize(self) -> int: ...
+
+
+class RulesDerivedCache(Protocol):
+    """A cached function of no arguments: ``functools.cache``'s wrapper, for one.
+
+    No arguments, because the value is the rules' alone: the same for every
+    caller until the rules change.
+    """
+
+    def __call__(self) -> object: ...
+
+    def cache_clear(self) -> None: ...
+
+    def cache_info(self) -> CacheCounts: ...
+
+
+#: Every cache :func:`derived_from_rules` registered, in registration order.
+_CACHES_DERIVED_FROM_RULES: list[RulesDerivedCache] = []
+
+
+def derived_from_rules[Cached: RulesDerivedCache](cached: Cached) -> Cached:
+    """Register a cached function whose value is built from loaded rules.
+
+    Placed above ``@functools.cache``, so the registered cache is the one the
+    function's callers read. A module registers its caches when it is
+    imported; a cache whose module was never imported holds nothing to clear.
+
+    Args:
+        cached: The cached function.
+
+    Returns:
+        ``cached``, unchanged.
+    """
+    _CACHES_DERIVED_FROM_RULES.append(cached)
+    return cached
+
+
+def caches_derived_from_rules() -> tuple[RulesDerivedCache, ...]:
+    """Every cache :func:`derived_from_rules` has registered so far."""
+    return tuple(_CACHES_DERIVED_FROM_RULES)
+
+
+def forget_values_derived_from_rules() -> None:
+    """Clear every registered cache, so each value is built afresh when asked.
+
+    The loaded rules files themselves are cached by their own modules
+    (``characters.skill_rules.skill_rules`` and its siblings), which a caller
+    seating other rules clears beside this.
+    """
+    for cached in _CACHES_DERIVED_FROM_RULES:
+        cached.cache_clear()
 
 
 class RulesFileError(Exception):

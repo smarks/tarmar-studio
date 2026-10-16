@@ -17,6 +17,7 @@ from characters.skill_rules import skill_rules
 from characters.skills import survival_targets
 from characters.tests.rules_fixtures import seated_skill_rules
 from characters.tests.test_skill_rules import INVENTED_SKILL_RULES
+from reference.rules_file import caches_derived_from_rules
 
 # The wrong rule the GM actually stated in #370, plus the rewordings a model
 # reaches for when it is wrong the same way. Each must be caught.
@@ -82,6 +83,25 @@ def test_the_natural_survival_faces_are_the_loaded_canons_dice():
     assert auto_survive.search("10, 10")
     # On the loaded canon's three dice the same total is no pair of tens.
     assert not harness._auto_survive_pattern(rule).search("10, 10")
+
+
+def test_the_track_patterns_name_the_seated_canons_tracks_and_then_the_loaded():
+    """The cached patterns are built from the rules in force (issue #70).
+
+    Each registers with ``reference.rules_file.derived_from_rules``, so seated
+    rules build their own and leave none behind.
+    """
+    patterns = (harness._track_name, harness._figure_for_track, harness._track_figure)
+    assert harness._track_name().search("the campaigner track")
+    with seated_skill_rules(INVENTED_SKILL_RULES):
+        assert harness._track_name().search("the sailor track")
+        assert not harness._track_name().search("the campaigner track")
+        assert harness._figure_for_track().search("25 for the smith")
+        assert harness._track_figure().search("Smith: 25")
+    assert harness._track_name().search("the campaigner track")
+    assert not harness._track_name().search("the sailor track")
+    for pattern in patterns:
+        assert pattern in caches_derived_from_rules()
 
 
 @pytest.mark.parametrize("wording", WRONG_RULE_WORDINGS)
@@ -2672,6 +2692,7 @@ def test_a_skill_checks_total_is_read_off_its_line():
         attribute_score=14,
         attribute_modifier=1,
         substituted=False,
+        dice="2d6",
         faces=(3, 5),
         stated=False,
         dice_total=8,

@@ -284,26 +284,28 @@ class GMServiceTest(TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_importing_the_site_builds_no_prompt(self):
-        """The prompts are built when a turn first asks, not at import (#70).
+        """Nothing built from the canon's rules is built at import (#70).
 
-        Three sections are built from the loaded canon's
-        ``skill-rules.json``, which nothing may read while modules import: a
-        canon missing that file must fail ``manage.py check`` with
-        ``characters.E002``, not crash the URL import. Run out of process:
+        The prompts and the patterns naming the canon's skills are built from
+        its rules files, which nothing may read while modules import: a canon
+        missing one must fail ``manage.py check`` (``characters.E001``,
+        ``E002``), not crash the URL import. Every cache registered with
+        ``reference.rules_file.derived_from_rules``, and both rules files'
+        own, must show no miss once the URLs have loaded. Run out of process:
         this runner has built them already.
         """
-        from gm import engine
-
-        builders = tuple(builder.__name__ for builder in engine.PROMPT_BUILDERS)
         script = (
             "import os, django\n"
             "os.environ.setdefault('DJANGO_SETTINGS_MODULE', "
             "'tarmar_studio.settings')\n"
             "django.setup()\n"
             "import tarmar_studio.urls\n"
-            "from gm import engine\n"
-            "for builder in engine.PROMPT_BUILDERS:\n"
-            "    print(builder.__name__, builder.cache_info().misses)\n"
+            "from characters.rules import character_rules\n"
+            "from characters.skill_rules import skill_rules\n"
+            "from reference.rules_file import caches_derived_from_rules\n"
+            "for cached in (character_rules, skill_rules, "
+            "*caches_derived_from_rules()):\n"
+            "    print(cached.__name__, cached.cache_info().misses)\n"
         )
         completed = subprocess.run(
             [sys.executable, "-c", script],
@@ -314,8 +316,12 @@ class GMServiceTest(TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        misses = dict(line.split() for line in completed.stdout.splitlines())
+        # The URLs reach the prompts and the turn policy's pattern.
+        for name in ("system_prompt", "dm_system_prompt", "_check_words"):
+            self.assertIn(name, misses)
         self.assertEqual(
-            completed.stdout.split("\n")[:-1], [f"{name} 0" for name in builders]
+            {name: count for name, count in misses.items() if count != "0"}, {}
         )
 
     def test_each_prompt_is_one_string_for_the_life_of_the_process(self):

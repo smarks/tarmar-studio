@@ -51,7 +51,7 @@ const CHARACTER_EDIT_CONFIG = JSON.parse(
 const TEXT_LIMITS = CHARACTER_EDIT_CONFIG.textLimits;
 
 // Each number input's bound, as the server holds it (issue #938):
-// characters.views.characters.CHARACTER_NUMBER_LIMITS. A range symmetric
+// characters.views.characters.character_number_limits(). A range symmetric
 // about zero is given by its magnitude.
 const NUMBER_LIMITS = CHARACTER_EDIT_CONFIG.numberLimits;
 

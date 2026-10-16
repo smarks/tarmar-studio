@@ -16,6 +16,12 @@ from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.dice import roll_survival_dice
 from characters.models import Character
 from characters.services import CharacterChangeError, apply_experience_years
+from characters.skill_checks import (
+    attribute_check,
+    governing_attribute,
+    is_glossary_skill,
+    skill_check,
+)
 from characters.skills import (
     calculate_attribute_modifier,
     calculate_skill_points_from_xp,
@@ -35,13 +41,17 @@ from characters.skills import (
     track_labels,
 )
 from characters.templatetags.dice_display import in_aging_order, survival_roll
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, FacesRoller
 from gm import engine
 from gm.engine import MODE_AIDE
 from gm.rules_lookup import look_up
 from gm.turn_engine.outcomes import outcomes_from_run
 from gm.turn_engine.plan import read_plan
-from gm.turn_engine.policy import TurnPolicy
+from gm.turn_engine.policy import TurnPolicy, _check_words, dice_actions_asked_for
+from reference.rules_file import (
+    caches_derived_from_rules,
+    forget_values_derived_from_rules,
+)
 
 from .rules_fixtures import seated_skill_rules
 from .test_skill_rules import INVENTED_SKILL_RULES, SAILOR_SKILLS, SMITH_SKILLS
@@ -295,13 +305,17 @@ class PromptCachesTest(BaseTestCase):
         self.assertNotEqual(seated, loaded)
         self.assertEqual(engine.system_prompt(), loaded)
 
-    def test_clearing_forgets_every_builder(self) -> None:
-        for builder in engine.PROMPT_BUILDERS:
-            builder()
-        engine.clear_prompt_caches()
-        for builder in engine.PROMPT_BUILDERS:
-            with self.subTest(builder=builder.__name__):
-                self.assertEqual(builder.cache_info().currsize, 0)
+    def test_clearing_forgets_every_value_built_from_the_rules(self) -> None:
+        registered = caches_derived_from_rules()
+        for builder in (engine.system_prompt, _check_words):
+            self.assertIn(builder, registered)
+        for cached in registered:
+            cached()
+            self.assertEqual(cached.cache_info().currsize, 1)
+        forget_values_derived_from_rules()
+        for cached in registered:
+            with self.subTest(cached=cached):
+                self.assertEqual(cached.cache_info().currsize, 0)
 
 
 class SheetTest(SeatedSkillRulesTestCase):
@@ -335,3 +349,160 @@ class SheetTest(SeatedSkillRulesTestCase):
             in_aging_order(stored),
             [("strength", -3), ("intelligence", -1), ("constitution", -3)],
         )
+
+
+class SkillAndAttributeChecksTest(SeatedSkillRulesTestCase):
+    """The checks follow the invented file: 3d4 naturals 12 and 3, a +2 focus,
+    the invented governing pairs, and a 2d8 attribute check limited to 4."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.game_master = self.create_dm(username="checks-gm")
+        self.character = Character.objects.create(
+            user=self.game_master,
+            name="Wren",
+            skills={"rope": 3, "knowledge (tides)": 1},
+            **STRONG,
+        )
+
+    def test_each_skill_rides_on_the_canons_attribute(self) -> None:
+        self.assertEqual(governing_attribute("rope"), "dexterity")
+        self.assertEqual(governing_attribute("weapon (broadsword)"), "strength")
+        self.assertEqual(governing_attribute("knowledge (tides)"), "charisma")
+        self.assertEqual(governing_attribute("sorcery"), "wisdom")
+        self.assertIsNone(governing_attribute("stealth"))
+        self.assertTrue(is_glossary_skill("sorcery"))
+        self.assertFalse(is_glossary_skill("stealth"))
+        with self.assertRaisesMessage(CharacterChangeError, "Unknown skill: stealth"):
+            skill_check(self.character, "stealth")
+
+    def test_a_skill_check_rolls_the_canons_dice_and_naturals(self) -> None:
+        rolled = skill_check(self.character, "rope", roller=FacesRoller(1, 4, 4))
+        self.assertEqual(
+            (rolled.dice, rolled.faces, rolled.dice_total), ("3d4", (1, 4, 4), 9)
+        )
+        self.assertTrue(rolled.line.startswith("rope check: 3d4 [1, 4, 4] = 9 +2 DEX"))
+        # The canon's natural success is 11: 4+4+3 succeeds against 40, and
+        # 4+4+4, the dice's highest, is no natural and fails against it.
+        high = skill_check(
+            self.character,
+            "rope",
+            difficulty=40,
+            is_game_master=True,
+            roller=FacesRoller(4, 4, 3),
+        )
+        self.assertEqual((high.natural, high.outcome), ("natural 11", "success"))
+        highest = skill_check(
+            self.character,
+            "rope",
+            difficulty=40,
+            is_game_master=True,
+            roller=FacesRoller(4, 4, 4),
+        )
+        self.assertEqual((highest.natural, highest.outcome), ("", "failure"))
+        low = skill_check(
+            self.character,
+            "rope",
+            difficulty=0,
+            is_game_master=True,
+            roller=FacesRoller(1, 1, 1),
+        )
+        self.assertEqual((low.natural, low.outcome), ("natural 3", "failure"))
+        # 2d6's 2 is no natural on 3d4, and no 3d4 roll shows it.
+        with self.assertRaisesMessage(
+            CharacterChangeError, "A 3d4 total is between 3 and 12"
+        ):
+            skill_check(self.character, "rope", stated_total=2, is_game_master=True)
+        stated = skill_check(
+            self.character, "rope", stated_total=3, is_game_master=True
+        )
+        self.assertIn("3d4 stated by a Game Master = 3", stated.line)
+
+    def test_a_focused_field_adds_the_canons_bonus(self) -> None:
+        focused = skill_check(
+            self.character, "knowledge (tides)", roller=FacesRoller(2, 2, 2)
+        )
+        self.assertEqual(focused.focus_bonus, 2)
+        self.assertIn("+2 focus", focused.line)
+
+    def test_an_attribute_check_rolls_the_canons_dice_within_its_limit(self) -> None:
+        rolled = attribute_check(self.character, "wisdom", roller=FacesRoller(7, 9))
+        self.assertIn("wisdom check, 2d8: [7, 9] = 16 > 12", rolled.line)
+        with self.assertRaisesMessage(
+            CharacterChangeError, "A 2d8 total is between 2 and 16"
+        ):
+            attribute_check(
+                self.character, "wisdom", stated_total=17, is_game_master=True
+            )
+        stated = attribute_check(
+            self.character, "wisdom", stated_total=16, modifier=4, is_game_master=True
+        )
+        self.assertIn("2d8 stated by a Game Master = 16 ≤ 16", stated.line)
+        with self.assertRaisesMessage(
+            CharacterChangeError, "modifier must be a whole number from -4 to 4"
+        ):
+            attribute_check(self.character, "wisdom", modifier=5, is_game_master=True)
+        # Players are held to the rules: no modifier at all, within the limit
+        # or not, as before.
+        with self.assertRaisesMessage(
+            CharacterChangeError, "Only a Game Master can set a modifier"
+        ):
+            attribute_check(self.character, "wisdom", modifier=1)
+
+    def test_the_plan_holds_stated_totals_and_modifiers_to_the_canon(self) -> None:
+        def errors(action: dict[str, Any]) -> str:
+            reading = read_plan(
+                json.dumps({"actions": [{"character_id": 41, **action}]}),
+                roster_ids={41},
+                policy=TurnPolicy.for_turn(MODE_AIDE, is_game_master=True),
+            )
+            return " ".join(str(error) for error in reading.errors)
+
+        skill = {"action": "skill_check", "skill": "rope"}
+        self.assertIn(
+            "total must be a whole number from 3 to 12", errors({**skill, "total": 2})
+        )
+        self.assertEqual(errors({**skill, "total": 3}), "")
+        attribute = {"action": "attribute_check", "attribute": "wisdom"}
+        self.assertIn(
+            "total must be a whole number from 2 to 16",
+            errors({**attribute, "total": 17}),
+        )
+        self.assertIn(
+            "modifier must be a whole number from -4 to 4",
+            errors({**attribute, "modifier": 5}),
+        )
+        self.assertEqual(errors({**attribute, "total": 16, "modifier": -4}), "")
+
+    def test_a_check_asked_for_by_name_is_one_the_canon_governs(self) -> None:
+        self.assertIn("skill_check", dice_actions_asked_for("his rope check"))
+        self.assertNotIn("skill_check", dice_actions_asked_for("his stealth check"))
+
+    def test_the_rules_lookups_are_the_canons(self) -> None:
+        said = look_up("skill_check")
+        self.assertIn("Skill check: roll 3d4, add", said)
+        self.assertIn("natural 11 always succeeds and a natural 3 always fails", said)
+        self.assertIn("rope dexterity", said)
+        self.assertNotIn("stealth", said)
+        attribute = look_up("attribute_check")
+        self.assertIn("roll 2d8; it passes", attribute)
+        self.assertIn("may state a total (2 to 16)", attribute)
+        self.assertIn("set a modifier (−4 to +4)", attribute)
+
+    def test_the_sheet_bounds_and_labels_the_stated_total_by_the_canon(self) -> None:
+        self.login_as(self.game_master)
+        html = self.client.get(
+            f"/tarmar/characters/{self.character.pk}/"
+        ).content.decode()
+        self.assertIn("3d4 rolled at the table (Game Master)", html)
+        self.assertRegex(html, r'name="total" min="3" max="12"')
+        self.assertIn('<option value="rope"', html)
+        self.assertNotIn('<option value="stealth"', html)
+
+
+class SeatedChecksLeaveNothingBehindTest(BaseTestCase):
+    def test_the_check_pattern_is_the_loaded_canons_again_afterwards(self) -> None:
+        self.assertIn("skill_check", dice_actions_asked_for("his stealth check"))
+        with seated_skill_rules(INVENTED_SKILL_RULES):
+            self.assertNotIn("skill_check", dice_actions_asked_for("his stealth check"))
+        self.assertIn("skill_check", dice_actions_asked_for("his stealth check"))

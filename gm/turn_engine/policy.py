@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass
 
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
-from characters.skill_checks import GOVERNING_ATTRIBUTES
+from characters.skill_rules import skill_rules
+from reference.rules_file import derived_from_rules
 
 from ..engine import MODE_AIDE, MODE_PLAY
 
@@ -189,6 +190,7 @@ _DICE_WORDS = re.compile(
 )
 
 
+@derived_from_rules
 @functools.cache
 def _check_words() -> re.Pattern[str]:
     """A skill check asked for as one.
@@ -197,9 +199,9 @@ def _check_words() -> re.Pattern[str]:
     with the skills by name for the two dice actions that are asked for that
     way rather than as a roll (issue #906). Not the bare word: "check the
     roster" asks for no dice (second review of #906). Compiled when first
-    asked, not at import, because the skills it names move to the canon's
-    ``skill-rules.json`` (issue #70), which no module may read while it
-    imports.
+    asked, not at import, because the skills it names are the loaded
+    canon's ``skill-rules.json`` (issue #70), which no module may read while
+    it imports.
 
     The message is the player's or the Game Master's, so this runs in linear
     time (issue #11). Reading on from "check" to "against" stops at the next
@@ -208,8 +210,9 @@ def _check_words() -> re.Pattern[str]:
     Whether a sentence holds a "check" with "against" after it is unchanged,
     since the last "check" before the "against" still reaches it.
     """
+    governed = skill_rules().skill_check.governing_attributes
     skill_names = "|".join(
-        re.escape(name) for name in sorted(GOVERNING_ATTRIBUTES, key=len, reverse=True)
+        re.escape(name) for name in sorted(governed, key=len, reverse=True)
     )
     return re.compile(
         rf"\bskill\s+checks?\b"

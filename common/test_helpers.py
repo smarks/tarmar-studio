@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from django.test import Client, TestCase
 
 from accounts.models import User
 from common.middleware import PublicPathPassphraseMiddleware
+from common.rolling import Roller, RollRecord
 from reference.paths import CANON_TESTS_DIR_NAME, DM_RULES_DIR
 
 # What the Tarmar-only tests expect of the loaded canon (issue #921). The
@@ -190,6 +192,38 @@ CHARACTER_DEFAULTS = {
     "weight_roll": "3",
     "fatigue_roll": 7,
 }
+
+
+class FacesRoller(Roller):
+    """A roller whose every roll lands on the faces given, whatever the dice.
+
+    For a test that needs a check or a save to show particular dice: the
+    record keeps the dice asked for and its purpose, with the faces given and
+    their sum as the total.
+    """
+
+    def __init__(self, *faces: int) -> None:
+        super().__init__(seed=0)
+        self.faces_to_give = faces
+
+    def roll(
+        self,
+        specification: str,
+        *,
+        purpose: str,
+        modifier: int = 0,
+        target_number: int | None = None,
+        outcome: str | None = None,
+    ) -> RollRecord:
+        """Roll ``specification`` as :class:`Roller` does, on the faces given."""
+        record = super().roll(
+            specification,
+            purpose=purpose,
+            modifier=modifier,
+            target_number=target_number,
+            outcome=outcome,
+        )
+        return replace(record, faces=self.faces_to_give, total=sum(self.faces_to_give))
 
 
 def create_character(user, **overrides):

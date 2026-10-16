@@ -122,29 +122,25 @@ class SkillCheckRuleTest(SimpleTestCase):
     """The skill check is a subject the Games Master can look up (#843)."""
 
     def test_the_mechanic_comes_from_the_check_itself(self):
-        from characters.skill_checks import NATURAL_FAILURE, NATURAL_SUCCESS
+        checks = skill_rules().skill_check
 
         said = rules_lookup.look_up("skill check")
 
-        self.assertIn("2d6", said)
-        self.assertIn(f"natural {NATURAL_SUCCESS} always succeeds", said)
-        self.assertIn(f"natural {NATURAL_FAILURE} always fails", said)
+        self.assertIn(f"roll {checks.dice}, add", said)
+        self.assertIn(f"natural {checks.natural_success} always succeeds", said)
+        self.assertIn(f"natural {checks.natural_failure} always fails", said)
 
     def test_a_named_skill_gets_its_governing_attribute(self):
-        from characters.skill_checks import GOVERNING_ATTRIBUTES
-
         said = rules_lookup.look_up("skill_check", "Stealth")
 
-        governing = GOVERNING_ATTRIBUTES["stealth"]
+        governing = skill_rules().skill_check.governing_attributes["stealth"]
         assert governing is not None
         self.assertIn(f"Stealth rides on {governing.title()}", said)
 
     def test_an_unnamed_skill_gets_the_whole_governs_column(self):
-        from characters.skill_checks import GOVERNING_ATTRIBUTES
-
         said = rules_lookup.look_up("skill_check")
 
-        for skill, attribute in GOVERNING_ATTRIBUTES.items():
+        for skill, attribute in skill_rules().skill_check.governing_attributes.items():
             if attribute is not None:
                 with self.subTest(skill=skill):
                     self.assertIn(f"{skill} {attribute}", said)
@@ -181,15 +177,11 @@ class AttributeCheckRuleTest(SimpleTestCase):
         )
 
     def test_a_game_master_may_state_a_total_3d6_can_make(self):
-        from characters.skill_checks import (
-            ATTRIBUTE_CHECK_MAXIMUM,
-            ATTRIBUTE_CHECK_MINIMUM,
-        )
+        check = skill_rules().attribute_check
 
         said = rules_lookup.look_up("attribute_check")
 
         self.assertIn(
-            f"Game Master may state a total ({ATTRIBUTE_CHECK_MINIMUM} to "
-            f"{ATTRIBUTE_CHECK_MAXIMUM})",
+            f"Game Master may state a total ({check.minimum} to {check.maximum})",
             said,
         )

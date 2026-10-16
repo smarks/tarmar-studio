@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from characters.skill_checks import MAX_ATTRIBUTE_CHECK_MODIFIER
+from characters.skill_rules import skill_rules
 from common.test_helpers import create_character
 
 from . import rules_lookup
@@ -80,15 +80,15 @@ class AGameMasterSetsTheModifierTest(ExecutorTestCase):
         )
 
     def test_the_plan_holds_it_to_its_bound(self):
-        past = MAX_ATTRIBUTE_CHECK_MODIFIER + 1
+        limit = skill_rules().attribute_check.game_master_modifier_limit
+        past = limit + 1
         with patch(ROLL_3D6, return_value=three_dice(10)):
             outcome, yielded, _model, _turn = self.play(
                 plan(self.check(modifier=-past)), replan=plan(self.check())
             )
         (rejected,) = [event for event in yielded if event.kind == events.PLAN_REJECTED]
         self.assertIn(
-            f"modifier must be a whole number from -{MAX_ATTRIBUTE_CHECK_MODIFIER} "
-            f"to {MAX_ATTRIBUTE_CHECK_MODIFIER}",
+            f"modifier must be a whole number from -{limit} to {limit}",
             " ".join(rejected.payload["errors"]),
         )
         self.assertNotIn("modifier", outcome.results[0].result)
@@ -169,10 +169,11 @@ class TheRulesSayWhoSetsItTest(SimpleTestCase):
                 )
 
     def test_the_lookup_gives_the_bound_and_the_order(self):
+        limit = skill_rules().attribute_check.game_master_modifier_limit
         said = rules_lookup.look_up("attribute_check")
         self.assertIn(
-            f"set a modifier ({rules_lookup.signed(-MAX_ATTRIBUTE_CHECK_MODIFIER)} "
-            f"to {rules_lookup.signed(MAX_ATTRIBUTE_CHECK_MODIFIER)}) on the score "
+            f"set a modifier ({rules_lookup.signed(-limit)} "
+            f"to {rules_lookup.signed(limit)}) on the score "
             "after any injury for the situation; a player sets neither.",
             said,
         )

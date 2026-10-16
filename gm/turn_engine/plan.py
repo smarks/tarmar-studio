@@ -36,14 +36,8 @@ from characters.constants import (
 )
 from characters.purse import CUSTOM_COMBAT_CATEGORIES, MAX_COIN_MOVEMENT
 from characters.rules import character_rules
-from characters.skill_checks import (
-    ATTRIBUTE_CHECK_MAXIMUM,
-    ATTRIBUTE_CHECK_MINIMUM,
-    MAX_ATTRIBUTE_CHECK_MODIFIER,
-    MAX_DIFFICULTY,
-    SKILL_CHECK_MAXIMUM,
-    SKILL_CHECK_MINIMUM,
-)
+from characters.skill_checks import MAX_DIFFICULTY
+from characters.skill_rules import skill_rules
 from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN, selectable_tracks
 
 from ..models import (
@@ -703,8 +697,10 @@ def _read_action(
             else:
                 fields["attribute"] = said_attribute
         if reader.given("total"):
+            # What the canon's skill check dice can show (2d6 on the pages).
+            skill_check_dice = skill_rules().skill_check
             fields["stated_total"] = reader.whole(
-                "total", SKILL_CHECK_MINIMUM, SKILL_CHECK_MAXIMUM
+                "total", skill_check_dice.minimum, skill_check_dice.maximum
             )
     elif name == "attribute_check":
         # 3d6 ≤ the attribute (#911): the rule names the direction, so the
@@ -718,18 +714,17 @@ def _read_action(
             )
         elif said_attribute:
             fields["attribute"] = said_attribute
+        attribute_check_rules = skill_rules().attribute_check
         if reader.given("total"):
+            # What the canon's attribute check dice can show (3d6 on the pages).
             fields["stated_total"] = reader.whole(
-                "total", ATTRIBUTE_CHECK_MINIMUM, ATTRIBUTE_CHECK_MAXIMUM
+                "total", attribute_check_rules.minimum, attribute_check_rules.maximum
             )
         if reader.given("modifier"):
             # On the target, after any injury (#953): who may set it is
-            # read_plan's ruling and the check's own.
-            fields["modifier"] = reader.whole(
-                "modifier",
-                -MAX_ATTRIBUTE_CHECK_MODIFIER,
-                MAX_ATTRIBUTE_CHECK_MODIFIER,
-            )
+            # read_plan's ruling and the check's own; how far, the canon's.
+            limit = attribute_check_rules.game_master_modifier_limit
+            fields["modifier"] = reader.whole("modifier", -limit, limit)
     elif name == "play_years":
         reader.target()
         track = entry.get("track")

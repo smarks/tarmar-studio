@@ -44,8 +44,8 @@ if (typeof module !== 'undefined' && module.exports) {
     /** One line for the check, from the server's numbers only. */
     function checkText(check) {
         const dice = check.stated
-            ? '2d6 stated by a Game Master = ' + check.dice_total
-            : '2d6 [' + check.faces.join(', ') + '] = ' + check.dice_total;
+            ? check.dice + ' stated by a Game Master = ' + check.dice_total
+            : check.dice + ' [' + check.faces.join(', ') + '] = ' + check.dice_total;
         let text = check.skill + ': ' + dice + ' ' + formatSigned(check.attribute_modifier) +
             ' ' + check.attribute.slice(0, 3).toUpperCase() + ' (' + check.attribute_score + ') ' +
             formatSigned(check.level) + ' level' +

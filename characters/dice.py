@@ -75,31 +75,32 @@ def roll_3d6_logged(roller: Roller | None = None) -> tuple[int, str]:
     return roll_dice_logged("3d6", roller)
 
 
+def roll_dice_faces(
+    specification: str, roller: Roller | None = None
+) -> tuple[tuple[int, ...], int]:
+    """Roll a dice specification and return (faces, total).
+
+    For a roll whose every face is kept, so a log can show the actual dice
+    and not just their sum: the survival roll and the skill check, each on
+    the canon's dice.
+
+    Args:
+        specification: ``NdS`` or ``NdS±M``, as the canon's rules state it.
+        roller: Roll through this roller instead of the module default.
+    """
+    record = roll_expression_record(specification, purpose=specification, roller=roller)
+    return record.faces, record.total
+
+
 def roll_survival_dice() -> tuple[int, ...]:
     """Roll the canon's survival dice: every face, then the total.
 
     The prior-experience survival roll (3d6 on the public pages since issue
-    #223) is the loaded canon's ``survival_roll.dice`` (issue #70). Every face
-    is kept so the experience log can show the actual dice, not just their
-    sum; a caller unpacks ``*faces, total``.
+    #223) is the loaded canon's ``survival_roll.dice`` (issue #70). A caller
+    unpacks ``*faces, total``.
     """
-    dice = skill_rules().survival_roll.dice
-    record = _DEFAULT_ROLLER.roll(dice, purpose=dice)
-    return (*record.faces, record.total)
-
-
-def roll_2d6_faces(roller: Roller | None = None) -> tuple[int, int, int]:
-    """Roll 2d6 and return (die1, die2, total).
-
-    The survival-check shape ``characters.skills`` uses: both faces are kept
-    so the experience log can show the actual dice, not just their sum.
-
-    Args:
-        roller: Roll through this roller instead of the module default.
-    """
-    record = (roller or _DEFAULT_ROLLER).roll("2d6", purpose="2d6")
-    first_die, second_die = record.faces
-    return first_die, second_die, record.total
+    faces, total = roll_dice_faces(skill_rules().survival_roll.dice)
+    return (*faces, total)
 
 
 def roll_d6_logged(roller: Roller | None = None) -> tuple[int, str]:

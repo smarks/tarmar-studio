@@ -28,8 +28,8 @@ from characters.skills import (
 )
 from characters.views.characters import (
     AGING_PREVIEW_HORIZON_STAGE,
-    CHARACTER_NUMBER_LIMITS,
     aging_preview_horizon_age,
+    character_number_limits,
 )
 from common.test_helpers import BaseTestCase
 
@@ -155,7 +155,7 @@ class CharacterEditConfigBlockTest(BaseTestCase):
         )
         self.assertEqual(config["markDeadUrl"], f"/tarmar/characters/{pk}/mark-dead/")
         self.assertEqual(config["textLimits"], CHARACTER_TEXT_LIMITS)
-        self.assertEqual(config["numberLimits"], CHARACTER_NUMBER_LIMITS)
+        self.assertEqual(config["numberLimits"], character_number_limits())
         self.assertEqual(config["reviveUrl"], f"/tarmar/characters/{pk}/revive/")
         self.assertEqual(
             config["rollLiteracyUrl"], f"/tarmar/characters/{pk}/roll-literacy/"
@@ -594,7 +594,10 @@ class NumberInputBoundsTest(BaseTestCase):
             **CHARACTER_DEFAULTS,
         )
         self.login_as(game_master)
-        with mock.patch.dict(CHARACTER_NUMBER_LIMITS, self.ODD):
+        with mock.patch(
+            "characters.views.characters.character_number_limits",
+            return_value=self.ODD,
+        ):
             page = self.client.get(f"/tarmar/characters/{character.pk}/")
         parser = _NumberInputs()
         parser.feed(page.content.decode())
