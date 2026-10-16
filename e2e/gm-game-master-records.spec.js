@@ -12,6 +12,7 @@
 
 const { test, expect, loginAs, TEST_ADMIN, TEST_USER } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { loadedSkillRules } = require('./skill-rules');
 
 /** A session of ``account`` holding one complete character of theirs. */
 function seedSession(name, account = TEST_ADMIN, mode = 'aide') {
@@ -30,13 +31,85 @@ print('SESSION', session.pk, 'CHARACTER', character.pk)
     return { sessionId: match[1], characterId: match[2] };
 }
 
+/**
+ * Send ``message`` and wait for this turn's own reply, then for the turn to be
+ * saved: ``.last()`` alone would match the previous turn's reply.
+ */
 async function send(page, message) {
+    const replies = page.locator('.message.assistant');
+    const before = await replies.count();
     await page.fill('#user-input', message);
     await page.click('#send-btn');
-    await expect(page.locator('.message.assistant').last()).toContainText('nothing stirs', { timeout: 30000 });
+    await expect(replies.nth(before)).toContainText('nothing stirs', { timeout: 30000 });
+    // Send comes back only once the stream has closed, after the done frame
+    // the server sends once the turn is saved (issue #910).
+    await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 30000 });
+}
+
+/**
+ * Why the session's latest turn refused its plan, from the turn's journal:
+ * every ``plan_rejected`` event's errors, joined.
+ */
+function latestPlanRefusals(sessionId) {
+    const output = readDjangoShell(`
+import json
+from gm.models import GMEvent, GMTurnRecord
+turn = GMTurnRecord.objects.filter(session_id=${Number(sessionId)}).latest('started_at', 'pk')
+errors = [
+    error
+    for event in GMEvent.objects.filter(turn=turn, kind='plan_rejected')
+    for error in event.payload.get('errors', [])
+]
+print('REFUSALS ' + json.dumps(errors))
+`);
+    const line = output.split('\n').find((text) => text.startsWith('REFUSALS '));
+    return JSON.parse(line.slice('REFUSALS '.length)).join(' ');
 }
 
 test.describe('GM chat — a Game Master records deaths, XP, coin and skill checks', () => {
+    test('a stated attribute check is held to the canon\'s dice and modifier limit (#70)', async ({ page }, testInfo) => {
+        // Read from the loaded canon, so this holds under either canon.
+        const { attribute_check: check } = loadedSkillRules();
+        const name = `Wren${testInfo.workerIndex}x${Date.now() % 100000}`;
+        const { sessionId } = seedSession(name);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        const checks = page.locator('.chat-messages .dice-roll', { hasText: 'wisdom check, ' });
+
+        // The dice's highest total and the widest modifier are taken.
+        await send(page, `${name} makes a wisdom check at ${check.maximum} with ${check.modifier_limit}`);
+        await expect(checks).toHaveCount(1);
+        await expect(checks.last()).toContainText(
+            `wisdom check, ${check.dice} stated by a Game Master = ${check.maximum}`
+        );
+        await expect(checks.last()).toContainText(`+${check.modifier_limit} modifier set by a Game Master`);
+        expect(latestPlanRefusals(sessionId)).toBe('');
+
+        // One past either is refused, and the journal says why: the plan is
+        // read again, and no check is rolled.
+        const totalRefusal = `total must be a whole number from ${check.minimum} to ${check.maximum}`;
+        const modifierRefusal =
+            `modifier must be a whole number from -${check.modifier_limit} to ${check.modifier_limit}`;
+        for (const [total, modifier, refusal] of [
+            [check.maximum + 1, 0, totalRefusal],
+            [check.minimum - 1, 0, totalRefusal],
+            [check.minimum, check.modifier_limit + 1, modifierRefusal],
+        ]) {
+            await send(page, `${name} makes a wisdom check at ${total} with ${modifier}`);
+            expect(latestPlanRefusals(sessionId), `${total} with ${modifier}`).toContain(refusal);
+            await expect(checks).toHaveCount(1);
+        }
+        // The lowest total but one, which no refused message used, with the
+        // widest modifier the other way, is taken.
+        await send(page, `${name} makes a wisdom check at ${check.minimum + 1} with -${check.modifier_limit}`);
+        expect(latestPlanRefusals(sessionId)).toBe('');
+        await expect(checks).toHaveCount(2);
+        await expect(checks.last()).toContainText(
+            `${check.dice} stated by a Game Master = ${check.minimum + 1}`
+        );
+        await expect(checks.last()).toContainText(`-${check.modifier_limit} modifier set by a Game Master`);
+    });
+
     test('each is a chip in the chat and a change on the record', async ({ page }, testInfo) => {
         const name = `Gorn${testInfo.workerIndex}x${Date.now() % 100000}`;
         const { sessionId, characterId } = seedSession(name);

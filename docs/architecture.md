@@ -261,7 +261,20 @@ Notes on the edges, each checkable:
   read it through the cached `character_rules()` when they run, never at
   import, so the offline CLI's import chain stays free of Django and a canon
   whose file is refused is reported by the `characters.E001` system check.
-  Both rules files are read by the one strict reader in
+- `characters/skill_rules.py` reads the canon's `skill-rules.json`
+  (`reference.paths.SKILL_RULES_FILE`) into `SkillRules`: every number skills,
+  prior experience and the checks use (the tracks and their d20 tables, the
+  experience ladder, the skill cost multipliers, the survival roll, the aging
+  table, the attribute modifier table, and the skill and attribute checks'
+  dice, naturals, focused-field bonus, governing attributes and Game Master's
+  modifier limit). Callers read it through the cached `skill_rules()` when
+  they run, never at import, and a refused file, or a skill name that is no
+  glossary skill in its own right (`characters.skills.validate_skill_names`),
+  is reported by `characters.E002`. A value built from it and cached (the
+  Games Master's prompts, the patterns naming its skills and tracks)
+  registers with `reference.rules_file.derived_from_rules`, so a test seating
+  other rules clears it.
+  The three rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
 ### Frontend layering
@@ -557,15 +570,25 @@ flowchart TD
     spend(["POST characters:allocate_skill"]) --> budget{"free_skill_points"}
     budget -->|"player over budget"| refuse3["Only N free skill point(s) available"]
     budget -->|"Game Master over budget"| granted["surplus recorded as granted"]
-    budget -->|"within budget"| store["skills JSON: name to points<br/>level derived by get_skill_level<br/>triangular cost, arcane doubled"]
+    budget -->|"within budget"| store["skills JSON: name to points<br/>level derived by get_skill_level<br/>triangular cost, times the canon's multiplier"]
 ```
 
 `skills` is a flat `{normalised_name: points}` map; a *level* is never stored —
 `skills.get_skill_level(points, name)` derives it, and `skill_cost_multiplier`
-doubles the ladder for `arcane`. `is_played` is a separate thing from having
-years: it flips only through `Character.mark_played_by(user)`, which no-ops
-unless the actor owns the character, so a DM editing someone else's sheet does
-not mark it played.
+multiplies the ladder by the canon's `skill_cost.multipliers` (Arcane's, on the
+public pages). Every number in this flow (the tracks, the ladder, the costs, the
+survival roll, the aging table, the modifiers) lives once, in the loaded canon's
+`skill-rules.json`, read through `characters.skill_rules.skill_rules()` (issue
+#70); the procedures stay in `characters/skills.py`. The default canon's file
+states the public pages' numbers, which the drift tests in
+`characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py` hold to
+the pages; `characters/tests/test_skill_rules_seated.py` seats invented rules to
+prove every caller reads them, and the e2e specs read them through the Django
+shell (`e2e/skill-rules.js`) rather than typing a number.
+
+`is_played` is a separate thing from having years: it flips only through
+`Character.mark_played_by(user)`, which no-ops unless the actor owns the
+character, so a DM editing someone else's sheet does not mark it played.
 
 Every mutation goes through `characters/services.py`, not through the ORM
 directly. `services.changing(pk, actor, authorize=...)` yields a `Change` under a

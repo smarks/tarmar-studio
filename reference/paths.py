@@ -56,15 +56,15 @@ the Games Master's world digest, all read once per process (issues #918,
   provenance, location and wealth percentile tables, with an optional
   ``rulings`` list. Read by ``characters.rules``, whose docstring gives the
   full schema.
-- ``skill-rules.json`` (required for skills and prior experience): the
-  numbers the skills and experience code reads, as the public prior
-  experience, attributes and skills pages state them: the skill tracks and
-  their d20 tables, the experience ladder, the Arcane cost multiplier, the
-  survival roll, the aging table, the attribute modifier table, and the skill
-  and attribute checks, with an optional ``rulings`` list. Read by
-  ``characters.skill_rules``, whose docstring gives the full schema. The
-  three rules files are read the one strict way ``reference.rules_file``
-  holds.
+- ``skill-rules.json`` (required: a canon without one fails the
+  ``characters.E002`` system check): the numbers skills, prior experience and
+  the checks read, as the public prior experience, attributes and skills pages
+  state them: the skill tracks and their d20 tables, the experience ladder,
+  the skill cost multipliers, the survival roll, the aging table, the
+  attribute modifier table, and the skill and attribute checks, with an
+  optional ``rulings`` list. Read by ``characters.skill_rules``, whose
+  docstring gives the full schema. The three rules files are read the one
+  strict way ``reference.rules_file`` holds.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's
   system prompt, used verbatim less its trailing newlines. Without it
   ``gm.engine`` uses a one-paragraph built-in fallback and logs a warning.
