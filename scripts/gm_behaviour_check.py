@@ -92,11 +92,13 @@ from django.urls import reverse  # noqa: E402
 from characters import skills  # noqa: E402
 from characters.combat import MATRIX  # noqa: E402
 from characters.dice import DICE_IN_TEXT, location_skill_choices  # noqa: E402
+from characters.skill_rules import skill_rules  # noqa: E402
 from characters.skills import (  # noqa: E402
-    SURVIVAL_RULE_DESCRIPTION,
     normalize_skill_name,
+    survival_rule_description,
 )
 from common.middleware import PublicPathPassphraseMiddleware  # noqa: E402
+from common.rolling import parse_dice_specification  # noqa: E402
 from common.services import ollama_client  # noqa: E402
 from gm import roster, summary  # noqa: E402
 from gm.engine import MODE_AIDE, MODE_PLAY  # noqa: E402
@@ -141,7 +143,7 @@ class SurvivalRule:
         auto_survive_roll: The natural dice total that forces survival.
         auto_death_roll: The natural dice total that forces death.
         described: The rule in the code's own words
-            (``SURVIVAL_RULE_DESCRIPTION``), for the failure report.
+            (``survival_rule_description()``), for the failure report.
     """
 
     track: str
@@ -157,17 +159,26 @@ class SurvivalRule:
         return self.rolls_high
 
 
+def _survival_dice_count() -> int:
+    """How many dice the canon's survival roll throws (three on the pages)."""
+    count, _sides, _modifier = parse_dice_specification(
+        skill_rules().survival_roll.dice
+    )
+    return count
+
+
 def _play_one_year(track: str, dice_total: int) -> dict[str, Any]:
     """Play a single year on ``track`` with the survival dice pinned.
 
     Args:
         track: The track key to play.
-        dice_total: The total the three survival dice are to show.
+        dice_total: The total the survival dice are to show.
 
     Returns:
         The year's ``survival_check`` dict as the rules recorded it.
     """
-    faces = (1, 1, dice_total - 2)
+    ones = _survival_dice_count() - 1
+    faces = (*(1,) * ones, dice_total - ones)
     original = skills.roll_survival_dice
     try:
         skills.roll_survival_dice = lambda: (*faces, dice_total)
@@ -208,13 +219,16 @@ def survival_rule_from_code(track: str = SURVIVAL_TRACK) -> SurvivalRule:
             f"cannot read the survival direction off {track}: a total of "
             f"{target} and a total of {target - 1} both gave {on_target}"
         )
+    survival_roll = skill_rules().survival_roll
     auto_survive = next(
         total
-        for total in range(18, 2, -1)
+        for total in range(survival_roll.maximum, survival_roll.minimum - 1, -1)
         if bool(_play_one_year(track, total)["success"])
     )
     auto_death = next(
-        total for total in range(3, 19) if not _play_one_year(track, total)["success"]
+        total
+        for total in range(survival_roll.minimum, survival_roll.maximum + 1)
+        if not _play_one_year(track, total)["success"]
     )
     return SurvivalRule(
         track=track,
@@ -222,7 +236,7 @@ def survival_rule_from_code(track: str = SURVIVAL_TRACK) -> SurvivalRule:
         rolls_high=on_target,
         auto_survive_roll=auto_survive,
         auto_death_roll=auto_death,
-        described=SURVIVAL_RULE_DESCRIPTION,
+        described=survival_rule_description(),
     )
 
 
@@ -1087,22 +1101,22 @@ def _track_pattern(track: str) -> str:
 
 def _tracks_alternation() -> str:
     """Every track as prose writes it, as one regex alternation."""
-    return "|".join(_track_pattern(track) for track in skills.SURVIVAL_TARGETS)
+    return "|".join(_track_pattern(track) for track in skills.track_keys())
 
 
 @functools.cache
 def _track_name() -> re.Pattern[str]:
     """A track named in prose.
 
-    Compiled when first asked, not at import, because the tracks move to
-    the canon's ``skill-rules.json`` (issue #70), which no module may read
+    Compiled when first asked, not at import, because the tracks are the
+    loaded canon's ``skill-rules.json`` (issue #70), which no module may read
     while it imports.
     """
     return re.compile(r"\b(" + _tracks_alternation() + r")", re.IGNORECASE)
 
 
 def _track_key(said: str) -> str:
-    """The ``SURVIVAL_TARGETS`` key a track name in prose stands for."""
+    """The track key a track name in prose stands for."""
     return re.sub(r"[\s-]", "_", said.casefold())
 
 
@@ -2590,14 +2604,15 @@ def _auto_survive_pattern(rule: SurvivalRule) -> re.Pattern[str]:
     """Match the automatic-survival roll, as a total or as the faces that make it.
 
     The faces are derived, not typed: a total of ``auto_survive_roll`` on
-    ``SURVIVAL_DICE_COUNT`` dice can only be every die showing its highest
-    face, which is how a player says it ("6, 6 and 6").
+    the survival roll's dice can only be every die showing its highest face,
+    which is how a player says it ("6, 6 and 6").
     """
-    face = rule.auto_survive_roll // skills.SURVIVAL_DICE_COUNT
-    listed = r"\s*[,-]\s*".join([str(face)] * skills.SURVIVAL_DICE_COUNT)
-    spoken = r"\s*,\s*".join([str(face)] * (skills.SURVIVAL_DICE_COUNT - 1))
+    dice_count = _survival_dice_count()
+    face = rule.auto_survive_roll // dice_count
+    listed = r"\s*[,-]\s*".join([str(face)] * dice_count)
+    spoken = r"\s*,\s*".join([str(face)] * (dice_count - 1))
     # "Three sixes", as a table says it, when the words exist for the dice.
-    counted = _NUMBER_WORDS.get(skills.SURVIVAL_DICE_COUNT)
+    counted = _NUMBER_WORDS.get(dice_count)
     plural = _FACE_PLURALS.get(face)
     in_words = rf"|\b(?:all\s+)?{counted}\s+{plural}\b" if counted and plural else ""
     # "6, 6 and 6" and, with the Oxford comma, "6, 6, and 6" (third review).
@@ -5763,7 +5778,8 @@ def build_scenarios() -> tuple[Scenario, ...]:
     # The ledger scenario is about arithmetic, not about dying, so it plays
     # the kindest track the rules define rather than the one #370 was filed
     # against. Which track that is comes from the rules, not from this file.
-    safest_track = min(skills.SURVIVAL_TARGETS, key=skills.SURVIVAL_TARGETS.__getitem__)
+    targets = skills.survival_targets()
+    safest_track = min(targets, key=targets.__getitem__)
     take_safe_years = Turn(f"Wren takes five years on the {safest_track} track.")
     return (
         Scenario(

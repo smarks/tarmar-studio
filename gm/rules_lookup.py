@@ -28,16 +28,12 @@ from characters.constants import (
     SEVERE_INJURY_ROLL_PENALTY,
 )
 from characters.rules import CoinRoll, character_rules
+from characters.skill_rules import AGING_ATTRIBUTES, skill_rules
 from characters.skills import (
-    AGING_TABLE,
-    STAGES_PER_MENTAL_AGING_STEP,
-    SURVIVAL_AUTO_DEATH_ROLL,
-    SURVIVAL_AUTO_SURVIVE_ROLL,
-    SURVIVAL_DICE_COUNT,
-    SURVIVAL_RULE_DESCRIPTION,
-    SURVIVAL_TARGETS,
     age_for_aging_stage,
     normalize_skill_name,
+    survival_rule_description,
+    survival_targets,
 )
 
 #: The longest a subject may be, so a plan cannot smuggle prose in here.
@@ -57,21 +53,24 @@ class UnknownRule(LookupError):
 def targets_written() -> str:
     """Every track's survivability target, in one line."""
     return ", ".join(
-        f"{name} {target}" for name, target in sorted(SURVIVAL_TARGETS.items())
+        f"{name} {target}" for name, target in sorted(survival_targets().items())
     )
 
 
 def _survival(track: str = "") -> str:
     """The prior-experience survival check, for one track or in general."""
+    survival_roll = skill_rules().survival_roll
     general = (
-        f"Prior-experience survival: {SURVIVAL_RULE_DESCRIPTION} "
-        f"A natural {SURVIVAL_AUTO_SURVIVE_ROLL} is never a death and a "
-        f"natural {SURVIVAL_AUTO_DEATH_ROLL} is never a survival."
+        f"Prior-experience survival: {survival_rule_description()} "
+        f"A natural {survival_roll.automatic_survival_total} is never a death "
+        f"and a natural {survival_roll.automatic_death_total} is never a "
+        "survival."
     )
     if not track:
         return f"{general} Survivability targets: {targets_written()}."
     named = track.strip().casefold().replace(" ", "_")
-    if named not in SURVIVAL_TARGETS:
+    targets = survival_targets()
+    if named not in targets:
         # A lookup always answers. The model phrases the narrowing field
         # however the question came out -- "base TN Piercing vs None" arrived
         # in it once -- and refusing left the GM narrating an apology at the
@@ -80,9 +79,9 @@ def _survival(track: str = "") -> str:
         return f"{general} Survivability targets: {targets_written()}."
     return (
         f"{general} The {named} track's survivability target is "
-        f"{SURVIVAL_TARGETS[named]}, so on {SURVIVAL_DICE_COUNT}d6 plus the "
+        f"{targets[named]}, so on {survival_roll.dice} plus the "
         f"best attribute modifier the character survives on "
-        f"{SURVIVAL_TARGETS[named]} or more."
+        f"{targets[named]} or more."
     )
 
 
@@ -123,7 +122,7 @@ def signed(number: int) -> str:
 
 
 def _aging(_narrowing: str = "") -> str:
-    """The aging schedule, from :data:`characters.skills.AGING_TABLE` (#807).
+    """The aging schedule, from the canon's aging table (#807, #70).
 
     Only the ages where a total changes, each with the cumulative totals it
     carries, as aging.md's table gives them. A lookup rather than a line of
@@ -133,17 +132,18 @@ def _aging(_narrowing: str = "") -> str:
     labels = {
         name: short for name, short in CORE_ATTRIBUTE_FIELDS if name != "charisma"
     }
+    aging = skill_rules().aging
     steps: list[str] = []
     before: dict[str, int] | None = None
-    for stage in sorted(AGING_TABLE):
-        totals = AGING_TABLE[stage]
+    for aging_stage in aging.stages:
+        totals = aging_stage.penalties
         if totals != before and any(totals.values()):
             said = ", ".join(
-                f"{labels[name]} {signed(value)}"
-                for name, value in totals.items()
-                if value
+                f"{labels[name]} {signed(totals[name])}"
+                for name in AGING_ATTRIBUTES
+                if totals[name]
             )
-            steps.append(f"{age_for_aging_stage(stage)} {said}")
+            steps.append(f"{age_for_aging_stage(aging_stage.stage)} {said}")
         before = totals
     age_rules = character_rules().age
     return (
@@ -152,7 +152,7 @@ def _aging(_narrowing: str = "") -> str:
         + "; ".join(steps)
         + "; after that STR, DEX and CON lose 1 more every "
         f"{age_rules.years_per_stage} years and INT and WIS every "
-        f"{STAGES_PER_MENTAL_AGING_STEP * age_rules.years_per_stage}. An aged "
+        f"{aging.stages_per_mental_step * age_rules.years_per_stage}. An aged "
         "score never goes below 0; "
         "play uses it, and only the literacy check and the weight from STR use "
         "the base score."

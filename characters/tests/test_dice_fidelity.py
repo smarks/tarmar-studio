@@ -36,7 +36,12 @@ from common.rolling import Roller
 from reference.markdown_tables import table_rows_under_heading as _table_rows
 from reference.paths import PUBLIC_RULES_DIR
 
-from .rules_fixtures import DEFAULT_CHARACTER_RULES, seated_character_rules
+from .rules_fixtures import (
+    DEFAULT_CHARACTER_RULES,
+    DEFAULT_SKILL_RULES,
+    seated_character_rules,
+    seated_skill_rules,
+)
 
 RULES = PUBLIC_RULES_DIR
 ATTRIBUTES_MD = RULES / "characters" / "attributes.md"
@@ -57,7 +62,7 @@ def _number(cell: str) -> int:
 
 
 class AttributeModifierDocTest(SimpleTestCase):
-    """attributes.md's modifier table vs ``calculate_attribute_modifier``."""
+    """attributes.md's modifier table vs the default canon's (issue #70)."""
 
     def test_modifier_table_matches_code(self):
         markdown = ATTRIBUTES_MD.read_text()
@@ -71,14 +76,17 @@ class AttributeModifierDocTest(SimpleTestCase):
             high = int(band.group(2) or band.group(1))
             for value in range(low, high + 1):
                 documented[value] = modifier
-        # The table covers the whole 3d6 span.
+        # The table covers the whole 3d6 span, and so does the canon's.
         self.assertEqual(sorted(documented), list(range(3, 19)))
-        for value, modifier in documented.items():
-            self.assertEqual(
-                calculate_attribute_modifier(value),
-                modifier,
-                f"attribute {value} should be {modifier:+d} per attributes.md",
-            )
+        table = DEFAULT_SKILL_RULES.attribute_modifier
+        self.assertEqual((table.lowest_score, table.highest_score), (3, 18))
+        with seated_skill_rules():
+            for value, modifier in documented.items():
+                self.assertEqual(
+                    calculate_attribute_modifier(value),
+                    modifier,
+                    f"attribute {value} should be {modifier:+d} per attributes.md",
+                )
 
 
 class HeightWeightDocTest(SimpleTestCase):

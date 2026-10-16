@@ -32,6 +32,7 @@ from characters.skills import (
     glossary_skill,
     specialised_skill_for_granted,
 )
+from characters.tests.rules_fixtures import seated_skill_rules
 from common.test_helpers import BaseTestCase, create_character
 from gm import roster
 from gm.models import GMSession
@@ -359,6 +360,7 @@ class ModifierTableTest(BaseTestCase):
     """#806: the table stops at 3 and 18, and so does the modifier."""
 
     def test_scores_past_the_table_take_the_nearest_row(self):
+        self.enterContext(seated_skill_rules())  # the default canon's table
         self.assertEqual(
             [calculate_attribute_modifier(score) for score in (0, 1, 2, 3)], [-5] * 4
         )

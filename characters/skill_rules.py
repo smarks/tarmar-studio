@@ -89,7 +89,11 @@ What the values mean, and what else is refused:
 
 Skill names in ``skill_cost``, ``money_skill`` and the checks are written as
 they are stored (:func:`characters.skill_names.normalize_skill_name`: lower
-case, no level numeral), so a lookup by a stored name finds them. Dice are
+case, no level numeral), so a lookup by a stored name finds them, and each
+is a glossary skill in its own right: not a weapon's name, which falls under
+Weapon, nor a chosen part such as "maker skill (smith)". That last needs
+``characters.skills``, which imports this module, so the ``characters.E002``
+system check makes it (:func:`characters.skills.validate_skill_names`). Dice are
 written as :mod:`characters.rules` requires, and each roll's lowest and
 highest totals are derived from its dice, not stored.
 """
@@ -104,14 +108,10 @@ from typing import Any
 from reference.paths import SKILL_RULES_FILE
 from reference.rules_file import RulesFileError, RulesFileReader
 
-from .constants import CORE_ATTRIBUTE_FIELDS
+from .constants import CHARACTER_ATTRIBUTE_FIELDS
 from .rules import DiceRollRules, require_at_least
 from .skill_names import normalize_skill_name
 
-#: The core attributes by field name, as the checks name them.
-CORE_ATTRIBUTE_NAMES: tuple[str, ...] = tuple(
-    field_name for field_name, _short_name in CORE_ATTRIBUTE_FIELDS
-)
 #: Faces on the d20 each track's skill table is rolled on (skill-tracks.md).
 TRACK_TABLE_DIE_FACES = 20
 #: Skills the code reads by name, which ``skill_check.governing_attributes``
@@ -582,10 +582,10 @@ class SkillCheckRules(DiceRollRules):
         }
         for skill_name, attribute in attributes_by_skill.items():
             _check_stored_skill_name(skill_name)
-            if attribute is not None and attribute not in CORE_ATTRIBUTE_NAMES:
+            if attribute is not None and attribute not in CHARACTER_ATTRIBUTE_FIELDS:
                 raise ValueError(
                     f"{skill_name!r} rides on {attribute!r}, which is not a "
-                    f"core attribute {list(CORE_ATTRIBUTE_NAMES)}"
+                    f"core attribute {list(CHARACTER_ATTRIBUTE_FIELDS)}"
                 )
         in_both = sorted(
             set(self.governing_attributes).intersection(

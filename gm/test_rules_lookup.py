@@ -13,11 +13,10 @@ instead, which is what the prohibition asks for.
 
 from django.test import SimpleTestCase
 
-from characters.skills import (
-    SURVIVAL_AUTO_DEATH_ROLL,
-    SURVIVAL_AUTO_SURVIVE_ROLL,
-    SURVIVAL_TARGETS,
-)
+from characters.skill_rules import skill_rules
+from characters.skills import survival_targets
+from characters.tests.rules_fixtures import seated_skill_rules
+from characters.tests.test_skill_rules import INVENTED_SKILL_RULES
 from gm import rules_lookup
 from gm.engine import section_plan_schema
 
@@ -31,7 +30,7 @@ class LookUpTest(SimpleTestCase):
                 self.assertIn(subject, section_plan_schema())
 
     def test_a_track_gets_its_own_target_from_the_rules(self):
-        for track, target in SURVIVAL_TARGETS.items():
+        for track, target in survival_targets().items():
             with self.subTest(track=track):
                 said = rules_lookup.look_up("survival", track)
                 self.assertIn(str(target), said)
@@ -49,19 +48,17 @@ class LookUpTest(SimpleTestCase):
     def test_the_answer_carries_the_natural_roll_overrides(self):
         said = rules_lookup.look_up("survival")
 
-        self.assertIn(str(SURVIVAL_AUTO_SURVIVE_ROLL), said)
-        self.assertIn(str(SURVIVAL_AUTO_DEATH_ROLL), said)
+        survival_roll = skill_rules().survival_roll
+        self.assertIn(str(survival_roll.automatic_survival_total), said)
+        self.assertIn(str(survival_roll.automatic_death_total), said)
         self.assertIn("never a death", said)
 
     def test_the_answer_is_built_from_the_rules_not_typed_here(self):
         """A target changed in the rules changes the answer, with no edit."""
-        track, target = next(iter(SURVIVAL_TARGETS.items()))
-        with self.settings():
-            SURVIVAL_TARGETS[track] = 99
-            try:
-                self.assertIn("99", rules_lookup.look_up("survival", track))
-            finally:
-                SURVIVAL_TARGETS[track] = target
+        with seated_skill_rules(INVENTED_SKILL_RULES):
+            said = rules_lookup.look_up("survival", "smith")
+        self.assertIn("target is 25, so on 2d10", said)
+        self.assertIn("A natural 20 is never a death and a natural 2", said)
 
     def test_an_unknown_subject_says_what_is_known(self):
         with self.assertRaises(rules_lookup.UnknownRule) as refused:
@@ -81,7 +78,7 @@ class LookUpTest(SimpleTestCase):
         said = rules_lookup.look_up("survival", "wizarding")
 
         self.assertIn("campaigner", said)
-        for target in SURVIVAL_TARGETS.values():
+        for target in survival_targets().values():
             self.assertIn(str(target), said)
 
     def test_an_unknown_weapon_class_still_answers_with_the_whole_matrix(self):

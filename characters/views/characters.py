@@ -87,7 +87,6 @@ from ..purse import format_coin, format_purse
 from ..rules import character_rules
 from ..services import CharacterChangeError
 from ..skill_checks import (
-    ATTRIBUTES,
     GOVERNING_ATTRIBUTES,
     LITERACY_SKILL,
     MAX_DIFFICULTY,
@@ -96,16 +95,16 @@ from ..skill_checks import (
     governing_attribute,
     literacy_refusal,
 )
+from ..skill_rules import skill_rules
 from ..skills import (
     DEFAULT_RUN_YEARS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
-    SURVIVAL_DICE_COUNT,
-    SURVIVAL_TARGETS,
-    TRACK_LABELS,
     age_for_aging_stage,
     granted_skill_names,
     next_aging_change_after_age,
     skill_rows,
+    survival_targets,
+    track_labels,
 )
 from ..weapon_skill import UNRECORDED_WEAPON_SKILL, weapon_choices
 from .access import answer_change, edit_denied, locked_character_or_404, may_edit
@@ -717,8 +716,8 @@ def character_import(request):
     )
 
 
-# How far past aging stage 13 (AGING_TABLE's last tabulated entry) the
-# workbench preview precomputes concrete penalty numbers. Stage 20 is age 96 --
+# How far past aging stage 13 (the public pages' last tabulated aging stage)
+# the workbench preview precomputes concrete penalty numbers. Stage 20 is age 96 --
 # comfortably past any character anyone actually plays to. Ages beyond this
 # still take real, uncapped aging on the server; the preview notes the ongoing
 # rate instead of listing every further stage (issue #163).
@@ -817,7 +816,7 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
         "unrecorded_weapon_skill": UNRECORDED_WEAPON_SKILL,
         "weapon_choices": weapon_choices(),
         "skill_check_skills": skill_check_skills(character),
-        "skill_check_attributes": ATTRIBUTES,
+        "skill_check_attributes": CHARACTER_ATTRIBUTE_FIELDS,
         "purse": format_purse(character),
         "coin_adjustment": format_coin(character.coin_adjustment),
         "known_spells": known_spells(character),
@@ -971,11 +970,13 @@ class CharacterEditView(
         # A fresh page always offers the default run of one year.
         context["default_run_years"] = DEFAULT_RUN_YEARS
         context["max_run_years"] = MAX_EXPERIENCE_YEARS_PER_RUN
-        context["survival_dice"] = f"{SURVIVAL_DICE_COUNT}d6"
+        survival_dice = skill_rules().survival_roll.dice
+        labels = track_labels()
+        context["survival_dice"] = survival_dice
         context["next_year_number"] = self.object.experience_years + 1
         context["next_run_age"] = self.object.age + DEFAULT_RUN_YEARS
         context["aging_preview_horizon_age"] = aging_preview_horizon_age()
-        context["track_options"] = list(TRACK_LABELS.items())
+        context["track_options"] = list(labels.items())
         # The equipment pickers' options, from characters/equipment.py rather
         # than typed into the template a second time (issue #338 item 21).
         context["equipment_catalog_groups"] = CATALOG_GROUPS
@@ -987,7 +988,7 @@ class CharacterEditView(
         # When the next aging hit lands, and what it costs -- the workbench
         # says so in as many words ("STR -1, DEX -1 at age 36") rather than
         # leaving the player to work it out from a table (issue #221).
-        # get_aging_penalties() never stops escalating (issue #163), so a
+        # The canon's aging never stops escalating (issue #163), so a
         # Python-only preview could show real numbers arbitrarily far out; cut
         # it off at the same horizon the JS uses, so the initial render and the
         # recomputed preview agree on when to switch to the general note.
@@ -1032,9 +1033,9 @@ class CharacterEditView(
             "currentYears": self.object.experience_years,
             "defaultRunYears": DEFAULT_RUN_YEARS,
             "maxRunYears": MAX_EXPERIENCE_YEARS_PER_RUN,
-            "survivalDice": f"{SURVIVAL_DICE_COUNT}d6",
-            "survivalTargets": SURVIVAL_TARGETS,
-            "trackLabels": TRACK_LABELS,
+            "survivalDice": survival_dice,
+            "survivalTargets": survival_targets(),
+            "trackLabels": labels,
             "agingByAge": aging_by_age,
             "agingHorizonAge": aging_preview_horizon_age(),
             # The record keeps the latest runs only; so does the page's

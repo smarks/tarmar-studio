@@ -1,11 +1,13 @@
-"""Drift guards between the Python rule tables and the markdown rulebook.
+"""Drift guards between the default canon's rule files and the markdown rulebook.
 
-The numbers that drive prior-experience simulation live in
-``characters/skills.py`` (``TRACK_DATA``, ``AGING_TABLE``, ``EXPERIENCE_LEVELS``,
-``SKILL_POINTS_PER_LEVEL``, ``SKILL_TRACKS``) and are *also* printed for players
-in ``reference/content/public-rules/characters/prior-experience/``. They have no
+The numbers that drive prior-experience simulation live in the default
+canon's ``skill-rules.json`` (issue #70: the tracks and their d20 tables, the
+experience ladder, the survival roll, the aging table, the Arcane cost) and
+are *also* printed for players in
+``reference/content/public-rules/characters/prior-experience/``. They have no
 shared source, so editing one without the other would silently diverge. These
-tests parse the markdown tables and assert they still match the code.
+tests parse the markdown tables and assert they still match the default
+canon's file (:data:`DEFAULT_SKILL_RULES`), whichever canon is loaded.
 
 The weapon-skill rule (issue #119) is guarded here too: the skills glossary and
 the attack-rolls page must both state the ruling that ``characters.combat`` and
@@ -39,17 +41,11 @@ from characters.equipment import EQUIPMENT_CATALOG
 from characters.models import Character
 from characters.movement import GAIT_BASE_DISTANCES
 from characters.rules import RollTable
+from characters.skill_rules import AGING_ATTRIBUTES
 from characters.skills import (
-    AGING_TABLE,
     ARCANE_SKILL_NAME,
-    EXPERIENCE_LEVELS,
-    SKILL_POINTS_PER_LEVEL,
-    SKILL_TRACKS,
-    SURVIVAL_DICE_COUNT,
-    TRACK_DATA,
     age_for_aging_stage,
     aging_stage_for_age,
-    get_aging_penalties,
     get_skill_level,
     normalize_skill_name,
     points_for_level,
@@ -59,7 +55,12 @@ from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.markdown_tables import is_separator_row, split_table_row
 from reference.paths import CONTENT_DIR, DM_RULES_DIR
 
-from .rules_fixtures import DEFAULT_CHARACTER_RULES, seated_character_rules
+from .rules_fixtures import (
+    DEFAULT_CHARACTER_RULES,
+    DEFAULT_SKILL_RULES,
+    seated_character_rules,
+    seated_skill_rules,
+)
 
 REFERENCE_CONTENT = CONTENT_DIR
 PUBLIC_RULES = REFERENCE_CONTENT / "public-rules"
@@ -86,16 +87,18 @@ MOVEMENT_RULES = PUBLIC_RULES / "combat" / "action-options" / "movement.md"
 # The glossary prints the level ladder in Roman numerals.
 ROMAN_TO_LEVEL = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}
 
-# Player-facing track headings -> the keys used in skills.py.
-TRACK_DISPLAY_TO_KEY = {
-    "Merchant": "merchant",
-    "Campaigner": "campaigner",
-    "Laborer": "laborer",
-    "Magic": "magic",
-    "Underworld": "underworld",
-    "Civil Service": "civil_service",
-    "Craft": "craft",
-    "Hunter/Gatherer": "hunter_gatherer",
+# The default canon's tracks, by key.
+DEFAULT_TRACKS = DEFAULT_SKILL_RULES.tracks.tracks
+
+# Player-facing track headings -> the default canon's track keys. Built from
+# the canon's labels, so a page heading that is no track's label fails the
+# lookup that reads it.
+TRACK_DISPLAY_TO_KEY = {track.label: key for key, track in DEFAULT_TRACKS.items()}
+
+# The pay a survivability.md row names -> the canon's ``money_skill``.
+MONEY_SKILL_BY_PAGE_WORDS = {
+    "highest skill level": None,
+    "craft skill level": "maker skill",
 }
 
 # Aging row labels -> attribute keys.
@@ -188,10 +191,13 @@ def _literacy_modifiers() -> dict[str, int]:
 
 
 class RulesConsistencyTest(SimpleTestCase):
-    """Each markdown rule table must match the Python source of truth."""
+    """Each markdown rule table must match the default canon's rules."""
+
+    def setUp(self) -> None:
+        self.enterContext(seated_skill_rules())  # the default canon's rules
 
     def test_survivability_table_matches_track_data(self):
-        """survivability.md survival/XP/money must match TRACK_DATA."""
+        """survivability.md survival/XP/money must match the default canon's."""
         rows = _table_rows(PRIOR_EXPERIENCE / "survivability.md")
         header, *data_rows = rows
         self.assertEqual(header[0], "Track")
@@ -200,19 +206,26 @@ class RulesConsistencyTest(SimpleTestCase):
         for track_display, survival, xp_per_year, money in data_rows:
             key = TRACK_DISPLAY_TO_KEY[track_display]
             seen.add(key)
-            expected = TRACK_DATA[key]
+            expected = DEFAULT_TRACKS[key]
             survival_target = int(_normalize_number(survival).rstrip("+"))
-            money_multiplier = int(_normalize_number(money).split()[0])
-            self.assertEqual(survival_target, expected["survivability"], key)
+            money_multiplier, _times, *pay_words = _normalize_number(money).split()
+            self.assertEqual(survival_target, expected.survival_target, key)
             self.assertEqual(
-                int(_normalize_number(xp_per_year)), expected["xp_per_year"], key
+                int(_normalize_number(xp_per_year)), expected.xp_per_year, key
             )
-            self.assertEqual(money_multiplier, expected["money_multiplier"], key)
+            self.assertEqual(int(money_multiplier), expected.money_multiplier, key)
+            self.assertEqual(
+                MONEY_SKILL_BY_PAGE_WORDS[" ".join(pay_words)],
+                expected.money_skill,
+                key,
+            )
 
-        self.assertEqual(seen, set(TRACK_DATA), "tracks differ between docs and code")
+        self.assertEqual(
+            seen, set(DEFAULT_TRACKS), "tracks differ between docs and canon"
+        )
 
     def test_experience_levels_table_matches(self):
-        """prior-experience.md levels must match EXPERIENCE_LEVELS + per-level rates."""
+        """prior-experience.md levels must match the canon's ladder and rates."""
         rows = _table_rows(CHARACTERS_RULES / "prior-experience.md")
 
         xp_by_level: dict[int, int] = {}
@@ -226,26 +239,42 @@ class RulesConsistencyTest(SimpleTestCase):
             if points not in ("—", "-", ""):  # em dash = "no points at level 1"
                 points_by_level[level] = int(points)
 
-        self.assertEqual(xp_by_level, EXPERIENCE_LEVELS)
-        self.assertEqual(points_by_level, SKILL_POINTS_PER_LEVEL)
+        levels = DEFAULT_SKILL_RULES.experience.levels
+        self.assertEqual(xp_by_level, {rung.level: rung.minimum_xp for rung in levels})
+        self.assertEqual(
+            points_by_level,
+            {rung.level: rung.xp_per_skill_point for rung in levels[1:]},
+        )
+        self.assertIsNone(levels[0].xp_per_skill_point)
 
     def test_aging_table_matches(self):
-        """aging.md (transposed, keyed by age) must match AGING_TABLE."""
+        """aging.md (transposed, keyed by age) must match the canon's table."""
         rows = _table_rows(PRIOR_EXPERIENCE / "aging.md")
         header = rows[0]
         self.assertEqual(header[0], "Age")
         ages = [int(value) for value in header[1:]]
 
         parsed = {age: {} for age in ages}
+        printed_order = []
         for cells in rows[1:]:
             label = cells[0]
             self.assertIn(label, AGING_LABEL_TO_ATTRIBUTE, label)
             attribute = AGING_LABEL_TO_ATTRIBUTE[label]
+            printed_order.append(attribute)
             for age, value in zip(ages, cells[1:]):
                 parsed[age][attribute] = int(_normalize_number(value))
 
+        aging = DEFAULT_SKILL_RULES.aging
+        rows_by_stage = {row.stage: row.penalties for row in aging.stages}
         self.assertEqual(
-            parsed, {age: AGING_TABLE[_default_aging_stage(age)] for age in ages}
+            parsed, {age: rows_by_stage[_default_aging_stage(age)] for age in ages}
+        )
+        # The order the page prints, which every stage's penalties come in.
+        self.assertEqual(printed_order, list(AGING_ATTRIBUTES))
+        # The first column carrying any penalty is the canon's first stage.
+        first_aged = next(age for age in ages if any(parsed[age].values()))
+        self.assertEqual(
+            _default_aging_stage(first_aged), aging.first_stage_with_penalties
         )
 
     def test_aging_age_columns_step_four_years_from_the_start_age(self):
@@ -280,21 +309,29 @@ class RulesConsistencyTest(SimpleTestCase):
                 self.assertEqual(age_for_aging_stage(stage), age)
 
     def test_survivability_states_the_survival_dice(self):
-        """survivability.md must print the dice the simulator actually rolls."""
+        """survivability.md must print the dice and naturals the canon rolls."""
         text = (PRIOR_EXPERIENCE / "survivability.md").read_text(encoding="utf-8")
-        self.assertIn(f"Roll {SURVIVAL_DICE_COUNT}d6 +", text)
-        self.assertIn(f"Survival ({SURVIVAL_DICE_COUNT}d6)", text)
+        survival_roll = DEFAULT_SKILL_RULES.survival_roll
+        self.assertIn(f"Roll {survival_roll.dice} +", text)
+        self.assertIn(f"Survival ({survival_roll.dice})", text)
+        self.assertIn(
+            f"A natural {survival_roll.automatic_survival_total} always survives; "
+            f"a natural {survival_roll.automatic_death_total} always dies.",
+            text,
+        )
 
     def test_aging_escalation_prose_matches_formula_past_the_table(self):
-        """aging.md's worked past-68 examples must match get_aging_penalties.
+        """aging.md's worked past-68 examples must match the canon's escalation.
 
-        Guards the escalation rule (issues #124, #221): AGING_TABLE stops at
+        Guards the escalation rule (issues #124, #221): the aging table stops at
         age 68, but penalties must keep escalating by formula, not freeze. The
         doc's prose examples ("age 76 totals STR/DEX/CON at -4 and INT/WIS at
         -2...") are parsed and checked against the code.
         """
         with seated_character_rules():
-            last_tabulated_age = age_for_aging_stage(max(AGING_TABLE))
+            last_tabulated_age = age_for_aging_stage(
+                DEFAULT_SKILL_RULES.aging.stages[-1].stage
+            )
         text = (PRIOR_EXPERIENCE / "aging.md").read_text(encoding="utf-8")
         pattern = re.compile(
             r"age (\d+) totals\s+STR/DEX/CON at ([−-]\d+)\s+and INT/WIS at ([−-]\d+)"
@@ -312,7 +349,9 @@ class RulesConsistencyTest(SimpleTestCase):
             physical = int(_normalize_number(physical_str))
             mental = int(_normalize_number(mental_str))
             with self.subTest(age=age):
-                penalties = get_aging_penalties(_default_aging_stage(age))
+                penalties = DEFAULT_SKILL_RULES.aging.penalties_for(
+                    _default_aging_stage(age)
+                )
                 assert penalties is not None
                 self.assertEqual(penalties["strength"], physical)
                 self.assertEqual(penalties["dexterity"], physical)
@@ -322,8 +361,9 @@ class RulesConsistencyTest(SimpleTestCase):
 
     def test_aging_penalties_never_freeze_past_term_13(self):
         """Regression guard: aging must keep escalating past term 13, never
-        freeze the way it used to before AGING_TABLE was extended by
+        freeze the way it used to before the aging table was extended by
         formula (issue #124)."""
+        get_aging_penalties = DEFAULT_SKILL_RULES.aging.penalties_for
         previous = get_aging_penalties(13)
         assert previous is not None
         for term in range(14, 40):
@@ -344,7 +384,7 @@ class RulesConsistencyTest(SimpleTestCase):
         self.assertLess(term_39["intelligence"], term_13["intelligence"])
 
     def test_skill_tracks_table_matches(self):
-        """skill-tracks.md must match SKILL_TRACKS for every d20 position (1-20)."""
+        """skill-tracks.md must match the canon's tables at every d20 position."""
         rows = _table_rows(PRIOR_EXPERIENCE / "skill-tracks.md")
         header = rows[0]
         self.assertEqual(header[0], "Year")
@@ -358,7 +398,7 @@ class RulesConsistencyTest(SimpleTestCase):
             years_checked += 1
             for key, skill in zip(track_keys, cells[1:]):
                 self.assertEqual(
-                    skill, SKILL_TRACKS[key][year - 1], f"{key} year {year}"
+                    skill, DEFAULT_TRACKS[key].skills[year - 1], f"{key} year {year}"
                 )
 
         # The player table covers the 20 rollable positions (a d20 never hits 21).
@@ -415,6 +455,9 @@ class PointBuyRuleTest(SimpleTestCase):
 
 class WeaponSkillRuleTest(SimpleTestCase):
     """The published weapon-skill ruling must match the code (issue #119)."""
+
+    def setUp(self) -> None:
+        self.enterContext(seated_skill_rules())  # the default canon's rules
 
     def test_glossary_bonus_ladder_matches_skill_bonus(self):
         """The glossary's per-level bonus table is +1 per level, as code says."""
@@ -511,6 +554,9 @@ class ArcaneSkillCostRuleTest(SimpleTestCase):
     """Arcane's doubled cost must be stated in the rules and priced in the
     code the same way (issue #154)."""
 
+    def setUp(self) -> None:
+        self.enterContext(seated_skill_rules())  # the default canon's rules
+
     def test_glossary_states_the_arcane_exception(self):
         """The glossary prints the exception the code implements: N(N+1)."""
         text = SKILLS_GLOSSARY.read_text(encoding="utf-8")
@@ -560,6 +606,9 @@ class ArcaneSkillCostRuleTest(SimpleTestCase):
         """The code matches Arcane by normalized name; the rules' spelling of
         it must survive that normalization or the exception never fires."""
         self.assertEqual(normalize_skill_name("Arcane"), ARCANE_SKILL_NAME)
+        self.assertEqual(
+            dict(DEFAULT_SKILL_RULES.skill_cost.multipliers), {ARCANE_SKILL_NAME: 2}
+        )
         self.assertEqual(skill_cost_multiplier("Arcane"), 2)
         self.assertEqual(skill_cost_multiplier("Weapon"), 1)
 
@@ -633,6 +682,9 @@ class InjuryThresholdRuleTest(SimpleTestCase):
 
 class PhysicalMentalRuleTest(SimpleTestCase):
     """Character.physical/.mental must match derived-pools.md (#144)."""
+
+    def setUp(self) -> None:
+        self.enterContext(seated_skill_rules())  # aging.md's age-68 column
 
     def _derived_pools_text(self) -> str:
         return DERIVED_POOLS_RULES.read_text(encoding="utf-8")

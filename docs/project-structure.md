@@ -73,7 +73,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 - `views.py` — character CRUD + game actions: list/edit/deleted views, create, import, bulk-delete, mark-dead/revive, skill allocate/rename, add-experience-term, equipment endpoints.
 - `urls.py` — routes for the above (`app_name="characters"`).
 - `admin.py` — `CharacterAdmin`.
-- `skills.py` — skills/experience engine: skill-level thresholds, `calculate_attribute_modifier`, `SKILL_TRACKS`, `TRACK_DATA`, `AGING_TABLE` (keyed by aging stage — see `aging_stage_for_age`), `simulate_experience_years`.
+- `skills.py` — skills/experience engine: skill-level thresholds, `calculate_attribute_modifier`, the track readers (`track_keys`, `track_labels`, `survival_targets`), the aging lookups (keyed by aging stage — see `aging_stage_for_age`), `simulate_experience_years`. Its numbers are the loaded canon's `skill-rules.json`, read through `skill_rules.py` (issue #70).
 - `equipment.py` — equipment catalog engine + encumbrance/movement helpers (data from the fixture).
 - `dice.py` — character-creation dice (d6, d100, 3d6, demon-die, fatigue), with logged variants.
 - `constants.py` — shared numeric/string bounds (attribute cap 30, equipment limits, regex patterns).

@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from characters.rules import CharacterRules, character_rules, load_character_rules
 from characters.skill_rules import SkillRules, load_skill_rules, skill_rules
+from gm.engine import clear_prompt_caches
 from reference.paths import (
     CANON_CHARACTER_RULES_FILE_NAME,
     CANON_SKILL_RULES_FILE_NAME,
@@ -33,6 +34,19 @@ DEFAULT_SKILL_RULES: SkillRules = load_skill_rules(
 )
 
 
+def _forget_loaded_rules() -> None:
+    """Forget both rules files and every prompt built from them.
+
+    The Games Master's prompts are built from the loaded rules once and held
+    for the process (``gm.engine.clear_prompt_caches``), so a seated test that
+    reads a prompt reads one built from the seated rules, and no later test
+    reads one built from them.
+    """
+    character_rules.cache_clear()
+    skill_rules.cache_clear()
+    clear_prompt_caches()
+
+
 @contextmanager
 def seated_character_rules(
     rules: CharacterRules = DEFAULT_CHARACTER_RULES,
@@ -42,12 +56,12 @@ def seated_character_rules(
     Args:
         rules: The rules :func:`characters.rules.character_rules` answers with.
     """
-    character_rules.cache_clear()
+    _forget_loaded_rules()
     try:
         with patch("characters.rules.load_character_rules", return_value=rules):
             yield
     finally:
-        character_rules.cache_clear()
+        _forget_loaded_rules()
 
 
 @contextmanager
@@ -58,9 +72,9 @@ def seated_skill_rules(rules: SkillRules = DEFAULT_SKILL_RULES) -> Iterator[None
         rules: The rules :func:`characters.skill_rules.skill_rules` answers
             with.
     """
-    skill_rules.cache_clear()
+    _forget_loaded_rules()
     try:
         with patch("characters.skill_rules.load_skill_rules", return_value=rules):
             yield
     finally:
-        skill_rules.cache_clear()
+        _forget_loaded_rules()

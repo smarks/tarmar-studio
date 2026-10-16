@@ -26,8 +26,8 @@ from decimal import Decimal
 from typing import Any, TypeIs
 
 from characters.constants import (
+    CHARACTER_ATTRIBUTE_FIELDS,
     CHARACTER_TEXT_LIMITS,
-    CORE_ATTRIBUTE_FIELDS,
     MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
     MAX_ARMOR_STOPS,
     MAX_EQUIPMENT_DAMAGE_LENGTH,
@@ -44,7 +44,7 @@ from characters.skill_checks import (
     SKILL_CHECK_MAXIMUM,
     SKILL_CHECK_MINIMUM,
 )
-from characters.skills import ALL_TRACKS, MAX_EXPERIENCE_YEARS_PER_RUN
+from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN, selectable_tracks
 
 from ..models import (
     CampaignState,
@@ -56,20 +56,6 @@ from ..models import (
 )
 from ..rules_lookup import MAX_SUBJECT_CHARS, MAX_TRACK_CHARS
 from .policy import ACTION_NAMES, TurnPolicy, already_refused_error
-
-#: The six attributes, written in full as the schema asks.
-ATTRIBUTE_NAMES: tuple[str, ...] = tuple(name for name, _short in CORE_ATTRIBUTE_FIELDS)
-
-
-def track_names() -> tuple[str, ...]:
-    """Every track a plan may name; ``random`` lets the rules choose.
-
-    Asked when a plan is read, not fixed at import, because the tracks move
-    to the canon's ``skill-rules.json`` (issue #70), which no module may read
-    while it imports.
-    """
-    return (*ALL_TRACKS, "random")
-
 
 #: The most actions one plan may hold. A turn asking for more is a plan gone
 #: wrong, not a table's real request.
@@ -651,10 +637,10 @@ def _read_action(
                 given: dict[str, int] = {}
                 for attribute, value in scores.items():
                     key = str(attribute).strip().casefold()
-                    if key not in ATTRIBUTE_NAMES:
+                    if key not in CHARACTER_ATTRIBUTE_FIELDS:
                         reader.fail(
                             f"{attribute!r} is not an attribute; write them in full: "
-                            + ", ".join(ATTRIBUTE_NAMES)
+                            + ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
                         )
                     elif not _is_whole(value):
                         reader.fail(f"the score for {key} must be a whole number")
@@ -662,7 +648,7 @@ def _read_action(
                         given[key] = value
                 fields["scores"] = tuple(
                     (attribute, given[attribute])
-                    for attribute in ATTRIBUTE_NAMES
+                    for attribute in CHARACTER_ATTRIBUTE_FIELDS
                     if attribute in given
                 )
     elif name == "roll_attributes":
@@ -709,9 +695,10 @@ def _read_action(
             fields["difficulty"] = reader.whole("difficulty", 0, MAX_DIFFICULTY)
         if reader.given("attribute"):
             said_attribute = reader.text("attribute").casefold()
-            if said_attribute not in ATTRIBUTE_NAMES:
+            if said_attribute not in CHARACTER_ATTRIBUTE_FIELDS:
                 reader.fail(
-                    "attribute must be written in full: " + ", ".join(ATTRIBUTE_NAMES)
+                    "attribute must be written in full: "
+                    + ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
                 )
             else:
                 fields["attribute"] = said_attribute
@@ -724,9 +711,10 @@ def _read_action(
         # plan names only whose check and on what.
         reader.target()
         said_attribute = reader.text("attribute").casefold()
-        if said_attribute and said_attribute not in ATTRIBUTE_NAMES:
+        if said_attribute and said_attribute not in CHARACTER_ATTRIBUTE_FIELDS:
             reader.fail(
-                "attribute must be written in full: " + ", ".join(ATTRIBUTE_NAMES)
+                "attribute must be written in full: "
+                + ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
             )
         elif said_attribute:
             fields["attribute"] = said_attribute
@@ -750,7 +738,7 @@ def _read_action(
             if isinstance(track, str)
             else ""
         )
-        allowed_tracks = track_names()
+        allowed_tracks = selectable_tracks()
         if normalised not in allowed_tracks:
             reader.fail("track must be one of " + ", ".join(allowed_tracks))
         fields["track"] = normalised

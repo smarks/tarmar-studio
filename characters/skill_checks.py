@@ -15,6 +15,7 @@ aged scores everywhere except the creation-time checks.
 
 from dataclasses import dataclass
 
+from .constants import CHARACTER_ATTRIBUTE_FIELDS
 from .dice import Roller, roll_2d6_faces, roll_3d6_logged
 from .models import Character
 from .services import CharacterChangeError
@@ -89,15 +90,6 @@ IMPLIED_GOVERNING_ATTRIBUTES: dict[str, str] = {
     "arcane": "intelligence",
 }
 
-#: Attribute names the check accepts, as the sheet and the model spell them.
-ATTRIBUTES: tuple[str, ...] = (
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
-)
 
 #: The naturals: "A natural 12 always succeeds; a natural 2 always fails".
 NATURAL_SUCCESS = 12
@@ -394,7 +386,7 @@ def skill_check(
             "Only a Game Master can set the difficulty, name the attribute or "
             "state the dice"
         )
-    if attribute is not None and attribute not in ATTRIBUTES:
+    if attribute is not None and attribute not in CHARACTER_ATTRIBUTE_FIELDS:
         raise CharacterChangeError(f"Unknown attribute: {attribute}")
     used = attribute or governing
     if used is None:
@@ -570,7 +562,9 @@ def attribute_check(
 
     Args:
         character: The character; not changed.
-        attribute: One of :data:`ATTRIBUTES`, written in full.
+        attribute: One of
+            :data:`characters.constants.CHARACTER_ATTRIBUTE_FIELDS`, written
+            in full.
         stated_total: A Game Master's 3d6 total from the table.
         modifier: A Game Master's modifier on the target, within
             :data:`MAX_ATTRIBUTE_CHECK_MODIFIER` either way; applied after the
@@ -593,7 +587,7 @@ def attribute_check(
         if not is_game_master or not character.is_alive:
             raise CharacterChangeError(unconscious)
         overridden.append("unconscious")
-    if attribute not in ATTRIBUTES:
+    if attribute not in CHARACTER_ATTRIBUTE_FIELDS:
         raise CharacterChangeError(f"Unknown attribute: {attribute}")
     if not is_game_master and (stated_total is not None or modifier):
         raise CharacterChangeError(

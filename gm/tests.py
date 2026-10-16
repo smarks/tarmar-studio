@@ -174,12 +174,12 @@ class GMServiceTest(TestCase):
 
     def test_system_prompt_lists_all_tracks(self):
         """Every experience track appears in the GM prompt (drift guard)."""
-        from characters.skills import SKILL_TRACKS
+        from characters.skills import track_keys
         from gm.engine import system_prompt
 
         prompt_lower = system_prompt().lower()
-        self.assertEqual(len(SKILL_TRACKS), 8)
-        for key in SKILL_TRACKS:
+        self.assertEqual(len(track_keys()), 8)
+        for key in track_keys():
             self.assertIn(key.split("_")[0], prompt_lower)
 
     def test_system_prompt_combat_matrix_matches_code(self):
@@ -286,22 +286,15 @@ class GMServiceTest(TestCase):
     def test_importing_the_site_builds_no_prompt(self):
         """The prompts are built when a turn first asks, not at import (#70).
 
-        Two sections are built from tables that move to the canon's
+        Three sections are built from the loaded canon's
         ``skill-rules.json``, which nothing may read while modules import: a
         canon missing that file must fail ``manage.py check`` with
         ``characters.E002``, not crash the URL import. Run out of process:
         this runner has built them already.
         """
-        builders = (
-            "section_core",
-            "section_plan_schema",
-            "system_prompt_sections",
-            "system_prompt",
-            "aide_system_prompt",
-            "dm_play_system_prompt",
-            "dm_system_prompt",
-            "system_prompts_by_authority_and_mode",
-        )
+        from gm import engine
+
+        builders = tuple(builder.__name__ for builder in engine.PROMPT_BUILDERS)
         script = (
             "import os, django\n"
             "os.environ.setdefault('DJANGO_SETTINGS_MODULE', "
@@ -309,8 +302,8 @@ class GMServiceTest(TestCase):
             "django.setup()\n"
             "import tarmar_studio.urls\n"
             "from gm import engine\n"
-            f"for name in {builders!r}:\n"
-            "    print(name, getattr(engine, name).cache_info().misses)\n"
+            "for builder in engine.PROMPT_BUILDERS:\n"
+            "    print(builder.__name__, builder.cache_info().misses)\n"
         )
         completed = subprocess.run(
             [sys.executable, "-c", script],

@@ -285,6 +285,42 @@ class SurvivalRollFilterEdgeTest(TestCase):
             "2d6 [6, 6] + 0 = 12 vs 14 (boxcars — always survives)",
         )
 
+    def test_a_natural_short_of_the_dices_end_is_said_as_its_total(self):
+        """A canon's automatic totals need not be the dice's ends (issue #70).
+
+        Triple sixes is 18 on 3d6; a canon that makes 17 an automatic survival,
+        or 4 an automatic death, has rolled no triple, so the number is said.
+        """
+        survived = _survival_check_3d6([5, 6, 6], 0, 20, True)
+        survived["auto_success"] = True
+        self.assertEqual(
+            survival_roll(survived),
+            "3d6 [5, 6, 6] + 0 = 17 vs 20 (a natural 17 — always survives)",
+        )
+        died = _survival_check_3d6([1, 1, 2], 3, 2, False)
+        died["auto_death"] = True
+        self.assertEqual(
+            survival_roll(died),
+            "3d6 [1, 1, 2] + 3 = 7 vs 2 (a natural 4 — always fatal)",
+        )
+
+    def test_dice_with_no_names_say_the_total(self):
+        check = {
+            "dice": [10, 10],
+            "dice_expression": "2d10",
+            "roll": 20,
+            "modifier": 0,
+            "total": 20,
+            "target": 25,
+            "success": True,
+            "auto_success": True,
+            "auto_death": False,
+        }
+        self.assertEqual(
+            survival_roll(check),
+            "2d10 [10, 10] + 0 = 20 vs 25 (a natural 20 — always survives)",
+        )
+
     def test_a_missing_check_renders_as_nothing(self):
         """Legacy log entries predate per-year checks and carry nothing."""
         self.assertEqual(survival_roll({}), "")

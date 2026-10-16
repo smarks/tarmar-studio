@@ -17,11 +17,16 @@ from typing import Any
 from django.apps import AppConfig
 from django.core.checks import CheckMessage, Error, register
 
-from reference.paths import CANON_CHARACTER_RULES_FILE_NAME, CANON_SKILL_RULES_FILE_NAME
+from reference.paths import (
+    CANON_CHARACTER_RULES_FILE_NAME,
+    CANON_SKILL_RULES_FILE_NAME,
+    SKILL_RULES_FILE,
+)
 from reference.rules_file import RulesFileError
 
 from .rules import CharacterRulesError, character_rules
 from .skill_rules import SkillRulesError, skill_rules
+from .skills import validate_skill_names
 
 #: The check id a refused ``character-rules.json`` reports under.
 CHARACTER_RULES_CHECK_ID = "characters.E001"
@@ -93,7 +98,11 @@ def check_character_rules(
 def check_skill_rules(
     app_configs: Sequence[AppConfig] | None = None, **kwargs: Any
 ) -> list[CheckMessage]:
-    """Load the canon's skills and experience rules.
+    """Load the canon's skills and experience rules and check their skill names.
+
+    Each skill the checks name must be a glossary skill in its own right
+    (:func:`characters.skills.validate_skill_names`), which the loader alone
+    cannot see.
 
     Args:
         app_configs: The apps being checked, or ``None`` for all; the canon
@@ -105,7 +114,7 @@ def check_skill_rules(
         the loader's message, which names the file and the field.
     """
     return _rules_file_refusals(
-        skill_rules,
+        lambda: validate_skill_names(skill_rules(), SKILL_RULES_FILE),
         SkillRulesError,
         CANON_SKILL_RULES_FILE_NAME,
         "characters/skill_rules.py",

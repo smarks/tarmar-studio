@@ -546,10 +546,10 @@ flowchart TD
     guard -->|"yes"| alive{"is_alive?"}
     alive -->|"no"| refuse2["Character is deceased"]
     alive -->|"yes"| sim["skills.simulate_experience_years<br/>up to MAX_EXPERIENCE_YEARS_PER_RUN = 20"]
-    sim --> peryear["per year: get_skill_for_year on SKILL_TRACKS<br/>d20 face to a skill, special result or attribute bonus"]
-    peryear --> surv["survival check: 3d6 vs SURVIVAL_TARGETS<br/>3 auto-death, 18 auto-survive"]
-    surv --> age["age plus one; aging_stage_for_age<br/>AGING_TABLE cumulative penalties"]
-    age --> xp["xp_per_year from TRACK_DATA<br/>money_multiplier for coin"]
+    sim --> peryear["per year: get_skill_for_year on the canon's track table<br/>d20 face to a skill, special result or attribute bonus"]
+    peryear --> surv["survival check: the canon's dice vs the track's target<br/>its automatic death and survival totals"]
+    surv --> age["age plus one; aging_stage_for_age<br/>the canon's cumulative aging penalties"]
+    age --> xp["the track's xp_per_year<br/>money_multiplier for coin"]
     xp --> pts["calculate_skill_points_in_range<br/>XP bracket thresholds"]
     pts --> apply["Character.apply_experience_run<br/>writes experience_log, skills,<br/>free_skill_points, free_spell_points,<br/>aging penalties, total_xp, age"]
     apply --> resp["_build_add_years_response<br/>renders _skills_list.html and _term_entry.html<br/>server-side, plus movement"]
@@ -1090,9 +1090,9 @@ turn asks and the same string for the life of the process, never per request:
 `system_prompt()`, `aide_system_prompt()`, `dm_play_system_prompt()`,
 `dm_system_prompt()`, selected by
 `system_prompts_by_authority_and_mode()[(is_game_master, mode)]`. They are
-built on first use rather than at import because two sections are built from
-tables that move to the canon's `skill-rules.json` (issue #70), which no module
-may read while it imports. The schema section is last on purpose so the growing
+built on first use rather than at import because three sections are built from
+the loaded canon's `skill-rules.json` (issue #70), which no module may read
+while it imports. The schema section is last on purpose so the growing
 prefix stays cacheable on the Ollama side.
 
 ### Canon retrieval (rules lookup, issues #605 and #333)
@@ -1101,8 +1101,8 @@ Two distinct things share the name "rules":
 
 - **`gm/rules_lookup.py`** answers a *rules number* from code, not from memory:
   `RULES = {"survival": ..., "survival_targets": ..., "combat": ...}`, every
-  sentence built from `characters/skills.py` constants and
-  `characters/combat.py::MATRIX`. The `rules_lookup` action calls `look_up`;
+  sentence built from the loaded canon's rules files (`characters/skill_rules.py`,
+  `characters/rules.py`) and `characters/combat.py::MATRIX`. The `rules_lookup` action calls `look_up`;
   an unknown subject raises `UnknownRule` listing what exists and reminding the
   model that a character's figure is a record, not a rule.
 - **`gm/retrieval.py`** is the semantic index over `reference/content/`.
@@ -1734,7 +1734,7 @@ player can read.
 
 | I want to change... | Start here |
 | --- | --- |
-| A game rule about attributes, skills or aging | `characters/skills.py`; drift is pinned by `characters/tests/test_rules_consistency.py` |
+| A game rule about attributes, skills or aging | its number is the canon's `skill-rules.json` (schema in `characters/skill_rules.py`; the default canon's copy in `reference/default_canon/`), its procedure `characters/skills.py`; drift between the default file and the pages is pinned by `characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py` |
 | A derived stat on the sheet | the property on `characters/models.py::Character`, then the module it delegates to (`skills.py`, `equipment.py`, `movement.py`, `dice.py`) |
 | Character creation or point buy | `characters/views/characters.py::character_create`, `characters/dice.py::roll_all_character_stats` / `build_point_buy_character_stats`, `static/js/point-buy.js` |
 | A limit or bound (attribute cap, name length, equipment size) | `characters/constants.py` |

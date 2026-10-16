@@ -13,11 +13,10 @@ import gm_behaviour_check as harness
 import pytest
 
 from characters.combat import MATRIX
-from characters.skills import (
-    SURVIVAL_AUTO_DEATH_ROLL,
-    SURVIVAL_AUTO_SURVIVE_ROLL,
-    SURVIVAL_TARGETS,
-)
+from characters.skill_rules import skill_rules
+from characters.skills import survival_targets
+from characters.tests.rules_fixtures import seated_skill_rules
+from characters.tests.test_skill_rules import INVENTED_SKILL_RULES
 
 # The wrong rule the GM actually stated in #370, plus the rewordings a model
 # reaches for when it is wrong the same way. Each must be caught.
@@ -49,17 +48,40 @@ def campaigner_rule():
 
 def test_survival_oracle_matches_the_rules_module(campaigner_rule):
     """The oracle's observations agree with the constants the rules declare."""
-    assert campaigner_rule.target == SURVIVAL_TARGETS["campaigner"]
-    assert campaigner_rule.auto_survive_roll == SURVIVAL_AUTO_SURVIVE_ROLL
-    assert campaigner_rule.auto_death_roll == SURVIVAL_AUTO_DEATH_ROLL
+    survival_roll = skill_rules().survival_roll
+    assert campaigner_rule.target == survival_targets()["campaigner"]
+    assert campaigner_rule.auto_survive_roll == survival_roll.automatic_survival_total
+    assert campaigner_rule.auto_death_roll == survival_roll.automatic_death_total
     assert campaigner_rule.rolls_high is True
 
 
 def test_survival_oracle_reads_each_track_separately():
     """A track with a different target is observed as having one."""
     laborer = harness.survival_rule_from_code("laborer")
-    assert laborer.target == SURVIVAL_TARGETS["laborer"]
-    assert laborer.target != SURVIVAL_TARGETS["campaigner"]
+    assert laborer.target == survival_targets()["laborer"]
+    assert laborer.target != survival_targets()["campaigner"]
+
+
+def test_the_natural_survival_faces_are_the_loaded_canons_dice():
+    """The faces of a natural survival are counted on the canon's dice (#70).
+
+    Under invented rules the survival roll is 2d10, so a natural 20 is two
+    tens, never three.
+    """
+    rule = harness.SurvivalRule(
+        track="smith",
+        target=25,
+        rolls_high=True,
+        auto_survive_roll=20,
+        auto_death_roll=2,
+        described="",
+    )
+    with seated_skill_rules(INVENTED_SKILL_RULES):
+        auto_survive = harness._auto_survive_pattern(rule)
+    assert auto_survive.search("a 10 and 10")
+    assert auto_survive.search("10, 10")
+    # On the loaded canon's three dice the same total is no pair of tens.
+    assert not harness._auto_survive_pattern(rule).search("10, 10")
 
 
 @pytest.mark.parametrize("wording", WRONG_RULE_WORDINGS)

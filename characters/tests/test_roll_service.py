@@ -48,18 +48,20 @@ class DiceModuleDelegationTest(SimpleTestCase):
         with patch("characters.dice.random.randint", side_effect=[3, 4]):
             self.assertEqual(roll_2d6_faces(), (3, 4, 7))
 
-    def test_roll_3d6_faces_returns_every_face_and_the_total(self):
-        from characters.dice import roll_3d6_faces
+    def test_the_survival_roll_returns_every_face_and_the_total(self):
+        from characters.dice import roll_survival_dice
+        from characters.tests.rules_fixtures import seated_skill_rules
 
-        with patch("characters.dice.random.randint", side_effect=[3, 4, 6]):
-            self.assertEqual(roll_3d6_faces(), (3, 4, 6, 13))
+        with seated_skill_rules():  # 3d6, the public pages' survival roll
+            with patch("characters.dice.random.randint", side_effect=[3, 4, 6]):
+                self.assertEqual(roll_survival_dice(), (3, 4, 6, 13))
 
 
 class SkillsRollConsolidationTest(SimpleTestCase):
     def test_skills_survival_roller_is_the_dice_module_implementation(self):
         from characters import dice, skills
 
-        self.assertIs(skills.roll_survival_dice, dice.roll_3d6_faces)
+        self.assertIs(skills.roll_survival_dice, dice.roll_survival_dice)
 
     def test_survival_check_still_records_individual_faces(self):
         from characters.skills import simulate_experience_years

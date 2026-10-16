@@ -8,6 +8,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from characters import services
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import Character
 from characters.purse import (
     CUSTOM_COMBAT_ITEM_REFUSAL,
@@ -41,15 +42,6 @@ from .turn_engine.policy import (
     TurnPolicy,
 )
 from .turn_engine.state import refusal_lines, settled_refusals
-
-ATTRIBUTES = (
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
-)
 
 
 def plan(*actions: dict) -> str:
@@ -154,7 +146,9 @@ class GameMasterActionsTest(ExecutorTestCase):
         twain, thread = self.characters()
         self.assertEqual((twain.name, thread.name), ("Twain", "Thread"))
         for character in (twain, thread):
-            self.assertEqual({getattr(character, name) for name in ATTRIBUTES}, {18})
+            self.assertEqual(
+                {getattr(character, name) for name in CHARACTER_ATTRIBUTE_FIELDS}, {18}
+            )
         self.assertEqual(
             SessionCharacter.objects.get(character=twain).label, "the brother"
         )

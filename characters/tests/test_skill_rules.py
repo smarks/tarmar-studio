@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -21,7 +22,7 @@ from unittest.mock import patch
 from django.core.checks import Error, run_checks
 from django.test import SimpleTestCase
 
-from characters import skill_checks, skills
+from characters import skill_checks
 from characters.checks import SKILL_RULES_CHECK_ID, check_skill_rules
 from characters.skill_rules import (
     AGING_ATTRIBUTES,
@@ -57,7 +58,7 @@ from reference.rules_file import RulesFileError
 
 #: An invented d20 table: one entry per face, some repeated.
 SAILOR_SKILLS = [f"Rope {face % 7}" for face in range(1, 21)]
-SMITH_SKILLS = ["Hammer"] * 10 + ["Bellows"] * 10
+SMITH_SKILLS = ["Tongs"] * 10 + ["Bellows"] * 10
 
 #: The skills the code reads by name, each on an invented attribute.
 INVENTED_REQUIRED_SKILLS: dict[str, str | None] = {
@@ -85,7 +86,7 @@ INVENTED_RULES: dict[str, Any] = {
             "xp_per_year": 400,
             "survival_target": 25,
             "money_multiplier": 30,
-            "money_skill": "hammer",
+            "money_skill": "tongs",
             "skills": SMITH_SKILLS,
         },
     },
@@ -138,7 +139,7 @@ INVENTED_RULES: dict[str, Any] = {
         "governing_attributes": {
             "rope": "dexterity",
             "fate": None,
-            "hammer": "strength",
+            "tongs": "strength",
             **INVENTED_REQUIRED_SKILLS,
         },
         "implied_governing_attributes": {"sorcery": "wisdom"},
@@ -166,7 +167,7 @@ INVENTED_SKILL_RULES = SkillRules(
                 xp_per_year=400,
                 survival_target=25,
                 money_multiplier=30,
-                money_skill="hammer",
+                money_skill="tongs",
                 skills=tuple(SMITH_SKILLS),
             ),
         }
@@ -222,7 +223,7 @@ INVENTED_SKILL_RULES = SkillRules(
         governing_attributes={
             "rope": "dexterity",
             "fate": None,
-            "hammer": "strength",
+            "tongs": "strength",
             **INVENTED_REQUIRED_SKILLS,
         },
         implied_governing_attributes={"sorcery": "wisdom"},
@@ -478,9 +479,9 @@ class SkillRulesFileTest(SimpleTestCase):
                 "money_multiplier must be at least 1, got 0",
             ),
             (
-                lambda rules: rules["tracks"]["smith"].update(money_skill="Hammer"),
+                lambda rules: rules["tracks"]["smith"].update(money_skill="Tongs"),
                 "tracks.smith:",
-                "skill 'Hammer' must be written as stored, 'hammer'",
+                "skill 'Tongs' must be written as stored, 'tongs'",
             ),
             (
                 lambda rules: rules["tracks"]["smith"].update(label="Sailor"),
@@ -861,122 +862,17 @@ class CanonSkillRulesTest(SimpleTestCase):
 
 
 class DefaultSkillRulesMatchTheCodeTablesTest(SimpleTestCase):
-    """The default canon's file states what the Python tables state today.
+    """The default canon's checks state what ``characters.skill_checks`` does.
 
-    Slice A of issue #70 seats nothing: ``characters.skills`` and
-    ``characters.skill_checks`` still read their own tables, which the drift
-    tests hold to the pages. This proves the default file equal to them field
-    by field, and its lookups equal to the functions they replace, so the
-    seating slices change where the numbers come from and nothing else. Slice
-    B turns it into a drift test against the pages before deleting the tables.
+    Slice A of issue #70 proved the whole default file equal to the Python
+    tables. Slice B seated the tracks, the ladder, the skill cost, the
+    survival roll, the aging table and the modifier table and deleted their
+    tables; the drift tests in ``characters/tests/test_rules_consistency.py``
+    and ``test_dice_fidelity.py`` now hold those parts of the default file to
+    the pages. The checks are seated next, and this holds them until then.
     """
 
     rules = DEFAULT_SKILL_RULES
-
-    def test_the_tracks_are_the_code_s_tracks(self) -> None:
-        tracks = self.rules.tracks.tracks
-        self.assertEqual(list(tracks), list(skills.SKILL_TRACKS))
-        self.assertEqual(list(tracks), list(skills.TRACK_DATA))
-        for key, track in tracks.items():
-            data = skills.TRACK_DATA[key]
-            with self.subTest(track=key):
-                self.assertEqual(track.label, skills.TRACK_LABELS[key])
-                self.assertEqual(track.xp_per_year, data["xp_per_year"])
-                self.assertEqual(track.survival_target, data["survivability"])
-                self.assertEqual(track.survival_target, skills.SURVIVAL_TARGETS[key])
-                self.assertEqual(track.money_multiplier, data["money_multiplier"])
-                # The code's "maker" flag names the Maker Skill.
-                self.assertEqual(
-                    track.money_skill,
-                    "maker skill" if data.get("money_skill") == "maker" else None,
-                )
-                self.assertEqual(list(track.skills), skills.SKILL_TRACKS[key])
-        # "random" is the editor's label for a random choice, not a track.
-        self.assertEqual(
-            {key: track.label for key, track in tracks.items()},
-            {
-                key: label
-                for key, label in skills.TRACK_LABELS.items()
-                if key != "random"
-            },
-        )
-
-    def test_the_survival_roll_is_the_code_s(self) -> None:
-        survival_roll = self.rules.survival_roll
-        self.assertEqual(survival_roll.dice, f"{skills.SURVIVAL_DICE_COUNT}d6")
-        self.assertEqual(
-            survival_roll.automatic_death_total, skills.SURVIVAL_AUTO_DEATH_ROLL
-        )
-        self.assertEqual(
-            survival_roll.automatic_survival_total, skills.SURVIVAL_AUTO_SURVIVE_ROLL
-        )
-
-    def test_the_ladder_is_the_code_s(self) -> None:
-        experience = self.rules.experience
-        self.assertEqual(
-            {rung.level: rung.minimum_xp for rung in experience.levels},
-            skills.EXPERIENCE_LEVELS,
-        )
-        self.assertIsNone(experience.levels[0].xp_per_skill_point)
-        self.assertEqual(
-            {rung.level: rung.xp_per_skill_point for rung in experience.levels[1:]},
-            skills.SKILL_POINTS_PER_LEVEL,
-        )
-        self.assertEqual(experience.top_level, skills.TOP_EXPERIENCE_LEVEL)
-        for total_xp in range(-1000, 600_001, 500):
-            with self.subTest(total_xp=total_xp):
-                self.assertEqual(
-                    experience.level_for(total_xp),
-                    skills.get_experience_level(total_xp),
-                )
-
-    def test_the_skill_cost_is_the_code_s(self) -> None:
-        skill_cost = self.rules.skill_cost
-        self.assertEqual(
-            dict(skill_cost.multipliers),
-            {skills.ARCANE_SKILL_NAME: skills.ARCANE_COST_MULTIPLIER},
-        )
-        for skill_name in (
-            "Arcane",
-            "ARCANE",
-            "Arcane III",
-            "arcane lore",
-            "weapon",
-            "Maker Skill (smith)",
-            *skills.granted_skill_names(),
-        ):
-            with self.subTest(skill_name=skill_name):
-                self.assertEqual(
-                    skill_cost.multiplier_for(skill_name),
-                    skills.skill_cost_multiplier(skill_name),
-                )
-
-    def test_the_aging_table_is_the_code_s(self) -> None:
-        aging = self.rules.aging
-        self.assertEqual(
-            {stage.stage: stage.penalties for stage in aging.stages},
-            skills.AGING_TABLE,
-        )
-        self.assertEqual(aging.first_stage_with_penalties, skills.FIRST_AGING_STAGE)
-        self.assertEqual(
-            aging.stages_per_mental_step, skills.STAGES_PER_MENTAL_AGING_STEP
-        )
-        for stage in range(-5, 61):
-            with self.subTest(stage=stage):
-                self.assertEqual(
-                    aging.penalties_for(stage), skills.get_aging_penalties(stage)
-                )
-
-    def test_the_modifier_table_is_the_code_s(self) -> None:
-        modifier = self.rules.attribute_modifier
-        self.assertEqual(modifier.lowest_score, skills.MODIFIER_TABLE_LOWEST_SCORE)
-        self.assertEqual(modifier.highest_score, skills.MODIFIER_TABLE_HIGHEST_SCORE)
-        for score in range(-10, 41):
-            with self.subTest(score=score):
-                self.assertEqual(
-                    modifier.modifier_for(score),
-                    skills.calculate_attribute_modifier(score),
-                )
 
     def test_the_checks_are_the_code_s(self) -> None:
         skill_check = self.rules.skill_check
@@ -1029,6 +925,50 @@ class SkillRulesCheckTest(SimpleTestCase):
         self.assertIsInstance(messages[0], Error)
         self.assertEqual(messages[0].msg, str(refusal))
         self.assertIn("characters/skill_rules.py", messages[0].hint or "")
+
+    def checked_with(self, **skill_check_changes: Any) -> list[str]:
+        """The E002 messages for the invented rules with the checks changed."""
+        rules = replace(
+            INVENTED_SKILL_RULES,
+            skill_check=replace(
+                INVENTED_SKILL_RULES.skill_check, **skill_check_changes
+            ),
+        )
+        with patch("characters.checks.skill_rules", return_value=rules):
+            return [
+                message.msg
+                for message in check_skill_rules()
+                if message.id == SKILL_RULES_CHECK_ID
+            ]
+
+    def test_a_weapons_name_is_refused(self) -> None:
+        # "hammer" is a weapon the catalog sells: a stored "hammer" is the
+        # Weapon skill, so a lookup by it would never find this entry.
+        governing = {**INVENTED_SKILL_RULES.skill_check.governing_attributes}
+        (message,) = self.checked_with(
+            governing_attributes={**governing, "hammer": "strength"}
+        )
+        self.assertIn(str(SKILL_RULES_FILE), message)
+        self.assertIn(
+            "skill_check.governing_attributes.hammer falls under 'weapon'", message
+        )
+        self.assertIn("each must be a glossary skill in its own right", message)
+
+    def test_a_chosen_part_is_refused(self) -> None:
+        (message,) = self.checked_with(
+            implied_governing_attributes={
+                "sorcery": "wisdom",
+                "maker skill (smith)": "intelligence",
+            }
+        )
+        self.assertIn(
+            "skill_check.implied_governing_attributes.maker skill (smith) falls "
+            "under 'maker skill'",
+            message,
+        )
+
+    def test_the_invented_names_pass(self) -> None:
+        self.assertEqual(self.checked_with(), [])
 
 
 class TarmarSkillRulesTest(SimpleTestCase):

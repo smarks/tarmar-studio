@@ -19,9 +19,10 @@ from characters.combat import (
     MATRIX,
     SEVERE_CRIT_DAMAGE_ROLLS,
 )
-from characters.constants import CORE_ATTRIBUTE_FIELDS
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.dice import roll_expression, roll_expression_record
-from characters.skills import ALL_TRACKS, calculate_attribute_modifier
+from characters.skill_rules import skill_rules
+from characters.skills import calculate_attribute_modifier, selectable_tracks
 from common.rolling import RollRecord
 from reference.paths import (
     CANON_NAME,
@@ -103,33 +104,39 @@ def _render_modifier_fragment() -> str:
     """The attribute modifier table, from the function the code uses (#807).
 
     Built from :func:`characters.skills.calculate_attribute_modifier` over the
-    3-18 rows attributes.md prints, labelled as the page labels them, and
-    what it does past either end said from the same function: flat at the
-    end rows, or the slope continuing. So the prompt says what the sheet
-    computes, whichever way that is ruled.
+    rows the canon's table prints (3-18 on attributes.md; issue #70),
+    labelled as the page labels them, and what it does past either end said
+    from the same function: flat at the end rows, or the slope continuing.
+    So the prompt says what the sheet computes, whichever way that is ruled.
     """
+    table = skill_rules().attribute_modifier
+    lowest, highest = table.lowest_score, table.highest_score
     bands: list[str] = []
-    low = 3
-    while low <= 18:
+    low = lowest
+    while low <= highest:
         modifier = calculate_attribute_modifier(low)
         high = low
-        while high < 18 and calculate_attribute_modifier(high + 1) == modifier:
+        while high < highest and calculate_attribute_modifier(high + 1) == modifier:
             high += 1
         label = str(low) if low == high else f"{low}-{high}"
         bands.append(f"{label}={rules_lookup.signed(modifier)}")
         low = high + 1
     fragment = "Modifiers: " + ", ".join(bands) + "."
-    below, above = calculate_attribute_modifier(2), calculate_attribute_modifier(19)
+    below = calculate_attribute_modifier(lowest - 1)
+    above = calculate_attribute_modifier(highest + 1)
     if (below, above) == (
-        calculate_attribute_modifier(3),
-        calculate_attribute_modifier(18),
+        calculate_attribute_modifier(lowest),
+        calculate_attribute_modifier(highest),
     ):
         fragment += (
-            f" Below 3 the modifier stays {rules_lookup.signed(below)} and above "
-            f"18 it stays {rules_lookup.signed(above)}."
+            f" Below {lowest} the modifier stays {rules_lookup.signed(below)} "
+            f"and above {highest} it stays {rules_lookup.signed(above)}."
         )
     else:
-        fragment += " Past 18 and below 3 the modifier keeps changing by 1 a point."
+        fragment += (
+            f" Past {highest} and below {lowest} the modifier keeps changing by "
+            "1 a point."
+        )
     return fragment
 
 
@@ -219,9 +226,9 @@ def section_core() -> str:
     """The core resolution section, built the first time a prompt needs it.
 
     Built on first use rather than at import because its modifier table,
-    from :func:`characters.skills.calculate_attribute_modifier`, moves to the
-    canon's ``skill-rules.json`` (issue #70), which no module may read while
-    it imports. Cached, so every prompt holds the same string for the life
+    from :func:`characters.skills.calculate_attribute_modifier`, is the
+    loaded canon's ``skill-rules.json`` (issue #70), which no module may read
+    while it imports. Cached, so every prompt holds the same string for the life
     of the process.
     """
     return (
@@ -313,12 +320,50 @@ _CREATION_REST = (
     "and Deceit; Underworld yields Stealth, Sleight of Hand, Poison and "
     "Bribery; Craft yields Maker Skills; Laborer can raise STR, DEX or CON.\n\n"
     "### Levels and Skill Points\n"
-    "Level 1 = 0 XP, Level 2 = 2,000, Level 3 = 4,000, Level 4 = 8,000, "
-    "Level 5 = 16,000, doubling each level to Level 10 = 512,000. Skill "
-    "points accrue at regular XP intervals within each level (every 1,000 XP "
-    "at level 2, every 1,334 at level 3, every 2,000 at level 4, and so on)."
 )
-SECTION_CHARACTER_CREATION = _CREATION_OPENING + _CREATION_PLAN_DICE + _CREATION_REST
+
+
+def _render_levels_fragment() -> str:
+    """The experience ladder and its skill-point rates, from the canon (#70).
+
+    The ladder the skills code reads (``skill-rules.json``'s
+    ``experience_levels``), written out rather than typed: each level's XP,
+    then the XP per skill point on the climb to each level, the top rate
+    carrying on past the top (prior-experience.md, issue #656).
+    """
+    experience = skill_rules().experience
+    levels = ", ".join(
+        f"Level {rung.level} = {rung.minimum_xp:,}"
+        + (" XP" if rung is experience.levels[0] else "")
+        for rung in experience.levels
+    )
+    rates = ", ".join(
+        f"every {rung.xp_per_skill_point:,} XP to level {rung.level}"
+        for rung in experience.levels[1:]
+    )
+    top = experience.levels[-1]
+    return (
+        f"{levels}. Skill points accrue at regular XP intervals on the climb "
+        f"to each level ({rates}), and the level-{top.level} rate keeps running "
+        f"past {top.minimum_xp:,} XP."
+    )
+
+
+@functools.cache
+def section_character_creation() -> str:
+    """The character creation section, built on first use for its ladder.
+
+    The ladder is the canon's (issue #70), which no module may read while it
+    imports. Cached, so every prompt holds the same string for the life of
+    the process.
+    """
+    return (
+        _CREATION_OPENING
+        + _CREATION_PLAN_DICE
+        + _CREATION_REST
+        + _render_levels_fragment()
+    )
+
 
 SECTION_COMBAT = (
     "## Combat System\n"
@@ -781,9 +826,10 @@ _DM_AIDE_REST = (
 # turn asks for it, and cached for the life of the process -- nothing is
 # built per request, which keeps first-token time flat (issues #330, #331) --
 # and every one opens with system_prompt()'s bytes, so one cached prefix
-# serves all four. Built on first use rather than at import because two of
-# the sections are built from tables that move to the canon's
-# skill-rules.json (issue #70), which no module may read while it imports.
+# serves all four. Built on first use rather than at import because three of
+# the sections (the core rules, character creation, the plan format) are built
+# from the loaded canon's skill-rules.json (issue #70), which no module may
+# read while it imports.
 # The plan format closes those shared sections,
 # so it is cached too, and the authority and aide addenda follow it.
 
@@ -965,10 +1011,10 @@ def section_plan_schema() -> str:
     """The plan format, last in every plan prompt so it stays in the cache.
 
     Built on first use for :func:`section_core`'s reason: the tracks it
-    lists move to the canon's ``skill-rules.json`` (issue #70).
+    lists are the loaded canon's ``skill-rules.json`` (issue #70).
     """
-    attributes = ", ".join(name for name, _abbreviation in CORE_ATTRIBUTE_FIELDS)
-    tracks = ", ".join((*ALL_TRACKS, "random"))
+    attributes = ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
+    tracks = ", ".join(selectable_tracks())
     times = ", ".join(value for value, _label in TIMES_OF_DAY)
     subjects = ", ".join(rules_lookup.subjects())
     return (
@@ -1096,7 +1142,7 @@ def system_prompt_sections() -> tuple[str, ...]:
         SECTION_PHILOSOPHY,
         SECTION_NOT_DND,
         section_core(),
-        SECTION_CHARACTER_CREATION,
+        section_character_creation(),
         SECTION_RECORDS,
         SECTION_COMBAT,
         SECTION_MAGIC,
@@ -1156,6 +1202,32 @@ def system_prompts_by_authority_and_mode() -> Mapping[tuple[bool, str], str]:
             (True, MODE_AIDE): dm_system_prompt(),
         }
     )
+
+
+#: Every cached prompt builder, in the order they build on one another.
+PROMPT_BUILDERS = (
+    section_core,
+    section_character_creation,
+    section_plan_schema,
+    system_prompt_sections,
+    system_prompt,
+    aide_system_prompt,
+    dm_play_system_prompt,
+    dm_system_prompt,
+    system_prompts_by_authority_and_mode,
+)
+
+
+def clear_prompt_caches() -> None:
+    """Forget every built prompt, so the next turn builds them afresh.
+
+    The prompts are built from the loaded canon's rules and then held for the
+    life of the process. A test that seats other rules
+    (``characters.tests.rules_fixtures``) calls this so the prompts it reads
+    are built from them, and again afterwards so no later test reads them.
+    """
+    for builder in PROMPT_BUILDERS:
+        builder.cache_clear()
 
 
 def system_prompt_for(is_game_master: bool, mode: str | None = None) -> str:

@@ -30,6 +30,7 @@ from common.rolling import Roller, RollRecord, parse_dice_specification
 from .constants import CORE_ATTRIBUTE_FIELDS, point_buy_budget_note
 from .rules import CoinRoll, character_rules
 from .skill_names import normalize_skill_name
+from .skill_rules import skill_rules
 
 # The module-default roller every helper below rolls through. Unseeded, so it
 # draws from the module-global ``random`` (see ``common.rolling.Roller``).
@@ -74,16 +75,17 @@ def roll_3d6_logged(roller: Roller | None = None) -> tuple[int, str]:
     return roll_dice_logged("3d6", roller)
 
 
-def roll_3d6_faces() -> tuple[int, int, int, int]:
-    """Roll 3d6 and return (die1, die2, die3, total).
+def roll_survival_dice() -> tuple[int, ...]:
+    """Roll the canon's survival dice: every face, then the total.
 
-    The survival-check shape ``characters.skills`` uses since issue #223 moved
-    the prior-experience survival roll from 2d6 to 3d6: every face is kept so
-    the experience log can show the actual dice, not just their sum.
+    The prior-experience survival roll (3d6 on the public pages since issue
+    #223) is the loaded canon's ``survival_roll.dice`` (issue #70). Every face
+    is kept so the experience log can show the actual dice, not just their
+    sum; a caller unpacks ``*faces, total``.
     """
-    record = _DEFAULT_ROLLER.roll("3d6", purpose="3d6")
-    first_die, second_die, third_die = record.faces
-    return first_die, second_die, third_die, record.total
+    dice = skill_rules().survival_roll.dice
+    record = _DEFAULT_ROLLER.roll(dice, purpose=dice)
+    return (*record.faces, record.total)
 
 
 def roll_2d6_faces(roller: Roller | None = None) -> tuple[int, int, int]:
