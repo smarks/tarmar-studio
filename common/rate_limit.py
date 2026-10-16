@@ -55,6 +55,7 @@ def too_many_attempts(
     window_seconds: int,
     request: HttpRequest | None = None,
     headline: str = "The door has stopped answering.",
+    hint: str = "",
 ) -> HttpResponse:
     """The 429 a spent guessing budget answers with.
 
@@ -78,6 +79,12 @@ def too_many_attempts(
             for the template; the response is the same without it.
         headline: The line above the message, so the gate and the sign-in can
             each say what has stopped answering.
+        hint: A line of help shown under the message, or empty for none. The
+            gate passes ``common.gate.GATE_HINT`` (issue #55): a visitor who
+            spent ``GUESS_MAX_ATTEMPTS`` guesses on the riddle has not
+            understood it, and the page that turns them away is the last
+            chance to say so. The login limiter passes nothing; there is no
+            hint to give about a password.
 
     Returns:
         A 429 carrying the rendered page and a ``Retry-After`` header.
@@ -85,7 +92,12 @@ def too_many_attempts(
     wait_minutes = max(1, -(-window_seconds // 60))
     body = render_to_string(
         "429.html",
-        {"message": message, "headline": headline, "wait_minutes": wait_minutes},
+        {
+            "message": message,
+            "headline": headline,
+            "wait_minutes": wait_minutes,
+            "hint": hint,
+        },
         request=request,
     )
     response = HttpResponse(body, status=429)
