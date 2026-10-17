@@ -21,15 +21,15 @@ from common.services.ollama_client import STRUCTURED_OUTPUT_UNAVAILABLE_STATUS
 from common.test_helpers import fake_embedder, write_fake_corpus
 from gm import retrieval
 from gm.engine import (
-    AIDE_SYSTEM_PROMPT,
     DEFAULT_RULES_DIR,
-    DM_PLAY_SYSTEM_PROMPT,
-    DM_SYSTEM_PROMPT,
     MODE_AIDE,
     MODE_PLAY,
     SECTION_DM_AUTHORITY,
-    SYSTEM_PROMPT,
+    aide_system_prompt,
+    dm_play_system_prompt,
+    dm_system_prompt,
     normalise_mode,
+    system_prompt,
 )
 from gm.model_config import GMModelConfig
 from gm.retrieval import CANON_CONTEXT_PREAMBLE, CANON_KIND, build_index
@@ -96,7 +96,7 @@ class ModelConfigTest(TestCase):
     def test_system_message_is_the_engine_prompt(self):
         self.assertEqual(
             cli_gm.build_system_message("ignored"),
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt()},
         )
 
     def test_the_offline_session_plays_as_a_player_by_default(self):
@@ -112,7 +112,7 @@ class ModelConfigTest(TestCase):
             patch.object(cli_gm, "RUNNING_MODE", MODE_AIDE),
         ):
             self.assertEqual(
-                cli_gm.build_system_message("ignored")["content"], DM_SYSTEM_PROMPT
+                cli_gm.build_system_message("ignored")["content"], dm_system_prompt()
             )
 
     def test_the_mode_variable_lets_a_game_master_play(self):
@@ -123,7 +123,7 @@ class ModelConfigTest(TestCase):
         ):
             self.assertEqual(
                 cli_gm.build_system_message("ignored")["content"],
-                DM_PLAY_SYSTEM_PROMPT,
+                dm_play_system_prompt(),
             )
 
     def test_a_player_choosing_aide_mode_gains_no_authority(self):
@@ -133,7 +133,7 @@ class ModelConfigTest(TestCase):
             patch.object(cli_gm, "RUNNING_MODE", MODE_AIDE),
         ):
             sent = cli_gm.build_system_message("ignored")["content"]
-        self.assertEqual(sent, AIDE_SYSTEM_PROMPT)
+        self.assertEqual(sent, aide_system_prompt())
         self.assertNotIn(SECTION_DM_AUTHORITY, sent)
 
     def test_the_mode_variable_is_named_in_one_place(self):
@@ -378,7 +378,7 @@ class CharacterCommandTest(TestCase):
         )
 
         history = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt()},
             {"role": "user", "content": "a hunter named Wren"},
         ]
         extracted = {
@@ -403,7 +403,7 @@ class CharacterCommandTest(TestCase):
         self.assertEqual(kwargs["options"]["temperature"], EXTRACTION_TEMPERATURE)
         self.assertEqual(kwargs["base_url"], cli_gm.OLLAMA_BASE_URL)
         self.assertEqual(messages[-1]["content"], extraction_prompt())
-        self.assertEqual(messages[0]["content"], SYSTEM_PROMPT)
+        self.assertEqual(messages[0]["content"], system_prompt())
 
         assert written is not None
         self.assertEqual(written, self.saves_dir / "character_Wren.json")

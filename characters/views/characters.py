@@ -87,47 +87,62 @@ from ..purse import format_coin, format_purse
 from ..rules import character_rules
 from ..services import CharacterChangeError
 from ..skill_checks import (
-    ATTRIBUTES,
-    GOVERNING_ATTRIBUTES,
     LITERACY_SKILL,
     MAX_DIFFICULTY,
-    SKILL_CHECK_MAXIMUM,
-    SKILL_CHECK_MINIMUM,
     governing_attribute,
     literacy_refusal,
 )
+from ..skill_rules import skill_rules
 from ..skills import (
     DEFAULT_RUN_YEARS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
-    SURVIVAL_DICE_COUNT,
-    SURVIVAL_TARGETS,
-    TRACK_LABELS,
     age_for_aging_stage,
     granted_skill_names,
     next_aging_change_after_age,
     skill_rows,
+    survival_targets,
+    track_labels,
 )
 from ..weapon_skill import UNRECORDED_WEAPON_SKILL, weapon_choices
 from .access import answer_change, edit_denied, locked_character_or_404, may_edit
 
-#: Each number input's bound on the sheet, by the name the template reads it
-#: under (``number_limits.<field>``) and the script under the page config's
-#: ``numberLimits``: the constant its endpoint refuses by, never a copy of it
-#: (issue #938). A range symmetric about zero is given by its magnitude, and
-#: a floor of 0 or 1 (no negative weight, no empty row) is not a limit here.
-CHARACTER_NUMBER_LIMITS: dict[str, int] = {
+#: Each code-held number input's bound on the sheet, by the name the template
+#: reads it under (``number_limits.<field>``) and the script under the page
+#: config's ``numberLimits``: the constant its endpoint refuses by, never a
+#: copy of it (issue #938). A range symmetric about zero is given by its
+#: magnitude, and a floor of 0 or 1 (no negative weight, no empty row) is not
+#: a limit here. :func:`character_number_limits` adds the canon's.
+FIXED_NUMBER_LIMITS: dict[str, int] = {
     "equipment_quantity": MAX_EQUIPMENT_QUANTITY,
     "equipment_weight": MAX_EQUIPMENT_WEIGHT_LBS,
     "equipment_modifier": MAX_EQUIPMENT_MODIFIER,
     "armor_stops": MAX_ARMOR_STOPS,
     "armor_dex_penalty": MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
     "check_difficulty": MAX_DIFFICULTY,
-    "check_total_minimum": SKILL_CHECK_MINIMUM,
-    "check_total_maximum": SKILL_CHECK_MAXIMUM,
     "mana_grant": MAX_MANA_GRANT,
     "defender_dodge": attack.MAX_DEFENDER_DODGE,
     "situational": attack.MAX_SITUATIONAL,
 }
+
+
+def character_number_limits() -> dict[str, int]:
+    """Every number input's bound on the sheet: the code's and the canon's.
+
+    The skill check's stated total is held to what the canon's dice can show
+    (2 to 12 on the public pages), read when a page asks, never at import
+    (issue #70), as :func:`characters.skill_checks.skill_check` holds it.
+
+    Returns:
+        :data:`FIXED_NUMBER_LIMITS` with ``check_total_minimum`` and
+        ``check_total_maximum``.
+    """
+    skill_check_dice = skill_rules().skill_check
+    return {
+        **FIXED_NUMBER_LIMITS,
+        "check_total_minimum": skill_check_dice.minimum,
+        "check_total_maximum": skill_check_dice.maximum,
+    }
+
 
 #: What the Location section's literacy row is painted from (issues #740,
 #: #741, #743). The field-update response for ``location`` and
@@ -717,8 +732,8 @@ def character_import(request):
     )
 
 
-# How far past aging stage 13 (AGING_TABLE's last tabulated entry) the
-# workbench preview precomputes concrete penalty numbers. Stage 20 is age 96 --
+# How far past aging stage 13 (the public pages' last tabulated aging stage)
+# the workbench preview precomputes concrete penalty numbers. Stage 20 is age 96 --
 # comfortably past any character anyone actually plays to. Ages beyond this
 # still take real, uncapped aging on the server; the preview notes the ongoing
 # rate instead of listing every further stage (issue #163).
@@ -786,10 +801,11 @@ def skill_check_skills(character: Character) -> list[dict]:
     re-rendered (issues #765, #792).
     """
     held = dict(character.skills or {})
+    governed = skill_rules().skill_check.governing_attributes
     check_skills = []
-    for skill_name in sorted(set(held) | set(GOVERNING_ATTRIBUTES)):
+    for skill_name in sorted(set(held) | set(governed)):
         attribute = governing_attribute(skill_name)
-        if skill_name in GOVERNING_ATTRIBUTES and attribute is None:
+        if skill_name in governed and attribute is None:
             continue  # Luck is not rolled as a check
         check_skills.append(
             {
@@ -817,7 +833,8 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
         "unrecorded_weapon_skill": UNRECORDED_WEAPON_SKILL,
         "weapon_choices": weapon_choices(),
         "skill_check_skills": skill_check_skills(character),
-        "skill_check_attributes": ATTRIBUTES,
+        "skill_check_attributes": CHARACTER_ATTRIBUTE_FIELDS,
+        "skill_check_dice": skill_rules().skill_check.dice,
         "purse": format_purse(character),
         "coin_adjustment": format_coin(character.coin_adjustment),
         "known_spells": known_spells(character),
@@ -971,23 +988,26 @@ class CharacterEditView(
         # A fresh page always offers the default run of one year.
         context["default_run_years"] = DEFAULT_RUN_YEARS
         context["max_run_years"] = MAX_EXPERIENCE_YEARS_PER_RUN
-        context["survival_dice"] = f"{SURVIVAL_DICE_COUNT}d6"
+        survival_dice = skill_rules().survival_roll.dice
+        labels = track_labels()
+        context["survival_dice"] = survival_dice
         context["next_year_number"] = self.object.experience_years + 1
         context["next_run_age"] = self.object.age + DEFAULT_RUN_YEARS
         context["aging_preview_horizon_age"] = aging_preview_horizon_age()
-        context["track_options"] = list(TRACK_LABELS.items())
+        context["track_options"] = list(labels.items())
         # The equipment pickers' options, from characters/equipment.py rather
         # than typed into the template a second time (issue #338 item 21).
         context["equipment_catalog_groups"] = CATALOG_GROUPS
         # Each text input's maxlength, the server's own limit (issue #928).
         context["text_limits"] = CHARACTER_TEXT_LIMITS
         # Each number input's bound, the server's own (issue #938).
-        context["number_limits"] = CHARACTER_NUMBER_LIMITS
+        number_limits = character_number_limits()
+        context["number_limits"] = number_limits
         context["equipment_item_categories"] = ITEM_CATEGORIES
         # When the next aging hit lands, and what it costs -- the workbench
         # says so in as many words ("STR -1, DEX -1 at age 36") rather than
         # leaving the player to work it out from a table (issue #221).
-        # get_aging_penalties() never stops escalating (issue #163), so a
+        # The canon's aging never stops escalating (issue #163), so a
         # Python-only preview could show real numbers arbitrarily far out; cut
         # it off at the same horizon the JS uses, so the initial render and the
         # recomputed preview agree on when to switch to the general note.
@@ -1032,9 +1052,9 @@ class CharacterEditView(
             "currentYears": self.object.experience_years,
             "defaultRunYears": DEFAULT_RUN_YEARS,
             "maxRunYears": MAX_EXPERIENCE_YEARS_PER_RUN,
-            "survivalDice": f"{SURVIVAL_DICE_COUNT}d6",
-            "survivalTargets": SURVIVAL_TARGETS,
-            "trackLabels": TRACK_LABELS,
+            "survivalDice": survival_dice,
+            "survivalTargets": survival_targets(),
+            "trackLabels": labels,
             "agingByAge": aging_by_age,
             "agingHorizonAge": aging_preview_horizon_age(),
             # The record keeps the latest runs only; so does the page's
@@ -1070,7 +1090,7 @@ class CharacterEditView(
             # (issue #928): the server's number, not a copy of it.
             "textLimits": CHARACTER_TEXT_LIMITS,
             # And each number input's bound (issue #938).
-            "numberLimits": CHARACTER_NUMBER_LIMITS,
+            "numberLimits": number_limits,
             "reviveUrl": reverse("characters:revive", args=[self.object.pk]),
             # The Fatigue roll's own control (issue #636); the handler binds
             # only when the button renders, which is for an editor alone.

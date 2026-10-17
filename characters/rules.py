@@ -183,7 +183,7 @@ def _check_dice(dice: str) -> None:
         raise ValueError(f"dice {dice!r} must be written {standard!r}")
 
 
-def _require_at_least(name: str, value: int, least: int) -> None:
+def require_at_least(name: str, value: int, least: int) -> None:
     """Refuse ``value`` below ``least``.
 
     Raises:
@@ -208,7 +208,7 @@ class PointBuyRules:
     maximum: int
 
     def __post_init__(self) -> None:
-        _require_at_least("minimum", self.minimum, 1)
+        require_at_least("minimum", self.minimum, 1)
         if self.maximum < self.minimum:
             raise ValueError(f"maximum {self.maximum} is below minimum {self.minimum}")
         attribute_count = len(ATTRIBUTE_SHORT_NAMES)
@@ -254,8 +254,8 @@ class AgeRules:
     years_per_stage: int
 
     def __post_init__(self) -> None:
-        _require_at_least("starting", self.starting, 1)
-        _require_at_least("years_per_stage", self.years_per_stage, 1)
+        require_at_least("starting", self.starting, 1)
+        require_at_least("years_per_stage", self.years_per_stage, 1)
 
 
 @dataclass(frozen=True)
@@ -395,7 +395,7 @@ def _check_faces(name: str, values: tuple[int, ...]) -> None:
             f"got {len(values)}"
         )
     for value in values:
-        _require_at_least(f"each of {name}", value, 1)
+        require_at_least(f"each of {name}", value, 1)
 
 
 @dataclass(frozen=True)
@@ -416,7 +416,7 @@ class HeightRules:
 
     def __post_init__(self) -> None:
         _check_faces("base_inches_by_face", self.base_inches_by_face)
-        _require_at_least("minimum_inches", self.minimum_inches, 1)
+        require_at_least("minimum_inches", self.minimum_inches, 1)
 
 
 @dataclass(frozen=True)
@@ -435,8 +435,8 @@ class WeightRules:
 
     def __post_init__(self) -> None:
         _check_faces("stones_by_face", self.stones_by_face)
-        _require_at_least("pounds_per_stone", self.pounds_per_stone, 1)
-        _require_at_least("strength_divisor", self.strength_divisor, 1)
+        require_at_least("pounds_per_stone", self.pounds_per_stone, 1)
+        require_at_least("strength_divisor", self.strength_divisor, 1)
 
 
 @dataclass(frozen=True)
@@ -574,7 +574,7 @@ class LocationTable(PercentileTable[LocationRow]):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        _require_at_least("skill_points", self.skill_points, 0)
+        require_at_least("skill_points", self.skill_points, 0)
 
 
 #: Percentile dice, which the logs write ``d100`` and the rules "percentile
@@ -610,7 +610,7 @@ class CoinRoll:
         return "percentile dice" if self.is_percentile else self.dice
 
     def __post_init__(self) -> None:
-        _require_at_least("base", self.base, 0)
+        require_at_least("base", self.base, 0)
         _check_dice(self.dice)
 
 
@@ -627,7 +627,7 @@ class WealthRow(TableRow):
 
     def __post_init__(self) -> None:
         if isinstance(self.coin, int):
-            _require_at_least("coin", self.coin, 0)
+            require_at_least("coin", self.coin, 0)
 
 
 @dataclass(frozen=True)
@@ -706,10 +706,7 @@ class _CharacterRulesFileReader(RulesFileReader):
     def point_buy(self, value: Any, field_path: str) -> PointBuyRules:
         """``attributes.point_buy``."""
         fields = self.json_object(value, field_path, POINT_BUY_FIELDS)
-        integers = {
-            name: self.integer(fields[name], f"{field_path}.{name}")
-            for name in POINT_BUY_FIELDS
-        }
+        integers = self.integers(fields, field_path, POINT_BUY_FIELDS)
         with self.wrapped_value_errors(field_path):
             return PointBuyRules(**integers)
 
@@ -724,10 +721,7 @@ class _CharacterRulesFileReader(RulesFileReader):
     def age(self, value: Any, field_path: str) -> AgeRules:
         """``age``."""
         fields = self.json_object(value, field_path, AGE_FIELDS)
-        integers = {
-            name: self.integer(fields[name], f"{field_path}.{name}")
-            for name in AGE_FIELDS
-        }
+        integers = self.integers(fields, field_path, AGE_FIELDS)
         with self.wrapped_value_errors(field_path):
             return AgeRules(**integers)
 
@@ -755,10 +749,7 @@ class _CharacterRulesFileReader(RulesFileReader):
         faces = self.integer_list(
             fields["base_inches_by_face"], f"{field_path}.base_inches_by_face"
         )
-        integers = {
-            name: self.integer(fields[name], f"{field_path}.{name}")
-            for name in HEIGHT_INTEGER_FIELDS
-        }
+        integers = self.integers(fields, field_path, HEIGHT_INTEGER_FIELDS)
         with self.wrapped_value_errors(field_path):
             return HeightRules(base_inches_by_face=faces, **integers)
 
@@ -768,10 +759,7 @@ class _CharacterRulesFileReader(RulesFileReader):
         faces = self.integer_list(
             fields["stones_by_face"], f"{field_path}.stones_by_face"
         )
-        integers = {
-            name: self.integer(fields[name], f"{field_path}.{name}")
-            for name in WEIGHT_INTEGER_FIELDS
-        }
+        integers = self.integers(fields, field_path, WEIGHT_INTEGER_FIELDS)
         with self.wrapped_value_errors(field_path):
             return WeightRules(stones_by_face=faces, **integers)
 

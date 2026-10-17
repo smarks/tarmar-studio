@@ -15,7 +15,7 @@ from django.core.management import CommandError, call_command
 from django.test import override_settings
 
 from common.test_helpers import BaseTestCase
-from gm.engine import DM_SYSTEM_PROMPT, SYSTEM_PROMPT
+from gm.engine import dm_system_prompt, system_prompt
 from gm.models import GMPromptSnapshot, GMSession, GMTurnRecord
 from gm.retrieval import CANON_KIND, PROCEDURE_KIND
 from gm.testing import add_character, gm_replies
@@ -84,8 +84,8 @@ class TurnRecordStreamTest(BaseTestCase):
         self.assertEqual(record.options, {"num_ctx": 1024, "temperature": 0.5})
         self.assertEqual(record.history_start, 0)
         self.assertEqual(record.history_end, len(session.history))
-        self.assertEqual(record.prompt.text, SYSTEM_PROMPT)
-        self.assertEqual(record.prompt.prompt_hash, prompt_hash(SYSTEM_PROMPT))
+        self.assertEqual(record.prompt.text, system_prompt())
+        self.assertEqual(record.prompt.prompt_hash, prompt_hash(system_prompt()))
         self.assertEqual(record.error, "")
 
     @patch("gm.turn_engine.model.ollama_client.stream_chat")
@@ -112,7 +112,7 @@ class TurnRecordStreamTest(BaseTestCase):
         record = GMTurnRecord.objects.get()
         self.assertTrue(record.is_game_master)
         self.assertEqual(record.mode, "aide")
-        self.assertEqual(record.prompt.text, DM_SYSTEM_PROMPT)
+        self.assertEqual(record.prompt.text, dm_system_prompt())
 
     @patch("gm.turn_engine.model.ollama_client.stream_chat")
     def test_a_failed_turn_is_recorded_even_though_it_saves_no_history(self, stream):

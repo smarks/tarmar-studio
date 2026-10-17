@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from characters.skills import SURVIVAL_RULE_DESCRIPTION
+from characters.skills import survival_dice_expression, survival_rule_description
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,9 @@ class ExperienceYearOutcome:
         year: The year's number in the character's career.
         age: The character's age at the end of the year.
         track: The track key played, e.g. ``"campaigner"``.
-        dice: The three survival dice, as they fell.
+        dice_expression: The dice the survival roll was made on, ``"3d6"``
+            on the public pages.
+        dice: The survival dice, as they fell.
         roll: The dice total before the modifier.
         modifier: The best attribute modifier applied to the roll.
         total: ``roll + modifier``, the number compared with the target.
@@ -38,6 +40,7 @@ class ExperienceYearOutcome:
     year: int
     age: int
     track: str
+    dice_expression: str
     dice: tuple[int, ...]
     roll: int
     modifier: int
@@ -81,7 +84,8 @@ class ExperienceYearOutcome:
         faces = ", ".join(str(die) for die in self.dice)
         natural = f", {self.natural_note}" if self.natural_note else ""
         return (
-            f"⚙️ {self.track_label} year {self.year} survival: 3d6 [{faces}] = "
+            f"⚙️ {self.track_label} year {self.year} survival: "
+            f"{self.dice_expression} [{faces}] = "
             f"{self.roll}, modifier {self.modifier:+d}, total {self.total} vs "
             f"target {self.target} (survive on {self.target} or more)"
             f"{natural} — {self.verdict}"
@@ -94,10 +98,11 @@ class ExperienceYearOutcome:
         natural = f" {self.natural_note.capitalize()}." if self.natural_note else ""
         return (
             f"Year {self.year} (age {self.age}) on the {self.track_label} track. "
-            f"Survival check: 3d6 rolled {faces} = {self.roll}; best attribute "
+            f"Survival check: {self.dice_expression} rolled {faces} = "
+            f"{self.roll}; best attribute "
             f"modifier {self.modifier:+d}; total {self.total}; the "
             f"{self.track_label} track's survivability target is {self.target}. "
-            f"The rule is: {SURVIVAL_RULE_DESCRIPTION}{natural} "
+            f"The rule is: {survival_rule_description()}{natural} "
             f"VERDICT: the character {self.verdict}. "
             f"The year's skill roll gave {self.skill}; it earned "
             f"{self.xp_awarded} XP and {self.money_earned} coin."
@@ -120,6 +125,7 @@ def outcomes_from_run(run: Mapping[str, Any]) -> tuple[ExperienceYearOutcome, ..
                 year=int(year.get("year", 0)),
                 age=int(year.get("age", 0)),
                 track=track,
+                dice_expression=survival_dice_expression(check),
                 dice=tuple(int(die) for die in check.get("dice", ())),
                 roll=int(check.get("roll", 0)),
                 modifier=int(check.get("modifier", 0)),

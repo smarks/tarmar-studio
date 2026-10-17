@@ -51,7 +51,7 @@ const CHARACTER_EDIT_CONFIG = JSON.parse(
 const TEXT_LIMITS = CHARACTER_EDIT_CONFIG.textLimits;
 
 // Each number input's bound, as the server holds it (issue #938):
-// characters.views.characters.CHARACTER_NUMBER_LIMITS. A range symmetric
+// characters.views.characters.character_number_limits(). A range symmetric
 // about zero is given by its magnitude.
 const NUMBER_LIMITS = CHARACTER_EDIT_CONFIG.numberLimits;
 
@@ -683,7 +683,7 @@ function renderWorkbenchPreview(track) {
             agingPreview.textContent = `${penalties} at age ${nextChangeAge}`;
         } else if (SKILLS_CONFIG.currentAge >= AGING_HORIZON_AGE) {
             // Aging keeps escalating past the precomputed horizon (server-side,
-            // uncapped -- see get_aging_penalties in characters/skills.py), but
+            // uncapped -- see AgingRules.penalties_for in characters/skill_rules.py), but
             // listing every further stage isn't worth the payload. Say the rate
             // instead of a stale/blank preview (issue #163).
             agingPreview.textContent = `Continues to escalate past age ${AGING_HORIZON_AGE} (roughly -1 to STR/DEX/CON every four years, plus -1 to INT/WIS every eight).`;

@@ -31,7 +31,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from gm import warmup
-from gm.engine import SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE
+from gm.engine import system_prompts_by_authority_and_mode
 from gm.model_config import SYSTEM_PROMPT_CONTEXT_SHARE
 from gm.retrieval import iter_corpus_chunks
 from gm.services import get_gm_model, get_gm_options, get_system_message
@@ -85,7 +85,7 @@ class Command(BaseCommand):
             "longest GM prompt, estimated",
             warmup.PromptBudget(
                 prompt_tokens=warmup.estimate_longest_prompt_tokens(
-                    SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values()
+                    system_prompts_by_authority_and_mode().values()
                 ),
                 num_ctx=num_ctx,
             ),
@@ -110,7 +110,7 @@ class Command(BaseCommand):
                     client,
                     model=model,
                     # There are four GM prompts now (issue #372), and this
-                    # deliberately warms the shortest: SYSTEM_PROMPT is the
+                    # deliberately warms the shortest: system_prompt() is the
                     # exact prefix all four share, and every real request is
                     # an extension of it. Warming an extension instead would
                     # cover a few hundred more tokens for one of the four and

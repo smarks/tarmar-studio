@@ -883,13 +883,13 @@ class PlanPromptTest(SimpleTestCase):
         for (
             is_game_master,
             mode,
-        ), prompt in prompts.SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.items():
+        ), prompt in prompts.system_prompts_by_authority_and_mode().items():
             with self.subTest(is_game_master=is_game_master, mode=mode):
                 self.assertNotIn("[[", prompt)
                 self.assertNotIn("procedure", prompt.lower())
                 self.assertNotIn("server", prompt.lower())
-                self.assertTrue(prompt.startswith(prompts.SYSTEM_PROMPT))
-                self.assertIn(prompts.SECTION_PLAN_SCHEMA, prompt)
+                self.assertTrue(prompt.startswith(prompts.system_prompt()))
+                self.assertIn(prompts.section_plan_schema(), prompt)
                 self.assertIs(prompts.system_prompt_for(is_game_master, mode), prompt)
                 self.assertEqual(prompts.SECTION_DM_AUTHORITY in prompt, is_game_master)
                 self.assertEqual(

@@ -12,6 +12,7 @@ from contextlib import AbstractContextManager
 from typing import Any
 from unittest.mock import patch
 
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import Character
 
 from .ledger import (
@@ -112,17 +113,7 @@ def recorded(who: str = "", score: int = 18) -> dict[str, Any]:
     """
     return {
         **draft_defaults(),
-        **dict.fromkeys(
-            (
-                "strength",
-                "dexterity",
-                "intelligence",
-                "wisdom",
-                "constitution",
-                "charisma",
-            ),
-            score,
-        ),
+        **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS, score),
         "name": who,
         LABEL_KEY: who,
     }

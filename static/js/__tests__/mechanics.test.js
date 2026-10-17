@@ -18,7 +18,7 @@ const CONFIG = {
 function checkPayload(overrides = {}) {
     return {
         skill: 'stealth', level: 2, attribute: 'dexterity', attribute_score: 15,
-        attribute_modifier: 2, substituted: false, faces: [5, 4], stated: false,
+        attribute_modifier: 2, substituted: false, dice: '2d6', faces: [5, 4], stated: false,
         dice_total: 9, total: 99, difficulty: 10, outcome: 'success', natural: '',
         ...overrides,
     };
@@ -73,6 +73,18 @@ test("prints the server's check without recomputing the total", async () => {
         'stealth: 2d6 [5, 4] = 9 +2 DEX (15) +2 level = 99 vs 10: success'
     );
     expect(pageNavigation.reload).not.toHaveBeenCalled();
+});
+
+test("prints the dice the server says the check was rolled on (issue #70)", async () => {
+    await load(jsonResponse({
+        success: true,
+        check: checkPayload({ dice: '3d4', faces: [1, 4, 4], difficulty: null, outcome: '', total: 13 }),
+    }));
+    document.getElementById('roll').click();
+    await flush();
+    expect(document.getElementById('check-result').textContent).toBe(
+        'stealth: 3d4 [1, 4, 4] = 9 +2 DEX (15) +2 level = 13'
+    );
 });
 
 test("a player's roll with no difficulty prints the total and no outcome", async () => {

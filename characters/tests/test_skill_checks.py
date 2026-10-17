@@ -6,26 +6,29 @@ stays the mechanic for a raw attribute check with no skill.
 """
 
 import re
-from dataclasses import replace
 from pathlib import Path
 
 from django.conf import settings
 from django.urls import reverse
 
-from characters.dice import Roller
 from characters.services import CharacterChangeError
 from characters.skill_checks import (
-    GOVERNING_ATTRIBUTES,
+    LITERACY_SKILL,
     governing_attribute,
     skill_check,
 )
+from characters.skill_rules import REQUIRED_SKILL_NAMES
 from characters.skills import (
+    SPECIALISED_SKILLS,
     granted_skill_names,
     normalize_skill_name,
     points_for_level,
 )
-from common.test_helpers import BaseTestCase, create_character
+from characters.weapon_skill import UNRECORDED_WEAPON_SKILL
+from common.test_helpers import BaseTestCase, FacesRoller, create_character
 from gm import engine
+
+from .rules_fixtures import DEFAULT_SKILL_RULES, seated_skill_rules
 
 RULES = Path(settings.BASE_DIR) / "reference" / "content" / "public-rules"
 GLOSSARY = RULES / "characters" / "prior-experience" / "skills-glossary.md"
@@ -42,21 +45,13 @@ ABBREVIATIONS = {
 }
 
 
-class FacesRoller(Roller):
-    """A dice-module roller whose 2d6 lands on the faces given."""
-
-    def __init__(self, first: int, second: int) -> None:
-        super().__init__(seed=0)
-        self.faces_to_give = [first, second]
-
-    def roll(self, specification, *, purpose, **kwargs):
-        record = super().roll(specification, purpose=purpose, **kwargs)
-        return replace(
-            record, faces=tuple(self.faces_to_give), total=sum(self.faces_to_give)
-        )
-
-
 class GlossaryDriftTest(BaseTestCase):
+    """The default canon's skill and attribute checks are the pages' (#70)."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(seated_skill_rules())  # the default canon's rules
+
     def test_the_map_is_the_glossarys_governs_column(self):
         """Every row of the glossary's skill tables, read against the map."""
         rows = re.findall(
@@ -69,11 +64,50 @@ class GlossaryDriftTest(BaseTestCase):
             normalize_skill_name(skill): ABBREVIATIONS[governs]
             for skill, governs in rows
         }
-        self.assertEqual(from_page, GOVERNING_ATTRIBUTES)
+        self.assertEqual(
+            from_page, DEFAULT_SKILL_RULES.skill_check.governing_attributes
+        )
+
+    def test_the_names_read_without_asking_are_the_ones_the_loader_requires(self):
+        """``governing_attribute`` reads these without checking first (#70).
+
+        The loader refuses a canon whose map lacks any of
+        ``REQUIRED_SKILL_NAMES``; the code's own names for them must be that
+        list, or a canon could pass the loader and still fail a check.
+        """
+        self.assertEqual(
+            set(SPECIALISED_SKILLS) | {UNRECORDED_WEAPON_SKILL, LITERACY_SKILL},
+            set(REQUIRED_SKILL_NAMES),
+        )
 
     def test_every_skill_a_track_grants_has_an_entry(self):
+        governed = DEFAULT_SKILL_RULES.skill_check.governing_attributes
         for skill_name in granted_skill_names():
-            self.assertIn(skill_name, GOVERNING_ATTRIBUTES)
+            self.assertIn(skill_name, governed)
+
+    def test_the_checks_dice_and_naturals_are_the_pages(self):
+        """The glossary's mechanic and attack-rolls.md's attribute check."""
+        glossary = " ".join(GLOSSARY.read_text().replace("\n>", "\n").split())
+        checks = DEFAULT_SKILL_RULES.skill_check
+        self.assertIn(
+            f"roll **{checks.dice} + the governing attribute's modifier",
+            glossary,
+        )
+        self.assertIn(
+            f"A natural {checks.natural_success} always succeeds; a natural "
+            f"{checks.natural_failure} always fails.",
+            glossary,
+        )
+        self.assertIn(
+            f"focused field gives is **{checks.focused_field_bonus:+d}** to "
+            "checks in that field",
+            glossary,
+        )
+        attack_rolls = " ".join(ATTACK_ROLLS.read_text().split())
+        self.assertIn(
+            f"still roll **{DEFAULT_SKILL_RULES.attribute_check.dice} ≤ attribute**",
+            attack_rolls,
+        )
 
     def test_the_pages_and_the_prompt_teach_the_glossary_mechanic(self):
         self.assertIn(
@@ -86,7 +120,7 @@ class GlossaryDriftTest(BaseTestCase):
             attack_rolls,
         )
         self.assertNotIn("General skill checks, attribute checks,", attack_rolls)
-        prompt = engine.SECTION_CORE + engine.SECTION_COMBAT
+        prompt = engine.section_core() + engine.SECTION_COMBAT
         self.assertIn(
             "A skill check rolls 2d6 + the governing attribute's modifier + the "
             "skill level",

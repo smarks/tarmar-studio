@@ -9,6 +9,7 @@ has, and that the file is prompt text, never a reference page.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from reference.paths import (
     CANON_DIR_ENV,
     CANON_NAME,
     CANON_PROMPT_DIR_NAME,
+    CANON_SKILL_RULES_FILE_NAME,
     CONTENT_DIR,
     DEFAULT_CANON_DIR,
     DEFAULT_CANON_NAME,
@@ -149,6 +151,9 @@ class WorldSectionFromCanonTest(SimpleTestCase):
     ) -> subprocess.CompletedProcess[str]:
         """Run ``script`` in a fresh process on a canon with no ``gm-prompt/``.
 
+        The canon carries the default canon's ``skill-rules.json``, which every
+        canon must and two prompt sections are built from (issue #70).
+
         Args:
             script: Python source that imports ``gm.engine``.
             canon_json: The canon's ``canon.json``, or None for none (which
@@ -164,6 +169,10 @@ class WorldSectionFromCanonTest(SimpleTestCase):
         )
         if canon_json is not None:
             (canon_directory / "canon.json").write_text(canon_json, encoding="utf-8")
+        shutil.copy(
+            DEFAULT_CANON_DIR / CANON_SKILL_RULES_FILE_NAME,
+            canon_directory / CANON_SKILL_RULES_FILE_NAME,
+        )
         environment = {
             name: value
             for name, value in os.environ.items()
@@ -185,7 +194,7 @@ class WorldSectionFromCanonTest(SimpleTestCase):
         completed = self.import_the_engine_on_a_canon_without_prompt_files(
             "from gm import engine\n"
             "assert engine.SECTION_WORLD == engine.FALLBACK_WORLD_SECTION\n"
-            "assert engine.FALLBACK_WORLD_SECTION in engine.SYSTEM_PROMPT\n",
+            "assert engine.FALLBACK_WORLD_SECTION in engine.system_prompt()\n",
             canon_json='{"name": "default"}',
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)

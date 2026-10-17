@@ -19,17 +19,17 @@ from django.conf import settings
 
 from characters.constants import CHARACTER_TEXT_LIMITS
 from characters.models import Character
+from characters.skill_rules import skill_rules
 from characters.skills import (
     DEFAULT_RUN_YEARS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
-    SURVIVAL_DICE_COUNT,
-    SURVIVAL_TARGETS,
     next_aging_change_after_age,
+    survival_targets,
 )
 from characters.views.characters import (
     AGING_PREVIEW_HORIZON_STAGE,
-    CHARACTER_NUMBER_LIMITS,
     aging_preview_horizon_age,
+    character_number_limits,
 )
 from common.test_helpers import BaseTestCase
 
@@ -155,7 +155,7 @@ class CharacterEditConfigBlockTest(BaseTestCase):
         )
         self.assertEqual(config["markDeadUrl"], f"/tarmar/characters/{pk}/mark-dead/")
         self.assertEqual(config["textLimits"], CHARACTER_TEXT_LIMITS)
-        self.assertEqual(config["numberLimits"], CHARACTER_NUMBER_LIMITS)
+        self.assertEqual(config["numberLimits"], character_number_limits())
         self.assertEqual(config["reviveUrl"], f"/tarmar/characters/{pk}/revive/")
         self.assertEqual(
             config["rollLiteracyUrl"], f"/tarmar/characters/{pk}/roll-literacy/"
@@ -175,17 +175,17 @@ class CharacterEditConfigBlockTest(BaseTestCase):
         self.assertEqual(config["catalogUrl"], "/tarmar/characters/equipment/catalog/")
 
     def test_config_carries_the_rules_tables_python_owns(self):
-        """The aging and survival numbers stay single-sourced in skills.py."""
+        """The aging and survival numbers are the loaded canon's (issue #70)."""
         config = self._config()
-        self.assertEqual(config["survivalTargets"], SURVIVAL_TARGETS)
-        self.assertEqual(config["survivalDice"], f"{SURVIVAL_DICE_COUNT}d6")
+        self.assertEqual(config["survivalTargets"], survival_targets())
+        self.assertEqual(config["survivalDice"], skill_rules().survival_roll.dice)
         self.assertEqual(config["agingHorizonAge"], aging_preview_horizon_age())
         self.assertEqual(config["defaultRunYears"], DEFAULT_RUN_YEARS)
         self.assertEqual(config["maxRunYears"], MAX_EXPERIENCE_YEARS_PER_RUN)
         # Aging change points keyed by the age they land at, 3-letter attrs.
         # Every age at which the cumulative totals move, through the preview
-        # horizon (issue #163) -- get_aging_penalties() escalates by formula
-        # past AGING_TABLE, so very old characters get real numbers too.
+        # horizon (issue #163) -- the canon's aging escalates by formula past
+        # its table, so very old characters get real numbers too.
         expected = {}
         scan_age = 16
         while True:
@@ -202,12 +202,18 @@ class CharacterEditConfigBlockTest(BaseTestCase):
     def test_config_aging_preview_covers_ages_past_the_tabulated_data(self):
         """Past age 68 aging is formula-driven, and still previewed (issue #163)."""
         config = self._config()
-        # Age 72 is the first change point past AGING_TABLE's last column.
+        # Age 72 is the first change point past the aging table's last column.
         self.assertIn("72", config["agingByAge"])
         self.assertEqual(
             config["agingByAge"]["72"],
             {"str": -3, "dex": -3, "con": -3, "int": -1, "wis": -1},
         )
+        # In the table's order, as every tabulated stage is (issue #70): the
+        # page iterates the object as it arrives.
+        self.assertEqual(
+            list(config["agingByAge"]["72"]), ["str", "dex", "int", "wis", "con"]
+        )
+        self.assertEqual(list(config["agingByAge"]["40"]), ["str", "dex", "con"])
         # Nothing is precomputed past the horizon.
         self.assertTrue(
             all(int(age) <= aging_preview_horizon_age() for age in config["agingByAge"])
@@ -588,7 +594,10 @@ class NumberInputBoundsTest(BaseTestCase):
             **CHARACTER_DEFAULTS,
         )
         self.login_as(game_master)
-        with mock.patch.dict(CHARACTER_NUMBER_LIMITS, self.ODD):
+        with mock.patch(
+            "characters.views.characters.character_number_limits",
+            return_value=self.ODD,
+        ):
             page = self.client.get(f"/tarmar/characters/{character.pk}/")
         parser = _NumberInputs()
         parser.feed(page.content.decode())

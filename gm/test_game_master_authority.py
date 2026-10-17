@@ -15,6 +15,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 from characters import services
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.services import CharacterChangeError
 from common.test_helpers import BaseTestCase
 
@@ -38,20 +39,12 @@ from .turn_engine.policy import TurnPolicy
 
 DIE = patch("characters.skills.roll_survival_dice", return_value=(1, 1, 1, 3))
 FIRST_SKILL = patch("characters.skills.roll_d20", return_value=1)
-ATTRIBUTES = (
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
-)
 
 
 def _with_points(free: int):
     """A character with every attribute set and ``free`` skill points to spend."""
     character = draft_character(draft_defaults())
-    for name in ATTRIBUTES:
+    for name in CHARACTER_ATTRIBUTE_FIELDS:
         setattr(character, name, 12)
     character.free_skill_points = free
     return character

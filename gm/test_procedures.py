@@ -16,12 +16,11 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, override_settings
 
+from characters.skill_rules import SkillTrack, SurvivalRollRules, skill_rules
 from characters.skills import (
-    SURVIVAL_AUTO_DEATH_ROLL,
-    SURVIVAL_AUTO_SURVIVE_ROLL,
-    SURVIVAL_RULE_DESCRIPTION,
-    TRACK_DATA,
     calculate_skill_points_from_xp,
+    survival_rule_description,
+    survival_targets,
 )
 from common.test_helpers import BaseTestCase
 
@@ -29,8 +28,16 @@ from .engine import SECTION_OUTCOMES
 from .ledger import draft_defaults
 from .testing import character_values, gm_replies, run_actions, session_with_character
 
-CAMPAIGNER_TARGET = int(TRACK_DATA["campaigner"]["survivability"])
-CAMPAIGNER_XP_PER_YEAR = int(TRACK_DATA["campaigner"]["xp_per_year"])
+
+def campaigner() -> SkillTrack:
+    """The loaded canon's Campaigner track, the one #370 was filed against."""
+    return skill_rules().tracks.tracks["campaigner"]
+
+
+def survival_roll() -> SurvivalRollRules:
+    """The loaded canon's survival roll."""
+    return skill_rules().survival_roll
+
 
 # Every attribute in the 8-13 band, whose modifier is 0, so a survival total is
 # the dice and nothing else.
@@ -92,17 +99,18 @@ class PlayYearsTest(BaseTestCase):
         result = self.campaigner_year(12)
         self.assertTrue(result.ran)
         (line,) = result.procedure["lines"]
-        self.assertIn(f"target {CAMPAIGNER_TARGET}", line)
+        self.assertIn(f"target {campaigner().survival_target}", line)
         self.assertIn("3d6 [4, 4, 4] = 12", line)
         self.assertIn(
-            f"the campaigner track's survivability target is {CAMPAIGNER_TARGET}",
+            "the campaigner track's survivability target is "
+            f"{campaigner().survival_target}",
             result.result,
         )
-        self.assertIn(SURVIVAL_RULE_DESCRIPTION, result.result)
+        self.assertIn(survival_rule_description(), result.result)
 
     def test_a_natural_eighteen_on_campaigner_never_produces_a_death(self):
         """The reported bug, named: the GM killed a character on this roll."""
-        result = self.campaigner_year(SURVIVAL_AUTO_SURVIVE_ROLL)
+        result = self.campaigner_year(survival_roll().automatic_survival_total)
         (line,) = result.procedure["lines"]
         self.assertIn("SURVIVED", line)
         self.assertNotIn("DIED", line)
@@ -110,19 +118,19 @@ class PlayYearsTest(BaseTestCase):
         self.assertTrue(character_values(self.session)["is_alive"])
 
     def test_a_natural_three_is_a_death_whatever_the_target(self):
-        result = self.campaigner_year(SURVIVAL_AUTO_DEATH_ROLL)
+        result = self.campaigner_year(survival_roll().automatic_death_total)
         (line,) = result.procedure["lines"]
         self.assertIn("DIED", line)
         self.assertIn("automatic death", line)
         self.assertFalse(character_values(self.session)["is_alive"])
 
     def test_the_record_is_stored_before_the_narration_that_describes_it(self):
-        self.campaigner_year(SURVIVAL_AUTO_SURVIVE_ROLL)
+        self.campaigner_year(survival_roll().automatic_survival_total)
         stored = character_values(self.session)
-        self.assertEqual(stored["total_xp"], CAMPAIGNER_XP_PER_YEAR)
+        self.assertEqual(stored["total_xp"], campaigner().xp_per_year)
         self.assertEqual(
             stored["free_skill_points"],
-            calculate_skill_points_from_xp(CAMPAIGNER_XP_PER_YEAR),
+            calculate_skill_points_from_xp(campaigner().xp_per_year),
         )
         self.assertEqual(stored["age"], draft_defaults()["age"] + 1)
 
@@ -166,13 +174,19 @@ class SurvivalRuleDescriptionTest(SimpleTestCase):
     """The sentence the GM reads is built from the code, so it cannot drift."""
 
     def test_it_names_the_real_natural_rolls(self):
-        self.assertIn(str(SURVIVAL_AUTO_SURVIVE_ROLL), SURVIVAL_RULE_DESCRIPTION)
-        self.assertIn(str(SURVIVAL_AUTO_DEATH_ROLL), SURVIVAL_RULE_DESCRIPTION)
+        self.assertIn(
+            str(survival_roll().automatic_survival_total), survival_rule_description()
+        )
+        self.assertIn(
+            str(survival_roll().automatic_death_total), survival_rule_description()
+        )
 
     def test_it_states_the_direction_the_code_actually_compares(self):
-        self.assertIn("greater than or equal to the target", SURVIVAL_RULE_DESCRIPTION)
-        self.assertIn("HIGH", SURVIVAL_RULE_DESCRIPTION)
-        self.assertNotIn("≤", SURVIVAL_RULE_DESCRIPTION)
+        self.assertIn(
+            "greater than or equal to the target", survival_rule_description()
+        )
+        self.assertIn("HIGH", survival_rule_description())
+        self.assertNotIn("≤", survival_rule_description())
 
 
 class OutcomesPromptSectionTest(SimpleTestCase):
@@ -245,7 +259,7 @@ class OutcomesPromptSectionTest(SimpleTestCase):
         )
 
     def test_it_names_no_concrete_target_even_in_what_it_forbids(self):
-        targets = {int(data["survivability"]) for data in TRACK_DATA.values()}
+        targets = set(survival_targets().values())
         for sentence in ("3d6 <= N", "N or lower", "the target is N, not M"):
             self.assertIn(sentence, SECTION_OUTCOMES)
         for target in targets:
@@ -303,18 +317,18 @@ class YearsTurnTest(BaseTestCase):
         return stream.calls, payloads
 
     def test_the_year_runs_before_the_narration_that_uses_it(self):
-        calls, payloads = self.play(SURVIVAL_AUTO_SURVIVE_ROLL)
+        calls, payloads = self.play(survival_roll().automatic_survival_total)
         procedures = [f["procedure"] for f in payloads if "procedure" in f]
         self.assertEqual(len(procedures), 1)
         self.assertTrue(procedures[0]["ran"])
         self.assertEqual(len(calls), 2)
         narrate = calls[1][-1]["content"]
-        self.assertIn(f"target is {CAMPAIGNER_TARGET}", narrate)
+        self.assertIn(f"target is {campaigner().survival_target}", narrate)
         self.assertIn("SURVIVED", narrate)
 
     def test_a_three_shows_a_death(self):
         _calls, payloads = self.play(
-            SURVIVAL_AUTO_DEATH_ROLL, "You do not come through it."
+            survival_roll().automatic_death_total, "You do not come through it."
         )
         (line,) = [f["procedure"] for f in payloads if "procedure" in f][0]["lines"]
         self.assertIn("DIED", line)
@@ -323,11 +337,11 @@ class YearsTurnTest(BaseTestCase):
     def test_the_year_is_played_once_not_twice(self):
         self.play(12)
         stored = character_values(self.session)
-        self.assertEqual(stored["total_xp"], CAMPAIGNER_XP_PER_YEAR)
+        self.assertEqual(stored["total_xp"], campaigner().xp_per_year)
         self.assertEqual(len(stored["experience_log"]), 1)
 
     def test_the_outcome_survives_a_reload_of_the_session(self):
-        self.play(SURVIVAL_AUTO_SURVIVE_ROLL)
+        self.play(survival_roll().automatic_survival_total)
         rendered = self.client.get(
             f"/tarmar/gm/?session={self.session.pk}"
         ).content.decode()
@@ -335,8 +349,8 @@ class YearsTurnTest(BaseTestCase):
         self.assertNotIn('"actions"', rendered)
 
     def test_the_next_turn_s_state_block_carries_what_the_year_did(self):
-        self.play(SURVIVAL_AUTO_SURVIVE_ROLL)
+        self.play(survival_roll().automatic_survival_total)
         calls, _payloads = self.play(12, "You have points to spend.")
         state = calls[0][-1]["content"]
-        self.assertIn(f"XP {CAMPAIGNER_XP_PER_YEAR} (level", state)
+        self.assertIn(f"XP {campaigner().xp_per_year} (level", state)
         self.assertIn(f"age {draft_defaults()['age'] + 1};", state)

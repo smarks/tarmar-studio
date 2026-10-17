@@ -9,107 +9,35 @@ raw attribute check with no skill (:func:`attribute_check`, issue #911).
 Players roll through the sheet's control, which rolls here with the dice
 module; a Game Master may override.
 
+The numbers are the loaded canon's ``skill-rules.json`` (issue #70), read
+through :func:`characters.skill_rules.skill_rules` when a check is made: each
+check's dice, the skill check's naturals and focused-field bonus, the
+attribute each skill rides on, and the widest modifier a Game Master may set
+on an attribute check. The rulings the pages leave open (Arcane on INT, the
++1 focused field, the modifier limit) are recorded in that file's
+``rulings``.
+
 Scores are the effective (aged) ones, per the ruling on #773: checks use
 aged scores everywhere except the creation-time checks.
 """
 
 from dataclasses import dataclass
 
-from .dice import Roller, roll_2d6_faces, roll_3d6_logged
+from .constants import CHARACTER_ATTRIBUTE_FIELDS
+from .dice import Roller, roll_dice_faces, roll_dice_logged
 from .models import Character
+from .rules import DiceRollRules
 from .services import CharacterChangeError
+from .skill_rules import skill_rules
 from .skills import (
     SPECIALISED_SKILLS,
     calculate_attribute_modifier,
     get_skill_level,
+    glossary_skill,
     glossary_skill_level,
     split_specialised_skill,
 )
 from .weapon_skill import is_weapon_skill
-
-#: The glossary's Governs column, by stored (normalised) skill name. ``None``
-#: is the glossary's own "—": Luck is "Governed by no attribute" and is not
-#: rolled as a check. The drift test reads the glossary's tables against this.
-GOVERNING_ATTRIBUTES: dict[str, str | None] = {
-    # Combat skills
-    "weapon": "dexterity",
-    "weapon parry": "dexterity",
-    "archery": "dexterity",
-    "poison": "intelligence",
-    # Social & roguish skills
-    "deceit": "charisma",
-    "bluff": "charisma",
-    "persuasion": "charisma",
-    "diplomacy": "charisma",
-    "detect truth": "wisdom",
-    "sleight of hand": "dexterity",
-    "stealth": "dexterity",
-    "street smarts": "wisdom",
-    "bribery": "charisma",
-    "gamble": "intelligence",
-    "morale": "charisma",
-    "luck": None,
-    # Trade, knowledge & craft skills
-    "coins": "intelligence",
-    "barter": "charisma",
-    "appraise": "intelligence",
-    "logistics": "intelligence",
-    "literacy": "intelligence",
-    "knowledge": "intelligence",
-    "contracts/law": "intelligence",
-    "maker skill": "intelligence",
-    "arts": "charisma",
-    "enchanting": "intelligence",
-    # Wilderness, survival & labor skills
-    "tracker": "wisdom",
-    "hunting": "wisdom",
-    "survival": "wisdom",
-    "weather/path": "wisdom",
-    "herb lore": "intelligence",
-    "medic": "intelligence",
-    "perception": "intelligence",
-    "alert": "wisdom",
-    "portage": "strength",
-    "miner": "strength",
-    "sailor": "dexterity",
-}
-
-#: Skills the glossary's tables do not list, and the attribute the rules
-#: imply for each. Named in the PR for Spencer.
-#:
-#: * Arcane (True Magic) — the skills glossary prices it and channel.md
-#:   uses it, but no table gives it a Governs entry. attributes.md: INT
-#:   "governs a character's 'smarts'--the ability to perceive or infer
-#:   information, retain it as knowledge, and apply it"; True Magic is that
-#:   study, so INT.
-#:
-#: "Brawling" is not here: the rules have no such skill (#815, #867), and a
-#: record still carrying one is checked on the attribute a Game Master names.
-IMPLIED_GOVERNING_ATTRIBUTES: dict[str, str] = {
-    "arcane": "intelligence",
-}
-
-#: Attribute names the check accepts, as the sheet and the model spell them.
-ATTRIBUTES: tuple[str, ...] = (
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
-)
-
-#: The naturals: "A natural 12 always succeeds; a natural 2 always fails".
-NATURAL_SUCCESS = 12
-NATURAL_FAILURE = 2
-
-#: What a skill check's 2d6 can show, which a Game Master's stated total is
-#: held to and the sheet's input stops at (#938): the naturals are its ends.
-SKILL_CHECK_MINIMUM = NATURAL_FAILURE
-SKILL_CHECK_MAXIMUM = NATURAL_SUCCESS
-
-#: What a focused Knowledge field adds to a check in it (#808).
-FOCUSED_FIELD_BONUS = 1
 
 #: The Literacy skill's stored name.
 LITERACY_SKILL = "literacy"
@@ -173,21 +101,30 @@ MAX_DIFFICULTY = 40
 def governing_attribute(skill_name: str) -> str | None:
     """The attribute a skill rides on, or None when no rule names one.
 
-    A Weapon skill tied to a weapon ("weapon (broadsword)", or the older
-    "broadsword") is the Weapon skill and rides on DEX; a Maker Skill or
+    The canon's ``governing_attributes`` (the glossary's Governs column, whose
+    "—" is ``None``: Luck is governed by no attribute), then its
+    ``implied_governing_attributes`` for a skill no table lists (Arcane on
+    the public pages). A Weapon skill tied to a weapon ("weapon (broadsword)",
+    or the older "broadsword") is the Weapon skill; a Maker Skill or
     Knowledge with its chosen part ("maker skill (smith)") rides on the
     skill's own attribute.
     """
-    if skill_name in GOVERNING_ATTRIBUTES:
-        return GOVERNING_ATTRIBUTES[skill_name]
+    checks = skill_rules().skill_check
+    governing = checks.governing_attributes
+    if skill_name in governing:
+        return governing[skill_name]
     # A Maker Skill or Knowledge with its chosen part is that skill (#808).
+    # Those two and "weapon" are the only names read here without asking
+    # first: the loader refuses a canon whose map lacks any of them
+    # (characters.skill_rules.REQUIRED_SKILL_NAMES).
     chosen_under = split_specialised_skill(skill_name)[0]
     if chosen_under != skill_name:
-        return GOVERNING_ATTRIBUTES[chosen_under]
-    if skill_name in IMPLIED_GOVERNING_ATTRIBUTES:
-        return IMPLIED_GOVERNING_ATTRIBUTES[skill_name]
+        return governing[chosen_under]
+    implied = checks.implied_governing_attributes
+    if skill_name in implied:
+        return implied[skill_name]
     if is_weapon_skill(skill_name):
-        return GOVERNING_ATTRIBUTES["weapon"]
+        return governing["weapon"]
     return None
 
 
@@ -197,16 +134,14 @@ def is_glossary_skill(skill_name: str) -> bool:
     A Weapon skill, tied or not, is the glossary's Weapon; a Maker Skill or
     Knowledge with its chosen part is that skill
     (:func:`characters.skills.glossary_skill`). Arcane counts, though no
-    glossary table gives it an attribute (:data:`IMPLIED_GOVERNING_ATTRIBUTES`).
-    "Brawling" and a freely typed "navigation" do not (issue #862).
+    glossary table gives it an attribute (the canon's
+    ``implied_governing_attributes``). "Brawling" and a freely typed
+    "navigation" do not (issue #862).
 
     Args:
         skill_name: A stored (normalised) skill name.
     """
-    from .skills import glossary_skill
-
-    under = glossary_skill(skill_name)
-    return under in GOVERNING_ATTRIBUTES or under in IMPLIED_GOVERNING_ATTRIBUTES
+    return skill_rules().skill_check.names_skill(glossary_skill(skill_name))
 
 
 def effective_score(character: Character, attribute: str) -> int | None:
@@ -230,14 +165,19 @@ class SkillCheck:
         attribute_score: Its effective (aged) score.
         attribute_modifier: That score's modifier.
         substituted: Whether a Game Master named a different attribute.
-        faces: The two dice, or ``()`` when a Game Master stated the total.
+        dice: The dice the check rolls, the canon's (``"2d6"`` on the
+            public pages).
+        faces: The dice as they fell, or ``()`` when a Game Master stated the
+            total.
         stated: Whether a Game Master stated the dice.
-        dice_total: The 2d6 total.
+        dice_total: The dice's total.
         total: Dice + modifier + level + focus bonus + injury penalty.
         difficulty: The difficulty, or None when none was given.
         outcome: "success", "failure", or "" with no difficulty.
-        natural: "natural 12" / "natural 2" when a natural decided it.
-        focus_bonus: +1 for a check in a focused Knowledge field (#808).
+        natural: "natural 12" / "natural 2" on the public pages' dice, when a
+            natural decided it.
+        focus_bonus: The canon's bonus for a check in a focused Knowledge
+            field (+1 on the public pages, #808).
         injury_penalty: The injury table's -1 or -2 to all rolls, or 0
             (issue #840).
         game_master_call: What a Game Master called the check past, which a
@@ -251,6 +191,7 @@ class SkillCheck:
     attribute_score: int
     attribute_modifier: int
     substituted: bool
+    dice: str
     faces: tuple[int, ...]
     stated: bool
     dice_total: int
@@ -266,9 +207,9 @@ class SkillCheck:
     def line(self) -> str:
         """The history line."""
         dice = (
-            f"2d6 {list(self.faces)} = {self.dice_total}"
+            f"{self.dice} {list(self.faces)} = {self.dice_total}"
             if not self.stated
-            else f"2d6 stated by a Game Master = {self.dice_total}"
+            else f"{self.dice} stated by a Game Master = {self.dice_total}"
         )
         attribute = self.attribute[:3].upper()
         text = (
@@ -348,7 +289,8 @@ def skill_check(
             or a glossary skill rolled untrained.
         difficulty: The Game Master's difficulty, or None.
         attribute: A Game Master's substitute attribute.
-        stated_total: A Game Master's 2d6 total from the table.
+        stated_total: A Game Master's total from the table, on the canon's
+            dice.
         is_game_master: Whether a Game Master asked.
         roller: Roll through this roller instead of the dice module default.
 
@@ -379,10 +321,12 @@ def skill_check(
             raise CharacterChangeError(unconscious)
         overridden.append("unconscious")
     skills = character.skills or {}
+    rules = skill_rules().skill_check
+    in_glossary = skill_name in rules.governing_attributes
     governing = governing_attribute(skill_name)
-    if skill_name not in skills and skill_name not in GOVERNING_ATTRIBUTES:
+    if skill_name not in skills and not in_glossary:
         raise CharacterChangeError(f"Unknown skill: {skill_name}")
-    if skill_name in GOVERNING_ATTRIBUTES and governing is None:
+    if in_glossary and governing is None:
         raise CharacterChangeError(
             "Luck is not rolled as a check: once per session per level, after "
             "seeing a roll, add its level to that roll"
@@ -394,7 +338,7 @@ def skill_check(
             "Only a Game Master can set the difficulty, name the attribute or "
             "state the dice"
         )
-    if attribute is not None and attribute not in ATTRIBUTES:
+    if attribute is not None and attribute not in CHARACTER_ATTRIBUTE_FIELDS:
         raise CharacterChangeError(f"Unknown attribute: {attribute}")
     used = attribute or governing
     if used is None:
@@ -409,16 +353,11 @@ def skill_check(
         raise CharacterChangeError(f"{used.title()} is not recorded yet")
 
     if stated_total is not None:
-        if not SKILL_CHECK_MINIMUM <= stated_total <= SKILL_CHECK_MAXIMUM:
-            raise CharacterChangeError(
-                f"A 2d6 total is between {SKILL_CHECK_MINIMUM} and "
-                f"{SKILL_CHECK_MAXIMUM}"
-            )
+        _check_stated_total(rules, stated_total)
         faces: tuple[int, ...] = ()
         dice_total = stated_total
     else:
-        first_die, second_die, dice_total = roll_2d6_faces(roller)
-        faces = (first_die, second_die)
+        faces, dice_total = roll_dice_faces(rules.dice, roller)
 
     if skill_name in SPECIALISED_SKILLS:
         # A check on the bare Maker Skill or Knowledge reads the chosen part
@@ -428,22 +367,22 @@ def skill_check(
         level = get_skill_level(int(skills.get(skill_name, 0) or 0), skill_name)
     modifier = calculate_attribute_modifier(score)
     # The glossary: "the GM may let you focus a field for a larger bonus in
-    # it". The bonus is +1 to checks in the field: coordinator's ruling under
-    # the standing rule; Spencer may overrule (#808).
+    # it". The bonus is the canon's (+1 to checks in the field on the public
+    # pages: coordinator's ruling under the standing rule; Spencer may
+    # overrule, #808).
     chosen_under, field_detail = split_specialised_skill(skill_name)
     focus_bonus = (
-        FOCUSED_FIELD_BONUS if chosen_under == "knowledge" and field_detail else 0
+        rules.focused_field_bonus if chosen_under == "knowledge" and field_detail else 0
     )
     injured = injury_penalty(character)
     total = dice_total + modifier + level + focus_bonus + injured
-    natural = {NATURAL_SUCCESS: "natural 12", NATURAL_FAILURE: "natural 2"}.get(
-        dice_total, ""
-    )
+    is_natural = dice_total in (rules.natural_success, rules.natural_failure)
+    natural = f"natural {dice_total}" if is_natural else ""
     outcome = ""
     if difficulty is not None:
-        if dice_total == NATURAL_SUCCESS:
+        if dice_total == rules.natural_success:
             outcome = "success"
-        elif dice_total == NATURAL_FAILURE:
+        elif dice_total == rules.natural_failure:
             outcome = "failure"
         else:
             outcome = "success" if total >= difficulty else "failure"
@@ -454,6 +393,7 @@ def skill_check(
         attribute_score=score,
         attribute_modifier=modifier,
         substituted=attribute is not None and attribute != governing,
+        dice=rules.dice,
         faces=faces,
         stated=stated_total is not None,
         dice_total=dice_total,
@@ -467,22 +407,25 @@ def skill_check(
     )
 
 
-#: The lowest and highest a 3d6 attribute check's dice can come to.
-ATTRIBUTE_CHECK_MINIMUM = 3
-ATTRIBUTE_CHECK_MAXIMUM = 18
+def _check_stated_total(roll: DiceRollRules, stated_total: int) -> None:
+    """Refuse a Game Master's stated total the check's dice cannot make.
 
-#: The widest situational modifier a Game Master may set on an attribute
-#: check's target, either way (#953): a situational call, separate from the
-#: survival save's penalty in injury-thresholds-death.md, which only
-#: ``survival_save`` applies. Past ten the check is decided before the dice
-#: fall (a score of 3 to 18 against a 3d6 of 3 to 18), so a Game Master who
-#: means that rules it rather than rolls it.
-MAX_ATTRIBUTE_CHECK_MODIFIER = 10
+    Args:
+        roll: The check's dice, the canon's.
+        stated_total: The total stated.
+
+    Raises:
+        CharacterChangeError: No roll of those dice gives ``stated_total``.
+    """
+    if not roll.minimum <= stated_total <= roll.maximum:
+        raise CharacterChangeError(
+            f"A {roll.dice} total is between {roll.minimum} and {roll.maximum}"
+        )
 
 
 @dataclass(frozen=True)
 class AttributeCheck:
-    """One attribute check with no skill: 3d6 ≤ the attribute (issue #911).
+    """One attribute check with no skill: the dice ≤ the attribute (issue #911).
 
     The rule reads one way only, roll-under, so the injury table's penalty
     is applied here and never in a direction somebody names: "-1 to all
@@ -493,9 +436,9 @@ class AttributeCheck:
     Attributes:
         attribute: The attribute checked.
         attribute_score: Its effective (aged) score.
-        dice: The dice as the line prints them: ``"3d6: [4, 4, 4] = 12"``,
-            or the Game Master's stated total.
-        dice_total: The 3d6 total.
+        dice: The dice as the line prints them: ``"3d6: [4, 4, 4] = 12"``
+            on the public pages' dice, or the Game Master's stated total.
+        dice_total: The dice's total.
         injury_penalty: The injury table's -1 or -2, or 0.
         modifier: A Game Master's situational modifier on the target, after
             the injury penalty (#953); situational, and never a survival
@@ -569,11 +512,15 @@ def attribute_check(
 
     Args:
         character: The character; not changed.
-        attribute: One of :data:`ATTRIBUTES`, written in full.
-        stated_total: A Game Master's 3d6 total from the table.
-        modifier: A Game Master's modifier on the target, within
-            :data:`MAX_ATTRIBUTE_CHECK_MODIFIER` either way; applied after the
-            injury penalty. 0 for none.
+        attribute: One of
+            :data:`characters.constants.CHARACTER_ATTRIBUTE_FIELDS`, written
+            in full.
+        stated_total: A Game Master's total from the table, on the canon's
+            dice.
+        modifier: A Game Master's modifier on the target, within the canon's
+            ``game_master_modifier_limit`` either way (10 on the public
+            pages' file, a ruling recorded there); applied after the injury
+            penalty. 0 for none.
         is_game_master: Whether a Game Master asked.
         roller: Roll through this roller instead of the dice module default.
 
@@ -582,7 +529,7 @@ def attribute_check(
 
     Raises:
         CharacterChangeError: An unknown attribute or one not yet recorded, a
-            player stating the dice or setting a modifier, a total no 3d6 can
+            player stating the dice or setting a modifier, a total no roll can
             make, a modifier past the bound, a player's check for an
             unconscious character, or a dead character.
     """
@@ -592,30 +539,27 @@ def attribute_check(
         if not is_game_master or not character.is_alive:
             raise CharacterChangeError(unconscious)
         overridden.append("unconscious")
-    if attribute not in ATTRIBUTES:
+    if attribute not in CHARACTER_ATTRIBUTE_FIELDS:
         raise CharacterChangeError(f"Unknown attribute: {attribute}")
     if not is_game_master and (stated_total is not None or modifier):
         raise CharacterChangeError(
             "Only a Game Master can set a modifier or state the dice"
         )
-    if not -MAX_ATTRIBUTE_CHECK_MODIFIER <= modifier <= MAX_ATTRIBUTE_CHECK_MODIFIER:
+    rules = skill_rules().attribute_check
+    limit = rules.game_master_modifier_limit
+    if not -limit <= modifier <= limit:
         raise CharacterChangeError(
-            f"modifier must be a whole number from -{MAX_ATTRIBUTE_CHECK_MODIFIER} "
-            f"to {MAX_ATTRIBUTE_CHECK_MODIFIER}"
+            f"modifier must be a whole number from -{limit} to {limit}"
         )
     score = effective_score(character, attribute)
     if score is None:
         raise CharacterChangeError(f"{attribute.title()} is not recorded yet")
     if stated_total is not None:
-        if not ATTRIBUTE_CHECK_MINIMUM <= stated_total <= ATTRIBUTE_CHECK_MAXIMUM:
-            raise CharacterChangeError(
-                f"A 3d6 total is between {ATTRIBUTE_CHECK_MINIMUM} and "
-                f"{ATTRIBUTE_CHECK_MAXIMUM}"
-            )
+        _check_stated_total(rules, stated_total)
         dice_total = stated_total
-        dice = f"3d6 stated by a Game Master = {stated_total}"
+        dice = f"{rules.dice} stated by a Game Master = {stated_total}"
     else:
-        dice_total, dice = roll_3d6_logged(roller)
+        dice_total, dice = roll_dice_logged(rules.dice, roller)
     return AttributeCheck(
         attribute=attribute,
         attribute_score=score,

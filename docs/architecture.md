@@ -261,7 +261,20 @@ Notes on the edges, each checkable:
   read it through the cached `character_rules()` when they run, never at
   import, so the offline CLI's import chain stays free of Django and a canon
   whose file is refused is reported by the `characters.E001` system check.
-  Both rules files are read by the one strict reader in
+- `characters/skill_rules.py` reads the canon's `skill-rules.json`
+  (`reference.paths.SKILL_RULES_FILE`) into `SkillRules`: every number skills,
+  prior experience and the checks use (the tracks and their d20 tables, the
+  experience ladder, the skill cost multipliers, the survival roll, the aging
+  table, the attribute modifier table, and the skill and attribute checks'
+  dice, naturals, focused-field bonus, governing attributes and Game Master's
+  modifier limit). Callers read it through the cached `skill_rules()` when
+  they run, never at import, and a refused file, or a skill name that is no
+  glossary skill in its own right (`characters.skills.validate_skill_names`),
+  is reported by `characters.E002`. A value built from it and cached (the
+  Games Master's prompts, the patterns naming its skills and tracks)
+  registers with `reference.rules_file.derived_from_rules`, so a test seating
+  other rules clears it.
+  The three rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
 ### Frontend layering
@@ -546,10 +559,10 @@ flowchart TD
     guard -->|"yes"| alive{"is_alive?"}
     alive -->|"no"| refuse2["Character is deceased"]
     alive -->|"yes"| sim["skills.simulate_experience_years<br/>up to MAX_EXPERIENCE_YEARS_PER_RUN = 20"]
-    sim --> peryear["per year: get_skill_for_year on SKILL_TRACKS<br/>d20 face to a skill, special result or attribute bonus"]
-    peryear --> surv["survival check: 3d6 vs SURVIVAL_TARGETS<br/>3 auto-death, 18 auto-survive"]
-    surv --> age["age plus one; aging_stage_for_age<br/>AGING_TABLE cumulative penalties"]
-    age --> xp["xp_per_year from TRACK_DATA<br/>money_multiplier for coin"]
+    sim --> peryear["per year: get_skill_for_year on the canon's track table<br/>d20 face to a skill, special result or attribute bonus"]
+    peryear --> surv["survival check: the canon's dice vs the track's target<br/>its automatic death and survival totals"]
+    surv --> age["age plus one; aging_stage_for_age<br/>the canon's cumulative aging penalties"]
+    age --> xp["the track's xp_per_year<br/>money_multiplier for coin"]
     xp --> pts["calculate_skill_points_in_range<br/>XP bracket thresholds"]
     pts --> apply["Character.apply_experience_run<br/>writes experience_log, skills,<br/>free_skill_points, free_spell_points,<br/>aging penalties, total_xp, age"]
     apply --> resp["_build_add_years_response<br/>renders _skills_list.html and _term_entry.html<br/>server-side, plus movement"]
@@ -557,15 +570,25 @@ flowchart TD
     spend(["POST characters:allocate_skill"]) --> budget{"free_skill_points"}
     budget -->|"player over budget"| refuse3["Only N free skill point(s) available"]
     budget -->|"Game Master over budget"| granted["surplus recorded as granted"]
-    budget -->|"within budget"| store["skills JSON: name to points<br/>level derived by get_skill_level<br/>triangular cost, arcane doubled"]
+    budget -->|"within budget"| store["skills JSON: name to points<br/>level derived by get_skill_level<br/>triangular cost, times the canon's multiplier"]
 ```
 
 `skills` is a flat `{normalised_name: points}` map; a *level* is never stored —
 `skills.get_skill_level(points, name)` derives it, and `skill_cost_multiplier`
-doubles the ladder for `arcane`. `is_played` is a separate thing from having
-years: it flips only through `Character.mark_played_by(user)`, which no-ops
-unless the actor owns the character, so a DM editing someone else's sheet does
-not mark it played.
+multiplies the ladder by the canon's `skill_cost.multipliers` (Arcane's, on the
+public pages). Every number in this flow (the tracks, the ladder, the costs, the
+survival roll, the aging table, the modifiers) lives once, in the loaded canon's
+`skill-rules.json`, read through `characters.skill_rules.skill_rules()` (issue
+#70); the procedures stay in `characters/skills.py`. The default canon's file
+states the public pages' numbers, which the drift tests in
+`characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py` hold to
+the pages; `characters/tests/test_skill_rules_seated.py` seats invented rules to
+prove every caller reads them, and the e2e specs read them through the Django
+shell (`e2e/skill-rules.js`) rather than typing a number.
+
+`is_played` is a separate thing from having years: it flips only through
+`Character.mark_played_by(user)`, which no-ops unless the actor owns the
+character, so a DM editing someone else's sheet does not mark it played.
 
 Every mutation goes through `characters/services.py`, not through the ORM
 directly. `services.changing(pk, actor, authorize=...)` yields a `Change` under a
@@ -979,7 +1002,7 @@ as the name of the chip frame a record-changing action produces
 (`ActionResult.procedure`, `GMTurnRecord.procedures`, the SSE key `procedure`).
 
 The 24 action names live once, in `gm/turn_engine/policy.py::ACTION_NAMES`, and
-are declared to the model by `gm/engine.py::_plan_schema_section`:
+are declared to the model by `gm/engine.py::section_plan_schema`:
 
 | Group | Actions |
 | --- | --- |
@@ -1085,12 +1108,15 @@ graph TD
     last --> ollama["ollama_client.stream_chat<br/>think false, GM_MODEL, GM_NUM_CTX"]
 ```
 
-The prompt is built from four cached constants, never assembled per request:
-`SYSTEM_PROMPT`, `AIDE_SYSTEM_PROMPT`, `DM_PLAY_SYSTEM_PROMPT`,
-`DM_SYSTEM_PROMPT`, selected by
-`SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE[(is_game_master, mode)]`. The schema
-section is last on purpose so the growing prefix stays cacheable on the Ollama
-side.
+The prompt is one of four cached builders, each assembled the first time a
+turn asks and the same string for the life of the process, never per request:
+`system_prompt()`, `aide_system_prompt()`, `dm_play_system_prompt()`,
+`dm_system_prompt()`, selected by
+`system_prompts_by_authority_and_mode()[(is_game_master, mode)]`. They are
+built on first use rather than at import because three sections are built from
+the loaded canon's `skill-rules.json` (issue #70), which no module may read
+while it imports. The schema section is last on purpose so the growing
+prefix stays cacheable on the Ollama side.
 
 ### Canon retrieval (rules lookup, issues #605 and #333)
 
@@ -1098,8 +1124,8 @@ Two distinct things share the name "rules":
 
 - **`gm/rules_lookup.py`** answers a *rules number* from code, not from memory:
   `RULES = {"survival": ..., "survival_targets": ..., "combat": ...}`, every
-  sentence built from `characters/skills.py` constants and
-  `characters/combat.py::MATRIX`. The `rules_lookup` action calls `look_up`;
+  sentence built from the loaded canon's rules files (`characters/skill_rules.py`,
+  `characters/rules.py`) and `characters/combat.py::MATRIX`. The `rules_lookup` action calls `look_up`;
   an unknown subject raises `UnknownRule` listing what exists and reminding the
   model that a character's figure is a record, not a rule.
 - **`gm/retrieval.py`** is the semantic index over `reference/content/`.
@@ -1731,7 +1757,7 @@ player can read.
 
 | I want to change... | Start here |
 | --- | --- |
-| A game rule about attributes, skills or aging | `characters/skills.py`; drift is pinned by `characters/tests/test_rules_consistency.py` |
+| A game rule about attributes, skills or aging | its number is the canon's `skill-rules.json` (schema in `characters/skill_rules.py`; the default canon's copy in `reference/default_canon/`), its procedure `characters/skills.py`; drift between the default file and the pages is pinned by `characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py` |
 | A derived stat on the sheet | the property on `characters/models.py::Character`, then the module it delegates to (`skills.py`, `equipment.py`, `movement.py`, `dice.py`) |
 | Character creation or point buy | `characters/views/characters.py::character_create`, `characters/dice.py::roll_all_character_stats` / `build_point_buy_character_stats`, `static/js/point-buy.js` |
 | A limit or bound (attribute cap, name length, equipment size) | `characters/constants.py` |
@@ -1746,8 +1772,8 @@ player can read.
 | Who may control a seat | `battle/access.py::decides_for` / `can_control`, `battle/control.py` |
 | A new rules profile | `battle/profiles.py` (`BattleProfile` subclass), `battle/persistence.py::PROFILE_CHOICES`, `battle/viewmodel.py` |
 | What the arena draws | `battle/viewmodel.py` for the payload, `static/js/battle.js` for the drawing, `battle/templates/battle/_arena.html` |
-| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants and `SYSTEM_PROMPT_SECTIONS` |
-| Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::_plan_schema_section` |
+| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, `section_core()`, `section_plan_schema()` and `system_prompt_sections()` |
+| Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::section_plan_schema` |
 | What the model is told about the session | `gm/turn_engine/state.py::state_block` |
 | The two model calls' wording | `gm/turn_engine/messages.py` |
 | Refusals and who may do what | `gm/turn_engine/policy.py::TurnPolicy` |

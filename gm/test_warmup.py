@@ -19,15 +19,22 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase, override_settings
 
 from gm import warmup
-from gm.engine import SYSTEM_PROMPT, SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE
+from gm.engine import system_prompt, system_prompts_by_authority_and_mode
 from gm.retrieval import estimate_message_tokens
 
 FAKE_SYSTEM = {"role": "system", "content": "You are the GM."}
-# The real prompt's estimated size, so the command tests below can script a
-# cached count that means "today's prompt is warm" however the prompt grows.
-SYSTEM_PROMPT_TOKENS = estimate_message_tokens(
-    {"role": "system", "content": SYSTEM_PROMPT}
-)
+
+
+def system_prompt_tokens() -> int:
+    """The real prompt's estimated size.
+
+    So the command tests below can script a cached count that means "today's
+    prompt is warm" however the prompt grows. A function, so collecting this
+    module builds no prompt.
+    """
+    return estimate_message_tokens({"role": "system", "content": system_prompt()})
+
+
 FAKE_OPTIONS: dict[str, int | float] = {"num_ctx": 4096, "temperature": 0.5}
 FILLER = "canon " * 40
 
@@ -428,10 +435,10 @@ class WarmGMCommandTest(SimpleTestCase):
 
     def test_states_both_prompt_budgets_within_the_ceiling(self):
         """Issue #907: the estimate before warming, Ollama's count after."""
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         output = self._run(fake, num_ctx=65536)
         longest = warmup.estimate_longest_prompt_tokens(
-            SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values()
+            system_prompts_by_authority_and_mode().values()
         )
         self.assertIn(
             f"prompt budget: longest GM prompt, estimated {longest} tokens, "
@@ -449,7 +456,7 @@ class WarmGMCommandTest(SimpleTestCase):
         )
 
     def test_prompt_over_the_ceiling_is_reported_loudly_and_exits_zero(self):
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         output = self._run(fake)
         self.assertIn(
             "ceiling 1024 (25% of GM_NUM_CTX 4096) -- OVER the ceiling", output
@@ -458,7 +465,7 @@ class WarmGMCommandTest(SimpleTestCase):
         self.assertIn("warm: system prompt cached", output)
 
     def test_reports_cached_system_prompt(self):
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         output = self._run(fake)
         self.assertIn(
             "Ollama 0.33.3 at http://ollama:11434; warming fake-model", output
@@ -466,23 +473,23 @@ class WarmGMCommandTest(SimpleTestCase):
         self.assertIn("turn 1: prompt 8947 tokens, cached 0, prefill 27.4s", output)
         self.assertIn(
             "fresh probe: prompt 7342 tokens, "
-            f"cached {SYSTEM_PROMPT_TOKENS}, prefill 0.2s",
+            f"cached {system_prompt_tokens()}, prefill 0.2s",
             output,
         )
         self.assertIn(
-            f"warm: system prompt cached ({SYSTEM_PROMPT_TOKENS} tokens, "
-            f"~{SYSTEM_PROMPT_TOKENS} expected)",
+            f"warm: system prompt cached ({system_prompt_tokens()} tokens, "
+            f"~{system_prompt_tokens()} expected)",
             output,
         )
         self.assertEqual(self.seen_read_timeout, warmup.DEFAULT_READ_TIMEOUT)
 
     def test_sends_real_system_prompt_and_gm_options(self):
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         self._run(fake, "--num-predict", "4")
         for payload in fake.chat_payloads:
             self.assertEqual(payload["model"], "fake-model")
             self.assertEqual(
-                payload["messages"][0], {"role": "system", "content": SYSTEM_PROMPT}
+                payload["messages"][0], {"role": "system", "content": system_prompt()}
             )
             self.assertIs(payload["think"], False)
             self.assertEqual(
@@ -505,11 +512,11 @@ class WarmGMCommandTest(SimpleTestCase):
         The deploy log has to say so with both numbers, or the next prompt
         change looks warm while every fresh session pays a full prefill.
         """
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS // 2))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens() // 2))
         output = self._run(fake)
         self.assertIn("warm: NOT cached", output)
-        self.assertIn(str(SYSTEM_PROMPT_TOKENS // 2), output)
-        self.assertIn(f"~{SYSTEM_PROMPT_TOKENS}", output)
+        self.assertIn(str(system_prompt_tokens() // 2), output)
+        self.assertIn(f"~{system_prompt_tokens()}", output)
         self.assertIn("pays a full prefill", output)
 
     def test_missing_cached_count_is_reported_not_guessed(self):
@@ -521,7 +528,7 @@ class WarmGMCommandTest(SimpleTestCase):
 
     def test_wait_polls_version_before_warming(self):
         fake = RecordingOllama(
-            three_turns_then_probe(SYSTEM_PROMPT_TOKENS), version_failures=2
+            three_turns_then_probe(system_prompt_tokens()), version_failures=2
         )
         with (
             patch.object(warmup.time, "sleep") as sleep,
@@ -539,19 +546,19 @@ class WarmGMCommandTest(SimpleTestCase):
         self.assertEqual(fake.chat_payloads, [])
 
     def test_failed_chat_request_is_a_command_error(self):
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS)[:1])
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens())[:1])
         with self.assertRaisesRegex(CommandError, "GM warm-up request failed.*500"):
             self._run(fake)
 
     def test_empty_corpus_is_a_command_error(self):
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         with self._settings(corpus_root=self.root / "absent"):
             with self.assertRaisesRegex(CommandError, "GM warm-up filler failed"):
                 call_command("warm_gm", stdout=StringIO())
         self.assertEqual(fake.requests, [])
 
     def test_timeout_flag_reaches_the_client(self):
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         self._run(fake, "--timeout", "45")
         self.assertEqual(self.seen_read_timeout, 45.0)
 
@@ -559,20 +566,20 @@ class WarmGMCommandTest(SimpleTestCase):
         """Issue #372: four prompts, one warm-up, and it is the shortest.
 
         Whatever the person at the table has chosen, the request they send
-        opens with ``SYSTEM_PROMPT`` — so warming that, and nothing past it,
+        opens with ``system_prompt()`` — so warming that, and nothing past it,
         establishes a restore point every one of the four extends. Warming a
         longer variant would put the restore point past where three of the
         four diverge.
         """
         from gm.engine import (
-            SYSTEM_PROMPT,
-            SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE,
+            system_prompt,
+            system_prompts_by_authority_and_mode,
         )
 
-        fake = RecordingOllama(three_turns_then_probe(SYSTEM_PROMPT_TOKENS))
+        fake = RecordingOllama(three_turns_then_probe(system_prompt_tokens()))
         self._run(fake)
         warmed = fake.chat_payloads[0]["messages"][0]["content"]
-        self.assertEqual(warmed, SYSTEM_PROMPT)
-        for prompt in SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values():
+        self.assertEqual(warmed, system_prompt())
+        for prompt in system_prompts_by_authority_and_mode().values():
             with self.subTest(prompt=prompt[:40]):
                 self.assertTrue(prompt.startswith(warmed))

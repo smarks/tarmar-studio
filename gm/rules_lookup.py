@@ -28,16 +28,12 @@ from characters.constants import (
     SEVERE_INJURY_ROLL_PENALTY,
 )
 from characters.rules import CoinRoll, character_rules
+from characters.skill_rules import AGING_ATTRIBUTES, skill_rules
 from characters.skills import (
-    AGING_TABLE,
-    STAGES_PER_MENTAL_AGING_STEP,
-    SURVIVAL_AUTO_DEATH_ROLL,
-    SURVIVAL_AUTO_SURVIVE_ROLL,
-    SURVIVAL_DICE_COUNT,
-    SURVIVAL_RULE_DESCRIPTION,
-    SURVIVAL_TARGETS,
     age_for_aging_stage,
     normalize_skill_name,
+    survival_rule_description,
+    survival_targets,
 )
 
 #: The longest a subject may be, so a plan cannot smuggle prose in here.
@@ -57,21 +53,24 @@ class UnknownRule(LookupError):
 def targets_written() -> str:
     """Every track's survivability target, in one line."""
     return ", ".join(
-        f"{name} {target}" for name, target in sorted(SURVIVAL_TARGETS.items())
+        f"{name} {target}" for name, target in sorted(survival_targets().items())
     )
 
 
 def _survival(track: str = "") -> str:
     """The prior-experience survival check, for one track or in general."""
+    survival_roll = skill_rules().survival_roll
     general = (
-        f"Prior-experience survival: {SURVIVAL_RULE_DESCRIPTION} "
-        f"A natural {SURVIVAL_AUTO_SURVIVE_ROLL} is never a death and a "
-        f"natural {SURVIVAL_AUTO_DEATH_ROLL} is never a survival."
+        f"Prior-experience survival: {survival_rule_description()} "
+        f"A natural {survival_roll.automatic_survival_total} is never a death "
+        f"and a natural {survival_roll.automatic_death_total} is never a "
+        "survival."
     )
     if not track:
         return f"{general} Survivability targets: {targets_written()}."
     named = track.strip().casefold().replace(" ", "_")
-    if named not in SURVIVAL_TARGETS:
+    targets = survival_targets()
+    if named not in targets:
         # A lookup always answers. The model phrases the narrowing field
         # however the question came out -- "base TN Piercing vs None" arrived
         # in it once -- and refusing left the GM narrating an apology at the
@@ -80,9 +79,9 @@ def _survival(track: str = "") -> str:
         return f"{general} Survivability targets: {targets_written()}."
     return (
         f"{general} The {named} track's survivability target is "
-        f"{SURVIVAL_TARGETS[named]}, so on {SURVIVAL_DICE_COUNT}d6 plus the "
+        f"{targets[named]}, so on {survival_roll.dice} plus the "
         f"best attribute modifier the character survives on "
-        f"{SURVIVAL_TARGETS[named]} or more."
+        f"{targets[named]} or more."
     )
 
 
@@ -123,7 +122,7 @@ def signed(number: int) -> str:
 
 
 def _aging(_narrowing: str = "") -> str:
-    """The aging schedule, from :data:`characters.skills.AGING_TABLE` (#807).
+    """The aging schedule, from the canon's aging table (#807, #70).
 
     Only the ages where a total changes, each with the cumulative totals it
     carries, as aging.md's table gives them. A lookup rather than a line of
@@ -133,17 +132,18 @@ def _aging(_narrowing: str = "") -> str:
     labels = {
         name: short for name, short in CORE_ATTRIBUTE_FIELDS if name != "charisma"
     }
+    aging = skill_rules().aging
     steps: list[str] = []
     before: dict[str, int] | None = None
-    for stage in sorted(AGING_TABLE):
-        totals = AGING_TABLE[stage]
+    for aging_stage in aging.stages:
+        totals = aging_stage.penalties
         if totals != before and any(totals.values()):
             said = ", ".join(
-                f"{labels[name]} {signed(value)}"
-                for name, value in totals.items()
-                if value
+                f"{labels[name]} {signed(totals[name])}"
+                for name in AGING_ATTRIBUTES
+                if totals[name]
             )
-            steps.append(f"{age_for_aging_stage(stage)} {said}")
+            steps.append(f"{age_for_aging_stage(aging_stage.stage)} {said}")
         before = totals
     age_rules = character_rules().age
     return (
@@ -152,7 +152,7 @@ def _aging(_narrowing: str = "") -> str:
         + "; ".join(steps)
         + "; after that STR, DEX and CON lose 1 more every "
         f"{age_rules.years_per_stage} years and INT and WIS every "
-        f"{STAGES_PER_MENTAL_AGING_STEP * age_rules.years_per_stage}. An aged "
+        f"{aging.stages_per_mental_step * age_rules.years_per_stage}. An aged "
         "score never goes below 0; "
         "play uses it, and only the literacy check and the weight from STR use "
         "the base score."
@@ -197,28 +197,24 @@ def _starting_coin(_narrowing: str = "") -> str:
 def _skill_check(skill: str = "") -> str:
     """The skills glossary's check, and which attribute a skill rides on (#843).
 
-    Built from :mod:`characters.skill_checks`, which rolls the check and whose
-    Governs table is held to the glossary by a drift test. ``skill`` names
-    one skill; unnamed or unknown, every governing attribute is given.
+    Built from the canon's skill check (``skill-rules.json``, issue #70),
+    which :mod:`characters.skill_checks` rolls and whose default Governs
+    table is held to the glossary by a drift test. ``skill`` names one skill;
+    unnamed or unknown, every governing attribute is given.
     """
     # Imported here: gm.engine reads this module's subjects for its prompt,
     # and must import without Django (the offline CLI), which the check's
     # module needs for the character model.
-    from characters.skill_checks import (
-        GOVERNING_ATTRIBUTES,
-        MAX_DIFFICULTY,
-        NATURAL_FAILURE,
-        NATURAL_SUCCESS,
-        governing_attribute,
-    )
+    from characters.skill_checks import MAX_DIFFICULTY, governing_attribute
 
+    checks = skill_rules().skill_check
     general = (
-        "Skill check: roll 2d6, add the governing attribute's modifier (from "
-        "its aged score) and the skill level, against a difficulty the Game "
-        f"Master sets (0 to {MAX_DIFFICULTY}); a player sets none. A natural "
-        f"{NATURAL_SUCCESS} always succeeds and a "
-        f"natural {NATURAL_FAILURE} always fails; untrained, the modifier "
-        "alone. Luck is not rolled as a check."
+        f"Skill check: roll {checks.dice}, add the governing attribute's "
+        "modifier (from its aged score) and the skill level, against a "
+        f"difficulty the Game Master sets (0 to {MAX_DIFFICULTY}); a player "
+        f"sets none. A natural {checks.natural_success} always succeeds and a "
+        f"natural {checks.natural_failure} always fails; untrained, the "
+        "modifier alone. Luck is not rolled as a check."
     )
     named = normalize_skill_name(skill) if skill.strip() else ""
     governing = governing_attribute(named) if named else None
@@ -226,7 +222,7 @@ def _skill_check(skill: str = "") -> str:
         return f"{general} {named.title()} rides on {governing.title()}."
     listed = ", ".join(
         f"{name} {attribute}"
-        for name, attribute in sorted(GOVERNING_ATTRIBUTES.items())
+        for name, attribute in sorted(checks.governing_attributes.items())
         if attribute is not None
     )
     return f"{general} Governing attributes: {listed}."
@@ -235,30 +231,25 @@ def _skill_check(skill: str = "") -> str:
 def _attribute_check(_narrowing: str = "") -> str:
     """The attribute check with no skill, 3d6 ≤ the attribute (#911).
 
-    Built from :func:`characters.skill_checks.attribute_check`'s bounds and
-    the injury table's bands, so the direction and the penalty are stated
+    Built from the canon's attribute check (``skill-rules.json``, issue #70),
+    which :func:`characters.skill_checks.attribute_check` rolls and bounds,
+    and the injury table's bands, so the direction and the penalty are stated
     the way the action rolls them.
     """
-    # Imported here for the reason _skill_check gives.
-    from characters.skill_checks import (
-        ATTRIBUTE_CHECK_MAXIMUM,
-        ATTRIBUTE_CHECK_MINIMUM,
-        MAX_ATTRIBUTE_CHECK_MODIFIER,
-    )
-
+    check = skill_rules().attribute_check
+    limit = check.game_master_modifier_limit
     return (
-        "Attribute check with no skill: roll 3d6; it passes when the total is "
-        "at or under the attribute's aged score. Injured, the score the dice "
-        f"must come in under is lowered: {signed(MINOR_INJURY_ROLL_PENALTY)} "
-        f"with a pool down to half (but above {SEVERE_INJURY_BAND_TOP}), "
-        f"{signed(SEVERE_INJURY_ROLL_PENALTY)} with a pool at 1 to "
-        f"{SEVERE_INJURY_BAND_TOP}, the worse pool governing. The Game Master "
-        f"may state a total ({ATTRIBUTE_CHECK_MINIMUM} to "
-        f"{ATTRIBUTE_CHECK_MAXIMUM}) rolled at his table, and set a modifier "
-        f"({signed(-MAX_ATTRIBUTE_CHECK_MODIFIER)} to "
-        f"{signed(MAX_ATTRIBUTE_CHECK_MODIFIER)}) on the score after any injury "
-        "for the situation; a player sets neither. That modifier is not a "
-        "survival save's penalty: a dying character's save is survival_save, "
+        f"Attribute check with no skill: roll {check.dice}; it passes when the "
+        "total is at or under the attribute's aged score. Injured, the score "
+        "the dice must come in under is lowered: "
+        f"{signed(MINOR_INJURY_ROLL_PENALTY)} with a pool down to half (but "
+        f"above {SEVERE_INJURY_BAND_TOP}), {signed(SEVERE_INJURY_ROLL_PENALTY)} "
+        f"with a pool at 1 to {SEVERE_INJURY_BAND_TOP}, the worse pool "
+        "governing. The Game Master may state a total "
+        f"({check.minimum} to {check.maximum}) rolled at his table, and set a "
+        f"modifier ({signed(-limit)} to {signed(limit)}) on the score after any "
+        "injury for the situation; a player sets neither. That modifier is not "
+        "a survival save's penalty: a dying character's save is survival_save, "
         "which applies its own penalty."
     )
 

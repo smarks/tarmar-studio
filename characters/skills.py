@@ -1,43 +1,63 @@
-"""Skills system logic for character experience and skill allocation."""
+"""Skills system logic for character experience and skill allocation.
+
+The numbers are the loaded canon's ``skill-rules.json``, read through
+:func:`characters.skill_rules.skill_rules` when a function needs them, never
+at import (issue #70): the tracks and their d20 tables, the experience
+ladder, the skill cost multipliers, the survival roll, the aging table and
+the attribute modifier table. The procedures that use them stay here.
+"""
 
 import math
 import random
 import re
+from collections.abc import Mapping
+from itertools import pairwise
+from pathlib import Path
+from typing import Any
 
-from .constants import (
-    ATTRIBUTE_BONUS_FIELDS,
-    strip_control_characters,
-)
+from .constants import ATTRIBUTE_BONUS_FIELDS
 
-# The survival roll's dice. It moved from 2d6 to 3d6 in issue #223 -- same
-# per-track targets, a much narrower spread -- so this is the local name (and
-# the patch target the tests use) for the roller that returns the faces the
-# survival log stores.
-from .dice import roll_3d6_faces as roll_survival_dice
-from .dice import roll_d20
+# The survival roll's dice are the canon's (issue #70; 3d6 on the public
+# pages since issue #223). This is the local name, and the patch target the
+# tests use, for the roller that returns the faces the survival log stores.
+from .dice import roll_d20, roll_survival_dice
 from .rules import character_rules
 
-# Survival roll shape (issue #223). Three dice, so the natural-roll overrides
-# are triple ones and triple sixes rather than 2d6's snake eyes and boxcars.
-SURVIVAL_DICE_COUNT = 3
-SURVIVAL_AUTO_DEATH_ROLL = 3
-SURVIVAL_AUTO_SURVIVE_ROLL = 18
-
-# The survival check written out in words, for the GM to read rather than
-# remember (issue #370: it told a player the campaigner track "requires a
-# survival roll of 3d6 <= 12" and killed a character on an 18). It is *built*
-# from the constants above and from the comparison
-# ``simulate_experience_years`` actually makes, so the sentence cannot drift
-# away from the code the way the model's memory did. It lives here, beside the
-# rule, because this module is the single source of truth for the check.
-SURVIVAL_RULE_DESCRIPTION = (
-    f"roll {SURVIVAL_DICE_COUNT}d6, add the character's best attribute "
-    "modifier, and compare that total with the track's survivability target — "
-    "the character survives when the total is greater than or equal to the "
-    f"target, so the roll must go HIGH. A natural {SURVIVAL_AUTO_SURVIVE_ROLL} "
-    "on the dice is an automatic survival whatever the target, and a natural "
-    f"{SURVIVAL_AUTO_DEATH_ROLL} is an automatic death."
+# Re-exported: callers import it from here, as they did before it moved
+# (issue #70).
+from .skill_names import normalize_skill_name as normalize_skill_name
+from .skill_rules import (
+    AGING_ATTRIBUTES,
+    ExperienceLevel,
+    SkillRules,
+    SkillRulesError,
+    SkillTrack,
+    skill_rules,
 )
+
+
+def survival_rule_description() -> str:
+    """The survival check written out in words, for the GM to read.
+
+    For the GM to read rather than remember (issue #370: it told a player the
+    campaigner track "requires a survival roll of 3d6 <= 12" and killed a
+    character on an 18). It is *built* from the canon's survival roll and
+    from the comparison ``simulate_experience_years`` actually makes, so the
+    sentence cannot drift away from the code the way the model's memory did.
+    It lives here, beside the rule, because this module is the single source
+    of truth for the check.
+    """
+    survival_roll = skill_rules().survival_roll
+    return (
+        f"roll {survival_roll.dice}, add the character's best attribute "
+        "modifier, and compare that total with the track's survivability "
+        "target — the character survives when the total is greater than or "
+        "equal to the target, so the roll must go HIGH. A natural "
+        f"{survival_roll.automatic_survival_total} on the dice is an automatic "
+        "survival whatever the target, and a natural "
+        f"{survival_roll.automatic_death_total} is an automatic death."
+    )
+
 
 # How many years one run of the prior-experience workbench may play. One year
 # is the default and the first-class case; the maximum is the upper bound on
@@ -55,19 +75,21 @@ MAX_EXPERIENCE_YEARS_PER_RUN = 20
 # character's export re-imports. See reference/content/public-rules/characters/
 # prior-experience/skills-glossary.md.
 #
-# One skill is priced differently. **Arcane** (True Magic) costs double: level N
-# costs 2xN more points, so reaching level N costs N(N+1) in total -> 2, 6, 12,
-# 20, 30, 42, ... (issue #154). Every function that converts between points and
-# levels takes the skill name so the exception is applied in exactly one place;
-# passing no name means "an ordinary skill".
+# Some skills are priced as a multiple of that: the canon's
+# ``skill_cost.multipliers``. On the public pages **Arcane** (True Magic)
+# costs double: level N costs 2xN more points, so reaching level N costs
+# N(N+1) in total -> 2, 6, 12, 20, 30, 42, ... (issue #154). Every function
+# that converts between points and levels takes the skill name so the
+# exception is applied in exactly one place; passing no name means "an
+# ordinary skill".
 
-# The doubled skill, as ``normalize_skill_name`` stores it. The match is exact
+# The Arcane skill, as ``normalize_skill_name`` stores it: the key its cost
+# multiplier is filed under and the skill Channel reads. The match is exact
 # normalized equality, so "Arcane", "ARCANE", and "Arcane III" all hit it while
 # a differently named skill that merely contains the word ("arcane lore") is an
 # ordinary skill at ordinary cost. ``ArcaneSkillCostRuleTest`` guards the
 # spelling against the rulebook's.
 ARCANE_SKILL_NAME = "arcane"
-ARCANE_COST_MULTIPLIER = 2
 
 # Points are uncapped by the rules but not by storage: a skill total has to stay
 # a sane, JSON-serializable integer, and the level ladder is walked one level at
@@ -109,14 +131,13 @@ def roman_numeral(number: int) -> str:
 def skill_cost_multiplier(skill_name: str | None = None) -> int:
     """How many times the ordinary triangular cost ``skill_name`` charges.
 
-    2 for Arcane, 1 for every other skill (and for ``None``, meaning the
-    caller is asking about the ordinary ladder rather than a named skill).
+    The canon's multiplier for the skill (2 for Arcane on the public pages),
+    1 for every other skill and for ``None``, meaning the caller is asking
+    about the ordinary ladder rather than a named skill.
     """
     if skill_name is None:
         return 1
-    if normalize_skill_name(skill_name) == ARCANE_SKILL_NAME:
-        return ARCANE_COST_MULTIPLIER
-    return 1
+    return skill_rules().skill_cost.multiplier_for(skill_name)
 
 
 def points_for_level(level: int, skill_name: str | None = None) -> int:
@@ -171,102 +192,65 @@ def format_skill_level(points: int, skill_name: str | None = None) -> str:
     return rendered
 
 
-# Track data: XP per year, survivability target, money multiplier
-# Money is multiplied by highest skill level (or maker skill for craft track)
-# Human display labels for the tracks -- the one place they are spelled
-# (the editor's select, the history run summaries, and the JS mirror all
-# read these; issue #221 review caught "Civil_service" leaking raw values).
-TRACK_LABELS: dict[str, str] = {
-    "random": "Random",
-    "merchant": "Merchant",
-    "campaigner": "Campaigner",
-    "laborer": "Laborer",
-    "magic": "Magic",
-    "underworld": "Underworld",
-    "civil_service": "Civil Service",
-    "craft": "Craft",
-    "hunter_gatherer": "Hunter/Gatherer",
-}
+#: The track choice that lets the rules pick one of the canon's tracks: a UI
+#: and plan option, not a track (issue #70 keeps it in code, beside the
+#: choice that reads it).
+RANDOM_TRACK_KEY = "random"
+#: How the random choice is labelled wherever the tracks are listed.
+RANDOM_TRACK_LABEL = "Random"
+
+
+def track_keys() -> tuple[str, ...]:
+    """The canon's prior-experience tracks, by key, in the canon's order."""
+    return tuple(skill_rules().tracks.tracks)
+
+
+def selectable_tracks() -> tuple[str, ...]:
+    """Every track a player or a plan may name: the canon's, then random.
+
+    The one list the plan schema the Games Master reads, the plan reader and
+    the add-years endpoint check a named track against (issue #70).
+    """
+    return (*track_keys(), RANDOM_TRACK_KEY)
+
+
+def track_labels() -> dict[str, str]:
+    """Each selectable track's label, the random choice first.
+
+    The one place they are spelled (the editor's select, the history run
+    summaries, and the JS mirror all read these; issue #221 review caught
+    "Civil_service" leaking raw values): the canon's labels, and the random
+    choice's own.
+    """
+    return {
+        RANDOM_TRACK_KEY: RANDOM_TRACK_LABEL,
+        **{key: track.label for key, track in skill_rules().tracks.tracks.items()},
+    }
 
 
 def track_label(track: str) -> str:
     """The human label for a track value, humanized for unknown/legacy ones."""
-    return TRACK_LABELS.get(track, track.replace("_", " ").title())
+    return track_labels().get(track, track.replace("_", " ").title())
 
 
-TRACK_DATA: dict[str, dict[str, int | str]] = {
-    "merchant": {"xp_per_year": 750, "survivability": 4, "money_multiplier": 100},
-    "campaigner": {"xp_per_year": 1200, "survivability": 9, "money_multiplier": 200},
-    "laborer": {"xp_per_year": 500, "survivability": 2, "money_multiplier": 25},
-    "magic": {"xp_per_year": 900, "survivability": 9, "money_multiplier": 75},
-    "underworld": {"xp_per_year": 1000, "survivability": 8, "money_multiplier": 125},
-    "civil_service": {"xp_per_year": 750, "survivability": 4, "money_multiplier": 75},
-    "craft": {
-        "xp_per_year": 600,
-        "survivability": 3,
-        "money_multiplier": 75,
-        "money_skill": "maker",
-    },
-    "hunter_gatherer": {"xp_per_year": 800, "survivability": 6, "money_multiplier": 25},
-}
-
-# Backward compatibility: extract survival targets from TRACK_DATA
-SURVIVAL_TARGETS: dict[str, int] = {
-    track: int(data["survivability"]) for track, data in TRACK_DATA.items()
-}
-
-# Experience level thresholds (level -> minimum XP required)
-EXPERIENCE_LEVELS: dict[int, int] = {
-    1: 0,
-    2: 2000,
-    3: 4000,
-    4: 8000,
-    5: 16000,
-    6: 32000,
-    7: 64000,
-    8: 128000,
-    9: 256000,
-    10: 512000,
-}
-
-# XP per skill point at each level (used for cumulative skill point calculation)
-SKILL_POINTS_PER_LEVEL: dict[int, int] = {
-    2: 1000,
-    3: 1334,
-    4: 2000,
-    5: 3200,
-    6: 5334,
-    7: 9143,
-    8: 16000,
-    9: 28445,
-    10: 51200,
-}
-
-
-def get_experience_level(total_xp: int) -> int:
-    """Get experience level (1-10) from total XP."""
-    for level in range(10, 0, -1):
-        if total_xp >= EXPERIENCE_LEVELS[level]:
-            return level
-    return 1
-
-
-#: The last level the published table prints. Level 10's row gives a rate
-#: ("Skill Points Every 51,200") rather than a terminus, and the page says
-#: skill points are granted cumulatively as XP is earned without naming a
-#: stop, so that rate keeps running past 512,000 XP rather than the grant
-#: ending there (issue #656).
-TOP_EXPERIENCE_LEVEL = 10
+def survival_targets() -> dict[str, int]:
+    """Each track's survivability target, by key."""
+    return {
+        key: track.survival_target for key, track in skill_rules().tracks.tracks.items()
+    }
 
 
 def calculate_skill_points_from_xp(total_xp: int) -> int:
     """Total skill points earned from XP thresholds.
 
-    Skill points are granted cumulatively as XP is earned; the rate is the
-    one the level bracket names. Past the top of the published table the
-    level-10 rate carries on, so a Game Master who grants a character ten
-    million XP sees the points keep coming -- the table gives level 10 a
-    rate, not a ceiling, and ``total_xp`` is directly editable far past it.
+    Skill points are granted cumulatively as XP is earned: the climb to each
+    level of the canon's ladder earns one point per that level's
+    ``xp_per_skill_point`` (prior-experience.md: "at 3,000 XP you would have
+    earned 2 skill points (at 1,000 and 2,000 XP)"). Past the top of the
+    ladder the top level's rate carries on, so a Game Master who grants a
+    character ten million XP sees the points keep coming -- the table gives
+    the top level a rate, not a ceiling, and ``total_xp`` is directly
+    editable far past it (issue #656).
 
     Args:
         total_xp: The character's lifetime XP.
@@ -276,32 +260,29 @@ def calculate_skill_points_from_xp(total_xp: int) -> int:
     """
     if total_xp <= 0:
         return 0
-
+    levels = skill_rules().experience.levels
     total_points = 0
-
-    # Process each level bracket
-    for level in range(2, TOP_EXPERIENCE_LEVEL + 1):
-        level_start = EXPERIENCE_LEVELS[level - 1] if level > 1 else 0
-        level_end = EXPERIENCE_LEVELS[level]
-        xp_per_point = SKILL_POINTS_PER_LEVEL[level]
-
-        # How much XP in this bracket?
-        if total_xp <= level_start:
+    for lower, higher in pairwise(levels):
+        if total_xp <= lower.minimum_xp:
             break
-
-        bracket_xp = min(total_xp, level_end) - level_start
-        if bracket_xp > 0:
-            points_in_bracket = bracket_xp // xp_per_point
-            total_points += points_in_bracket
-
-    # Past the table's last row, level 10's rate continues (issue #656).
-    top_of_table = EXPERIENCE_LEVELS[TOP_EXPERIENCE_LEVEL]
-    if total_xp > top_of_table:
-        total_points += (total_xp - top_of_table) // SKILL_POINTS_PER_LEVEL[
-            TOP_EXPERIENCE_LEVEL
-        ]
-
+        bracket_xp = min(total_xp, higher.minimum_xp) - lower.minimum_xp
+        total_points += bracket_xp // _rate_of(higher)
+    top = levels[-1]
+    if len(levels) > 1 and total_xp > top.minimum_xp:
+        total_points += (total_xp - top.minimum_xp) // _rate_of(top)
     return total_points
+
+
+def _rate_of(level: ExperienceLevel) -> int:
+    """The XP per skill point on the climb to ``level``, past level 1.
+
+    Raises:
+        ValueError: ``level`` is level 1, which has no climb to rate; the
+            ladder's own validation means no caller here asks for it.
+    """
+    if level.xp_per_skill_point is None:  # pragma: no cover - refused on load
+        raise ValueError(f"level {level.level} has no XP per skill point")
+    return level.xp_per_skill_point
 
 
 def skill_budget_note(allocated: int, earned: int) -> str | None:
@@ -339,104 +320,16 @@ def calculate_skill_points_in_range(xp_before: int, xp_after: int) -> int:
     )
 
 
-# All tracks are now unrestricted - no attribute requirements
-
-# Aging table: aging *stage* -> TOTAL cumulative penalties at that stage.
+# Aging is the canon's ``aging`` table: aging *stage* -> TOTAL cumulative
+# penalties at that stage, and how decline continues past the last tabulated
+# stage (:meth:`characters.skill_rules.AgingRules.penalties_for`).
 #
 # A stage is the canon's ``age.years_per_stage`` years of life (four on the
 # public pages) counted from its starting age (16), so stage N is reached at
-# age ``16 + 4N`` -- 16, 20, 24, ... Decline starts at
-# stage 5 (age 36). Before issue #221 the key was the experience *term*
-# number, which came to the same thing only because a term was exactly four
-# years; keying it to age makes the schedule identical whether a character
-# buys four years in one click or one year at a time.
-AGING_TABLE: dict[int, dict[str, int]] = {
-    4: {
-        "strength": 0,
-        "dexterity": 0,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": 0,
-    },
-    5: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": 0,
-    },
-    6: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    7: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    8: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    9: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    10: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    11: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    12: {
-        "strength": -1,
-        "dexterity": -1,
-        "intelligence": 0,
-        "wisdom": 0,
-        "constitution": -1,
-    },
-    13: {
-        "strength": -2,
-        "dexterity": -2,
-        "intelligence": -1,
-        "wisdom": -1,
-        "constitution": -2,
-    },
-}
-
-# AGING_TABLE stops at stage 13 (age 68), but decline doesn't stop there.
-# Stages 14+ escalate by formula instead of a longer table: every stage past
-# 13 adds a further -1 to STR/DEX/CON, and every second stage past 13 (15, 17,
-# 19, ...) adds a further -1 to INT/WIS. Uncapped -- see reference/content/
-# public-rules/characters/prior-experience/aging.md.
-_LAST_TABULATED_AGING_STAGE = max(AGING_TABLE)  # 13
-
-# Past the table, INT and WIS lose 1 every this many stages, STR, DEX and CON
-# every stage. Read by the escalation below and by the rules lookup that
-# states it (``gm.rules_lookup``).
-STAGES_PER_MENTAL_AGING_STEP = 2
-
-# The first stage that carries any penalty at all.
-FIRST_AGING_STAGE = 5
+# age ``16 + 4N`` -- 16, 20, 24, ... Before issue #221 the key was the
+# experience *term* number, which came to the same thing only because a term
+# was exactly four years; keying it to age makes the schedule identical
+# whether a character buys four years in one click or one year at a time.
 
 
 def aging_stage_for_age(age: int) -> int:
@@ -457,37 +350,14 @@ def age_for_aging_stage(stage: int) -> int:
     return age_rules.starting + age_rules.years_per_stage * stage
 
 
-def get_aging_penalties(stage_number: int) -> dict[str, int] | None:
-    """Return the cumulative aging penalty totals for aging stage `stage_number`.
-
-    Stages before 5 have no aging (``None``). Stages 4-13 come straight from
-    ``AGING_TABLE``, unchanged. Stages past the table's last entry escalate by
-    formula so aging never freezes for very old characters.
-    """
-    if stage_number < FIRST_AGING_STAGE:
-        return None
-    if stage_number in AGING_TABLE:
-        return AGING_TABLE[stage_number]
-    if stage_number > _LAST_TABULATED_AGING_STAGE:
-        stages_past_table = stage_number - _LAST_TABULATED_AGING_STAGE
-        last = AGING_TABLE[_LAST_TABULATED_AGING_STAGE]
-        physical_penalty = last["strength"] - stages_past_table
-        mental_penalty = last["intelligence"] - (
-            stages_past_table // STAGES_PER_MENTAL_AGING_STEP
-        )
-        return {
-            "strength": physical_penalty,
-            "dexterity": physical_penalty,
-            "constitution": physical_penalty,
-            "intelligence": mental_penalty,
-            "wisdom": mental_penalty,
-        }
-    return None
-
-
 def get_aging_penalties_for_age(age: int) -> dict[str, int] | None:
-    """The cumulative aging penalty totals a character of `age` carries."""
-    return get_aging_penalties(aging_stage_for_age(age))
+    """The cumulative aging penalty totals a character of `age` carries.
+
+    ``None`` before the canon's first stage with penalties; otherwise every
+    aged attribute by field name, in the table's order (STR, DEX, INT, WIS,
+    CON) whether the stage is tabulated or past the table.
+    """
+    return skill_rules().aging.penalties_for(aging_stage_for_age(age))
 
 
 def next_aging_change_after_age(
@@ -507,260 +377,23 @@ def next_aging_change_after_age(
 
     Returns:
         ``(age, totals)`` for the next change, or ``None`` past the horizon.
+        The totals are in :data:`characters.skill_rules.AGING_ATTRIBUTES`'
+        order, the order the workbench prints them in.
     """
+    aging = skill_rules().aging
     current_totals = get_aging_penalties_for_age(age) or {}
     for stage in range(aging_stage_for_age(age) + 1, horizon_stage + 1):
-        totals = get_aging_penalties(stage)
+        totals = aging.penalties_for(stage)
         if not totals or totals == current_totals:
             continue
-        non_zero = {attr: value for attr, value in totals.items() if value != 0}
+        non_zero = {
+            attribute: totals[attribute]
+            for attribute in AGING_ATTRIBUTES
+            if totals[attribute] != 0
+        }
         if non_zero:
             return age_for_aging_stage(stage), non_zero
     return None
-
-
-# Skill tracks: maps track name to a list of 20 skills, one per d20 roll
-# position (index 0 = a roll of 1). A d20 cannot exceed 20, so every position
-# is reachable and there is no overflow entry.
-SKILL_TRACKS: dict[str, list[str]] = {
-    "merchant": [
-        "Weapon",
-        "Weapon Parry",
-        "Coins",
-        "Deceit",
-        "Persuasion",
-        "Sleight of Hand",
-        "Literacy",
-        "Street Smarts",
-        "Weather/Path",
-        "Morale",
-        "Diplomacy",
-        "Logistics",
-        "Barter",
-        "Bribery",
-        "Appraise",
-        "Perception",
-        "Knowledge",
-        "Bluff",
-        "Luck",
-        "Alert",
-    ],
-    "campaigner": [
-        "Weapon Parry",
-        "Weapon",
-        "Weapon Parry",
-        "Weapon",
-        "Weapon Parry",
-        "Weapon",
-        "Weapon Parry",
-        "Tracker",
-        "Medic",
-        "Hunting",
-        "Coins",
-        "Literacy",
-        "Knowledge",
-        "Alert",
-        "Alert",
-        "Perception",
-        "Stealth",
-        "Barter",
-        "Weather/Path",
-        "Survival",
-    ],
-    "laborer": [
-        "Weapon",
-        "Weapon Parry",
-        "Coins",
-        "Literacy",
-        "Knowledge",
-        "Maker Skill",
-        "Maker Skill",
-        "Portage",
-        "Portage",
-        "+1 STR",
-        "+1 DEX",
-        "+1 CON",
-        "+1 STR",
-        "+1 DEX",
-        "+1 CON",
-        "Gamble",
-        "Miner",
-        "Sailor",
-        "Luck",
-        "Herb Lore",
-    ],
-    "magic": [
-        "Deceit",
-        "Persuasion",
-        "Literacy",
-        "Literacy",
-        "Sleight of Hand",
-        "Perception",
-        "Skill Point",
-        "Spell Point",
-        "Spell Point",
-        "Spell Point",
-        "Coins",
-        "Medic",
-        "Herb Lore",
-        "Knowledge",
-        "Knowledge",
-        "Bluff",
-        "Diplomacy",
-        "Enchanting",
-        "Enchanting",
-        "Alert",
-    ],
-    "underworld": [
-        "Weapon",
-        "Weapon Parry",
-        "Weapon",
-        "Weapon Parry",
-        "Deceit",
-        "Persuasion",
-        "Persuasion",
-        "Literacy",
-        "Street Smarts",
-        "Stealth",
-        "Sleight of Hand",
-        "Bribery",
-        "Appraise",
-        "Perception",
-        "Poison",
-        "Gamble",
-        "Bluff",
-        "Diplomacy",
-        "Coins",
-        "Alert",
-    ],
-    "civil_service": [
-        "Weapon",
-        "Deceit",
-        "Persuasion",
-        "Detect Truth",
-        "Detect Truth",
-        "Knowledge",
-        "Knowledge",
-        "Weather/Path",
-        "Diplomacy",
-        "Logistics",
-        "Barter",
-        "Bribery",
-        "Coins",
-        "Coins",
-        "Literacy",
-        "Literacy",
-        "Contracts/Law",
-        "Appraise",
-        "Street Smarts",
-        "Sleight of Hand",
-    ],
-    "craft": [
-        "Weapon",
-        "Weapon Parry",
-        "Enchanting",
-        "Enchanting",
-        "Arts",
-        "Herb Lore",
-        "Herb Lore",
-        "Literacy",
-        "Logistics",
-        "Appraise",
-        "Knowledge",
-        "Coins",
-        "Maker Skill",
-        "Maker Skill",
-        "Maker Skill",
-        "Maker Skill",
-        "Maker Skill",
-        "Appraise",
-        "Street Smarts",
-        "Barter",
-    ],
-    "hunter_gatherer": [
-        "Weapon",
-        "Weapon Parry",
-        "Weapon",
-        "Weapon Parry",
-        "Archery",
-        "Archery",
-        "Archery",
-        "Tracker",
-        "Tracker",
-        "Herb Lore",
-        "Herb Lore",
-        "Knowledge",
-        "Survival",
-        "Alert",
-        "Alert",
-        "Poison",
-        "Stealth",
-        "Perception",
-        "Hunting",
-        "Hunting",
-    ],
-}
-
-# All available tracks
-ALL_TRACKS: list[str] = list(SKILL_TRACKS.keys())
-
-
-# The three patterns normalize_skill_name applies. A skill name comes from a
-# player's request, an imported file (up to 256 KB, checked against the
-# 60-character limit only after it is normalized) or the model, so each runs
-# in linear time (issue #11). Two things keep it so. No two repeated parts
-# take the same characters: the bonus's text starts on a non-space the
-# whitespace before it cannot take, and a run of whitespace is tried only
-# from its first character (the lookbehinds), not again from each character
-# inside it. And the parenthesis patterns only see the name up to its last
-# ")": past it, every "(" scanned to the end of the name and failed, so a
-# name of many unclosed "(+1 " was scanned once per "(".
-_BONUS_IN_PARENTHESES = re.compile(r"\(\+?\d+\s+(\S[^)\n]*|[^\S\n])\)")
-_PARENTHESES = re.compile(r"(?<!\s)\s*\([^)]*\)")
-_ROMAN_NUMERAL_SUFFIX = re.compile(r"(?<!\s)\s+[ivx]+\s*$", re.IGNORECASE)
-
-
-def normalize_skill_name(raw_name: str) -> str:
-    """
-    Normalize a skill name for storage.
-
-    Rules:
-    - Convert to lowercase
-    - Drop control characters (they have no place in a skill name and would
-      travel into the page as a data-skill attribute value)
-    - Strip parenthetical modifiers like (+1 to hit)
-    - Remove trailing Roman numerals (I, II, III, IV, V)
-    - Collapse whitespace
-
-    Quotes and apostrophes are deliberately left alone -- "wolf's bane" is a
-    legitimate skill name -- and the templates escape them for both text and
-    attribute contexts.
-
-    Examples:
-    - "Sword" -> "sword"
-    - "Sword (+1 to hit)" -> "sword to hit"
-    - "Shield Parry II" -> "shield parry"
-    - "  Navigation  " -> "navigation"
-    """
-    name = strip_control_characters(raw_name).lower()
-
-    # Remove parenthetical modifiers but keep content like "to hit"
-    # Match patterns like "(+1 to hit)" and extract "to hit" part. Every match
-    # ends on a ")", so nothing past the last one can match.
-    closed = name[: name.rfind(")") + 1]
-    paren_match = _BONUS_IN_PARENTHESES.search(closed)
-    if paren_match:
-        suffix = paren_match.group(1)
-        name = _PARENTHESES.sub("", closed) + name[len(closed) :]
-        name = f"{name.strip()} {suffix}"
-
-    # Remove trailing Roman numerals (case-insensitive since we lowercased)
-    name = _ROMAN_NUMERAL_SUFFIX.sub("", name)
-
-    # Collapse whitespace
-    name = " ".join(name.split())
-
-    return name
 
 
 #: The glossary skills taken with a chosen part, recorded in the skill's own
@@ -807,6 +440,46 @@ def glossary_skill(skill_name: str) -> str:
     if is_weapon_skill(skill_name):
         return UNRECORDED_WEAPON_SKILL
     return split_specialised_skill(skill_name)[0]
+
+
+def validate_skill_names(rules: SkillRules, path: Path) -> None:
+    """Refuse a canon skill name that is not a glossary skill in its own right.
+
+    The checks' maps name each skill by the glossary skill a stored name falls
+    under (:func:`glossary_skill`), and every track's ``money_skill`` and
+    every cost multiplier must be one of them
+    (:class:`characters.skill_rules.SkillRules`). A weapon's name ("hammer"
+    falls under Weapon) or a chosen part ("maker skill (smith)" falls under
+    Maker Skill) would never be found that way: a check, a cost or a year's
+    pay would read the wrong skill without a word. Here rather than in
+    :mod:`characters.skill_rules`, which this module imports and
+    :func:`glossary_skill` needs; :func:`characters.checks.check_skill_rules`
+    calls it, so a refusal is ``characters.E002`` (issue #70).
+
+    Args:
+        rules: The rules read from ``path``.
+        path: The ``skill-rules.json`` they were read from, for the message.
+
+    Raises:
+        SkillRulesError: Some map key is not its own glossary skill.
+    """
+    skill_check = rules.skill_check
+    refused = {
+        f"skill_check.{field}.{name}": glossary_skill(name)
+        for field, names in (
+            ("governing_attributes", skill_check.governing_attributes),
+            ("implied_governing_attributes", skill_check.implied_governing_attributes),
+        )
+        for name in names
+        if glossary_skill(name) != name
+    }
+    if refused:
+        listed = "; ".join(
+            f"{field} falls under {under!r}" for field, under in refused.items()
+        )
+        raise SkillRulesError(
+            f"{path}: {listed}: each must be a glossary skill in its own right"
+        )
 
 
 def glossary_skill_level(skills: dict[str, int] | None, skill_name: str) -> int:
@@ -876,26 +549,23 @@ def is_special_experience_result(normalized_skill: str) -> bool:
 def granted_skill_names() -> list[str]:
     """Every real (non-special) skill name any track's d20 table can grant.
 
-    Flattened from ``SKILL_TRACKS``, normalized, deduplicated, and sorted --
-    the single source of truth the character editor's add-skill type-ahead
-    reads from (issue #224), so its suggestion list can never drift from what
-    the prior-experience generator actually rolls.
+    Flattened from the canon's track tables, normalized, deduplicated, and
+    sorted -- the single source of truth the character editor's add-skill
+    type-ahead reads from (issue #224), so its suggestion list can never drift
+    from what the prior-experience generator actually rolls.
     """
     normalized_names = {
-        normalize_skill_name(raw) for table in SKILL_TRACKS.values() for raw in table
+        normalize_skill_name(raw)
+        for track in skill_rules().tracks.tracks.values()
+        for raw in track.skills
     }
     return sorted(
         name for name in normalized_names if not is_special_experience_result(name)
     )
 
 
-#: The attribute table's first and last printed rows (attributes.md).
-MODIFIER_TABLE_LOWEST_SCORE = 3
-MODIFIER_TABLE_HIGHEST_SCORE = 18
-
-
 def calculate_attribute_modifier(value: int) -> int:
-    """Modifier for an attribute value, per the Tarmar attributes table.
+    """Modifier for an attribute value, per the canon's attributes table.
 
     The published table (``reference/content/public-rules/characters/
     attributes.md``) is flat 0 across 8-13, then changes by 1 per point outside
@@ -912,14 +582,10 @@ def calculate_attribute_modifier(value: int) -> int:
     as attributes.md now says. It used to continue the slope the rules never
     state (19 -> +6 ... 30 -> +17, 0 -> -8). Coordinator's ruling under the
     standing rule (the table is the rule; nothing past it is invented);
-    Spencer may overrule.
+    Spencer may overrule. The table and the ruling are the canon's
+    (``attribute_modifier``, issue #70).
     """
-    value = min(max(value, MODIFIER_TABLE_LOWEST_SCORE), MODIFIER_TABLE_HIGHEST_SCORE)
-    if value <= 7:
-        return value - 8
-    if value <= 13:
-        return 0
-    return value - 13
+    return skill_rules().attribute_modifier.modifier_for(value)
 
 
 def get_best_modifier(
@@ -949,11 +615,13 @@ def get_skill_for_year(track: str, position: int) -> str:
     Positions past the end of the 20-entry table clamp to the last skill. This
     is purely defensive — the simulator never asks for one, because a d20 roll
     cannot exceed the table length.
-    """
-    if track not in SKILL_TRACKS:
-        track = "laborer"  # Fallback
 
-    table = SKILL_TRACKS[track]
+    Raises:
+        ValueError: ``track`` is not one of the canon's tracks. It used to
+            fall back to Laborer, a track a canon need not have; every caller
+            checks the track first (issue #70).
+    """
+    table = _track(track).skills
     if position > len(table):
         return table[-1]
 
@@ -961,9 +629,21 @@ def get_skill_for_year(track: str, position: int) -> str:
     return table[position - 1]
 
 
+def _track(track: str) -> SkillTrack:
+    """The canon's track ``track``.
+
+    Raises:
+        ValueError: The canon has no such track.
+    """
+    tracks = skill_rules().tracks.tracks
+    if track not in tracks:
+        raise ValueError(f"Unknown track: {track}")
+    return tracks[track]
+
+
 def get_random_track() -> str:
     """Get a random track (all tracks are unrestricted)."""
-    return random.choice(ALL_TRACKS)
+    return random.choice(track_keys())
 
 
 def _effective_attributes_at_age(
@@ -981,6 +661,23 @@ def _effective_attributes_at_age(
         name: max(0, value + penalties.get(name, 0))
         for name, value in attributes.items()
     }
+
+
+def survival_dice_expression(check: Mapping[str, Any]) -> str:
+    """The dice a stored survival check was rolled on, e.g. ``"3d6"``.
+
+    A check records its dice since the canon names them (issue #70). One
+    stored before that was rolled on d6s, two of them before issue #223 and
+    three after, so its own faces say how many.
+
+    Args:
+        check: A ``survival_check`` dict as :func:`simulate_experience_years`
+            stores it.
+    """
+    expression = check.get("dice_expression")
+    if isinstance(expression, str) and expression:
+        return expression
+    return f"{len(check.get('dice') or ())}d6"
 
 
 def simulate_experience_years(
@@ -1037,11 +734,11 @@ def simulate_experience_years(
       None
     - alive: bool
     """
-    track_data = TRACK_DATA.get(track, TRACK_DATA["laborer"])
-    xp_per_year = track_data["xp_per_year"]
-    survival_target = track_data["survivability"]
-    money_multiplier = track_data["money_multiplier"]
-    uses_maker_skill = track_data.get("money_skill") == "maker"
+    track_rules = _track(track)
+    xp_per_year = track_rules.xp_per_year
+    survival_target = track_rules.survival_target
+    money_multiplier = track_rules.money_multiplier
+    survival_roll = skill_rules().survival_roll
 
     # Running skill-points snapshot, seeded from the character's skills at the
     # start of the run and updated after each year's roll -- so a later year's
@@ -1072,8 +769,7 @@ def simulate_experience_years(
         "alive": True,
     }
 
-    track_table = SKILL_TRACKS.get(track, SKILL_TRACKS["laborer"])
-    max_skill_index = len(track_table)
+    max_skill_index = len(track_rules.skills)
     aging_at_run_start = get_aging_penalties_for_age(current_age)
 
     for year_offset in range(years_requested):
@@ -1120,31 +816,33 @@ def simulate_experience_years(
             skill = specialised_skill_for_granted(running_skills, skill)
             running_skills[skill] = running_skills.get(skill, 0) + 1
 
-        # Levels are read per skill, not per point total, because Arcane's
-        # points buy levels at half the rate (issue #154).
-        highest_skill_level = max(
-            (
-                get_skill_level(pts, running_name)
-                for running_name, pts in running_skills.items()
-            ),
-            default=0,
-        )
-        maker_skill_level = glossary_skill_level(running_skills, "maker skill")
-
         # Calculate money for this year from skill levels as of this point in
         # the run (floored at level 1: everyone earns at least the track's
-        # base rate, even with no skills -- see survivability.md).
-        skill_level_for_money = (
-            maker_skill_level if uses_maker_skill else highest_skill_level
-        )
+        # base rate, even with no skills -- see survivability.md). A track
+        # whose pay rides on one skill (Craft's Maker Skill on the public
+        # pages) reads that skill's level; the rest read the highest held.
+        # Levels are read per skill, not per point total, because Arcane's
+        # points buy levels at half the rate (issue #154).
+        if track_rules.money_skill is not None:
+            skill_level_for_money = glossary_skill_level(
+                running_skills, track_rules.money_skill
+            )
+        else:
+            skill_level_for_money = max(
+                (
+                    get_skill_level(pts, running_name)
+                    for running_name, pts in running_skills.items()
+                ),
+                default=0,
+            )
         year_money = money_multiplier * max(1, skill_level_for_money)
 
-        # Survival check for this year: 3d6 + best modifier >= target
-        # (issue #223 -- same targets, three dice).
-        first_die, second_die, third_die, roll_total = roll_survival_dice()
+        # Survival check for this year: the canon's dice + best modifier >=
+        # target (3d6 on the public pages since issue #223).
+        *faces, roll_total = roll_survival_dice()
         survival_total = roll_total + best_mod
-        auto_success = roll_total == SURVIVAL_AUTO_SURVIVE_ROLL
-        auto_death = roll_total == SURVIVAL_AUTO_DEATH_ROLL
+        auto_success = roll_total == survival_roll.automatic_survival_total
+        auto_death = roll_total == survival_roll.automatic_death_total
 
         if auto_death:
             survival_success = False
@@ -1154,7 +852,8 @@ def simulate_experience_years(
             survival_success = survival_total >= survival_target
 
         survival_check = {
-            "dice": [first_die, second_die, third_die],
+            "dice": faces,
+            "dice_expression": survival_roll.dice,
             "roll": roll_total,
             "modifier": best_mod,
             "total": survival_total,

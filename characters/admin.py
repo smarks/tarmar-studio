@@ -1,5 +1,6 @@
 from django.contrib import admin
 
+from .constants import CHARACTER_ATTRIBUTE_FIELDS
 from .models import Character
 
 
@@ -25,16 +26,7 @@ class CharacterAdmin(admin.ModelAdmin):
         (None, {"fields": ("user", "name")}),
         (
             "Core Attributes",
-            {
-                "fields": (
-                    "strength",
-                    "dexterity",
-                    "intelligence",
-                    "wisdom",
-                    "constitution",
-                    "charisma",
-                )
-            },
+            {"fields": CHARACTER_ATTRIBUTE_FIELDS},
         ),
         (
             "Physical Attributes",

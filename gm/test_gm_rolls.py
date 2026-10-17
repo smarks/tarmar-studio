@@ -14,7 +14,7 @@ from django.test import SimpleTestCase, override_settings
 from common.rolling import Roller
 from common.test_helpers import BaseTestCase
 
-from .engine import SECTION_CHARACTER_CREATION, SECTION_OUTCOMES, roll_dice_record
+from .engine import SECTION_OUTCOMES, roll_dice_record, section_character_creation
 from .roll_service import (
     RollRequest,
     RollResolution,
@@ -151,7 +151,7 @@ class DicePromptTest(SimpleTestCase):
 
     def test_character_creation_says_whose_dice_the_attributes_are(self):
         self.assertIn(
-            "rolled for the player, never by the player", SECTION_CHARACTER_CREATION
+            "rolled for the player, never by the player", section_character_creation()
         )
 
 

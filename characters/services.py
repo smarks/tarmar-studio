@@ -38,6 +38,7 @@ from django.db.models import Q
 from accounts.models import User
 
 from .constants import (
+    CHARACTER_ATTRIBUTE_FIELDS,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
     MAX_SKILL_NAME_LENGTH,
@@ -80,9 +81,9 @@ from .purse import (
 )
 from .rules import character_rules
 from .skills import (
-    ALL_TRACKS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
     MAX_SKILL_POINTS,
+    RANDOM_TRACK_KEY,
     calculate_skill_points_from_xp,
     calculate_skill_points_in_range,
     format_skill_level,
@@ -92,18 +93,9 @@ from .skills import (
     simulate_experience_years,
     specialised_skill_for_granted,
     split_specialised_skill,
+    track_keys,
 )
 from .weapon_skill import adds_to_attacks
-
-#: The six core attributes, in sheet order.
-ATTRIBUTE_NAMES: tuple[str, ...] = (
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
-)
 
 #: The refusal the Games Master can put right itself, in the same turn, by
 #: recording the attributes it was given before the years (issue #457).
@@ -397,7 +389,10 @@ def can_set_field(
         return False
     if field_name in update_fields_for(is_game_master=is_game_master):
         return True
-    return field_name in ATTRIBUTE_NAMES and getattr(character, field_name) is None
+    return (
+        field_name in CHARACTER_ATTRIBUTE_FIELDS
+        and getattr(character, field_name) is None
+    )
 
 
 def check_field_author(
@@ -461,7 +456,11 @@ def check_point_buy(character: Character, name: str, value: int) -> str:
     """
     check_attribute(name, value, is_game_master=False)
     point_buy = character_rules().attributes.point_buy
-    others = [getattr(character, other) for other in ATTRIBUTE_NAMES if other != name]
+    others = [
+        getattr(character, other)
+        for other in CHARACTER_ATTRIBUTE_FIELDS
+        if other != name
+    ]
     recorded = sum(score for score in others if score is not None)
     missing_after = sum(1 for score in others if score is None)
     lowest = max(
@@ -775,7 +774,7 @@ def check_attribute(name: str, value: int, is_game_master: bool) -> str:
         CharacterChangeError: A player outside the limits, or anyone past
             what a character can hold.
     """
-    if name not in ATTRIBUTE_NAMES:
+    if name not in CHARACTER_ATTRIBUTE_FIELDS:
         raise CharacterChangeError(f"{name} is not a core attribute")
     attribute_rules = character_rules().attributes
     point_buy = attribute_rules.point_buy
@@ -799,7 +798,9 @@ def check_attribute(name: str, value: int, is_game_master: bool) -> str:
 
 def attributes_known(character: Character) -> bool:
     """Whether all six core attributes are recorded."""
-    return all(getattr(character, name) is not None for name in ATTRIBUTE_NAMES)
+    return all(
+        getattr(character, name) is not None for name in CHARACTER_ATTRIBUTE_FIELDS
+    )
 
 
 def apply_attribute(
@@ -817,7 +818,7 @@ def apply_recorded_attributes(
     """Record stated attribute scores: all six (``name="all"``) or one (#391)."""
     if name == "all":
         beyond = check_attribute("strength", value, is_game_master)
-        for attribute in ATTRIBUTE_NAMES:
+        for attribute in CHARACTER_ATTRIBUTE_FIELDS:
             setattr(character, attribute, value)
         return f"all six attributes recorded as {value}{beyond}"
     beyond = check_attribute(name, value, is_game_master)
@@ -849,13 +850,15 @@ def apply_rolled_attributes(
     Code owns the dice: the faces go into the character's dice log.
     """
     check_first_roll(
-        any(getattr(character, name) is not None for name in ATTRIBUTE_NAMES),
+        any(
+            getattr(character, name) is not None for name in CHARACTER_ATTRIBUTE_FIELDS
+        ),
         "The attributes are",
         is_game_master,
     )
     rolled = []
     logs = []
-    for name in ATTRIBUTE_NAMES:
+    for name in CHARACTER_ATTRIBUTE_FIELDS:
         total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
@@ -1650,7 +1653,7 @@ def _complete_rows():
     return Character.objects.filter(
         entered_play_at__isnull=True,
         fatigue_roll__isnull=False,
-        **{f"{name}__isnull": False for name in ATTRIBUTE_NAMES},
+        **{f"{name}__isnull": False for name in CHARACTER_ATTRIBUTE_FIELDS},
     )
 
 
@@ -1726,8 +1729,8 @@ def apply_experience_years(
         raise CharacterChangeError(
             f"Years must be between 1 and {MAX_EXPERIENCE_YEARS_PER_RUN}"
         )
-    chosen = get_random_track() if track in ("", "random") else track
-    if chosen not in ALL_TRACKS:
+    chosen = get_random_track() if track in ("", RANDOM_TRACK_KEY) else track
+    if chosen not in track_keys():
         raise CharacterChangeError(f"Unknown track: {track}")
     in_play = character_in_play(character)
     if in_play and not is_game_master:
@@ -2477,10 +2480,10 @@ def change_field(
             notes.append(granted)
         return notes
     beyond = ""
-    if field_name in ATTRIBUTE_NAMES and is_game_master:
+    if field_name in CHARACTER_ATTRIBUTE_FIELDS and is_game_master:
         # The same limits the Games Master's stated scores are held to.
         beyond = check_attribute(field_name, int(str(value)), is_game_master)
-    elif field_name in ATTRIBUTE_NAMES:
+    elif field_name in CHARACTER_ATTRIBUTE_FIELDS:
         _append_dice_log(
             character, check_point_buy(character, field_name, int(str(value)))
         )
@@ -2850,7 +2853,9 @@ def apply_sheet_attribute_roll(
     recorded it is :func:`apply_rolled_attributes`, which only a Game Master
     may ask for. The chat's roll keeps its own all-or-nothing rule.
     """
-    missing = [name for name in ATTRIBUTE_NAMES if getattr(character, name) is None]
+    missing = [
+        name for name in CHARACTER_ATTRIBUTE_FIELDS if getattr(character, name) is None
+    ]
     if not missing:
         return apply_rolled_attributes(character, is_game_master=is_game_master)
     if bought_scores(character) and not is_game_master:
@@ -2907,7 +2912,7 @@ class RollOffer:
 SHEET_ROLLS: Mapping[str, SheetRoll] = MappingProxyType(
     {
         "attributes": SheetRoll(
-            ATTRIBUTE_NAMES,
+            CHARACTER_ATTRIBUTE_FIELDS,
             apply_sheet_attribute_roll,
             lambda character, is_game_master: is_game_master
             or not (attributes_known(character) or bought_scores(character)),

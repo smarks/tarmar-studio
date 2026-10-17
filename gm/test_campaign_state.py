@@ -146,10 +146,10 @@ class ReadingCampaignActionsTest(TestCase):
 
     def test_the_planning_guidance_teaches_the_action_it_reads(self):
         """A bullet naming an action the reader does not know is a dead letter."""
-        from gm.engine import SECTION_PLAN_SCHEMA
+        from gm.engine import section_plan_schema
 
-        self.assertIn('"action": "adjust_supplies"', SECTION_PLAN_SCHEMA)
-        self.assertNotIn("record_supplies", SECTION_PLAN_SCHEMA)
+        self.assertIn('"action": "adjust_supplies"', section_plan_schema())
+        self.assertNotIn("record_supplies", section_plan_schema())
 
     def test_a_thing_does_not_want_anything(self):
         reading = self.read(

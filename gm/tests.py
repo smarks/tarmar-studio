@@ -1,6 +1,7 @@
 """Tests for the GM app — model, services, and views."""
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -161,34 +162,34 @@ class GMServiceTest(TestCase):
     def test_system_prompt_modifier_table_matches_code(self):
         """The GM prompt's modifier table must not drift from the code."""
         from characters.skills import calculate_attribute_modifier
-        from gm.services import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         for value in (3, 4, 5, 6, 7):
             mod = calculate_attribute_modifier(value)
-            self.assertIn(f"{value}=−{abs(mod)}", SYSTEM_PROMPT)  # unicode minus
-        self.assertIn("8-13=0", SYSTEM_PROMPT)
+            self.assertIn(f"{value}=−{abs(mod)}", system_prompt())  # unicode minus
+        self.assertIn("8-13=0", system_prompt())
         for value in (14, 15, 16, 17, 18):
             mod = calculate_attribute_modifier(value)
-            self.assertIn(f"{value}=+{mod}", SYSTEM_PROMPT)
+            self.assertIn(f"{value}=+{mod}", system_prompt())
 
     def test_system_prompt_lists_all_tracks(self):
         """Every experience track appears in the GM prompt (drift guard)."""
-        from characters.skills import SKILL_TRACKS
-        from gm.services import SYSTEM_PROMPT
+        from characters.skills import track_keys
+        from gm.engine import system_prompt
 
-        prompt_lower = SYSTEM_PROMPT.lower()
-        self.assertEqual(len(SKILL_TRACKS), 8)
-        for key in SKILL_TRACKS:
+        prompt_lower = system_prompt().lower()
+        self.assertEqual(len(track_keys()), 8)
+        for key in track_keys():
             self.assertIn(key.split("_")[0], prompt_lower)
 
     def test_system_prompt_combat_matrix_matches_code(self):
         """The GM prompt's d20 weapon-vs-armour matrix must not drift from code."""
         from characters.combat import ARMOUR_TIERS, MATRIX
-        from gm.services import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         for weapon_class, row in MATRIX.items():
             numbers = "/".join(str(row[tier]) for tier in ARMOUR_TIERS)
-            self.assertIn(f"{weapon_class} {numbers}", SYSTEM_PROMPT)
+            self.assertIn(f"{weapon_class} {numbers}", system_prompt())
 
     def test_system_prompt_fumble_ranges_match_code(self):
         """The prompt must print the actual 1d6 fumble bands (issue #105).
@@ -199,12 +200,12 @@ class GMServiceTest(TestCase):
         the range, the label and the effect of each one.
         """
         from characters.combat import FUMBLE_TABLE
-        from gm.services import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         for band in _expected_fumble_bands(FUMBLE_TABLE):
             with self.subTest(band=band):
-                self.assertIn(band, SYSTEM_PROMPT)
-        self.assertIn("roll 1d6", SYSTEM_PROMPT)
+                self.assertIn(band, system_prompt())
+        self.assertIn("roll 1d6", system_prompt())
 
     def test_cli_has_no_second_copy_of_the_prompt(self):
         """The offline CLI sends the engine prompt itself, not a baked copy.
@@ -216,11 +217,11 @@ class GMServiceTest(TestCase):
         string, so the drift guards above cover both clients at once.
         """
         from cli.gm import build_system_message
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         self.assertFalse((REPO_ROOT / "cli" / "Modelfile").exists())
         self.assertIs(
-            build_system_message("unused rules text")["content"], SYSTEM_PROMPT
+            build_system_message("unused rules text")["content"], system_prompt()
         )
 
     def test_system_prompt_crit_multipliers_match_code(self):
@@ -232,13 +233,13 @@ class GMServiceTest(TestCase):
         are rendered from the constants; this locks them.
         """
         from characters.combat import CRIT_DAMAGE_ROLLS, SEVERE_CRIT_DAMAGE_ROLLS
-        from gm.services import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
-        self.assertIn(f"damage dice {CRIT_DAMAGE_ROLLS}×", SYSTEM_PROMPT)
-        self.assertIn(f"damage dice {SEVERE_CRIT_DAMAGE_ROLLS}×", SYSTEM_PROMPT)
+        self.assertIn(f"damage dice {CRIT_DAMAGE_ROLLS}×", system_prompt())
+        self.assertIn(f"damage dice {SEVERE_CRIT_DAMAGE_ROLLS}×", system_prompt())
         # The severe crit is gated on the confirm roll, and it bleeds.
-        self.assertIn("confirm", SYSTEM_PROMPT)
-        self.assertIn("bleeding", SYSTEM_PROMPT)
+        self.assertIn("confirm", system_prompt())
+        self.assertIn("bleeding", system_prompt())
 
     def test_cli_and_web_send_the_same_options_shape(self):
         """One ``options`` object for both clients (issue #324).
@@ -263,12 +264,15 @@ class GMServiceTest(TestCase):
         ``roll_dice`` now delegates to ``characters.dice``, which pulls
         ``characters.constants`` in with it, and ``characters.rules`` (read
         through the shared rules-file reader) is where ``characters.dice``
-        takes its numbers from once issue #59 seats them — a fresh
-        interpreter proves none of them drags Django along. Run out-of-process because this test runner has Django loaded
-        already.
+        takes its numbers from once issue #59 seats them, and
+        ``characters.skill_rules`` (issue #70) is read the same way, by
+        ``characters.skills``, whose tracks and modifiers the prompt lists — a
+        fresh interpreter proves none of them drags Django along. Run
+        out-of-process because this test runner has Django loaded already.
         """
         script = (
-            "import sys, gm.engine, characters.rules\n"
+            "import sys, gm.engine, characters.rules, characters.skill_rules\n"
+            "import characters.skills\n"
             "loaded = sorted(m for m in sys.modules if m.split('.')[0] == 'django')\n"
             "assert not loaded, loaded\n"
         )
@@ -280,6 +284,73 @@ class GMServiceTest(TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_importing_the_site_builds_no_prompt(self):
+        """Nothing built from the canon's rules is built at import (#70).
+
+        The prompts and the patterns naming the canon's skills are built from
+        its rules files, which nothing may read while modules import: a canon
+        missing one must fail ``manage.py check`` (``characters.E001``,
+        ``E002``), not crash the URL import. Every cache registered with
+        ``reference.rules_file.derived_from_rules``, and both rules files'
+        own, must show no miss once the URLs have loaded. Run out of process:
+        this runner has built them already.
+        """
+        script = (
+            "import os, django\n"
+            "os.environ.setdefault('DJANGO_SETTINGS_MODULE', "
+            "'tarmar_studio.settings')\n"
+            "django.setup()\n"
+            "import tarmar_studio.urls\n"
+            "from characters.rules import character_rules\n"
+            "from characters.skill_rules import skill_rules\n"
+            "from reference.rules_file import caches_derived_from_rules\n"
+            "for cached in (character_rules, skill_rules, "
+            "*caches_derived_from_rules()):\n"
+            "    print(cached.__name__, cached.cache_info().misses)\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=REPO_ROOT,
+            env={**os.environ, "DEBUG": "true"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        misses = dict(line.split() for line in completed.stdout.splitlines())
+        # The URLs reach the prompts and the turn policy's pattern.
+        for name in ("system_prompt", "dm_system_prompt", "_check_words"):
+            self.assertIn(name, misses)
+        self.assertEqual(
+            {name: count for name, count in misses.items() if count != "0"}, {}
+        )
+
+    def test_each_prompt_is_one_string_for_the_life_of_the_process(self):
+        """Built once and then the same object, so the prefix cache holds (#590).
+
+        A turn records its prompt under the text's hash (``GMPromptSnapshot``),
+        so a prompt rebuilt to the same bytes stores nothing new either.
+        """
+        from gm import engine
+
+        for builder in (
+            engine.system_prompt,
+            engine.aide_system_prompt,
+            engine.dm_play_system_prompt,
+            engine.dm_system_prompt,
+        ):
+            with self.subTest(builder=builder.__name__):
+                self.assertIs(builder(), builder())
+                self.assertIn(
+                    builder(), engine.system_prompts_by_authority_and_mode().values()
+                )
+        for (
+            is_game_master,
+            mode,
+        ), prompt in engine.system_prompts_by_authority_and_mode().items():
+            with self.subTest(is_game_master=is_game_master, mode=mode):
+                self.assertIs(engine.system_prompt_for(is_game_master, mode), prompt)
 
     def test_roll_dice_delegates_to_the_shared_parser(self):
         """One dice parser for the project: /roll goes through characters.dice."""
@@ -304,7 +375,7 @@ class GMServiceTest(TestCase):
         or ``combat.MATRIX``/``FUMBLE_TABLE``/the crit constants changed and
         the rendered block moved with them (investigate before updating).
         """
-        from gm.services import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         expected_attack_block = (
             "Natural 20 = auto-hit + critical: roll the weapon's damage dice 2× "
@@ -322,11 +393,11 @@ class GMServiceTest(TestCase):
             "Heavy Thrusting 14/14/15/15; Missile — Bows 12/14/17/20; "
             "Missile — Crossbows 13/14/15/16; Flexible / Snare 13/16/19/22.\n"
         )
-        self.assertIn(expected_attack_block, SYSTEM_PROMPT)
-        self.assertIn(expected_matrix_line, SYSTEM_PROMPT)
+        self.assertIn(expected_attack_block, system_prompt())
+        self.assertIn(expected_matrix_line, system_prompt())
         self.assertLess(
-            SYSTEM_PROMPT.index(expected_attack_block),
-            SYSTEM_PROMPT.index(expected_matrix_line),
+            system_prompt().index(expected_attack_block),
+            system_prompt().index(expected_matrix_line),
         )
 
     def test_build_state_request_message(self):
@@ -1027,19 +1098,21 @@ class GMSystemPromptContentTest(SimpleTestCase):
     )
 
     def test_every_section_is_present_in_order(self):
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
-        positions = [SYSTEM_PROMPT.index(heading) for heading in self.REQUIRED_HEADINGS]
+        positions = [
+            system_prompt().index(heading) for heading in self.REQUIRED_HEADINGS
+        ]
         self.assertEqual(positions, sorted(positions))
 
     def test_prompt_is_the_sections_joined(self):
-        """``SYSTEM_PROMPT`` is exactly the section tuple, nothing hidden."""
-        from gm.engine import SYSTEM_PROMPT, SYSTEM_PROMPT_SECTIONS
+        """``system_prompt()`` is exactly the section tuple, nothing hidden."""
+        from gm.engine import system_prompt, system_prompt_sections
 
-        self.assertEqual(SYSTEM_PROMPT, "\n\n".join(SYSTEM_PROMPT_SECTIONS))
+        self.assertEqual(system_prompt(), "\n\n".join(system_prompt_sections()))
         # Thirteen since issue #590 replaced the ledger, dice and procedures
         # sections with the records, outcomes and plan-format sections.
-        self.assertEqual(len(SYSTEM_PROMPT_SECTIONS), 13)
+        self.assertEqual(len(system_prompt_sections()), 13)
 
     def test_the_dm_prompt_appends_and_changes_nothing_else(self):
         """The player's sections are untouched by the addendum.
@@ -1051,28 +1124,30 @@ class GMSystemPromptContentTest(SimpleTestCase):
         the ledger) does not read as the DM addendum having changed.
         """
         from gm.engine import (
-            DM_SYSTEM_PROMPT,
             SECTION_DM_AIDE,
             SECTION_DM_AUTHORITY,
-            SYSTEM_PROMPT,
+            dm_system_prompt,
+            system_prompt,
         )
 
         self.assertEqual(
-            DM_SYSTEM_PROMPT,
-            "\n\n".join((SYSTEM_PROMPT, SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
+            dm_system_prompt(),
+            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
         )
 
     def test_the_world_section_sits_between_equipment_and_guidelines(self):
         """The canon's world headings, in its order, where the world goes."""
-        from gm.engine import SECTION_WORLD, SYSTEM_PROMPT
+        from gm.engine import SECTION_WORLD, system_prompt
 
         world_headings = [
             line for line in SECTION_WORLD.splitlines() if line.startswith("#")
         ]
         self.assertTrue(world_headings[0].startswith("## The World"))
-        start = SYSTEM_PROMPT.index("## Equipment (Key Items)")
-        end = SYSTEM_PROMPT.index("## GM Guidelines")
-        positions = [SYSTEM_PROMPT.index(heading, start) for heading in world_headings]
+        start = system_prompt().index("## Equipment (Key Items)")
+        end = system_prompt().index("## GM Guidelines")
+        positions = [
+            system_prompt().index(heading, start) for heading in world_headings
+        ]
         self.assertEqual(positions, sorted(positions))
         self.assertLess(positions[-1], end)
         for heading in self.WORLD_SUBSECTIONS:
@@ -1105,11 +1180,11 @@ class GMSystemPromptContentTest(SimpleTestCase):
                 self.assertIn(name, SECTION_WORLD)
 
     def test_prompt_omits_stale_names_and_hacks(self):
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         for text in self.STALE_TEXT:
             with self.subTest(text=text):
-                self.assertNotIn(text, SYSTEM_PROMPT)
+                self.assertNotIn(text, system_prompt())
 
     def test_mana_pool_follows_the_reference_rules(self):
         """``public-rules/magic.md``: the Pool starts at 0 and is not secret.
@@ -1117,12 +1192,12 @@ class GMSystemPromptContentTest(SimpleTestCase):
         Both the old quick reference and the Modelfile said "3d6 at creation
         (SECRET)", which the rules tree contradicts; canon wins.
         """
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
-        self.assertIn("Mana Pool = the Spell Points earned", SYSTEM_PROMPT)
-        self.assertIn("starts at 0", SYSTEM_PROMPT)
-        self.assertNotIn("3d6 at creation", SYSTEM_PROMPT)
-        self.assertNotIn("SECRET", SYSTEM_PROMPT)
+        self.assertIn("Mana Pool = the Spell Points earned", system_prompt())
+        self.assertIn("starts at 0", system_prompt())
+        self.assertNotIn("3d6 at creation", system_prompt())
+        self.assertNotIn("SECRET", system_prompt())
 
     def test_gm_only_background_is_fenced(self):
         """The deep-history digest is marked for the GM alone."""
@@ -1168,14 +1243,14 @@ class GMSystemPromptContentTest(SimpleTestCase):
         """
         from django.conf import settings
 
-        from gm.engine import SYSTEM_PROMPT, SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE
+        from gm.engine import system_prompt, system_prompts_by_authority_and_mode
         from gm.model_config import SYSTEM_PROMPT_CONTEXT_SHARE
         from gm.warmup import PromptBudget, estimate_longest_prompt_tokens
 
-        self.assertGreaterEqual(len(SYSTEM_PROMPT), 20_000)
+        self.assertGreaterEqual(len(system_prompt()), 20_000)
         budget = PromptBudget(
             prompt_tokens=estimate_longest_prompt_tokens(
-                SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values()
+                system_prompts_by_authority_and_mode().values()
             ),
             num_ctx=settings.GM_NUM_CTX,
         )
@@ -1404,7 +1479,7 @@ class GMStreamPayloadTest(BaseTestCase):
         """The web GM hands Ollama the env-configured model, the options
         object, and ``think=False`` — the API-level replacement for the old
         ``/no_think`` prompt hack (issue #324)."""
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         mock_stream.side_effect = gm_replies(["ok"])
         response = self.client.post(
@@ -1416,7 +1491,7 @@ class GMStreamPayloadTest(BaseTestCase):
 
         (model, history), kwargs = mock_stream.call_args
         self.assertEqual(model, "test-model")
-        self.assertEqual(history[0], {"role": "system", "content": SYSTEM_PROMPT})
+        self.assertEqual(history[0], {"role": "system", "content": system_prompt()})
         # Bounded by the turn's deadline, and hung up on if the turn gives up
         # on it (issue #904).
         stop_at = kwargs.pop("stop_at")
@@ -1607,9 +1682,9 @@ class PromptMatchesTheRulesPagesTest(SimpleTestCase):
     """
 
     def setUp(self):
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
-        self.prompt = SYSTEM_PROMPT
+        self.prompt = system_prompt()
 
     def test_the_forced_retreat_phase_is_the_pages_row_six(self):
         # Issue #876: the turn sequence still armed a push with any damage
@@ -1630,12 +1705,12 @@ class PromptMatchesTheRulesPagesTest(SimpleTestCase):
         self.assertIn("took none", row[3])
         checked = []
         for name in (
-            "SYSTEM_PROMPT",
-            "AIDE_SYSTEM_PROMPT",
-            "DM_SYSTEM_PROMPT",
-            "DM_PLAY_SYSTEM_PROMPT",
+            "system_prompt",
+            "aide_system_prompt",
+            "dm_system_prompt",
+            "dm_play_system_prompt",
         ):
-            prompt = getattr(engine, name)
+            prompt = getattr(engine, name)()
             if "### Turn Sequence" not in prompt:
                 continue
             checked.append(name)

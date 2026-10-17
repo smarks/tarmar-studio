@@ -21,7 +21,7 @@ from .character_schema import (
     character_json_schema,
     extraction_to_import_payload,
 )
-from .engine import MODE_PLAY, SECTION_PLAN_SCHEMA
+from .engine import MODE_PLAY, section_plan_schema
 from .ledger import DraftLedger, draft_defaults
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .testing import add_character, recorded, session_with_character
@@ -154,7 +154,7 @@ class LiteracyPlanTest(SimpleTestCase):
 
     def test_the_plan_schema_teaches_the_roll(self):
         self.assertIn(
-            '{"action": "roll_literacy", "character_id": 41}', SECTION_PLAN_SCHEMA
+            '{"action": "roll_literacy", "character_id": 41}', section_plan_schema()
         )
 
 
@@ -269,7 +269,7 @@ class LiteracyRulingPlanTest(SimpleTestCase):
     def test_the_plan_schema_teaches_the_ruling(self):
         self.assertIn(
             '{"action": "rule_literacy", "character_id": 41, "literate": true}',
-            SECTION_PLAN_SCHEMA,
+            section_plan_schema(),
         )
 
 
