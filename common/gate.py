@@ -36,3 +36,27 @@ def normalize_passphrase(value: str) -> str:
 # :func:`normalize_passphrase` produces, so it can never be the value that
 # locks a site out (issue #138).
 DEV_GATE_PASSPHRASE = "mellon"
+
+# The hint the gate offers once a visitor has guessed wrong
+# GATE_HINT_AFTER_WRONG_GUESSES times (issue #55). The evidence, stated once
+# here: of the only two outside visitors who found the gate in fifteen days,
+# one needed three tries and the other gave up after three wrong guesses. The
+# riddle is meant to be answered, not to turn people away. The hint is
+# deliberately oblique at Spencer's direction (2026-10-16, "very sneaky"): it
+# names neither the word nor the language, only sends the reader back to the
+# riddle already on the page. The wording stays his to change. It is kept
+# beside the dev passphrase because both describe the one door.
+GATE_HINT = (
+    "The door has already said the word. It is waiting to hear it in its own tongue."
+)
+
+# How many wrong guesses in a window before the hint is shown. Three, because
+# that is where both visitors in the evidence above stood when one of them
+# walked away. It must stay well under common.rate_limit.GUESS_MAX_ATTEMPTS so
+# the hint arrives before the lockout does; a hint that only ever appears on
+# the 429 page helps nobody still at the door. rate_limit is not imported here
+# to say so in code: tarmar_studio/settings.py and scripts/verify_deployment.py
+# import this module before Django's apps are loaded, and rate_limit imports
+# common.models, which cannot be imported that early. middleware.py imports
+# both and is where the two meet.
+GATE_HINT_AFTER_WRONG_GUESSES = 3
