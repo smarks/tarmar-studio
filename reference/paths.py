@@ -71,14 +71,22 @@ them):
   and the fields its group carries (damage, strength requirement and weapon
   class; stops, DEX penalty, tier and movement restriction; shield bonus), as
   the public equipment pages list them. Read by ``characters.equipment_rules``,
-  whose docstring gives the full schema.
+  whose docstring gives the full schema. The battle names some items by id
+  (the archetypes' kits and step-downs, the arrows and the bows' class, the
+  hand-to-hand weapon), which the canon must carry (``battle.E005``).
 - ``equipment-rules.json`` (required: a canon without one fails the
   ``characters.E004`` system check): the numbers encumbrance and movement
   read, as the public movement and armour pages state them: the encumbrance
   levels with their multipliers, penalties, forbidden gaits and walk limit,
   the armour restriction codes, the gaits' order and base distances, the
-  Missile weapon classes Archery covers and the bounds on a defender's dodge,
-  with an optional ``rulings`` list. Read by ``characters.equipment_rules``.
+  Missile weapon classes (the ones Archery covers and the battle seats as
+  missile weapons) and the bounds on a defender's dodge,
+  with an optional ``rulings`` list. Read by ``characters.equipment_rules``,
+  whose docstring gives the full schema. The level keys and gait names are the
+  canon's, but the battle engine seats exactly four gaits, the one it seats as
+  its run above 0 (``battle.E003``, until stage 6 of rules-as-data seats the
+  engine's own rules), and the battle generator deals no load past a level it
+  names, which the canon must carry (``battle.E004``).
   The five rules files are read the one strict way ``reference.rules_file``
   holds.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's

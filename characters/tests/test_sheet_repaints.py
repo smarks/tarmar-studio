@@ -72,6 +72,8 @@ class AttributeEditMovesMovementTest(SheetTestCase):
                 self.character.refresh_from_db()
                 for key in (
                     "encumbrance_level",
+                    "encumbrance_label",
+                    "encumbrance_badge_classes",
                     "movement_penalty",
                     "movement_restriction_label",
                     "movement_modifier",
@@ -86,6 +88,9 @@ class AttributeEditMovesMovementTest(SheetTestCase):
                     data["lightest_load_limit"], self.character.lightest_load_limit
                 )
                 self.assertEqual(data["gait_readout"], self.character.gait_readout)
+                self.assertEqual(
+                    data["encumbrance_label"], self.character.encumbrance_label
+                )
 
     def test_a_lower_strength_is_heavier_load_in_the_response(self):
         self.character.equipment = [{"item_id": "tower_shield", "quantity": 1}]

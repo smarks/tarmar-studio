@@ -1968,6 +1968,17 @@ class Character(models.Model):
         return equipment_rules().encumbrance.level_for(self.carried_weight, strength)
 
     @property
+    def encumbrance_label(self) -> str | None:
+        """The level as the sheet's badge prints it, or None while unknown.
+
+        The canon's key title-cased, the one wording the page renders and the
+        repaint after a change paints (issue #75: the two used to capitalise
+        differently, which a level key of two words would have shown).
+        """
+        level = self.encumbrance_level
+        return None if level is None else level.title()
+
+    @property
     def encumbrance_badge_classes(self) -> str:
         """The encumbrance badge's classes, by the level's place, not its name.
 

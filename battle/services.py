@@ -28,7 +28,7 @@ from characters.equipment import (
     get_shield_bonus,
     is_worn_armour,
 )
-from characters.equipment_rules import equipment_catalog
+from characters.equipment_rules import equipment_catalog, equipment_rules
 from characters.magic import battle_loadout, current_mana, spell_mastery
 from characters.models import (
     Character,
@@ -163,13 +163,14 @@ class SeatedArms:
 def _catalog_weapon(item_id: str) -> WeaponState:
     """The engine's copy of one catalog weapon :func:`board_can_seat_weapon` passed.
 
-    A missile weapon's rate of fire is read off its weapons.md Notes cell by
-    the engine's own parser (``tarmar_engine.weapons.missile_rate_from_note``),
-    so the numbers are never retyped here (#781).
+    A missile weapon is one of the loaded canon's Missile classes (issue #75).
+    Its rate of fire is read off its weapons.md Notes cell by the engine's own
+    parser (``tarmar_engine.weapons.missile_rate_from_note``), so the numbers
+    are never retyped here (#781).
     """
     item_data = get_item(item_id) or {}
     weapon_class = str(item_data.get("weapon_class"))
-    is_missile = weapon_class.startswith("Missile")
+    is_missile = weapon_class in equipment_rules().missile_classes
     rate = missile_rate_from_note(item_data.get("notes") if is_missile else None)
     return WeaponState(
         item_id=item_id,

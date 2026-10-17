@@ -168,6 +168,7 @@ def _melee_attacks(beast: Beast) -> list[dict]:
         attack
         for attack in beast.attacks or []
         if (attack.get("weapon_class") or "")
+        # The bestiary's own class vocabulary, not the canon's Missile classes.
         and not (attack.get("weapon_class") or "").startswith("Missile")
     ]
 

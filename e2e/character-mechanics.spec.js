@@ -25,6 +25,7 @@ const {
 } = require('./fixtures');
 const { pinDice } = require('./dice');
 const { loadedSkillRules } = require('./skill-rules');
+const { item, sheetValues } = require('./equipment-rules');
 
 function mechanicsCharacter(name) {
     return {
@@ -72,6 +73,23 @@ async function importCharacter(page, name) {
     await seedCharacterFromExport(page, TEST_USER, mechanicsCharacter(name));
 }
 
+/** An amount of coin in whole cents, so sums compare exactly. */
+function cents(amount) {
+    return Math.round(Number(amount) * 100);
+}
+
+/**
+ * The purse comes to ``target`` gp on the server, and the sheet's two purse
+ * readouts print it as the server does (issue #75).
+ */
+async function expectPurse(page, target) {
+    const characterId = characterIdFromUrl(page);
+    await expect.poll(() => cents(sheetValues(characterId).purse)).toBe(cents(target));
+    const printed = sheetValues(characterId).purse_text;
+    await expect(page.locator('#purse')).toHaveText(printed);
+    return printed;
+}
+
 /** Set the purse to exactly `target` gp, as a Game Master. */
 async function setPurse(page, browser, target) {
     const held = Number((await page.locator('#purse').textContent()).replace(/[^0-9.]/g, ''));
@@ -83,7 +101,7 @@ async function setPurse(page, browser, target) {
         expect(moved.status).toBe(200);
     }
     await page.reload();
-    await expect(page.locator('#purse')).toHaveText(`${target} gp`);
+    await expectPurse(page, target);
 }
 
 function breakdownValue(page, label) {
@@ -165,22 +183,29 @@ test.describe('Sheet mechanics', () => {
     });
 
     test('#757: catalog gear is bought from the purse', async ({ page, browser }) => {
+        // The prices are the loaded catalog's (#75): enough for a broadsword
+        // and a chainmail with a tenth of the chainmail's price left over, so
+        // a second chainmail is refused.
+        const sword = item('broadsword').cost;
+        const mail = item('chainmail').cost;
+        const leftOver = Math.round(mail * 10) / 100;
+        const purse = sword + mail + leftOver;
         await loginAs(page, TEST_USER);
         await importCharacter(page, `Buyer ${Date.now()}`);
-        await setPurse(page, browser, 300);
+        await setPurse(page, browser, purse);
 
         await page.locator('#equipment-category').selectOption('weapons');
         await page.locator('#equipment-item').selectOption('broadsword');
         await page.locator('#add-equipment-btn').click();
-        await expect(page.locator('#equipment-purse')).toHaveText('220 gp');
-        await expect(page.locator('#purse')).toHaveText('220 gp');
+        const afterSword = await expectPurse(page, purse - sword);
+        await expect(page.locator('#equipment-purse')).toHaveText(afterSword);
 
-        // Chainmail costs 200; with 220 it is bought, and then nothing that
-        // costs more than 20 is.
+        // With the chainmail's price and a tenth over it is bought, and then
+        // nothing that costs more than that tenth is.
         await page.locator('#equipment-category').selectOption('armor');
         await page.locator('#equipment-item').selectOption('chainmail');
         await page.locator('#add-equipment-btn').click();
-        await expect(page.locator('#equipment-purse')).toHaveText('20 gp');
+        await expect(page.locator('#equipment-purse')).toHaveText(await expectPurse(page, leftOver));
         await page.locator('#equipment-category').selectOption('armor');
         await page.locator('#equipment-item').selectOption('chainmail');
         await page.locator('#add-equipment-btn').click();
@@ -192,7 +217,7 @@ test.describe('Sheet mechanics', () => {
         await page.locator('.notice-confirm button:has-text("Remove")').click();
         await expect(page.locator('.equipment-row', { hasText: 'Broadsword' })).toHaveCount(0);
         await page.reload();
-        await expect(page.locator('#purse')).toHaveText('20 gp');
+        await expectPurse(page, leftOver);
     });
 
     test('#774/#755: a learned spell is on the sheet and seated in battle', async ({ page, browser }) => {

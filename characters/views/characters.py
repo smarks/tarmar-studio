@@ -1809,6 +1809,7 @@ def movement_response(character: Character) -> dict:
         "lightest_load_limit": character.lightest_load_limit,
         "encumbrance_level": character.encumbrance_level,
         "encumbrance_badge_classes": character.encumbrance_badge_classes,
+        "encumbrance_label": character.encumbrance_label,
         "movement_penalty": character.movement_penalty,
         "movement_restriction_label": character.movement_restriction_label,
         "movement_modifier": character.movement_modifier,

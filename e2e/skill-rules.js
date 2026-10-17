@@ -9,7 +9,7 @@
  * server loaded.
  */
 
-const { readDjangoShell } = require('./django');
+const { readDjangoJson } = require('./django');
 
 /**
  * Every number the specs check, from ``characters.skill_rules.skill_rules()``.
@@ -21,7 +21,7 @@ const { readDjangoShell } = require('./django');
  * @returns {object}
  */
 function loadedSkillRules() {
-    const output = readDjangoShell(`
+    return readDjangoJson(`
 import json
 from characters.dice import roll_dice_faces
 from characters.rules import character_rules
@@ -85,9 +85,7 @@ print("SKILL_RULES " + json.dumps({
         "modifier_limit": rules.attribute_check.game_master_modifier_limit,
     },
 }))
-`);
-    const line = output.split('\n').find((text) => text.startsWith('SKILL_RULES '));
-    return JSON.parse(line.slice('SKILL_RULES '.length));
+`, 'SKILL_RULES');
 }
 
 /**

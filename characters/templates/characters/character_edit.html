@@ -664,7 +664,7 @@ runs.
                 <span id="carried-weight">{{ character.carried_weight }}</span> / <span id="max-unencumbered">{{ character.lightest_load_limit|default_if_none:"—" }}</span> lbs
             </span>
             {# What a load weighs on a character is priced against their STR, so an unrecorded STR leaves the level unknown (issue #630). #}
-            <span class="level-badge {{ character.encumbrance_badge_classes }}" id="encumbrance-level">{% if character.encumbrance_level is None %}—{% else %}{{ character.encumbrance_level|title }}{% endif %}</span>
+            <span class="level-badge {{ character.encumbrance_badge_classes }}" id="encumbrance-level">{{ character.encumbrance_label|default_if_none:"—" }}</span>
             {% if character.movement_penalty != 0 %}
             <span class="penalty" id="movement-penalty">{{ character.movement_penalty }} movement</span>
             {% else %}

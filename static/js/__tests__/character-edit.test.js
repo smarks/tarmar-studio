@@ -637,7 +637,8 @@ describe('updateEquipmentDisplay', () => {
         success: true,
         carried_weight: 22,
         pack_weight: 10,
-        encumbrance_level: 'medium',
+        // A canon's key of two words: the badge prints the server's wording.
+        encumbrance_level: 'half laden', encumbrance_label: 'Half Laden',
         encumbrance_badge_classes: 'load-3',
         movement_penalty: -2,
         movement_restriction_label: 'No running',
@@ -666,7 +667,7 @@ describe('updateEquipmentDisplay', () => {
         expect(document.getElementById('carried-weight').textContent).toBe('22');
         expect(document.getElementById('pack-weight').textContent).toBe('10');
         const badge = document.getElementById('encumbrance-level');
-        expect(badge.textContent).toBe('Medium');
+        expect(badge.textContent).toBe('Half Laden');
         // The classes are the server's, by the level's place (issue #75).
         expect(badge.className).toBe('level-badge load-3');
         expect(document.getElementById('movement-penalty').textContent).toBe('-2 movement');
@@ -811,7 +812,7 @@ describe('updateEquipmentDisplay', () => {
 describe('equipment mutations', () => {
     const OK = {
         success: true,
-        carried_weight: 1, pack_weight: 0, encumbrance_level: 'unencumbered', encumbrance_badge_classes: 'load-1',
+        carried_weight: 1, pack_weight: 0, encumbrance_level: 'unencumbered', encumbrance_label: 'Unencumbered', encumbrance_badge_classes: 'load-1',
         movement_penalty: 0, movement_restriction_label: '', movement_modifier: 0,
         gait_readout: [], armor_stops: 0, armor_dex_penalty: 0,
         weapon_to_hit_mod: 0, weapon_damage_mod: 0, weapon_critical_mod: 0,
@@ -1128,7 +1129,7 @@ describe('custom item panel', () => {
     test('posts a custom weapon with its damage string', async () => {
         await loadPage({}, [jsonResponse({
             success: true, carried_weight: 0, pack_weight: 0,
-            encumbrance_level: 'unencumbered', encumbrance_badge_classes: 'load-1', movement_penalty: 0,
+            encumbrance_level: 'unencumbered', encumbrance_label: 'Unencumbered', encumbrance_badge_classes: 'load-1', movement_penalty: 0,
             movement_restriction_label: '', movement_modifier: 0, gait_readout: [],
             armor_stops: 0, armor_dex_penalty: 0, weapon_to_hit_mod: 0,
             weapon_damage_mod: 0, weapon_critical_mod: 0, pack_dropped: false,
@@ -1972,7 +1973,7 @@ describe('the experience workbench', () => {
                 success: true,
                 carried_weight: 22,
                 pack_weight: 10,
-                encumbrance_level: 'medium',
+                encumbrance_level: 'medium', encumbrance_label: 'Medium',
                 encumbrance_badge_classes: 'load-3',
                 movement_penalty: -2,
                 movement_restriction_label: 'No running',
@@ -3327,7 +3328,7 @@ describe('the sheet repaints what a change moves (issues #763-#766, #792, #797, 
         routeFetch([jsonResponse({
             success: true, physical: 16,
             carried_weight: 30, pack_weight: 0, lightest_load_limit: '14',
-            encumbrance_level: 'medium', encumbrance_badge_classes: 'load-3', movement_penalty: -2,
+            encumbrance_level: 'medium', encumbrance_label: 'Medium', encumbrance_badge_classes: 'load-3', movement_penalty: -2,
             movement_restriction_label: 'Cannot Sprint', movement_modifier: 2,
             gait_readout: [{ key: 'walk', na: false, distance: 7 }, { key: 'run', na: true, distance: null }],
             armor_stops: 0, armor_dex_penalty: 0, dex_modifier: 1, dodge_modifier: 1,
@@ -3352,7 +3353,7 @@ describe('the sheet repaints what a change moves (issues #763-#766, #792, #797, 
         const response = {
             success: true, equipment: [{ item_id: 'rope', quantity: 1 }], pack_dropped: false,
             carried_weight: 10, pack_weight: 0, lightest_load_limit: null,
-            encumbrance_level: null, encumbrance_badge_classes: 'unknown', movement_penalty: 0,
+            encumbrance_level: null, encumbrance_label: null, encumbrance_badge_classes: 'unknown', movement_penalty: 0,
             movement_restriction_label: '', movement_modifier: null,
             gait_readout: [{ key: 'walk', na: true, distance: null }, { key: 'run', na: true, distance: null }],
             armor_stops: 0, armor_dex_penalty: 0, dex_modifier: null, dodge_modifier: null,

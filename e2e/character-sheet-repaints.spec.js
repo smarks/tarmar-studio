@@ -14,6 +14,9 @@
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 const { pinDice } = require('./dice');
+const {
+    loadedEquipment, group, item, movementCostingLoad, sheetValues,
+} = require('./equipment-rules');
 
 /**
  * Seed a character for the test user and return its id.
@@ -39,6 +42,42 @@ print('CHARACTER', Character.objects.create(user=user, **values).pk)
 /** A name unique to this worker and moment. */
 function uniqueName(label, testInfo) {
     return `${label} ${testInfo.workerIndex}${Date.now()}`;
+}
+
+/**
+ * The load bar and the gaits show what the server says for character
+ * ``characterId`` as stored (issue #75): the load, the level's wording, its
+ * penalty, the restriction label, each gait's readout and the carrying
+ * capacity. The page is held to the server; that the server follows the
+ * loaded rules is the Python tests' business.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} characterId
+ * @returns {Promise<object>} the server's values (``sheetValues``)
+ */
+async function expectTheServersLoadAndGaits(page, characterId) {
+    const sheet = sheetValues(characterId);
+    // The server prints 16.0 where the painter prints 16, so compare numbers.
+    await expect.poll(async () => Number(await page.locator('#carried-weight').textContent()))
+        .toBe(sheet.carried_weight);
+    await expect(page.locator('#encumbrance-level')).toHaveText(sheet.encumbrance_label ?? '—');
+    await expect(page.locator('#max-unencumbered')).toHaveText(sheet.lightest_load_limit ?? '—');
+    if (sheet.movement_penalty === 0) {
+        await expect(page.locator('#movement-penalty')).toBeHidden();
+    } else {
+        await expect(page.locator('#movement-penalty')).toHaveText(`${sheet.movement_penalty} movement`);
+    }
+    if (sheet.movement_restriction_label) {
+        await expect(page.locator('#movement-restriction')).toHaveText(sheet.movement_restriction_label);
+    } else {
+        await expect(page.locator('#movement-restriction')).toBeHidden();
+    }
+    for (const gait of sheet.gait_readout) {
+        let shown = String(gait.distance);
+        if (sheet.movement_modifier === null) shown = '—';
+        else if (gait.na) shown = 'n/a';
+        await expect(page.locator(`#gait-${gait.key} .gait-value`)).toHaveText(shown);
+    }
+    return sheet;
 }
 
 /** Type a value into one autosaving cell and wait for the save. */
@@ -73,10 +112,9 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#attack-incomplete')).toBeHidden();
         await expect(page.locator('#attack-form')).toBeVisible();
         await expect(page.locator('#skill-check')).toBeVisible();
-        await expect(page.locator('#max-unencumbered')).toHaveText('14');
         await expect(page.locator('#encumbrance-level')).not.toHaveText('—');
         await expect(page.locator('#movement-modifier')).not.toHaveText('—');
-        await expect(page.locator('#gait-walk .gait-value')).not.toHaveText('—');
+        await expectTheServersLoadAndGaits(page, characterId);
         await expect(page.locator('#recent-changes')).toBeVisible();
         await expect(page.locator('#recent-changes-rows')).toContainText('strength');
 
@@ -90,17 +128,78 @@ test.describe('The sheet repaints without a reload', () => {
     });
 
     test('a lower STR moves the encumbrance badge on the spot (#763)', async ({ page }, testInfo) => {
-        // 35 lbs against STR 14 is Heavy; against STR 3, Overloaded.
+        // A tower shield against STR 14, then against STR 3: the server says
+        // which level each is, and the two must differ for the test to mean
+        // anything.
         const characterId = seedCharacter(uniqueName('Laden', testInfo),
             "equipment=[{'item_id': 'tower_shield', 'quantity': 1}]");
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/characters/${characterId}/`);
-        await expect(page.locator('#encumbrance-level')).toHaveText('Heavy');
+        const before = await expectTheServersLoadAndGaits(page, characterId);
 
         await saveCell(page, 'strength', 3);
 
-        await expect(page.locator('#max-unencumbered')).toHaveText('3');
-        await expect(page.locator('#encumbrance-level')).toHaveText('Overloaded');
+        const after = await expectTheServersLoadAndGaits(page, characterId);
+        expect(after.encumbrance_label, 'a lower STR must move the load to another level')
+            .not.toBe(before.encumbrance_label);
+    });
+
+    test('the picker offers the loaded catalog, and an added item moves the load and the gaits by the loaded rules (#75)', async ({ page }, testInfo) => {
+        // The heaviest item the canon sells outside the armour, and a STR at
+        // which carrying it costs movement and forbids a gait without
+        // overloading; the server's own levels choose both.
+        const { item: heaviest, strength } = movementCostingLoad();
+        expect(strength, `no STR puts ${heaviest.id} at a level that forbids a gait`).not.toBeNull();
+        const equipment = loadedEquipment();
+
+        const characterId = seedCharacter(uniqueName('Loader', testInfo),
+            `strength=${strength}, equipment=[]`);
+        await loginAs(page, TEST_ADMIN);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        await expectTheServersLoadAndGaits(page, characterId);
+
+        // The groups, in order, with their labels; and each group's items by
+        // name, with their loaded weights.
+        await expect(page.locator('#equipment-category option:not([value=""])')).toHaveText(
+            equipment.groups.map((candidate) => candidate.label)
+        );
+        await page.locator('#equipment-category').selectOption(heaviest.group);
+        const offered = [...group(heaviest.group).items]
+            .sort((first, second) => first.name.localeCompare(second.name))
+            .map((entry) => `${entry.name} (${entry.weight} lbs)`);
+        await expect(page.locator('#equipment-item option:not([value=""])')).toHaveText(offered);
+
+        await page.locator('#equipment-item').selectOption(heaviest.id);
+        await page.locator('#add-free').check();
+        await page.locator('#add-equipment-btn').click();
+        await expect(page.locator('.equipment-row .item-name')).toContainText(heaviest.name);
+        const sheet = await expectTheServersLoadAndGaits(page, characterId);
+        // The load is the item's loaded weight, and it costs movement.
+        expect(sheet.carried_weight).toBe(heaviest.weight);
+        expect(sheet.movement_penalty).not.toBe(0);
+        expect(sheet.movement_restriction_label).not.toBe('');
+    });
+
+    test('worn armour forbids the gaits its loaded restriction code names (#75)', async ({ page }, testInfo) => {
+        // The lightest loaded armour whose restriction code forbids a gait.
+        const codes = loadedEquipment().armour_restriction_codes;
+        const restricting = group('armor').items.filter(
+            (entry) => entry.movement_restriction && (codes[entry.movement_restriction] || []).length
+        );
+        expect(restricting.length, 'the loaded catalog has no armour that restricts movement')
+            .toBeGreaterThan(0);
+        const armour = [...restricting].sort((first, second) => first.weight - second.weight)[0];
+        const forbidden = codes[armour.movement_restriction];
+        const characterId = seedCharacter(uniqueName('Armoured', testInfo),
+            `equipment=[{'item_id': '${armour.id}', 'quantity': 1, 'equipped': True}]`);
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+        const sheet = await expectTheServersLoadAndGaits(page, characterId);
+        // Every gait the code forbids is n/a, and the label names the armour.
+        expect(sheet.movement_restriction_label).toContain(`(${armour.name})`);
+        for (const gait of forbidden) {
+            await expect(page.locator(`#gait-${gait} .gait-value`)).toHaveText('n/a');
+        }
     });
 
     test('a renamed skill is offered by the skill check under its new name (#765)', async ({ page }, testInfo) => {
@@ -281,7 +380,8 @@ test.describe('The sheet repaints without a reload', () => {
             "equipment=[{'item_id': 'chainmail', 'quantity': 1, 'equipped': True}]");
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
-        await expect(page.locator('#armor-stops')).toHaveText('3');
+        const stops = String(item('chainmail').stops);
+        await expect(page.locator('#armor-stops')).toHaveText(stops);
 
         await page.locator('.equipment-row[data-index="0"] [data-field="in_pack"]').check();
         await expect(page.locator('#armor-stops')).toHaveText('0');
@@ -289,7 +389,7 @@ test.describe('The sheet repaints without a reload', () => {
 
         // Putting it back on takes it out of the pack again.
         await page.locator('.equipment-row[data-index="0"] [data-field="equipped"]').check();
-        await expect(page.locator('#armor-stops')).toHaveText('3');
+        await expect(page.locator('#armor-stops')).toHaveText(stops);
         await expect(page.locator('.equipment-row[data-index="0"] [data-field="in_pack"]')).not.toBeChecked();
     });
 

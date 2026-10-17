@@ -185,7 +185,9 @@ serve is at another commit, the deploy stops before anything is built, naming
 both commits, since that canon change has not been through the suites and the
 canon holds rules the code loads (`magic-rules.json` for battles,
 `character-rules.json` for character creation, `skill-rules.json` for skills,
-prior experience and checks), not only lore.
+prior experience and checks, `equipment.json` for the equipment catalog and
+`equipment-rules.json` for encumbrance, movement, Archery and the attack
+panel's dodge), not only lore.
 The check runs before the checkout moves, against the commit it would move to,
 so a refused canon never reaches the checkout the live colour reads. Run
 `./run ship` again: it gates `main`'s head against the canon's head and

@@ -5,9 +5,10 @@ loader refuses, or a canon without one, would otherwise surface only then, as
 an error in the middle of somebody's fight. Checked here, it fails
 ``manage.py check`` and the deploy's ``migrate`` (which runs the system
 checks) before any battle is seated. The same goes for a canon whose gaits
-the engine cannot seat (:func:`check_engine_gaits`), or that lacks the
+the engine cannot seat (:func:`check_engine_gaits`), that lacks the
 encumbrance level the battle generator deals up to
-(:func:`check_generated_load`).
+(:func:`check_generated_load`), or that lacks an item the battle names
+(:func:`check_generator_catalog_ids`).
 """
 
 from collections.abc import Sequence
@@ -16,13 +17,22 @@ from typing import Any
 from django.apps import AppConfig
 from django.core.checks import CheckMessage, Error, register
 
-from characters.equipment_rules import EquipmentRulesError, equipment_rules
+from characters.equipment_rules import (
+    EquipmentCatalogError,
+    EquipmentRulesError,
+    equipment_catalog,
+    equipment_rules,
+)
 from characters.skill_checks import is_glossary_skill
 from characters.skills import glossary_skill
-from reference.paths import EQUIPMENT_RULES_FILE, MAGIC_RULES_FILE
+from reference.paths import (
+    EQUIPMENT_CATALOG_FILE,
+    EQUIPMENT_RULES_FILE,
+    MAGIC_RULES_FILE,
+)
 
 from .adaptation import ENGINE_GAITS, engine_gait_names
-from .generation import HEAVIEST_GENERATED_LOAD
+from .generation import HEAVIEST_GENERATED_LOAD, catalog_ids_refused
 from .magic_rules import MagicRulesError, magic_rules
 
 #: The check id a refused ``magic-rules.json`` reports under.
@@ -33,6 +43,8 @@ CHANNEL_SOURCE_SKILL_CHECK_ID = "battle.E002"
 ENGINE_GAITS_CHECK_ID = "battle.E003"
 #: The check id a canon without the generator's heaviest load reports under.
 GENERATED_LOAD_CHECK_ID = "battle.E004"
+#: The check id a canon without an item the battle names reports under.
+GENERATOR_CATALOG_CHECK_ID = "battle.E005"
 
 #: Where the schema is written, for every message's hint.
 SCHEMA_HINT = "The schema is in battle/magic_rules.py."
@@ -217,5 +229,50 @@ def check_generated_load(
                 "changes with it."
             ),
             id=GENERATED_LOAD_CHECK_ID,
+        )
+    ]
+
+
+@register()
+def check_generator_catalog_ids(
+    app_configs: Sequence[AppConfig] | None = None, **kwargs: Any
+) -> list[CheckMessage]:
+    """Require the canon to carry every item the battle names by id.
+
+    The archetypes' kits, their step-down tables, the arrows and the bows'
+    class, and the hand-to-hand weapon are the battle's own choices
+    (:func:`battle.generation.catalog_ids_refused`), read by id, so a canon
+    without one would fail the first battle a Game Master generates (issue
+    #75).
+
+    Args:
+        app_configs: The apps being checked, or ``None`` for all; the canon
+            belongs to no one app, so it is checked whichever are named.
+        **kwargs: Django's other check arguments, unused.
+
+    Returns:
+        No messages when the canon carries them all, or when its catalog or
+        rules file is refused (``characters.E003`` and ``characters.E004``
+        report those); otherwise one :class:`Error` naming each id.
+    """
+    try:
+        equipment_catalog()
+        equipment_rules()
+    except (EquipmentCatalogError, EquipmentRulesError):
+        # The files' own refusals are characters.E003's and E004's to report.
+        return []
+    refused = catalog_ids_refused()
+    if not refused:
+        return []
+    return [
+        Error(
+            f"{EQUIPMENT_CATALOG_FILE}: the battle names items the canon does "
+            f"not carry: {'; '.join(refused)}",
+            hint=(
+                "The kits, step-downs, arrows and hand-to-hand weapon in "
+                "battle/generation.py and battle/services.py are the battle's "
+                "choices; a canon carries them, or the choices change with it."
+            ),
+            id=GENERATOR_CATALOG_CHECK_ID,
         )
     ]

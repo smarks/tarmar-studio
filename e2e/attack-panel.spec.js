@@ -17,8 +17,11 @@
 const {
     test, expect, loginAs, seedCharacterFromExport, TEST_USER,
 } = require('./fixtures');
+const {
+    loadedEquipment, group, item, targetNumber: serverTargetNumber,
+} = require('./equipment-rules');
 
-// A saber (Striking, 2d6-2) behind a backpack, so the panel's weapon select
+// A saber behind a backpack, so the panel's weapon select
 // has to filter the non-weapon out AND the surviving option's value has to be
 // the saber's *equipment index* (1), not its position among the weapons (0).
 const ATTACK_CHARACTER = {
@@ -106,29 +109,37 @@ test.describe('Attack Resolution panel', () => {
         await expect(page.locator('.no-combat-log')).toBeVisible();
 
         // A defender the GM has described: medium armour, 3 stops, a large
-        // shield, dodging 1, and the attacker is flanking for +2.
+        // shield, dodging a point above the canon's least, and the attacker
+        // is flanking for +2.
         // No skill select: the record decides which skill applies (#753).
+        const bounds = loadedEquipment().defender_dodge;
+        const dodge = Math.min(bounds.minimum + 1, bounds.maximum);
+        const expected = serverTargetNumber('saber', 'Medium', 'large_shield', dodge);
+        const targetNumber = expected.total;
         await expect(page.locator('#attack-skill')).toHaveCount(0);
         await page.locator('#attack-armour-tier').selectOption('Medium');
         await page.locator('#attack-stops').fill('3');
         await page.locator('#attack-shield').selectOption('large_shield');
-        await page.locator('#attack-dodge').fill('1');
+        await page.locator('#attack-dodge').fill(String(dodge));
         await page.locator('#attack-situational').fill('2');
         await page.locator('#attack-resolve-btn').click();
 
         // The breakdown appears and carries the server's Target Number: the
-        // §6 base for Striking vs Medium (16), the catalog's large-shield
-        // bonus (2) and the dodge (1) — 19. The page never computed any of it.
+        // matrix's base for the saber's loaded class against Medium, the
+        // loaded large shield's bonus and the dodge, each as the server
+        // gives it. The page never computed any of it.
         await expect(page.locator('#attack-result')).toBeVisible();
-        await expect(breakdownValue(page, 'Target Number')).toHaveText('16 base + 2 shield + 1 dodge = 19');
+        await expect(breakdownValue(page, 'Target Number')).toHaveText(
+            `${expected.base} base + ${expected.shield} shield + ${dodge} dodge = ${targetNumber}`
+        );
         await expect(breakdownValue(page, 'To hit')).toContainText('+2 situational');
         await expect(breakdownValue(page, 'Skill')).toHaveText(
             'weapon (saber) level 4 (full: the weapon it was taken for)'
         );
         await expect(breakdownValue(page, 'To hit')).toContainText('+4 skill');
-        await expect(breakdownValue(page, 'Attack roll')).toContainText('vs 19');
+        await expect(breakdownValue(page, 'Attack roll')).toContainText(`vs ${targetNumber}`);
         await expect(page.locator('#attack-outcome')).not.toBeEmpty();
-        await expect(page.locator('#attack-dice-log li').first()).toContainText('vs TN 19');
+        await expect(page.locator('#attack-dice-log li').first()).toContainText(`vs TN ${targetNumber}`);
 
         // The roll's own outcome is whatever the die gave; what matters is
         // that the same outcome is what got written to the log.
@@ -145,7 +156,7 @@ test.describe('Attack Resolution panel', () => {
         const entry = page.locator('.combat-log-entry').first();
         await expect(entry.locator('.combat-log-weapon')).toHaveText('Saber');
         await expect(entry.locator('.combat-log-outcome')).toHaveText(outcome);
-        await expect(entry.locator('.combat-log-roll')).toContainText('vs TN 19');
+        await expect(entry.locator('.combat-log-roll')).toContainText(`vs TN ${targetNumber}`);
 
         // The result panel itself is this page's copy of the last response, so
         // a fresh load starts empty again while the log stays.
@@ -162,14 +173,70 @@ test.describe('Attack Resolution panel', () => {
         await loginAs(page, TEST_USER);
         await importAttackCharacter(page);
 
+        // The dodge input is bounded by the loaded canon's dodge (#75).
+        const bounds = loadedEquipment().defender_dodge;
+        const dodgeInput = page.locator('#attack-dodge');
+        await expect(dodgeInput).toHaveAttribute('min', String(bounds.minimum));
+        await expect(dodgeInput).toHaveAttribute('max', String(bounds.maximum));
+        await expect(dodgeInput).toHaveValue(String(bounds.minimum));
+
         // The input's max attribute is advisory; fill() bypasses it, which is
         // exactly what a hand-rolled request would do. The server decides.
-        await page.locator('#attack-dodge').fill('99');
+        await dodgeInput.fill(String(bounds.maximum + 1));
         await page.locator('#attack-resolve-btn').click();
 
         await expect(page.locator('#attack-result')).toBeHidden();
         // The notice is state-driven and stays until dismissed (notify.js).
-        await expect(page.locator('.notice .notice-text').first()).toContainText('dodge');
+        await expect(page.locator('.notice .notice-text').first()).toContainText(
+            `Defender dodge must be between ${bounds.minimum} and ${bounds.maximum}`
+        );
+
+        // The canon's most is accepted.
+        await dodgeInput.fill(String(bounds.maximum));
+        await page.locator('#attack-resolve-btn').click();
+        await expect(breakdownValue(page, 'Target Number')).toContainText(
+            `${bounds.maximum} dodge`
+        );
+    });
+
+    test('Archery covers the loaded Missile classes and no other (#75)', async ({ page }) => {
+        // A weapon of a loaded Missile class with damage the dice can roll,
+        // beside the saber, and Archery on the sheet. Archery is the skill
+        // for the first and nothing for the second.
+        const equipment = loadedEquipment();
+        const missile = group('weapons').items.find((weapon) =>
+            equipment.missile_classes.includes(weapon.weapon_class)
+            && weapon.subcategory !== 'unusual'
+            && /^\d+d\d+([+-]\d+)?$/.test(weapon.damage || ''));
+        expect(missile, 'the loaded catalog sells no rollable Missile weapon').toBeDefined();
+        await loginAs(page, TEST_USER);
+        await seedCharacterFromExport(page, TEST_USER, {
+            ...ATTACK_CHARACTER,
+            data: {
+                ...ATTACK_CHARACTER.data,
+                name: `Archer ${Date.now()}`,
+                skills: { archery: 6 },
+                equipment: [
+                    { item_id: missile.id, quantity: 1 },
+                    { item_id: 'saber', quantity: 1 },
+                ],
+            },
+        });
+
+        const weaponSelect = page.locator('#attack-weapon');
+        const missileOption = weaponSelect.locator(`option[data-item-id="${missile.id}"]`);
+        // The first weapon carried is the one in hand, which its option says.
+        await expect(missileOption).toContainText(
+            `${missile.name} (${missile.weapon_class}, ${missile.damage})`
+        );
+        await weaponSelect.selectOption(await missileOption.getAttribute('value'));
+        await page.locator('#attack-resolve-btn').click();
+        await expect(breakdownValue(page, 'Skill')).toContainText('(full: Archery, a Missile weapon)');
+
+        const saberOption = weaponSelect.locator('option[data-item-id="saber"]');
+        await weaponSelect.selectOption(await saberOption.getAttribute('value'));
+        await page.locator('#attack-resolve-btn').click();
+        await expect(breakdownValue(page, 'Skill')).toHaveText('untrained');
     });
 
     test('equipment edits refresh the weapon list and show saved or refused states (#339 items 22, 24)', async ({ page }) => {
@@ -183,7 +250,10 @@ test.describe('Attack Resolution panel', () => {
         await page.locator('#equipment-item').selectOption('dagger');
         await page.locator('#add-equipment-btn').click();
         await expect(weaponSelect.locator('option')).toHaveCount(2);
-        await expect(weaponSelect.locator('option[data-item-id="dagger"]')).toHaveText('Dagger (Piercing, 1d6-1)');
+        const dagger = item('dagger');
+        await expect(weaponSelect.locator('option[data-item-id="dagger"]')).toHaveText(
+            `${dagger.name} (${dagger.weapon_class}, ${dagger.damage})`
+        );
 
         // Item 22: a row field that saves says so on the field itself.
         const backpackRow = page.locator('.equipment-row', { hasText: 'Backpack' });

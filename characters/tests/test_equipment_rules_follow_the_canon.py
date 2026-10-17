@@ -27,7 +27,8 @@ from battle.checks import (
     check_engine_gaits,
     check_generated_load,
 )
-from battle.services import snapshot_character
+from battle.generation import _lighter_weapons
+from battle.services import _catalog_weapon, snapshot_character
 from character_export.export_utils import format_pounds, generate_character_markdown
 from characters import attack
 from characters.equipment import combine_movement_restrictions
@@ -154,6 +155,7 @@ class TheSheetFollowsTheSeatedRulesTest(SeatedRulesTest):
         # STR 10: unburdened to 20 lb, laden to 30.
         character = Character(**AVERAGE_BODY, equipment=carrying(25))
         self.assertEqual(character.encumbrance_level, "laden")
+        self.assertEqual(character.encumbrance_label, "Laden")
         self.assertEqual(character.encumbrance_badge_classes, "load-2")
         self.assertEqual(character.movement_penalty, -3)
         self.assertEqual(character.movement_restrictions, ["dash"])
@@ -224,6 +226,15 @@ class TheSheetFollowsTheSeatedRulesTest(SeatedRulesTest):
             "full: Archery, a Missile weapon",
         )
         self.assertEqual(resolve_weapon_skill(skills, "longbow").bonus, 0)
+
+    def test_the_battle_seats_the_seated_missile_classes_as_missiles(self) -> None:
+        # A Thrusting javelin is the seated rules' missile, and a longbow is
+        # not. A missile is never stepped down: the one-handed spear, which
+        # under the default canon steps down to the trident and the javelin,
+        # keeps its place.
+        self.assertTrue(_catalog_weapon("javelin").is_missile)
+        self.assertFalse(_catalog_weapon("longbow").is_missile)
+        self.assertEqual(_lighter_weapons("spear_1h", 18), [])
 
     def test_a_beast_s_gaits_take_the_seated_proportions_by_place(self) -> None:
         # Stroll and trot to lope, 3 and 6 to 11: a full move of 22 walks 6

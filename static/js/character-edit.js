@@ -1204,8 +1204,8 @@ function paintMovement(data) {
 
     const levelBadge = document.getElementById('encumbrance-level');
     if (levelBadge && data.encumbrance_level !== undefined) {
-        const level = data.encumbrance_level;
-        levelBadge.textContent = level === null ? '—' : level.charAt(0).toUpperCase() + level.slice(1);
+        // The server's wording of the level (Character.encumbrance_label).
+        levelBadge.textContent = data.encumbrance_level === null ? '—' : data.encumbrance_label;
         // By the level's place, not its name: the classes are the server's
         // (Character.encumbrance_badge_classes, issue #75).
         levelBadge.className = 'level-badge ' + data.encumbrance_badge_classes;

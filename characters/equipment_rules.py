@@ -91,9 +91,11 @@ What the rules' values mean, and what else is refused:
   distance in hexes (0 or more), keyed by exactly the gaits of ``order``.
   Every gait a level or a code forbids is one of them, and not the slowest,
   which is never forbidden, only capped (:attr:`GaitRules.restrictable_gaits`).
-- ``missile_classes``: the weapon classes Archery covers, at least one; each
-  must be a class some catalog weapon has, which the ``characters.E004``
-  system check makes (:func:`validate_missile_classes`).
+- ``missile_classes``: the Missile weapon classes, at least one: the ones
+  Archery covers, and the ones the battle seats as missile weapons (a rate of
+  fire, and never stepped down to a lighter weapon); each must be a class
+  some catalog weapon has, which the ``characters.E004`` system check makes
+  (:func:`validate_missile_classes`).
 - ``defender_dodge``: the least and most dodge the Game Master may give a
   defender on the attack panel, the minimum no more than the maximum.
 
@@ -660,7 +662,8 @@ class EquipmentRules:
         armour_restriction_codes: The gaits each armour restriction code
             forbids, by code.
         gaits: The gaits and their base distances.
-        missile_classes: The weapon classes Archery covers.
+        missile_classes: The Missile weapon classes: Archery covers them, and
+            the battle seats their weapons as missile weapons.
         defender_dodge: The bounds on a defender's dodge.
     """
 
