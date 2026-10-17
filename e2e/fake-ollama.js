@@ -20,7 +20,9 @@
  * the tower" plan a Game Master's records and a skill check (issues #802,
  * #843), "<name> tests her nerve" and "roll <name>'s survival save" plan a
  * character's roll and survival save (issue #886), "<name> makes a
- * <attribute> check" plans an attribute check (issue #911), "twins in brackets"
+ * <attribute> check" plans an attribute check (issue #911), "<name> makes a
+ * <attribute> check at <total> with <modifier>" plans one a Game Master
+ * stated with a modifier (issue #70), "twins in brackets"
  * names a character the name rule refuses (issue #908), and anything else
  * plans nothing. A structured call asking for a
  * player's foes is answered with set_foes: gray wolves (dire wolves when the
@@ -99,6 +101,21 @@ function recordsPlanFor(latest, said) {
                 purpose: 'a test of nerve',
                 character_id: listedId(said, nerve[1]),
                 direction: 'over',
+            }],
+        };
+    }
+    // A Game Master's attribute check stated at his table, with a modifier
+    // (issues #911, #953, #70): "<name> makes a <attribute> check at <total>
+    // with <modifier>".
+    const statedCheck = latest.match(/(\w+) makes an? (\w+) check at (-?\d+) with ([+-]?\d+)/i);
+    if (statedCheck) {
+        return {
+            actions: [{
+                action: 'attribute_check',
+                character_id: listedId(said, statedCheck[1]),
+                attribute: statedCheck[2].toLowerCase(),
+                total: Number(statedCheck[3]),
+                modifier: Number(statedCheck[4]),
             }],
         };
     }

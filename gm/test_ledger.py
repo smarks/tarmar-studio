@@ -14,7 +14,7 @@ from django.urls import reverse
 
 from characters import services
 from characters.services import CharacterChangeError
-from characters.skills import ALL_TRACKS, calculate_skill_points_from_xp
+from characters.skills import calculate_skill_points_from_xp, track_keys
 from common.test_helpers import BaseTestCase
 from gm.ledger import (
     ATTRIBUTE_FIELDS,
@@ -314,7 +314,7 @@ class SkillPointArithmeticTests(TestCase):
                 ),
             )
         (track,) = DraftLedger.from_draft(draft).experience_tracks
-        self.assertIn(track, ALL_TRACKS)
+        self.assertIn(track, track_keys())
 
     def test_a_nonsense_quantity_or_point_count_is_refused(self):
         for change in (

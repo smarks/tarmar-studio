@@ -16,14 +16,14 @@ structure that keeps first-token time flat.
 from common.test_helpers import BaseTestCase
 
 from .engine import (
-    DM_SYSTEM_PROMPT,
     SECTION_DM_AIDE,
     SECTION_DM_AUTHORITY,
     SECTION_GUIDELINES,
     SECTION_ROLE,
-    SYSTEM_PROMPT,
-    SYSTEM_PROMPT_SECTIONS,
+    dm_system_prompt,
+    system_prompt,
     system_prompt_for,
+    system_prompt_sections,
 )
 from .services import get_system_message
 
@@ -36,9 +36,9 @@ class AidePromptShapeTest(BaseTestCase):
     def test_the_aide_section_is_last(self):
         """It overrides the manner set out above it, so it reads last."""
         self.assertEqual(
-            DM_SYSTEM_PROMPT,
+            dm_system_prompt(),
             "\n\n".join(
-                (*SYSTEM_PROMPT_SECTIONS, SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
+                (*system_prompt_sections(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
             ),
         )
 
@@ -50,21 +50,21 @@ class AidePromptShapeTest(BaseTestCase):
         MLX runner's restore point for the shared prefix survives, and the
         first token after this change costs what it cost before.
         """
-        self.assertTrue(DM_SYSTEM_PROMPT.startswith(SYSTEM_PROMPT))
+        self.assertTrue(dm_system_prompt().startswith(system_prompt()))
 
     def test_nothing_is_assembled_per_call(self):
-        self.assertIs(system_prompt_for(True), DM_SYSTEM_PROMPT)
-        self.assertIs(system_prompt_for(False), SYSTEM_PROMPT)
+        self.assertIs(system_prompt_for(True), dm_system_prompt())
+        self.assertIs(system_prompt_for(False), system_prompt())
 
     def test_the_player_prompt_is_untouched(self):
         """Deliverable 3: a player still gets the GM who runs the game."""
-        self.assertNotIn(SECTION_DM_AIDE, SYSTEM_PROMPT)
-        self.assertNotIn("Be The Aide", SYSTEM_PROMPT)
+        self.assertNotIn(SECTION_DM_AIDE, system_prompt())
+        self.assertNotIn("Be The Aide", system_prompt())
         # The player-facing manner the aide overrides is still there for them.
         self.assertIn("Give vivid but concise descriptions", SECTION_ROLE)
         self.assertIn("When offering numbered choices", SECTION_GUIDELINES)
         self.assertEqual(
-            get_system_message(self.create_player())["content"], SYSTEM_PROMPT
+            get_system_message(self.create_player())["content"], system_prompt()
         )
 
     def test_the_addendum_costs_a_readable_amount_of_context(self):
@@ -287,10 +287,10 @@ class ModeIndicatorTest(BaseTestCase):
         dm = self.create_dm()
         self.login_as(dm)
         self.assertTrue(self.client.get(CHAT_URL).context["is_game_master"])
-        self.assertEqual(get_system_message(dm)["content"], DM_SYSTEM_PROMPT)
+        self.assertEqual(get_system_message(dm)["content"], dm_system_prompt())
 
     def test_a_players_page_and_prompt_agree_the_other_way(self):
         player = self.create_player()
         self.login_as(player)
         self.assertFalse(self.client.get(CHAT_URL).context["is_game_master"])
-        self.assertEqual(get_system_message(player)["content"], SYSTEM_PROMPT)
+        self.assertEqual(get_system_message(player)["content"], system_prompt())

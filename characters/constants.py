@@ -43,6 +43,14 @@ CORE_ATTRIBUTE_FIELDS = (
     ("charisma", "CHR"),
 )
 
+# The six core attributes by field name, in character-sheet order. Each has a
+# max of 30 on the model. Creation, export, beast variation, the checks, the
+# plan reader and the canon's skill rules all build their lists from this
+# rather than restating the six names (issues #337, #70).
+CHARACTER_ATTRIBUTE_FIELDS: tuple[str, ...] = tuple(
+    field_name for field_name, _short_name in CORE_ATTRIBUTE_FIELDS
+)
+
 
 def point_buy_budget_note(spent: int) -> str | None:
     """How far a bought set of attributes sits off the point budget.
@@ -221,19 +229,6 @@ def name_within_rule(text: str, *, fallback: str) -> str:
     kept = CHARACTER_NAME_REFUSED.sub("", strip_control_characters(text))
     name = " ".join(kept.split())[:MAX_CHARACTER_NAME_LENGTH].rstrip()
     return name if name else fallback
-
-
-# The six core attributes, in character-sheet order. Each has a max of 30 on the
-# model. Creation, export, and beast variation all build their field lists from
-# this rather than restating the six names (issue #337).
-CHARACTER_ATTRIBUTE_FIELDS: tuple[str, ...] = (
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
-)
 
 
 #: The per-item modifiers an equipment entry may carry (issue #752).

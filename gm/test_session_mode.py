@@ -26,19 +26,19 @@ from unittest.mock import patch
 from common.test_helpers import BaseTestCase, create_character
 
 from .engine import (
-    AIDE_SYSTEM_PROMPT,
-    DM_PLAY_SYSTEM_PROMPT,
-    DM_SYSTEM_PROMPT,
     GM_MODES,
     MODE_AIDE,
     MODE_PLAY,
     SECTION_DM_AIDE,
     SECTION_DM_AUTHORITY,
-    SYSTEM_PROMPT,
-    SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE,
+    aide_system_prompt,
     default_mode_for,
+    dm_play_system_prompt,
+    dm_system_prompt,
     normalise_mode,
+    system_prompt,
     system_prompt_for,
+    system_prompts_by_authority_and_mode,
 )
 from .messages import build_mode_switch_message
 from .models import MODE_DESCRIPTIONS, MODE_LABELS, GMSession
@@ -56,12 +56,12 @@ class PromptMatrixTest(BaseTestCase):
 
     def test_every_combination_has_its_own_constant(self):
         self.assertEqual(
-            SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE,
+            system_prompts_by_authority_and_mode(),
             {
-                (False, MODE_PLAY): SYSTEM_PROMPT,
-                (False, MODE_AIDE): AIDE_SYSTEM_PROMPT,
-                (True, MODE_PLAY): DM_PLAY_SYSTEM_PROMPT,
-                (True, MODE_AIDE): DM_SYSTEM_PROMPT,
+                (False, MODE_PLAY): system_prompt(),
+                (False, MODE_AIDE): aide_system_prompt(),
+                (True, MODE_PLAY): dm_play_system_prompt(),
+                (True, MODE_AIDE): dm_system_prompt(),
             },
         )
 
@@ -74,36 +74,37 @@ class PromptMatrixTest(BaseTestCase):
                     self.assertIs(first, system_prompt_for(is_game_master, mode))
                     self.assertIs(
                         first,
-                        SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE[(is_game_master, mode)],
+                        system_prompts_by_authority_and_mode()[(is_game_master, mode)],
                     )
 
     def test_all_four_open_with_the_same_bytes(self):
         """The expensive ~7k-token prefix is shared, so one warm-up serves all."""
-        for prompt in SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE.values():
+        for prompt in system_prompts_by_authority_and_mode().values():
             with self.subTest(prompt=prompt[:40]):
-                self.assertTrue(prompt.startswith(SYSTEM_PROMPT))
+                self.assertTrue(prompt.startswith(system_prompt()))
 
     def test_the_addenda_follow_the_shared_prompt_in_one_order(self):
         """Authority, then aide, after the shared prompt (issues #352, #353)."""
         self.assertEqual(
-            DM_SYSTEM_PROMPT,
-            "\n\n".join((SYSTEM_PROMPT, SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
+            dm_system_prompt(),
+            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
         )
         self.assertEqual(
-            DM_PLAY_SYSTEM_PROMPT, "\n\n".join((SYSTEM_PROMPT, SECTION_DM_AUTHORITY))
+            dm_play_system_prompt(),
+            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY)),
         )
         self.assertEqual(
-            AIDE_SYSTEM_PROMPT, "\n\n".join((SYSTEM_PROMPT, SECTION_DM_AIDE))
+            aide_system_prompt(), "\n\n".join((system_prompt(), SECTION_DM_AIDE))
         )
 
     def test_playing_adds_nothing(self):
         """Play mode is the prompt's own voice; only the aide is an override."""
-        self.assertNotIn(SECTION_DM_AIDE, SYSTEM_PROMPT)
-        self.assertNotIn(SECTION_DM_AIDE, DM_PLAY_SYSTEM_PROMPT)
+        self.assertNotIn(SECTION_DM_AIDE, system_prompt())
+        self.assertNotIn(SECTION_DM_AIDE, dm_play_system_prompt())
 
     def test_an_omitted_mode_takes_the_roles_default(self):
-        self.assertIs(system_prompt_for(True), DM_SYSTEM_PROMPT)
-        self.assertIs(system_prompt_for(False), SYSTEM_PROMPT)
+        self.assertIs(system_prompt_for(True), dm_system_prompt())
+        self.assertIs(system_prompt_for(False), system_prompt())
 
     def test_a_mode_nobody_offers_falls_back_rather_than_raising(self):
         """A mistyped mode is a request for the ordinary session, not a 500."""
@@ -154,7 +155,7 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
 
         self.assertEqual(session.mode, MODE_AIDE)
         sent = self._system_message_sent(player, session)
-        self.assertEqual(sent, AIDE_SYSTEM_PROMPT)
+        self.assertEqual(sent, aide_system_prompt())
         self.assertNotIn(SECTION_DM_AUTHORITY, sent)
 
     def test_a_mode_posted_with_the_turn_cannot_grant_authority_either(self):
@@ -182,7 +183,7 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
             )
             b"".join(response.streaming_content)
         sent = streamed.call_args.args[1][0]["content"]
-        self.assertEqual(sent, AIDE_SYSTEM_PROMPT)
+        self.assertEqual(sent, aide_system_prompt())
         self.assertNotIn(SECTION_DM_AUTHORITY, sent)
 
     def test_a_game_master_in_play_mode_is_still_the_authority(self):
@@ -191,7 +192,7 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
         self.login_as(dm)
         session = GMSession.objects.create(name="Quest", user=dm, mode=MODE_PLAY)
         sent = self._system_message_sent(dm, session)
-        self.assertEqual(sent, DM_PLAY_SYSTEM_PROMPT)
+        self.assertEqual(sent, dm_play_system_prompt())
         self.assertIn(SECTION_DM_AUTHORITY, sent)
         self.assertNotIn(SECTION_DM_AIDE, sent)
 
@@ -267,7 +268,7 @@ class SessionOpensInTheRolesModeTest(BaseTestCase):
             )
             b"".join(response.streaming_content)
         self.assertEqual(
-            streamed.call_args.args[1][0]["content"], DM_PLAY_SYSTEM_PROMPT
+            streamed.call_args.args[1][0]["content"], dm_play_system_prompt()
         )
 
 
@@ -385,7 +386,7 @@ class SwitchingKeepsTheConversationTest(BaseTestCase):
             )
             b"".join(response.streaming_content)
         sent = [message["content"] for message in streamed.call_args.args[1]]
-        self.assertEqual(sent[0], DM_PLAY_SYSTEM_PROMPT)
+        self.assertEqual(sent[0], dm_play_system_prompt())
         self.assertTrue(
             any("running the game yourself" in content for content in sent),
             "the switch note was not sent to the model",

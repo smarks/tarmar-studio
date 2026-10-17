@@ -15,6 +15,7 @@ const {
     test, expect, loginAs, logout, createNamedCharacter, seedCharacterFromExport, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
 const { pinDice } = require('./dice');
+const { loadedSkillRules, nextAgingChange } = require('./skill-rules');
 
 /**
  * Create a character for this test and leave the page on its editor.
@@ -372,6 +373,87 @@ test.describe('Prior-experience workbench', () => {
         const firstEntry = page.locator('#experience-log .term-entry').first();
         await expect(firstEntry.locator('summary')).toContainText('Laborer, Age 21');
         await expect(firstEntry).toHaveJSProperty('open', true);
+    });
+
+    // The tests above type the default canon's numbers (Laborer's 2, the 3d6,
+    // the age-36 hit), which the Tarmar canon's file states too today. These
+    // read the loaded canon's rules (issue #70), so they hold under either.
+    test.describe('following the loaded canon\'s rules (#70)', () => {
+        /** The loaded track whose survival target is lowest. */
+        function safestTrack(rules) {
+            return rules.tracks.reduce(
+                (safest, track) => (track.survival_target < safest.survival_target ? track : safest)
+            );
+        }
+
+        test('the tracks, the survival line and the aging preview are the canon\'s', async ({ page }) => {
+            const rules = loadedSkillRules();
+            await loginAs(page, TEST_USER);
+            await importWorkbenchCharacter(page);
+
+            // The random choice first, then every loaded track in its label.
+            const offered = await page.locator('#track-select option').evaluateAll(
+                (options) => options.map((option) => [option.value, option.textContent.trim()])
+            );
+            expect(offered).toEqual([
+                [rules.random.key, rules.random.label],
+                ...rules.tracks.map((track) => [track.key, track.label]),
+            ]);
+
+            const track = safestTrack(rules);
+            await page.locator('#track-select').selectOption(track.key);
+            await expect(page.locator('#workbench-survival-preview')).toHaveText(
+                `${rules.survival_roll.dice} + best attribute modifier ≥ ${track.survival_target}`
+            );
+            // The next hit at a tabulated stage, its penalties in the table's order.
+            const { aging } = rules;
+            const tabulated = aging.stages.map((row) => row.stage);
+            const lastStage = tabulated[tabulated.length - 1];
+            expect(
+                lastStage + 1 <= aging.preview_horizon_stage,
+                'the preview horizon must lie past the aging table'
+            ).toBe(true);
+            const firstChange = nextAgingChange(aging, WORKBENCH_CHARACTER.data.age);
+            expect(firstChange, 'no aging change before the horizon').not.toBeNull();
+            expect(tabulated, 'the first change must be at a tabulated stage').toContain(firstChange.stage);
+            await expect(page.locator('#workbench-aging-preview')).toHaveText(firstChange.text);
+
+            // At the table's last stage, the next hit is escalated past it.
+            const lastAge = aging.starting_age + aging.years_per_stage * lastStage;
+            const escalated = nextAgingChange(aging, lastAge);
+            expect(escalated, 'no aging change past the table').not.toBeNull();
+            expect(escalated.stage, 'the change must be past the table').toBeGreaterThan(lastStage);
+            await seedCharacterFromExport(page, TEST_USER, {
+                ...WORKBENCH_CHARACTER,
+                data: { ...WORKBENCH_CHARACTER.data, age: lastAge },
+            });
+            await expect(page.locator('#workbench-aging-preview')).toHaveText(escalated.text);
+        });
+
+        test('a year grants from the track\'s table, at its XP, on the canon\'s dice', async ({ page }) => {
+            const rules = loadedSkillRules();
+            const track = safestTrack(rules);
+            await loginAs(page, TEST_USER);
+            await importWorkbenchCharacter(page);
+
+            await pinDice(page, '**/add-years/', SURVIVING_YEAR_SEED);
+            await page.locator('#track-select').selectOption(track.key);
+            await page.locator('#roll-years-btn').click();
+            const entry = page.locator('#experience-log .term-entry').first();
+            await expect(entry).toContainText('Year 1: ');
+
+            const year = (await entry.locator('li').first().textContent()).replace(/\s+/g, ' ').trim();
+            const read = year.match(
+                /^Year 1: (.+) \(rolled (\d+)\) — survival (\S+) \[[\d, ]+\] [+-] \d+ = -?\d+ vs (-?\d+)/
+            );
+            expect(read, `unread year line: ${year}`).not.toBeNull();
+            const [, skill, rolled, dice, target] = read;
+            // The skill is the face the d20 landed on in the track's table.
+            expect(skill).toBe(track.skills[Number(rolled) - 1]);
+            expect(dice).toBe(rules.survival_roll.dice);
+            expect(Number(target)).toBe(track.survival_target);
+            await expect(entry).toContainText(`+${track.xp_per_year} XP`);
+        });
     });
 });
 

@@ -26,8 +26,8 @@ from decimal import Decimal
 from typing import Any, TypeIs
 
 from characters.constants import (
+    CHARACTER_ATTRIBUTE_FIELDS,
     CHARACTER_TEXT_LIMITS,
-    CORE_ATTRIBUTE_FIELDS,
     MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
     MAX_ARMOR_STOPS,
     MAX_EQUIPMENT_DAMAGE_LENGTH,
@@ -36,15 +36,9 @@ from characters.constants import (
 )
 from characters.purse import CUSTOM_COMBAT_CATEGORIES, MAX_COIN_MOVEMENT
 from characters.rules import character_rules
-from characters.skill_checks import (
-    ATTRIBUTE_CHECK_MAXIMUM,
-    ATTRIBUTE_CHECK_MINIMUM,
-    MAX_ATTRIBUTE_CHECK_MODIFIER,
-    MAX_DIFFICULTY,
-    SKILL_CHECK_MAXIMUM,
-    SKILL_CHECK_MINIMUM,
-)
-from characters.skills import ALL_TRACKS, MAX_EXPERIENCE_YEARS_PER_RUN
+from characters.skill_checks import MAX_DIFFICULTY
+from characters.skill_rules import skill_rules
+from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN, selectable_tracks
 
 from ..models import (
     CampaignState,
@@ -56,12 +50,6 @@ from ..models import (
 )
 from ..rules_lookup import MAX_SUBJECT_CHARS, MAX_TRACK_CHARS
 from .policy import ACTION_NAMES, TurnPolicy, already_refused_error
-
-#: The six attributes, written in full as the schema asks.
-ATTRIBUTE_NAMES: tuple[str, ...] = tuple(name for name, _short in CORE_ATTRIBUTE_FIELDS)
-
-#: Every track a plan may name; ``random`` lets the rules choose.
-TRACK_NAMES: tuple[str, ...] = (*ALL_TRACKS, "random")
 
 #: The most actions one plan may hold. A turn asking for more is a plan gone
 #: wrong, not a table's real request.
@@ -643,10 +631,10 @@ def _read_action(
                 given: dict[str, int] = {}
                 for attribute, value in scores.items():
                     key = str(attribute).strip().casefold()
-                    if key not in ATTRIBUTE_NAMES:
+                    if key not in CHARACTER_ATTRIBUTE_FIELDS:
                         reader.fail(
                             f"{attribute!r} is not an attribute; write them in full: "
-                            + ", ".join(ATTRIBUTE_NAMES)
+                            + ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
                         )
                     elif not _is_whole(value):
                         reader.fail(f"the score for {key} must be a whole number")
@@ -654,7 +642,7 @@ def _read_action(
                         given[key] = value
                 fields["scores"] = tuple(
                     (attribute, given[attribute])
-                    for attribute in ATTRIBUTE_NAMES
+                    for attribute in CHARACTER_ATTRIBUTE_FIELDS
                     if attribute in given
                 )
     elif name == "roll_attributes":
@@ -701,39 +689,42 @@ def _read_action(
             fields["difficulty"] = reader.whole("difficulty", 0, MAX_DIFFICULTY)
         if reader.given("attribute"):
             said_attribute = reader.text("attribute").casefold()
-            if said_attribute not in ATTRIBUTE_NAMES:
+            if said_attribute not in CHARACTER_ATTRIBUTE_FIELDS:
                 reader.fail(
-                    "attribute must be written in full: " + ", ".join(ATTRIBUTE_NAMES)
+                    "attribute must be written in full: "
+                    + ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
                 )
             else:
                 fields["attribute"] = said_attribute
         if reader.given("total"):
+            # What the canon's skill check dice can show (2d6 on the pages).
+            skill_check_dice = skill_rules().skill_check
             fields["stated_total"] = reader.whole(
-                "total", SKILL_CHECK_MINIMUM, SKILL_CHECK_MAXIMUM
+                "total", skill_check_dice.minimum, skill_check_dice.maximum
             )
     elif name == "attribute_check":
         # 3d6 ≤ the attribute (#911): the rule names the direction, so the
         # plan names only whose check and on what.
         reader.target()
         said_attribute = reader.text("attribute").casefold()
-        if said_attribute and said_attribute not in ATTRIBUTE_NAMES:
+        if said_attribute and said_attribute not in CHARACTER_ATTRIBUTE_FIELDS:
             reader.fail(
-                "attribute must be written in full: " + ", ".join(ATTRIBUTE_NAMES)
+                "attribute must be written in full: "
+                + ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
             )
         elif said_attribute:
             fields["attribute"] = said_attribute
+        attribute_check_rules = skill_rules().attribute_check
         if reader.given("total"):
+            # What the canon's attribute check dice can show (3d6 on the pages).
             fields["stated_total"] = reader.whole(
-                "total", ATTRIBUTE_CHECK_MINIMUM, ATTRIBUTE_CHECK_MAXIMUM
+                "total", attribute_check_rules.minimum, attribute_check_rules.maximum
             )
         if reader.given("modifier"):
             # On the target, after any injury (#953): who may set it is
-            # read_plan's ruling and the check's own.
-            fields["modifier"] = reader.whole(
-                "modifier",
-                -MAX_ATTRIBUTE_CHECK_MODIFIER,
-                MAX_ATTRIBUTE_CHECK_MODIFIER,
-            )
+            # read_plan's ruling and the check's own; how far, the canon's.
+            limit = attribute_check_rules.game_master_modifier_limit
+            fields["modifier"] = reader.whole("modifier", -limit, limit)
     elif name == "play_years":
         reader.target()
         track = entry.get("track")
@@ -742,8 +733,9 @@ def _read_action(
             if isinstance(track, str)
             else ""
         )
-        if normalised not in TRACK_NAMES:
-            reader.fail("track must be one of " + ", ".join(TRACK_NAMES))
+        allowed_tracks = selectable_tracks()
+        if normalised not in allowed_tracks:
+            reader.fail("track must be one of " + ", ".join(allowed_tracks))
         fields["track"] = normalised
         fields["years"] = reader.whole("years", 1, MAX_EXPERIENCE_YEARS_PER_RUN)
     elif name == "spend_skill_points":

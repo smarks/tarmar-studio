@@ -25,12 +25,13 @@ from .turn_engine import events
 from .turn_engine.plan import PLAYER_ATTRIBUTE_CHECK_ERROR
 from .turn_engine.policy import AIDE_UNASKED_ROLL_REFUSAL, TurnPolicy
 
-#: Where the attribute check's 3d6 comes from, for a fixed total.
-ROLL_3D6 = "characters.skill_checks.roll_3d6_logged"
+#: Where the attribute check's dice come from (the canon's, 3d6 on the
+#: pages), for a fixed total.
+ROLL_3D6 = "characters.skill_checks.roll_dice_logged"
 
 
 def three_dice(total: int) -> tuple[int, str]:
-    """A 3d6 result of ``total``, as ``roll_3d6_logged`` returns one."""
+    """A 3d6 result of ``total``, as ``roll_dice_logged`` returns one."""
     return total, f"3d6: [{total}] = {total}"
 
 

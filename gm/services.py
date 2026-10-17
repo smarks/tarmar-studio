@@ -21,8 +21,6 @@ from .character_schema import EXTRACTION_TEMPERATURE
 # Single source of truth for the prompt, dice roller, and rules loader
 # (shared with the CLI).
 from .engine import (
-    DM_SYSTEM_PROMPT,
-    SYSTEM_PROMPT,
     default_mode_for,
     load_rules_from_dir,
     normalise_mode,
@@ -43,8 +41,6 @@ from .retrieval import ChatMessage, canon_entry_for_turn, model_messages
 from .turn_engine.state import state_block_tokens
 
 __all__ = [
-    "SYSTEM_PROMPT",
-    "DM_SYSTEM_PROMPT",
     "roll_dice",
     "build_roll_message",
     "build_rules_lookup_message",

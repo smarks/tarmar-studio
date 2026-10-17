@@ -24,6 +24,7 @@ from character_export.export_utils import (
     generate_character_markdown,
 )
 from characters import services
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import CHARACTER_FIELDS, Character
 from characters.services import (
     FIELD_RULES,
@@ -315,7 +316,8 @@ class PointBuyTest(BaseTestCase):
 
         self.character.refresh_from_db()
         self.assertEqual(
-            sum(getattr(self.character, name) for name in services.ATTRIBUTE_NAMES), 65
+            sum(getattr(self.character, name) for name in CHARACTER_ATTRIBUTE_FIELDS),
+            65,
         )
         self.assertIn(
             "strength: point-buy = 15 (typed on the sheet)", self.character.dice_log

@@ -7,7 +7,6 @@ Ruling: a survival save is rolled once, by code, and recorded.
 """
 
 import math
-from dataclasses import replace
 
 from django.urls import reverse
 
@@ -22,24 +21,9 @@ from characters.services import (
     roll_survival_save,
     survival_save_refusal,
 )
-from common.rolling import Roller
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, FacesRoller, create_character
 
 SAVE_BUTTON = 'id="roll-survival-save-btn"'
-
-
-class ThreeFacesRoller(Roller):
-    """A dice-module roller whose 3d6 lands on the faces given."""
-
-    def __init__(self, *faces: int) -> None:
-        super().__init__(seed=0)
-        self.faces_to_give = faces
-
-    def roll(self, specification, *, purpose, **kwargs):
-        record = super().roll(specification, purpose=purpose, **kwargs)
-        return replace(
-            record, faces=tuple(self.faces_to_give), total=sum(self.faces_to_give)
-        )
 
 
 class SurvivalSaveTest(BaseTestCase):
@@ -59,7 +43,7 @@ class SurvivalSaveTest(BaseTestCase):
 
     def test_a_save_at_or_under_con_survives_and_is_recorded(self) -> None:
         result = roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(4, 4, 4)
+            self.character.pk, actor=self.player, roller=FacesRoller(4, 4, 4)
         )
         character = result.character
         self.assertTrue(character.is_alive)
@@ -83,7 +67,7 @@ class SurvivalSaveTest(BaseTestCase):
 
     def test_a_failed_save_is_death_on_the_record(self) -> None:
         result = roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(6, 4, 3)
+            self.character.pk, actor=self.player, roller=FacesRoller(6, 4, 3)
         )
         character = result.character
         self.assertFalse(character.is_alive)
@@ -104,7 +88,7 @@ class SurvivalSaveTest(BaseTestCase):
         self.character.body_damage = self.body * 2 + 3
         self.character.save()
         result = roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(3, 3, 3)
+            self.character.pk, actor=self.player, roller=FacesRoller(3, 3, 3)
         )
         self.assertTrue(result.character.is_alive)
         self.assertIn("9 ≤ 9 (CON 12 -3)", result.note)
@@ -112,7 +96,7 @@ class SurvivalSaveTest(BaseTestCase):
         result = roll_survival_save(
             self.character.pk,
             actor=self.player,
-            roller=ThreeFacesRoller(4, 3, 3),
+            roller=FacesRoller(4, 3, 3),
             is_game_master=True,
         )
         self.assertFalse(result.character.is_alive)
@@ -120,7 +104,7 @@ class SurvivalSaveTest(BaseTestCase):
     def test_a_player_rolls_once_for_each_state_of_the_pools(self) -> None:
         # The reviewer's probe: three presses were three saves.
         roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(1, 1, 1)
+            self.character.pk, actor=self.player, roller=FacesRoller(1, 1, 1)
         )
         for _press in range(2):
             with self.assertRaisesMessage(
@@ -132,7 +116,7 @@ class SurvivalSaveTest(BaseTestCase):
             body_damage=self.body + self.dying_at + 1
         )
         roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(1, 1, 1)
+            self.character.pk, actor=self.player, roller=FacesRoller(1, 1, 1)
         )
         self.character.refresh_from_db()
         saves = [e for e in self.character.history if e["field"] == "survival save"]
@@ -143,7 +127,7 @@ class SurvivalSaveTest(BaseTestCase):
             roll_survival_save(
                 self.character.pk,
                 actor=self.player,
-                roller=ThreeFacesRoller(1, 1, 1),
+                roller=FacesRoller(1, 1, 1),
                 is_game_master=True,
             )
         self.assertIsNone(
@@ -169,7 +153,7 @@ class SurvivalSaveTest(BaseTestCase):
         # Once that fight is over, the sheet rolls it again.
         Battle.objects.filter(pk=battle.pk).update(status=Battle.STATUS_FINISHED)
         roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(1, 1, 1)
+            self.character.pk, actor=self.player, roller=FacesRoller(1, 1, 1)
         )
 
     def test_a_board_that_writes_nothing_does_not_hold_it(self) -> None:
@@ -181,7 +165,7 @@ class SurvivalSaveTest(BaseTestCase):
             character_ids=(self.character.pk,),
         )
         roll_survival_save(
-            self.character.pk, actor=self.player, roller=ThreeFacesRoller(1, 1, 1)
+            self.character.pk, actor=self.player, roller=FacesRoller(1, 1, 1)
         )
 
     def test_no_save_is_due_above_minus_half_a_pool(self) -> None:

@@ -7,10 +7,13 @@ speaker may not do, and the narrate message carries the manner. Nothing the
 model writes, and nothing typed in the chat, changes it (issue #352).
 """
 
+import functools
 import re
 from dataclasses import dataclass
 
-from characters.skill_checks import ATTRIBUTES, GOVERNING_ATTRIBUTES
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
+from characters.skill_rules import skill_rules
+from reference.rules_file import derived_from_rules
 
 from ..engine import MODE_AIDE, MODE_PLAY
 
@@ -186,28 +189,39 @@ _DICE_WORDS = re.compile(
     re.IGNORECASE,
 )
 
-#: Words that ask for a skill check or a survival save by name, for the two
-#: dice actions that are asked for that way rather than as a roll: "check
-#: Gorn's stealth against 12", "his survival save" (issue #906).
-_SKILL_NAMES = "|".join(
-    re.escape(name) for name in sorted(GOVERNING_ATTRIBUTES, key=len, reverse=True)
-)
-#: A skill check asked for as one: "a skill check", "his stealth check",
-#: "check Gorn's stealth against 12". Not the bare word: "check the roster"
-#: asks for no dice (second review of #906).
-#:
-#: The message is the player's or the Game Master's, so this runs in linear
-#: time (issue #11). Reading on from "check" to "against" stops at the next
-#: "check": it used to read to the end of the sentence from every "check" in
-#: it, quadratic on a sentence of them (0.27 s at 20,000 characters). Whether
-#: a sentence holds a "check" with "against" after it is unchanged, since the
-#: last "check" before the "against" still reaches it.
-_CHECK_WORDS = re.compile(
-    rf"\bskill\s+checks?\b"
-    rf"|\b(?:{_SKILL_NAMES})\s+checks?\b"
-    rf"|\bchecks?\b(?:(?!\bchecks?\b)[^.!?\n])*\bagainst\b",
-    re.IGNORECASE,
-)
+
+@derived_from_rules
+@functools.cache
+def _check_words() -> re.Pattern[str]:
+    """A skill check asked for as one.
+
+    "a skill check", "his stealth check", "check Gorn's stealth against 12",
+    with the skills by name for the two dice actions that are asked for that
+    way rather than as a roll (issue #906). Not the bare word: "check the
+    roster" asks for no dice (second review of #906). Compiled when first
+    asked, not at import, because the skills it names are the loaded
+    canon's ``skill-rules.json`` (issue #70), which no module may read while
+    it imports.
+
+    The message is the player's or the Game Master's, so this runs in linear
+    time (issue #11). Reading on from "check" to "against" stops at the next
+    "check": it used to read to the end of the sentence from every "check" in
+    it, quadratic on a sentence of them (0.27 s at 20,000 characters).
+    Whether a sentence holds a "check" with "against" after it is unchanged,
+    since the last "check" before the "against" still reaches it.
+    """
+    governed = skill_rules().skill_check.governing_attributes
+    skill_names = "|".join(
+        re.escape(name) for name in sorted(governed, key=len, reverse=True)
+    )
+    return re.compile(
+        rf"\bskill\s+checks?\b"
+        rf"|\b(?:{skill_names})\s+checks?\b"
+        rf"|\bchecks?\b(?:(?!\bchecks?\b)[^.!?\n])*\bagainst\b",
+        re.IGNORECASE,
+    )
+
+
 #: A survival save asked for as one: "his survival save", "a save vs death",
 #: "a saving throw". Not "saving up for a horse".
 _SAVE_WORDS = re.compile(
@@ -220,7 +234,9 @@ _SAVE_WORDS = re.compile(
 #: An attribute check asked for as one (#911): "an attribute check", "a
 #: strength check", "his CON check". The three-letter forms are the sheet's.
 _ATTRIBUTE_NAMES = "|".join(
-    name for attribute in ATTRIBUTES for name in (attribute, attribute[:3])
+    name
+    for attribute in CHARACTER_ATTRIBUTE_FIELDS
+    for name in (attribute, attribute[:3])
 )
 _ATTRIBUTE_CHECK_WORDS = re.compile(
     rf"\b(?:attribute|{_ATTRIBUTE_NAMES}|chr)\s+checks?\b", re.IGNORECASE
@@ -239,7 +255,7 @@ def dice_actions_asked_for(latest: str | None) -> frozenset[str]:
     """Which of :data:`AIDE_DICE_ACTIONS` ``latest`` asks for (issue #906).
 
     Any dice word asks for any of them; a skill check, a survival save or
-    an attribute check named as one (:data:`_CHECK_WORDS`,
+    an attribute check named as one (:func:`_check_words`,
     :data:`_SAVE_WORDS`, :data:`_ATTRIBUTE_CHECK_WORDS`) asks for that
     action. ``None`` (no chat message, as when a
     tool runs actions) asks for all of them.
@@ -247,7 +263,7 @@ def dice_actions_asked_for(latest: str | None) -> frozenset[str]:
     if latest is None or _DICE_WORDS.search(latest):
         return AIDE_DICE_ACTIONS
     asked = set()
-    if _CHECK_WORDS.search(latest):
+    if _check_words().search(latest):
         asked.add("skill_check")
     if _SAVE_WORDS.search(latest):
         asked.add("survival_save")

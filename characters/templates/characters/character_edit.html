@@ -545,8 +545,8 @@ runs.
                     {% endfor %}
                 </select>
             </label>
-            <label>2d6 rolled at the table (Game Master)
-                <input type="number" name="total" min="{{ number_limits.check_total_minimum }}" max="{{ number_limits.check_total_maximum }}" aria-label="2d6 rolled at the table">
+            <label>{{ skill_check_dice }} rolled at the table (Game Master)
+                <input type="number" name="total" min="{{ number_limits.check_total_minimum }}" max="{{ number_limits.check_total_maximum }}" aria-label="{{ skill_check_dice }} rolled at the table">
             </label>
             {% endif %}
             <button type="button" class="button mechanics-submit" id="skill-check-btn">Roll check</button>

@@ -5,8 +5,11 @@ only the pure, single-source-of-truth bits: the system prompt, the dice roller,
 and the rules-file loader.
 """
 
+import functools
 import logging
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
 from characters.combat import (
@@ -16,9 +19,10 @@ from characters.combat import (
     MATRIX,
     SEVERE_CRIT_DAMAGE_ROLLS,
 )
-from characters.constants import CORE_ATTRIBUTE_FIELDS
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.dice import roll_expression, roll_expression_record
-from characters.skills import ALL_TRACKS, calculate_attribute_modifier
+from characters.skill_rules import skill_rules
+from characters.skills import calculate_attribute_modifier, selectable_tracks
 from common.rolling import RollRecord
 from reference.paths import (
     CANON_NAME,
@@ -28,6 +32,7 @@ from reference.paths import (
     TARMAR_CANON_NAME,
     WORLD_PROMPT_FILE,
 )
+from reference.rules_file import derived_from_rules
 
 from . import rules_lookup
 
@@ -100,33 +105,39 @@ def _render_modifier_fragment() -> str:
     """The attribute modifier table, from the function the code uses (#807).
 
     Built from :func:`characters.skills.calculate_attribute_modifier` over the
-    3-18 rows attributes.md prints, labelled as the page labels them, and
-    what it does past either end said from the same function: flat at the
-    end rows, or the slope continuing. So the prompt says what the sheet
-    computes, whichever way that is ruled.
+    rows the canon's table prints (3-18 on attributes.md; issue #70),
+    labelled as the page labels them, and what it does past either end said
+    from the same function: flat at the end rows, or the slope continuing.
+    So the prompt says what the sheet computes, whichever way that is ruled.
     """
+    table = skill_rules().attribute_modifier
+    lowest, highest = table.lowest_score, table.highest_score
     bands: list[str] = []
-    low = 3
-    while low <= 18:
+    low = lowest
+    while low <= highest:
         modifier = calculate_attribute_modifier(low)
         high = low
-        while high < 18 and calculate_attribute_modifier(high + 1) == modifier:
+        while high < highest and calculate_attribute_modifier(high + 1) == modifier:
             high += 1
         label = str(low) if low == high else f"{low}-{high}"
         bands.append(f"{label}={rules_lookup.signed(modifier)}")
         low = high + 1
     fragment = "Modifiers: " + ", ".join(bands) + "."
-    below, above = calculate_attribute_modifier(2), calculate_attribute_modifier(19)
+    below = calculate_attribute_modifier(lowest - 1)
+    above = calculate_attribute_modifier(highest + 1)
     if (below, above) == (
-        calculate_attribute_modifier(3),
-        calculate_attribute_modifier(18),
+        calculate_attribute_modifier(lowest),
+        calculate_attribute_modifier(highest),
     ):
         fragment += (
-            f" Below 3 the modifier stays {rules_lookup.signed(below)} and above "
-            f"18 it stays {rules_lookup.signed(above)}."
+            f" Below {lowest} the modifier stays {rules_lookup.signed(below)} "
+            f"and above {highest} it stays {rules_lookup.signed(above)}."
         )
     else:
-        fragment += " Past 18 and below 3 the modifier keeps changing by 1 a point."
+        fragment += (
+            f" Past {highest} and below {lowest} the modifier keeps changing by "
+            "1 a point."
+        )
     return fragment
 
 
@@ -210,51 +221,64 @@ SECTION_NOT_DND = (
     "Use ONLY the Tarmar mechanics described below."
 )
 
-SECTION_CORE = (
-    "## Core Resolution Mechanic\n"
-    "An attribute check with no skill rolls 3d6 ≤ the attribute (or adjusted "
-    "attribute). A skill check rolls 2d6 + the governing attribute's modifier "
-    "+ the skill level against a difficulty the GM sets; a natural 12 always "
-    "succeeds and a natural 2 always fails (the skills glossary is the "
-    "source). Only combat attacks use a d20 (see Combat).\n\n"
-    "### Attributes\n"
-    "Six core attributes: STR, DEX, INT, WIS, CON, CHR — each 3d6, or divide "
-    "65 points between them with every attribute ending between 3 and 18.\n"
-    f"{_render_modifier_fragment()}\n"
-    "Play uses aged scores everywhere; only the literacy check and the "
-    "weight from STR use the base score.\n"
-    "STR governs weapon requirements and physical damage; DEX governs "
-    "to-hit, action order, and avoiding falls; INT governs perception, "
-    "learning, and most casting rolls; WIS governs insight, judgment, "
-    "persuasion, some casting rolls, and Anchor rolls during Runaway; CHR "
-    "governs influence, morale, and leadership; CON governs endurance, the "
-    "pools, and survival saves.\n"
-    "Secondary: Appearance (1d6: 1=pretty, 6=ugly), Height (1d6: 4'8\" to "
-    "6'4\"), Weight (8-13 stones base + STR/2 stones; a stone is 14 lbs).\n\n"
-    "### Derived Pools\n"
-    "- Fatigue = CON + WIS + INT + max(DEX, STR) + 2d6. Normal hits reduce "
-    "Fatigue only. At 0 = unconscious.\n"
-    "- Body = 2/3 × Fatigue (round up). Severe critical hits (a confirmed "
-    "natural 20) reduce Fatigue AND Body. At 0 = unconscious.\n"
-    "- Mana Pool = the Spell Points earned through the Magic skill track. It "
-    "starts at 0, grows only as the character trains, and is NOT rolled at "
-    "creation and NOT secret: the player always knows their exact Pool. Mana "
-    "is separate from every attribute. Skill points never convert into mana; "
-    "a Game Master may grant mana. Mana a fight spends stays spent until a "
-    "Game Master restores it.\n"
-    "- Physical = ceil((STR + DEX + CON) / 2) and Mental = ceil((WIS + INT + "
-    "CHR) / 2) are sheet read-outs, not pools.\n\n"
-    "### Injury Thresholds (apply to Fatigue and Body, whichever is worse)\n"
-    "- Down to 1/2 (but above 5): −1 to all rolls\n"
-    "- Between 1 and 5: −2 to all rolls\n"
-    "- 0: unconscious\n"
-    "- Negative 1/2 of starting value: survival save each turn (3d6 ≤ CON)\n"
-    "- Negative full starting value: saves continue, penalised by how far "
-    "past that threshold the pool has gone (at −35 on a starting 30, roll "
-    "3d6 ≤ CON − 5)\n"
-    "Saves continue each turn until the character is healed above the "
-    "threshold or fails one and dies."
-)
+
+@derived_from_rules
+@functools.cache
+def section_core() -> str:
+    """The core resolution section, built the first time a prompt needs it.
+
+    Built on first use rather than at import because its modifier table,
+    from :func:`characters.skills.calculate_attribute_modifier`, is the
+    loaded canon's ``skill-rules.json`` (issue #70), which no module may read
+    while it imports. Cached, so every prompt holds the same string for the life
+    of the process.
+    """
+    return (
+        "## Core Resolution Mechanic\n"
+        "An attribute check with no skill rolls 3d6 ≤ the attribute (or adjusted "
+        "attribute). A skill check rolls 2d6 + the governing attribute's modifier "
+        "+ the skill level against a difficulty the GM sets; a natural 12 always "
+        "succeeds and a natural 2 always fails (the skills glossary is the "
+        "source). Only combat attacks use a d20 (see Combat).\n\n"
+        "### Attributes\n"
+        "Six core attributes: STR, DEX, INT, WIS, CON, CHR — each 3d6, or divide "
+        "65 points between them with every attribute ending between 3 and 18.\n"
+        f"{_render_modifier_fragment()}\n"
+        "Play uses aged scores everywhere; only the literacy check and the "
+        "weight from STR use the base score.\n"
+        "STR governs weapon requirements and physical damage; DEX governs "
+        "to-hit, action order, and avoiding falls; INT governs perception, "
+        "learning, and most casting rolls; WIS governs insight, judgment, "
+        "persuasion, some casting rolls, and Anchor rolls during Runaway; CHR "
+        "governs influence, morale, and leadership; CON governs endurance, the "
+        "pools, and survival saves.\n"
+        "Secondary: Appearance (1d6: 1=pretty, 6=ugly), Height (1d6: 4'8\" to "
+        "6'4\"), Weight (8-13 stones base + STR/2 stones; a stone is 14 lbs).\n\n"
+        "### Derived Pools\n"
+        "- Fatigue = CON + WIS + INT + max(DEX, STR) + 2d6. Normal hits reduce "
+        "Fatigue only. At 0 = unconscious.\n"
+        "- Body = 2/3 × Fatigue (round up). Severe critical hits (a confirmed "
+        "natural 20) reduce Fatigue AND Body. At 0 = unconscious.\n"
+        "- Mana Pool = the Spell Points earned through the Magic skill track. It "
+        "starts at 0, grows only as the character trains, and is NOT rolled at "
+        "creation and NOT secret: the player always knows their exact Pool. Mana "
+        "is separate from every attribute. Skill points never convert into mana; "
+        "a Game Master may grant mana. Mana a fight spends stays spent until a "
+        "Game Master restores it.\n"
+        "- Physical = ceil((STR + DEX + CON) / 2) and Mental = ceil((WIS + INT + "
+        "CHR) / 2) are sheet read-outs, not pools.\n\n"
+        "### Injury Thresholds (apply to Fatigue and Body, whichever is worse)\n"
+        "- Down to 1/2 (but above 5): −1 to all rolls\n"
+        "- Between 1 and 5: −2 to all rolls\n"
+        "- 0: unconscious\n"
+        "- Negative 1/2 of starting value: survival save each turn (3d6 ≤ CON)\n"
+        "- Negative full starting value: saves continue, penalised by how far "
+        "past that threshold the pool has gone (at −35 on a starting 30, roll "
+        "3d6 ≤ CON − 5)\n"
+        "Saves continue each turn until the character is healed above the "
+        "threshold or fails one and dies."
+    )
+
 
 # The character creation section in three parts (issue #590): the marker
 # prompts and the plan prompts differ only in how attribute dice are asked for.
@@ -298,12 +322,51 @@ _CREATION_REST = (
     "and Deceit; Underworld yields Stealth, Sleight of Hand, Poison and "
     "Bribery; Craft yields Maker Skills; Laborer can raise STR, DEX or CON.\n\n"
     "### Levels and Skill Points\n"
-    "Level 1 = 0 XP, Level 2 = 2,000, Level 3 = 4,000, Level 4 = 8,000, "
-    "Level 5 = 16,000, doubling each level to Level 10 = 512,000. Skill "
-    "points accrue at regular XP intervals within each level (every 1,000 XP "
-    "at level 2, every 1,334 at level 3, every 2,000 at level 4, and so on)."
 )
-SECTION_CHARACTER_CREATION = _CREATION_OPENING + _CREATION_PLAN_DICE + _CREATION_REST
+
+
+def _render_levels_fragment() -> str:
+    """The experience ladder and its skill-point rates, from the canon (#70).
+
+    The ladder the skills code reads (``skill-rules.json``'s
+    ``experience_levels``), written out rather than typed: each level's XP,
+    then the XP per skill point on the climb to each level, the top rate
+    carrying on past the top (prior-experience.md, issue #656).
+    """
+    experience = skill_rules().experience
+    levels = ", ".join(
+        f"Level {rung.level} = {rung.minimum_xp:,}"
+        + (" XP" if rung is experience.levels[0] else "")
+        for rung in experience.levels
+    )
+    rates = ", ".join(
+        f"every {rung.xp_per_skill_point:,} XP to level {rung.level}"
+        for rung in experience.levels[1:]
+    )
+    top = experience.levels[-1]
+    return (
+        f"{levels}. Skill points accrue at regular XP intervals on the climb "
+        f"to each level ({rates}), and the level-{top.level} rate keeps running "
+        f"past {top.minimum_xp:,} XP."
+    )
+
+
+@derived_from_rules
+@functools.cache
+def section_character_creation() -> str:
+    """The character creation section, built on first use for its ladder.
+
+    The ladder is the canon's (issue #70), which no module may read while it
+    imports. Cached, so every prompt holds the same string for the life of
+    the process.
+    """
+    return (
+        _CREATION_OPENING
+        + _CREATION_PLAN_DICE
+        + _CREATION_REST
+        + _render_levels_fragment()
+    )
+
 
 SECTION_COMBAT = (
     "## Combat System\n"
@@ -762,10 +825,15 @@ _DM_AIDE_REST = (
 #   carries the aide half; play mode adds nothing, because the sections above
 #   already describe the Game Master who runs a game.
 #
-# Crossing them gives four prompts, assembled once at import below --
-# nothing is built per request, which keeps first-token time flat (issues
-# #330, #331) -- and every one opens with SYSTEM_PROMPT's bytes, so one
-# cached prefix serves all four. The plan format closes those shared sections,
+# Crossing them gives four prompts, each assembled once, the first time a
+# turn asks for it, and cached for the life of the process -- nothing is
+# built per request, which keeps first-token time flat (issues #330, #331) --
+# and every one opens with system_prompt()'s bytes, so one cached prefix
+# serves all four. Built on first use rather than at import because three of
+# the sections (the core rules, character creation, the plan format) are built
+# from the loaded canon's skill-rules.json (issue #70), which no module may
+# read while it imports.
+# The plan format closes those shared sections,
 # so it is cached too, and the authority and aide addenda follow it.
 
 #: Run the game: set scenes, ask what the player does, roll the dice.
@@ -941,10 +1009,16 @@ TIMES_OF_DAY: tuple[tuple[str, str], ...] = (
 )
 
 
-def _plan_schema_section() -> str:
-    """The plan format, last in every plan prompt so it stays in the cache."""
-    attributes = ", ".join(name for name, _abbreviation in CORE_ATTRIBUTE_FIELDS)
-    tracks = ", ".join((*ALL_TRACKS, "random"))
+@derived_from_rules
+@functools.cache
+def section_plan_schema() -> str:
+    """The plan format, last in every plan prompt so it stays in the cache.
+
+    Built on first use for :func:`section_core`'s reason: the tracks it
+    lists are the loaded canon's ``skill-rules.json`` (issue #70).
+    """
+    attributes = ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
+    tracks = ", ".join(selectable_tracks())
     times = ", ".join(value for value, _label in TIMES_OF_DAY)
     subjects = ", ".join(rules_lookup.subjects())
     return (
@@ -1064,47 +1138,80 @@ def _plan_schema_section() -> str:
     )
 
 
-SECTION_PLAN_SCHEMA = _plan_schema_section()
-
-SYSTEM_PROMPT_SECTIONS: tuple[str, ...] = (
-    SECTION_ROLE,
-    SECTION_PHILOSOPHY,
-    SECTION_NOT_DND,
-    SECTION_CORE,
-    SECTION_CHARACTER_CREATION,
-    SECTION_RECORDS,
-    SECTION_COMBAT,
-    SECTION_MAGIC,
-    SECTION_EQUIPMENT,
-    SECTION_WORLD,
-    SECTION_GUIDELINES,
-    SECTION_OUTCOMES,
-    SECTION_PLAN_SCHEMA,
-)
+@derived_from_rules
+@functools.cache
+def system_prompt_sections() -> tuple[str, ...]:
+    """Every section the four prompts share, in the order they are sent."""
+    return (
+        SECTION_ROLE,
+        SECTION_PHILOSOPHY,
+        SECTION_NOT_DND,
+        section_core(),
+        section_character_creation(),
+        SECTION_RECORDS,
+        SECTION_COMBAT,
+        SECTION_MAGIC,
+        SECTION_EQUIPMENT,
+        SECTION_WORLD,
+        SECTION_GUIDELINES,
+        SECTION_OUTCOMES,
+        section_plan_schema(),
+    )
 
 
 def _prompt(*addenda: str) -> str:
-    return "\n\n".join((*SYSTEM_PROMPT_SECTIONS, *addenda))
+    return "\n\n".join((*system_prompt_sections(), *addenda))
 
 
-#: A player running a game.
-SYSTEM_PROMPT = _prompt()
-#: A player running a game for friends, answered as an aide. The manner
-#: changes; the limits on what may be written down do not (issue #352).
-AIDE_SYSTEM_PROMPT = _prompt(SECTION_DM_AIDE)
-#: A DM or admin playing a game.
-DM_PLAY_SYSTEM_PROMPT = _prompt(SECTION_DM_AUTHORITY)
-#: A DM or admin consulting the aide -- their default mode.
-DM_SYSTEM_PROMPT = _prompt(SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
+@derived_from_rules
+@functools.cache
+def system_prompt() -> str:
+    """A player running a game."""
+    return _prompt()
 
-# The 2x2 itself. A mapping rather than a chain of conditionals so the four
-# cases are visible at once and each names the constant it returns.
-SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE: dict[tuple[bool, str], str] = {
-    (False, MODE_PLAY): SYSTEM_PROMPT,
-    (False, MODE_AIDE): AIDE_SYSTEM_PROMPT,
-    (True, MODE_PLAY): DM_PLAY_SYSTEM_PROMPT,
-    (True, MODE_AIDE): DM_SYSTEM_PROMPT,
-}
+
+@derived_from_rules
+@functools.cache
+def aide_system_prompt() -> str:
+    """A player running a game for friends, answered as an aide.
+
+    The manner changes; the limits on what may be written down do not (issue
+    #352).
+    """
+    return _prompt(SECTION_DM_AIDE)
+
+
+@derived_from_rules
+@functools.cache
+def dm_play_system_prompt() -> str:
+    """A DM or admin playing a game."""
+    return _prompt(SECTION_DM_AUTHORITY)
+
+
+@derived_from_rules
+@functools.cache
+def dm_system_prompt() -> str:
+    """A DM or admin consulting the aide -- their default mode."""
+    return _prompt(SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
+
+
+@derived_from_rules
+@functools.cache
+def system_prompts_by_authority_and_mode() -> Mapping[tuple[bool, str], str]:
+    """The 2x2 itself, by ``(is_game_master, mode)``.
+
+    A mapping rather than a chain of conditionals so the four cases are
+    visible at once and each names the builder it returns. Read-only, since
+    every caller shares the one cached mapping.
+    """
+    return MappingProxyType(
+        {
+            (False, MODE_PLAY): system_prompt(),
+            (False, MODE_AIDE): aide_system_prompt(),
+            (True, MODE_PLAY): dm_play_system_prompt(),
+            (True, MODE_AIDE): dm_system_prompt(),
+        }
+    )
 
 
 def system_prompt_for(is_game_master: bool, mode: str | None = None) -> str:
@@ -1122,12 +1229,12 @@ def system_prompt_for(is_game_master: bool, mode: str | None = None) -> str:
             anything unrecognised -- takes this role's default.
 
     Returns:
-        One of the four module-level constants in
-        :data:`SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE`, never a freshly built
-        string.
+        One of the four cached prompts in
+        :func:`system_prompts_by_authority_and_mode`: the same string object
+        for the life of the process, never a freshly built one.
     """
     chosen = normalise_mode(mode, is_game_master=is_game_master)
-    return SYSTEM_PROMPTS_BY_AUTHORITY_AND_MODE[(bool(is_game_master), chosen)]
+    return system_prompts_by_authority_and_mode()[(bool(is_game_master), chosen)]
 
 
 def roll_dice(expression: str) -> tuple[list[int], int]:

@@ -270,7 +270,7 @@ class TrimmedWorldLoreReachesTheModelTest(SimpleTestCase):
         return embed
 
     def test_each_trimmed_fact_is_retrieved_and_no_longer_in_the_prompt(self):
-        from gm.engine import SYSTEM_PROMPT
+        from gm.engine import system_prompt
 
         for query, vocabulary, facts in self.CASES:
             with self.subTest(query=query), tempfile.TemporaryDirectory() as temp:
@@ -297,7 +297,7 @@ class TrimmedWorldLoreReachesTheModelTest(SimpleTestCase):
                 retrieved_text = "\n".join(item.chunk.text for item in results)
                 for fact in facts:
                     self.assertIn(fact, retrieved_text)
-                    self.assertNotIn(fact, SYSTEM_PROMPT)
+                    self.assertNotIn(fact, system_prompt())
 
 
 class EmbedClientTest(SimpleTestCase):

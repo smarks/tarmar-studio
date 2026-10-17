@@ -23,12 +23,13 @@ from common.helpers import (
 from .. import services
 from ..models import Character
 from ..skills import (
-    ALL_TRACKS,
     DEFAULT_RUN_YEARS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
+    RANDOM_TRACK_KEY,
     format_skill_level,
     get_skill_level,
     normalize_skill_name,
+    selectable_tracks,
 )
 from ..templatetags.dice_display import survival_roll
 from ..weapon_skill import needs_weapon_tie, weapon_choices
@@ -188,9 +189,9 @@ def character_add_experience_years(request, pk):
     data, err = _parse_json_body(request)
     if err:
         return err
-    track = data.get("track", "random")
+    track = data.get("track", RANDOM_TRACK_KEY)
 
-    if track not in ALL_TRACKS and track != "random":
+    if track not in selectable_tracks():
         return _json_error(f"Unknown track: {track}")
 
     years_requested, err = _parse_requested_years(data)

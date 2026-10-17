@@ -23,6 +23,34 @@
 const {
     test, expect, loginAs, seedCharacterFromExport, TEST_USER,
 } = require('./fixtures');
+const { loadedSkillRules } = require('./skill-rules');
+
+const ROMAN = [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+
+/** A small level as the sheet writes it: 3 is "III". */
+function roman(number) {
+    let left = number;
+    let written = '';
+    for (const [value, numeral] of ROMAN) {
+        while (left >= value) {
+            written += numeral;
+            left -= value;
+        }
+    }
+    return written;
+}
+
+/**
+ * What a skill's row says for ``points``, priced as characters.skills'
+ * points_for_level prices it: level N costs ``multiplier`` times N(N+1)/2 in
+ * total, and the points past the level are shown beside it.
+ */
+function levelText(points, multiplier) {
+    let level = 0;
+    while (multiplier * ((level + 1) * (level + 2)) / 2 <= points) level += 1;
+    const spare = points - multiplier * (level * (level + 1)) / 2;
+    return `Level ${level ? roman(level) : '0'}${spare ? ` (+${spare})` : ''}`;
+}
 
 // A 20-point sword is level V with 5 points to spare, so a single click
 // reaches level VI — past the cap that used to exist. 5 Arcane points is only
@@ -122,5 +150,25 @@ test.describe('Skill level ladder', () => {
         await page.reload();
         await expect(swordRow.locator('.skill-level')).toHaveText('Level VI');
         await expect(arcaneRow.locator('.skill-level')).toHaveText('Level II');
+    });
+
+    test('the Arcane ladder is priced by the loaded canon\'s multiplier (#70)', async ({ page }) => {
+        // The test above types the pages' doubled cost; this one reads the
+        // loaded canon's, so it holds under either canon.
+        const { arcane } = loadedSkillRules();
+        // One point short of level II: the next point buys it.
+        const points = 3 * arcane.multiplier - 1;
+        await loginAs(page, TEST_USER);
+        await seedCharacterFromExport(page, TEST_USER, {
+            ...LADDER_CHARACTER,
+            data: { ...LADDER_CHARACTER.data, skills: { [arcane.name]: points }, free_skill_points: 1 },
+        });
+
+        const row = page.locator(`.skill-row[data-skill="${arcane.name}"]`);
+        await expect(row.locator('.skill-level')).toHaveText(levelText(points, arcane.multiplier));
+        await row.locator('.allocate-btn').click();
+        await expect(row.locator('.skill-level')).toHaveText(levelText(points + 1, arcane.multiplier));
+        await expect(row.locator('.skill-level')).toHaveText('Level II');
+        await expect(row.locator('.skill-points')).toHaveText(`(${points + 1} pts)`);
     });
 });

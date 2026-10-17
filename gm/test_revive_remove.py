@@ -16,7 +16,7 @@ from characters.models import Character
 from common.test_helpers import BaseTestCase
 
 from . import roster
-from .engine import DM_SYSTEM_PROMPT, SYSTEM_PROMPT
+from .engine import dm_system_prompt, system_prompt
 from .models import GMSession
 from .testing import run_actions
 
@@ -87,8 +87,8 @@ class PromptTest(BaseTestCase):
     def test_only_the_game_masters_prompt_teaches_them(self):
         for phrase in ("brought back to life", "taken out of this session"):
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase, DM_SYSTEM_PROMPT)
-                self.assertNotIn(phrase, SYSTEM_PROMPT)
+                self.assertIn(phrase, dm_system_prompt())
+                self.assertNotIn(phrase, system_prompt())
 
 
 class ReviveTest(BaseTestCase):

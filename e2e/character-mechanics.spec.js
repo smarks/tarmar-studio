@@ -20,9 +20,11 @@
  */
 
 const {
-    test, expect, loginAs, TEST_USER, createBattleViaSetup, postAsGameMaster, characterIdFromUrl,
-    seedCharacterFromExport,
+    test, expect, loginAs, TEST_USER, TEST_ADMIN, createBattleViaSetup, postAsGameMaster,
+    characterIdFromUrl, seedCharacterFromExport,
 } = require('./fixtures');
+const { pinDice } = require('./dice');
+const { loadedSkillRules } = require('./skill-rules');
 
 function mechanicsCharacter(name) {
     return {
@@ -134,6 +136,32 @@ test.describe('Sheet mechanics', () => {
 
         await page.reload();
         await expect(page.locator('#recent-changes')).toContainText('stealth check: 2d6');
+    });
+
+    test('#70: the check rolls the canon\'s dice and its natural success succeeds', async ({ page }) => {
+        // Read from the loaded canon, so this holds under either canon: the
+        // dice, the natural success, a skill the canon governs, and a seed
+        // whose pinned dice make the natural.
+        const { skill_check: check } = loadedSkillRules();
+        const [skill] = check.governed_skills;
+        await loginAs(page, TEST_ADMIN);
+        await seedCharacterFromExport(page, TEST_ADMIN, mechanicsCharacter(`Natural ${Date.now()}`));
+
+        await pinDice(page, '**/skill-check/', check.natural_success_seed);
+        await page.locator('#skill-check-skill').selectOption(skill);
+        // A difficulty no total reaches: only the natural makes it a success.
+        await page.locator('#skill-check-difficulty').fill(String(check.max_difficulty));
+        await page.locator('#skill-check-btn').click();
+        const result = page.locator('#skill-check-result');
+        await expect(result).toContainText(`${skill}: ${check.dice} [`);
+        await expect(result).toContainText(`= ${check.natural_success} `);
+        await expect(result).toContainText(
+            `vs ${check.max_difficulty}: success (natural ${check.natural_success})`
+        );
+        const total = Number((await result.textContent()).match(/= (-?\d+) vs /)[1]);
+        expect(total, 'the total must fall short of the difficulty').toBeLessThan(check.max_difficulty);
+        await page.reload();
+        await expect(page.locator('#recent-changes')).toContainText(`${skill} check: ${check.dice}`);
     });
 
     test('#757: catalog gear is bought from the purse', async ({ page, browser }) => {

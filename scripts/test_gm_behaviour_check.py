@@ -13,11 +13,11 @@ import gm_behaviour_check as harness
 import pytest
 
 from characters.combat import MATRIX
-from characters.skills import (
-    SURVIVAL_AUTO_DEATH_ROLL,
-    SURVIVAL_AUTO_SURVIVE_ROLL,
-    SURVIVAL_TARGETS,
-)
+from characters.skill_rules import skill_rules
+from characters.skills import survival_targets
+from characters.tests.rules_fixtures import seated_skill_rules
+from characters.tests.test_skill_rules import INVENTED_SKILL_RULES
+from reference.rules_file import caches_derived_from_rules
 
 # The wrong rule the GM actually stated in #370, plus the rewordings a model
 # reaches for when it is wrong the same way. Each must be caught.
@@ -49,17 +49,59 @@ def campaigner_rule():
 
 def test_survival_oracle_matches_the_rules_module(campaigner_rule):
     """The oracle's observations agree with the constants the rules declare."""
-    assert campaigner_rule.target == SURVIVAL_TARGETS["campaigner"]
-    assert campaigner_rule.auto_survive_roll == SURVIVAL_AUTO_SURVIVE_ROLL
-    assert campaigner_rule.auto_death_roll == SURVIVAL_AUTO_DEATH_ROLL
+    survival_roll = skill_rules().survival_roll
+    assert campaigner_rule.target == survival_targets()["campaigner"]
+    assert campaigner_rule.auto_survive_roll == survival_roll.automatic_survival_total
+    assert campaigner_rule.auto_death_roll == survival_roll.automatic_death_total
     assert campaigner_rule.rolls_high is True
 
 
 def test_survival_oracle_reads_each_track_separately():
     """A track with a different target is observed as having one."""
     laborer = harness.survival_rule_from_code("laborer")
-    assert laborer.target == SURVIVAL_TARGETS["laborer"]
-    assert laborer.target != SURVIVAL_TARGETS["campaigner"]
+    assert laborer.target == survival_targets()["laborer"]
+    assert laborer.target != survival_targets()["campaigner"]
+
+
+def test_the_natural_survival_faces_are_the_loaded_canons_dice():
+    """The faces of a natural survival are counted on the canon's dice (#70).
+
+    Under invented rules the survival roll is 2d10, so a natural 20 is two
+    tens, never three.
+    """
+    rule = harness.SurvivalRule(
+        track="smith",
+        target=25,
+        rolls_high=True,
+        auto_survive_roll=20,
+        auto_death_roll=2,
+        described="",
+    )
+    with seated_skill_rules(INVENTED_SKILL_RULES):
+        auto_survive = harness._auto_survive_pattern(rule)
+    assert auto_survive.search("a 10 and 10")
+    assert auto_survive.search("10, 10")
+    # On the loaded canon's three dice the same total is no pair of tens.
+    assert not harness._auto_survive_pattern(rule).search("10, 10")
+
+
+def test_the_track_patterns_name_the_seated_canons_tracks_and_then_the_loaded():
+    """The cached patterns are built from the rules in force (issue #70).
+
+    Each registers with ``reference.rules_file.derived_from_rules``, so seated
+    rules build their own and leave none behind.
+    """
+    patterns = (harness._track_name, harness._figure_for_track, harness._track_figure)
+    assert harness._track_name().search("the campaigner track")
+    with seated_skill_rules(INVENTED_SKILL_RULES):
+        assert harness._track_name().search("the sailor track")
+        assert not harness._track_name().search("the campaigner track")
+        assert harness._figure_for_track().search("25 for the smith")
+        assert harness._track_figure().search("Smith: 25")
+    assert harness._track_name().search("the campaigner track")
+    assert not harness._track_name().search("the sailor track")
+    for pattern in patterns:
+        assert pattern in caches_derived_from_rules()
 
 
 @pytest.mark.parametrize("wording", WRONG_RULE_WORDINGS)
@@ -279,19 +321,19 @@ def test_both_of_a_game_masters_modes_are_covered():
 def test_each_persona_expects_the_prompt_its_role_and_mode_produce():
     """check_mode's four states, named the way the engine names them."""
     from gm.engine import (
-        AIDE_SYSTEM_PROMPT,
-        DM_PLAY_SYSTEM_PROMPT,
-        DM_SYSTEM_PROMPT,
-        SYSTEM_PROMPT,
+        aide_system_prompt,
+        dm_play_system_prompt,
+        dm_system_prompt,
+        system_prompt,
     )
 
-    assert harness.PLAYER.expected_prompt is SYSTEM_PROMPT
-    assert harness.GAME_MASTER.expected_prompt is DM_SYSTEM_PROMPT
-    assert harness.GAME_MASTER_PLAYING.expected_prompt is DM_PLAY_SYSTEM_PROMPT
-    assert harness.prompt_name(AIDE_SYSTEM_PROMPT) == "AIDE_SYSTEM_PROMPT"
-    assert harness.prompt_name(DM_PLAY_SYSTEM_PROMPT) == "DM_PLAY_SYSTEM_PROMPT"
+    assert harness.PLAYER.expected_prompt is system_prompt()
+    assert harness.GAME_MASTER.expected_prompt is dm_system_prompt()
+    assert harness.GAME_MASTER_PLAYING.expected_prompt is dm_play_system_prompt()
+    assert harness.prompt_name(aide_system_prompt()) == "aide_system_prompt()"
+    assert harness.prompt_name(dm_play_system_prompt()) == "dm_play_system_prompt()"
     assert (
-        harness.prompt_name("nothing") == "a prompt that is none of the known constants"
+        harness.prompt_name("nothing") == "a prompt that is none of the known builders"
     )
 
 
@@ -2650,6 +2692,7 @@ def test_a_skill_checks_total_is_read_off_its_line():
         attribute_score=14,
         attribute_modifier=1,
         substituted=False,
+        dice="2d6",
         faces=(3, 5),
         stated=False,
         dice_total=8,

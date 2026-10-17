@@ -1,9 +1,11 @@
 """The strict reader every canon rules file shares (issue #59).
 
 A canon carries its rules as JSON files beside its pages:
-``magic-rules.json`` (``battle.magic_rules``) and, from issue #59,
-``character-rules.json``. Each is read the same strict way, so a canon
-author's mistake stops the server instead of becoming a quiet default:
+``magic-rules.json`` (``battle.magic_rules``), from issue #59
+``character-rules.json`` (``characters.rules``) and from issue #70
+``skill-rules.json`` (``characters.skill_rules``). Each is read the same
+strict way, so a canon author's mistake stops the server instead of becoming
+a quiet default:
 
 - a missing or unreadable file, or one that is not JSON, is refused;
 - a key repeated in one object is refused (``json.loads`` alone keeps the
@@ -26,8 +28,14 @@ field path, e.g. ``push.failure_bands[1].highest_margin``.
 Free of Django on purpose, like ``reference.paths``: ``characters.dice`` is in
 ``gm.engine``'s import chain, which the offline CLI imports with no Django
 configured, and ``characters.rules``, which reads its file through here, is
-where ``characters.dice`` takes its numbers from once issue #59 seats them
-(``gm.tests``' ``test_engine_imports_without_django`` holds both to that).
+where ``characters.dice`` takes its numbers from once issue #59 seats them;
+``characters.skill_rules`` is read the same way (``gm.tests``'
+``test_engine_imports_without_django`` holds all three to that).
+
+A value built from a loaded rules file and then cached (a Games Master prompt,
+a pattern naming the canon's skills) registers its cache with
+:func:`derived_from_rules`, so :func:`forget_values_derived_from_rules` can
+clear every one of them when a test seats other rules (issue #70).
 """
 
 from collections.abc import Callable, Iterator, Sequence
@@ -41,6 +49,67 @@ from common.json_text import parse_json_text
 RULINGS_FIELD = "rulings"
 #: The fields each entry of ``rulings`` must carry as non-empty strings.
 RULING_FIELDS = ("key", "reading")
+
+
+class CacheCounts(Protocol):
+    """What a cache reports of itself: ``functools.cache``'s ``cache_info()``."""
+
+    @property
+    def misses(self) -> int: ...
+
+    @property
+    def currsize(self) -> int: ...
+
+
+class RulesDerivedCache(Protocol):
+    """A cached function of no arguments: ``functools.cache``'s wrapper, for one.
+
+    No arguments, because the value is the rules' alone: the same for every
+    caller until the rules change.
+    """
+
+    def __call__(self) -> object: ...
+
+    def cache_clear(self) -> None: ...
+
+    def cache_info(self) -> CacheCounts: ...
+
+
+#: Every cache :func:`derived_from_rules` registered, in registration order.
+_CACHES_DERIVED_FROM_RULES: list[RulesDerivedCache] = []
+
+
+def derived_from_rules[Cached: RulesDerivedCache](cached: Cached) -> Cached:
+    """Register a cached function whose value is built from loaded rules.
+
+    Placed above ``@functools.cache``, so the registered cache is the one the
+    function's callers read. A module registers its caches when it is
+    imported; a cache whose module was never imported holds nothing to clear.
+
+    Args:
+        cached: The cached function.
+
+    Returns:
+        ``cached``, unchanged.
+    """
+    _CACHES_DERIVED_FROM_RULES.append(cached)
+    return cached
+
+
+def caches_derived_from_rules() -> tuple[RulesDerivedCache, ...]:
+    """Every cache :func:`derived_from_rules` has registered so far."""
+    return tuple(_CACHES_DERIVED_FROM_RULES)
+
+
+def forget_values_derived_from_rules() -> None:
+    """Clear every registered cache, so each value is built afresh when asked.
+
+    The loaded rules files themselves are cached by their own modules
+    (``characters.skill_rules.skill_rules`` and its siblings), which a caller
+    seating other rules clears beside this.
+    """
+    for cached in _CACHES_DERIVED_FROM_RULES:
+        cached.cache_clear()
 
 
 class RulesFileError(Exception):
@@ -203,6 +272,15 @@ class RulesFileReader:
         if not isinstance(value, int) or isinstance(value, bool):
             self.fail(field_path, f"must be an integer, got {value!r}")
         return value
+
+    def integers(
+        self, fields: dict[str, Any], field_path: str, names: tuple[str, ...]
+    ) -> dict[str, int]:
+        """The integer fields ``names`` of one object read by
+        :meth:`json_object`, by name."""
+        return {
+            name: self.integer(fields[name], f"{field_path}.{name}") for name in names
+        }
 
     def optional_integer(self, value: Any, field_path: str) -> int | None:
         """An integer or ``null``."""

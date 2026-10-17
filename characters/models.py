@@ -50,6 +50,7 @@ from .equipment import (
 from .movement import GAIT_ORDER, compute_gaits
 from .movement import movement_modifier as _movement_modifier
 from .rules import character_rules, scores_by_short_name
+from .skill_rules import skill_rules
 from .skills import specialised_skill_for_granted
 from .weapon_skill import weapon_skill_for_granted
 
@@ -1770,9 +1771,7 @@ class Character(models.Model):
     @property
     def level(self):
         """Experience level (1-10) derived from total XP."""
-        from .skills import get_experience_level
-
-        return get_experience_level(self.total_xp)
+        return skill_rules().experience.level_for(self.total_xp)
 
     @property
     def highest_skill_level(self):

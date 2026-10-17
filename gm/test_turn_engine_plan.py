@@ -24,13 +24,13 @@ from .turn_engine.plan import (
     read_plan,
 )
 from .turn_engine.policy import (
-    _CHECK_WORDS,
     AIDE_MANNER,
     AIDE_PLANNING_GUIDANCE,
     AIDE_UNASKED_ROLL_REFUSAL,
     GAME_MASTER_ONLY_REFUSAL,
     PLAYER_STATED_SCORES_REFUSAL,
     TurnPolicy,
+    _check_words,
 )
 
 GAME_MASTER = TurnPolicy.for_turn(MODE_AIDE, is_game_master=True)
@@ -492,7 +492,7 @@ class CheckWordsTest(SimpleTestCase):
             "check the roster, then check his stealth against 12",
         ):
             with self.subTest(message=message):
-                self.assertIsNotNone(_CHECK_WORDS.search(message))
+                self.assertIsNotNone(_check_words().search(message))
 
     def test_no_check_with_against_in_the_same_sentence(self):
         for message in (
@@ -504,7 +504,7 @@ class CheckWordsTest(SimpleTestCase):
             "against 12, check",
         ):
             with self.subTest(message=message):
-                self.assertIsNone(_CHECK_WORDS.search(message))
+                self.assertIsNone(_check_words().search(message))
 
     def test_the_check_words_stay_fast_on_crafted_input(self):
         # The tests above check which messages ask; this one checks how long
@@ -524,7 +524,7 @@ class CheckWordsTest(SimpleTestCase):
         for label, message in crafted.items():
             with self.subTest(input=label, pattern="check words"):
                 started = time.perf_counter()
-                _CHECK_WORDS.search(message)
+                _check_words().search(message)
                 self.assertLess(time.perf_counter() - started, 1.0)
 
 

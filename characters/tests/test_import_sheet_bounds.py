@@ -30,7 +30,7 @@ from characters.models import (
     MAX_SMALLINT_FIELD_VALUE,
     Character,
 )
-from characters.skills import ALL_TRACKS
+from characters.skills import track_keys
 from common.test_helpers import BaseTestCase, create_character
 from gm.character_schema import extraction_to_import_payload
 
@@ -210,7 +210,7 @@ class SheetBuiltGameMasterCharacterRoundTripTest(BaseTestCase):
         try:
             services.add_experience_years(
                 built.pk,
-                ALL_TRACKS[0],
+                track_keys()[0],
                 8,
                 actor=self.game_master,
                 is_game_master=True,

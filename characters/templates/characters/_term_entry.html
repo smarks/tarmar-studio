@@ -14,7 +14,7 @@ it (the newest entry).
                             </ul>
                             {% if run.aging %}
                             <p class="aging-warning">Aging penalties applied:
-                                {% for attr, penalty in run.aging.items %}
+                                {% for attr, penalty in run.aging|in_aging_order %}
                                 {% if penalty != 0 %}{{ attr|upper|slice:":3" }} {{ penalty }}{% if not forloop.last %}, {% endif %}{% endif %}
                                 {% endfor %}
                             </p>

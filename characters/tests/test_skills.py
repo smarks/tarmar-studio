@@ -254,16 +254,17 @@ class SkillsFunctionsTest(TestCase):
         self.assertEqual(get_skill_for_year("merchant", 20), "Alert")
         self.assertEqual(get_skill_for_year("merchant", 21), "Alert")
         self.assertEqual(get_skill_for_year("merchant", 25), "Alert")
-        # Invalid track falls back to laborer
-        skill = get_skill_for_year("invalid_track", 1)
-        self.assertEqual(skill, "Weapon")
+        # A track the canon does not have is refused: it used to fall back to
+        # Laborer, a track a canon need not carry (issue #70).
+        with self.assertRaisesMessage(ValueError, "Unknown track: invalid_track"):
+            get_skill_for_year("invalid_track", 1)
 
     def test_get_random_track(self):
         """get_random_track returns valid track."""
-        from characters.skills import ALL_TRACKS, get_random_track
+        from characters.skills import get_random_track, track_keys
 
         track = get_random_track()
-        self.assertIn(track, ALL_TRACKS)
+        self.assertIn(track, track_keys())
 
     def test_simulate_experience_years(self):
         """simulate_experience_years returns valid term result."""
@@ -336,7 +337,7 @@ class SkillsFunctionsTest(TestCase):
             self.assertEqual(result["aging"]["strength"], -1)
 
     def test_simulate_experience_years_aging_escalates_past_the_table(self):
-        """Aging keeps escalating by formula past AGING_TABLE's last age."""
+        """Aging keeps escalating by formula past the aging table's last age."""
         from unittest.mock import patch
 
         from characters.skills import simulate_experience_years
@@ -364,19 +365,25 @@ class SkillsFunctionsTest(TestCase):
                     "constitution": -4,
                 },
             )
+            # Stored in the table's order, as a tabulated stage is (issue #70).
+            self.assertEqual(
+                list(result["aging"]),
+                ["strength", "dexterity", "intelligence", "wisdom", "constitution"],
+            )
 
     def test_get_aging_penalties_table_range_unchanged(self):
-        """Terms 4-13 still come straight from AGING_TABLE, unchanged."""
-        from characters.skills import AGING_TABLE, get_aging_penalties
+        """Terms 4-13 still come straight from the canon's table, unchanged."""
+        from characters.skill_rules import skill_rules
 
-        self.assertIsNone(get_aging_penalties(4))  # term 4 predates aging start
-        for term in range(5, 14):
-            self.assertEqual(get_aging_penalties(term), AGING_TABLE[term])
+        aging = skill_rules().aging
+        self.assertIsNone(aging.penalties_for(4))  # term 4 predates aging start
+        for row in aging.stages[1:]:
+            self.assertEqual(aging.penalties_for(row.stage), row.penalties)
 
     def test_get_aging_penalties_escalates_uncapped_past_term_13(self):
         """Terms 14+ escalate by formula: -1 STR/DEX/CON per term, -1 INT/WIS
         every second term (15, 17, 19, ...), with no ceiling."""
-        from characters.skills import get_aging_penalties
+        from characters.skill_rules import skill_rules
 
         expected = {
             13: {
@@ -424,7 +431,7 @@ class SkillsFunctionsTest(TestCase):
         }
         for term, penalties in expected.items():
             with self.subTest(term=term):
-                self.assertEqual(get_aging_penalties(term), penalties)
+                self.assertEqual(skill_rules().aging.penalties_for(term), penalties)
 
     def test_simulate_experience_years_survival_failure(self):
         """simulate_experience_years can result in death."""
@@ -490,17 +497,20 @@ class SkillsFunctionsTest(TestCase):
         So the track's target is stubbed past anything 18 plus a modifier can
         reach. Only the override survives it.
         """
+        from dataclasses import replace
         from unittest.mock import patch
 
-        from characters.skills import TRACK_DATA, simulate_experience_years
+        from characters.skill_rules import skill_rules
+        from characters.skills import simulate_experience_years
+        from characters.tests.rules_fixtures import seated_skill_rules
 
-        unsurvivable = {
-            **TRACK_DATA,
-            "campaigner": {**TRACK_DATA["campaigner"], "survivability": 30},
-        }
+        loaded = skill_rules()
+        tracks = dict(loaded.tracks.tracks)
+        tracks["campaigner"] = replace(tracks["campaigner"], survival_target=30)
+        unsurvivable = replace(loaded, tracks=replace(loaded.tracks, tracks=tracks))
         with (
             patch("characters.skills.roll_survival_dice", return_value=(6, 6, 6, 18)),
-            patch.dict("characters.skills.TRACK_DATA", unsurvivable, clear=True),
+            seated_skill_rules(unsurvivable),
         ):
             result = simulate_experience_years(
                 years_requested=4,
@@ -654,7 +664,7 @@ class SkillsFunctionsTest(TestCase):
 
         from characters.skills import simulate_experience_years
 
-        # Craft position 13 ("Maker Skill" per SKILL_TRACKS["craft"]) grants a
+        # Craft position 13 ("Maker Skill" on the craft track's table) grants a
         # maker skill point every year: 1, 2, 3, 4 -> levels 1, 1, 2, 2.
         with (
             patch("characters.skills.roll_survival_dice", return_value=(6, 6, 6, 18)),
@@ -2097,7 +2107,7 @@ class NormalizeSkillNamePatternsTest(TestCase):
         # whitespace runs the function would have collapsed, so each stays
         # linear on its own. The inputs marked "guard" were fast for the old
         # code too; they hold the new code's own paths to the same bound.
-        from characters.skills import (
+        from characters.skill_names import (
             _BONUS_IN_PARENTHESES,
             _PARENTHESES,
             _ROMAN_NUMERAL_SUFFIX,
@@ -2150,20 +2160,22 @@ class SkillMaxDynamicTest(TestCase):
 
     def test_each_track_has_one_skill_per_d20_position(self):
         """Every track has exactly 20 skills — one per reachable d20 roll."""
-        from characters.skills import SKILL_TRACKS
+        from characters.skill_rules import skill_rules
 
-        for track_name, track_skills in SKILL_TRACKS.items():
+        for track_name, track in skill_rules().tracks.tracks.items():
+            track_skills = track.skills
             self.assertEqual(
                 len(track_skills), 20, f"{track_name} should have 20 skills"
             )
 
     def test_position_past_table_clamps_to_last_skill(self):
         """A position beyond the 20-entry table clamps to that track's last skill."""
-        from characters.skills import ALL_TRACKS, SKILL_TRACKS, get_skill_for_year
+        from characters.skill_rules import skill_rules
+        from characters.skills import get_skill_for_year
 
-        for track in ALL_TRACKS:
+        for track, rules in skill_rules().tracks.tracks.items():
             skill = get_skill_for_year(track, 21)
-            self.assertEqual(skill, SKILL_TRACKS[track][-1], f"{track} position 21")
+            self.assertEqual(skill, rules.skills[-1], f"{track} position 21")
 
 
 class IsSpecialExperienceResultTest(TestCase):
@@ -2199,21 +2211,21 @@ class GrantedSkillNamesTest(TestCase):
     """Tests for the type-ahead corpus's single source of truth (issue #224).
 
     ``granted_skill_names`` enumerates every real skill any track's d20 table
-    can grant, straight from ``SKILL_TRACKS`` -- so the corpus can never drift
+    can grant, straight from the canon's track tables -- so the corpus can never drift
     from what the prior-experience generator actually rolls.
     """
 
     def test_includes_every_non_special_track_entry(self):
+        from characters.skill_rules import skill_rules
         from characters.skills import (
-            SKILL_TRACKS,
             granted_skill_names,
             is_special_experience_result,
             normalize_skill_name,
         )
 
         names = granted_skill_names()
-        for table in SKILL_TRACKS.values():
-            for raw in table:
+        for track in skill_rules().tracks.tracks.values():
+            for raw in track.skills:
                 normalized = normalize_skill_name(raw)
                 if is_special_experience_result(normalized):
                     continue

@@ -22,7 +22,7 @@ from characters.models import (
     character_int_field_minimum,
     starting_age,
 )
-from characters.skills import ALL_TRACKS, simulate_experience_years
+from characters.skills import simulate_experience_years, track_keys
 from common.test_helpers import BaseTestCase, create_character
 from gm.character_schema import character_json_schema, extraction_to_import_payload
 
@@ -117,7 +117,7 @@ class NoSheetPathLowersTheAgeTest(SimpleTestCase):
             ("strength", "dexterity", "intelligence", "wisdom", "constitution"), 3
         )
         deaths = 0
-        for track in ALL_TRACKS:
+        for track in track_keys():
             for seed in range(20):
                 with self.subTest(track=track, seed=seed):
                     random.seed(seed)
