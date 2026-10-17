@@ -34,6 +34,8 @@ Resolution is roll-over: ``d20 + to-hit bonus >= Target Number`` is a hit. A
 natural 20 always hits (and crits); a natural 1 always misses (and fumbles).
 """
 
+from pathlib import Path
+
 # The §8 Hybrid decomposition helpers were duplicated here and in
 # tarmar_engine.resolution until #240 milestone 2 folded them onto one
 # source; damage_after_armour is tarmar_rules' own, re-exported through the
@@ -67,6 +69,7 @@ from tarmar_rules import fumble_table_lookup as fumble_result
 from tarmar_rules import weapon_skill_bonus as _package_weapon_skill_bonus
 
 from .equipment import get_weapon_class, is_unusual_weapon
+from .equipment_rules import EquipmentCatalog, EquipmentCatalogError
 
 __all__ = [
     "ARMOUR_TIERS",
@@ -92,8 +95,51 @@ __all__ = [
     "strength_fit_penalty",
     "target_number",
     "to_hit_bonus",
+    "validate_catalog_classes",
     "weapon_skill_bonus",
 ]
+
+
+def validate_catalog_classes(catalog: EquipmentCatalog, path: Path) -> None:
+    """Refuse a weapon class or armour tier the combat matrix does not have.
+
+    The weapon-against-armour matrix (:data:`MATRIX`, rows by weapon class,
+    columns by :data:`ARMOUR_TIERS`) is the rules package's, and the catalog
+    the canon's, so the catalog's loader cannot see a class or tier with no
+    row or column: an attack with that weapon, or on that armour, would find
+    no Target Number. Here rather than in :mod:`characters.equipment_rules`,
+    which stays free of the rules package;
+    :func:`characters.checks.check_equipment_catalog` calls it, so a refusal
+    is ``characters.E003`` (issue #75).
+
+    Args:
+        catalog: The catalog read from ``path``.
+        path: The ``equipment.json`` it was read from, for the message.
+
+    Raises:
+        EquipmentCatalogError: Some weapon's ``weapon_class`` or
+            ``alt_class``, or some armour's ``armour_tier``, is not the
+            matrix's.
+    """
+    refused = [
+        f"weapons.{identifier}.{field} {weapon_class!r}"
+        for identifier, weapon in catalog.weapons.items()
+        for field, weapon_class in (
+            ("weapon_class", weapon.weapon_class),
+            ("alt_class", weapon.alt_class),
+        )
+        if weapon_class is not None and weapon_class not in MATRIX
+    ] + [
+        f"armor.{identifier}.armour_tier {armour.armour_tier!r}"
+        for identifier, armour in catalog.armour.items()
+        if armour.armour_tier not in ARMOUR_TIERS
+    ]
+    if refused:
+        raise EquipmentCatalogError(
+            f"{path}: {', '.join(refused)} is not a weapon class "
+            f"{list(MATRIX)} or armour tier {list(ARMOUR_TIERS)} the combat "
+            "matrix has"
+        )
 
 
 def weapon_skill_bonus(

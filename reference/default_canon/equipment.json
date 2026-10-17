@@ -1,0 +1,1315 @@
+{
+  "weapons": {
+    "dagger": {
+      "name": "Dagger",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "1d6-1",
+      "str_req": null,
+      "cost": 10,
+      "weight": 0.2,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Piercing"
+    },
+    "rapier": {
+      "name": "Rapier",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "1d6",
+      "str_req": 9,
+      "cost": 40,
+      "weight": 1.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Piercing"
+    },
+    "saber": {
+      "name": "Saber",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "2d6-2",
+      "str_req": 10,
+      "cost": 50,
+      "weight": 3.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "shortsword": {
+      "name": "Shortsword",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "2d6-1",
+      "str_req": 11,
+      "cost": 60,
+      "weight": 4.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "broadsword": {
+      "name": "Broadsword",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "2d6",
+      "str_req": 12,
+      "cost": 80,
+      "weight": 5.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "bastard_sword_1h": {
+      "name": "Bastard Sword (1 hand)",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "2d6+1",
+      "str_req": 13,
+      "cost": 100,
+      "weight": 7.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "bastard_sword_2h": {
+      "name": "Bastard Sword (2 hands)",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "3d6-2",
+      "str_req": 13,
+      "cost": 100,
+      "weight": 7.0,
+      "throwable": false,
+      "two_handed": true,
+      "weapon_class": "Heavy Striking"
+    },
+    "two_handed_sword": {
+      "name": "2-Handed Sword",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "3d6-1",
+      "str_req": 14,
+      "cost": 120,
+      "weight": 10.0,
+      "throwable": false,
+      "two_handed": true,
+      "weapon_class": "Heavy Striking"
+    },
+    "great_sword": {
+      "name": "Great Sword",
+      "category": "weapons",
+      "subcategory": "knives_swords",
+      "damage": "3d6+1",
+      "str_req": 16,
+      "cost": 150,
+      "weight": 15.0,
+      "throwable": false,
+      "two_handed": true,
+      "weapon_class": "Heavy Striking"
+    },
+    "club": {
+      "name": "Club",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "varies",
+      "str_req": null,
+      "cost": 10,
+      "weight": 3.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "hatchet": {
+      "name": "Hatchet",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "1d6",
+      "str_req": 9,
+      "cost": 15,
+      "weight": 2.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "hammer": {
+      "name": "Hammer",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "1d6+1",
+      "str_req": 10,
+      "cost": 25,
+      "weight": 4.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "mace": {
+      "name": "Mace",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "2d6-1",
+      "str_req": 11,
+      "cost": 40,
+      "weight": 6.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "small_ax": {
+      "name": "Small Ax",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "1d6+2",
+      "str_req": 11,
+      "cost": 30,
+      "weight": 5.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "war_ax": {
+      "name": "War Ax",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "2d6",
+      "str_req": 12,
+      "cost": 60,
+      "weight": 8.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "morningstar": {
+      "name": "Morningstar",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "2d6+1",
+      "str_req": 13,
+      "cost": 100,
+      "weight": 12.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "great_hammer": {
+      "name": "Great Hammer",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "2d6+2",
+      "str_req": 14,
+      "cost": 110,
+      "weight": 16.0,
+      "throwable": false,
+      "two_handed": true,
+      "weapon_class": "Heavy Striking"
+    },
+    "battle_axe": {
+      "name": "Battle Axe",
+      "category": "weapons",
+      "subcategory": "axes_hammers",
+      "damage": "3d6",
+      "str_req": 15,
+      "cost": 130,
+      "weight": 22.0,
+      "throwable": false,
+      "two_handed": true,
+      "weapon_class": "Heavy Striking"
+    },
+    "thrown_rock": {
+      "name": "Thrown Rock",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "1d6-4",
+      "str_req": null,
+      "cost": 0,
+      "weight": 0.5,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Missile — Bows"
+    },
+    "sling": {
+      "name": "Sling",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "1d6-2",
+      "str_req": null,
+      "cost": 2,
+      "weight": 1.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "Including rocks",
+      "weapon_class": "Missile — Bows"
+    },
+    "small_bow": {
+      "name": "Small Bow",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "1d6-1",
+      "str_req": 9,
+      "cost": 20,
+      "weight": 4.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "2 shots/turn if adjDEX 15+",
+      "weapon_class": "Missile — Bows"
+    },
+    "horse_bow": {
+      "name": "Horse Bow",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "1d6",
+      "str_req": 10,
+      "cost": 30,
+      "weight": 4.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "2 shots/turn if adjDEX 16+",
+      "weapon_class": "Missile — Bows"
+    },
+    "longbow": {
+      "name": "Longbow",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "1d6+2",
+      "str_req": 11,
+      "cost": 40,
+      "weight": 4.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "2 shots/turn if adjDEX 18+",
+      "weapon_class": "Missile — Bows"
+    },
+    "light_crossbow": {
+      "name": "Light Crossbow",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "2d6",
+      "str_req": 12,
+      "cost": 50,
+      "weight": 6.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "Every other turn; every if 14+",
+      "weapon_class": "Missile — Crossbows"
+    },
+    "heavy_crossbow": {
+      "name": "Heavy Crossbow",
+      "category": "weapons",
+      "subcategory": "missile",
+      "damage": "3d6",
+      "str_req": 15,
+      "cost": 80,
+      "weight": 10.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "Every 3rd turn; every other 16+",
+      "weapon_class": "Missile — Crossbows"
+    },
+    "arrows_20": {
+      "name": "Arrows (20)",
+      "category": "weapons",
+      "subcategory": "ammunition",
+      "damage": null,
+      "str_req": null,
+      "cost": 20,
+      "weight": 1.0,
+      "throwable": false,
+      "two_handed": false
+    },
+    "quarrels_20": {
+      "name": "Quarrels (20)",
+      "category": "weapons",
+      "subcategory": "ammunition",
+      "damage": null,
+      "str_req": null,
+      "cost": 20,
+      "weight": 1.0,
+      "throwable": false,
+      "two_handed": false
+    },
+    "javelin": {
+      "name": "Javelin",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "1d6-1",
+      "str_req": 9,
+      "cost": 20,
+      "weight": 3.0,
+      "throwable": true,
+      "two_handed": false,
+      "notes": "Too short for 2-hex",
+      "weapon_class": "Thrusting",
+      "alt_class": "Missile — Bows"
+    },
+    "spear_1h": {
+      "name": "Spear",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "1d6",
+      "str_req": 11,
+      "cost": 40,
+      "weight": 6.0,
+      "throwable": true,
+      "two_handed": false,
+      "notes": "2-2.5 yards",
+      "weapon_class": "Thrusting"
+    },
+    "spear_2h": {
+      "name": "Spear (2 hands)",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "1d6+1",
+      "str_req": 11,
+      "cost": 40,
+      "weight": 6.0,
+      "throwable": true,
+      "two_handed": true,
+      "notes": "2-2.5 yards",
+      "weapon_class": "Thrusting"
+    },
+    "halberd": {
+      "name": "Halberd",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "2d6",
+      "str_req": 13,
+      "cost": 70,
+      "weight": 16.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "2-2.5 yards",
+      "weapon_class": "Heavy Thrusting"
+    },
+    "pike_axe": {
+      "name": "Pike Axe",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "2d6+2",
+      "str_req": 15,
+      "cost": 100,
+      "weight": 22.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "2.5-3 yards",
+      "weapon_class": "Heavy Thrusting"
+    },
+    "trident": {
+      "name": "Trident",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "1d6",
+      "str_req": 10,
+      "cost": 30,
+      "weight": 4.0,
+      "throwable": false,
+      "two_handed": false,
+      "notes": "Too short for 2-hex",
+      "weapon_class": "Thrusting"
+    },
+    "cavalry_lance": {
+      "name": "Cavalry Lance",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "3d6-1",
+      "str_req": 13,
+      "cost": 100,
+      "weight": 20.0,
+      "throwable": false,
+      "two_handed": false,
+      "notes": "Mounted only",
+      "weapon_class": "Heavy Thrusting"
+    },
+    "pike": {
+      "name": "Pike",
+      "category": "weapons",
+      "subcategory": "pole",
+      "damage": "2d6+1",
+      "str_req": 12,
+      "cost": 50,
+      "weight": 12.0,
+      "throwable": false,
+      "two_handed": true,
+      "notes": "5 yards",
+      "weapon_class": "Heavy Thrusting"
+    },
+    "quarterstaff": {
+      "name": "Quarterstaff",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "1d6+2",
+      "str_req": 11,
+      "cost": 20,
+      "weight": 5.0,
+      "throwable": false,
+      "two_handed": true,
+      "weapon_class": "Striking"
+    },
+    "net": {
+      "name": "Net",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "1d6-3",
+      "str_req": 10,
+      "cost": 40,
+      "weight": 2.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Flexible / Snare"
+    },
+    "cestus": {
+      "name": "Cestus",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "by STR",
+      "str_req": null,
+      "cost": 20,
+      "weight": 2.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "whip": {
+      "name": "Whip",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "1d6-1",
+      "str_req": 8,
+      "cost": 30,
+      "weight": 1.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Flexible / Snare"
+    },
+    "lasso": {
+      "name": "Lasso",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "varies",
+      "str_req": 8,
+      "cost": 10,
+      "weight": 1.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Flexible / Snare"
+    },
+    "boomerang": {
+      "name": "Boomerang",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "2d6-1",
+      "str_req": 11,
+      "cost": 20,
+      "weight": 3.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Missile — Bows"
+    },
+    "nunchaku": {
+      "name": "Nunchaku",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "1d6+1",
+      "str_req": 9,
+      "cost": 35,
+      "weight": 4.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "torch_weapon": {
+      "name": "Torch (weapon)",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": "1d6 fire",
+      "str_req": null,
+      "cost": 0.01,
+      "weight": 1.0,
+      "throwable": false,
+      "two_handed": false,
+      "weapon_class": "Striking"
+    },
+    "bola": {
+      "name": "Bola",
+      "category": "weapons",
+      "subcategory": "unusual",
+      "damage": null,
+      "str_req": 9,
+      "cost": 15,
+      "weight": 1.0,
+      "throwable": true,
+      "two_handed": false,
+      "weapon_class": "Flexible / Snare"
+    }
+  },
+  "armor": {
+    "cloth_armor": {
+      "name": "Cloth Armor",
+      "category": "armor",
+      "stops": 1,
+      "dex_penalty": -1,
+      "cost": 50,
+      "weight": 14.0,
+      "movement_restriction": null,
+      "armour_tier": "Light"
+    },
+    "leather_armor": {
+      "name": "Leather Armor",
+      "category": "armor",
+      "stops": 2,
+      "dex_penalty": -2,
+      "cost": 100,
+      "weight": 16.0,
+      "movement_restriction": "no_sprint",
+      "armour_tier": "Light"
+    },
+    "chainmail": {
+      "name": "Chainmail",
+      "category": "armor",
+      "stops": 3,
+      "dex_penalty": -3,
+      "cost": 200,
+      "weight": 30.0,
+      "movement_restriction": "no_run_sprint",
+      "armour_tier": "Medium"
+    },
+    "half_plate": {
+      "name": "Half-Plate",
+      "category": "armor",
+      "stops": 4,
+      "dex_penalty": -4,
+      "cost": 300,
+      "weight": 45.0,
+      "movement_restriction": "no_run_sprint",
+      "armour_tier": "Heavy"
+    },
+    "plate_armor": {
+      "name": "Plate Armor",
+      "category": "armor",
+      "stops": 5,
+      "dex_penalty": -5,
+      "cost": 500,
+      "weight": 55.0,
+      "movement_restriction": "no_run_sprint",
+      "armour_tier": "Heavy"
+    },
+    "fine_plate": {
+      "name": "Fine Plate",
+      "category": "armor",
+      "stops": 6,
+      "dex_penalty": -4,
+      "cost": 5000,
+      "weight": 55.0,
+      "movement_restriction": "no_run_sprint",
+      "armour_tier": "Heavy"
+    }
+  },
+  "shields": {
+    "small_shield": {
+      "name": "Small Shield",
+      "category": "shield",
+      "stops": 1,
+      "dex_penalty": 0,
+      "cost": 30,
+      "weight": 10.0,
+      "shield_bonus": 1
+    },
+    "spike_shield": {
+      "name": "Spike Shield",
+      "category": "shield",
+      "stops": 1,
+      "dex_penalty": 0,
+      "cost": 40,
+      "weight": 12.0,
+      "shield_bonus": 1
+    },
+    "large_shield": {
+      "name": "Large Shield",
+      "category": "shield",
+      "stops": 2,
+      "dex_penalty": -1,
+      "cost": 50,
+      "weight": 20.0,
+      "shield_bonus": 2
+    },
+    "tower_shield": {
+      "name": "Tower Shield",
+      "category": "shield",
+      "stops": 3,
+      "dex_penalty": -2,
+      "cost": 70,
+      "weight": 35.0,
+      "shield_bonus": 3
+    },
+    "main_gauche": {
+      "name": "Main-Gauche",
+      "category": "shield",
+      "stops": 1,
+      "dex_penalty": -1,
+      "cost": 20,
+      "weight": 0.5,
+      "shield_bonus": 1
+    }
+  },
+  "gear": {
+    "backpack": {
+      "name": "Backpack",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 2,
+      "weight": 2.0
+    },
+    "bedroll": {
+      "name": "Bedroll",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 1,
+      "weight": 5.0
+    },
+    "blanket": {
+      "name": "Blanket",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.5,
+      "weight": 3.0
+    },
+    "candle": {
+      "name": "Candle",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.01,
+      "weight": 0.1
+    },
+    "torch": {
+      "name": "Torch",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.01,
+      "weight": 1.0
+    },
+    "lamp": {
+      "name": "Lamp",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.5,
+      "weight": 1.0
+    },
+    "oil_flask": {
+      "name": "Oil (flask)",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.1,
+      "weight": 1.0
+    },
+    "tinderbox": {
+      "name": "Tinderbox",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.5,
+      "weight": 0.5
+    },
+    "waterskin": {
+      "name": "Waterskin",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.2,
+      "weight": 4.0
+    },
+    "rations_1day": {
+      "name": "Rations (1 day)",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.5,
+      "weight": 2.0
+    },
+    "rope_hemp_50ft": {
+      "name": "Rope, hemp (50 ft)",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 1,
+      "weight": 10.0
+    },
+    "rope_silk_50ft": {
+      "name": "Rope, silk (50 ft)",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 10,
+      "weight": 5.0
+    },
+    "grappling_hook": {
+      "name": "Grappling hook",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 2,
+      "weight": 4.0
+    },
+    "hammer_tool": {
+      "name": "Hammer (tool)",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 1,
+      "weight": 3.0
+    },
+    "piton": {
+      "name": "Piton",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.05,
+      "weight": 0.25
+    },
+    "pole_10ft": {
+      "name": "10 ft pole",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 0.2,
+      "weight": 7.0
+    },
+    "iron_spikes_10": {
+      "name": "Iron spikes (10)",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 1,
+      "weight": 5.0
+    },
+    "barrel": {
+      "name": "Barrel",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 2,
+      "weight": 30.0
+    },
+    "basket": {
+      "name": "Basket",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 0.4,
+      "weight": 1.0
+    },
+    "bottle": {
+      "name": "Bottle",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 2,
+      "weight": 1.0
+    },
+    "bucket": {
+      "name": "Bucket",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 0.05,
+      "weight": 2.0
+    },
+    "chest": {
+      "name": "Chest",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 5,
+      "weight": 25.0
+    },
+    "flask": {
+      "name": "Flask",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 0.02,
+      "weight": 0.5
+    },
+    "jug": {
+      "name": "Jug",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 0.02,
+      "weight": 2.0
+    },
+    "pot_iron": {
+      "name": "Pot, iron",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 2,
+      "weight": 10.0
+    },
+    "pouch": {
+      "name": "Pouch",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 0.5,
+      "weight": 0.5
+    },
+    "sack": {
+      "name": "Sack",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 0.01,
+      "weight": 0.5
+    },
+    "vial": {
+      "name": "Vial",
+      "category": "gear",
+      "subcategory": "containers",
+      "cost": 1,
+      "weight": 0.1
+    },
+    "artisans_tools": {
+      "name": "Artisan's tools",
+      "category": "gear",
+      "subcategory": "tools",
+      "cost": 30,
+      "weight": 5.0,
+      "notes": "gear.md lists a 10-50 gp range; priced here at a flat 30 gp point value."
+    },
+    "climbers_kit": {
+      "name": "Climber's kit",
+      "category": "gear",
+      "subcategory": "tools",
+      "cost": 25,
+      "weight": 5.0
+    },
+    "healers_kit": {
+      "name": "Healer's kit",
+      "category": "gear",
+      "subcategory": "tools",
+      "cost": 25,
+      "weight": 3.0
+    },
+    "herbalism_kit": {
+      "name": "Herbalism kit",
+      "category": "gear",
+      "subcategory": "tools",
+      "cost": 5,
+      "weight": 3.0
+    },
+    "musical_instrument": {
+      "name": "Musical instrument",
+      "category": "gear",
+      "subcategory": "tools",
+      "cost": 25,
+      "weight": 3.0,
+      "notes": "gear.md lists a 5-50 gp range; priced here at a flat 25 gp point value."
+    },
+    "navigators_tools": {
+      "name": "Navigator's tools",
+      "category": "gear",
+      "subcategory": "tools",
+      "cost": 25,
+      "weight": 2.0
+    },
+    "ink_1oz": {
+      "name": "Ink (1 oz)",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 10,
+      "weight": 0.1
+    },
+    "ink_pen": {
+      "name": "Ink pen",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 0.02,
+      "weight": 0.1
+    },
+    "paper_sheet": {
+      "name": "Paper (sheet)",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 0.2,
+      "weight": 0.1
+    },
+    "parchment_sheet": {
+      "name": "Parchment (sheet)",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 0.1,
+      "weight": 0.1
+    },
+    "book_blank": {
+      "name": "Book, blank",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 25,
+      "weight": 3.0
+    },
+    "map_local": {
+      "name": "Map, local",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 5,
+      "weight": 0.1
+    },
+    "map_regional": {
+      "name": "Map, regional",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 50,
+      "weight": 0.1
+    },
+    "spellbook_blank": {
+      "name": "Spellbook, blank",
+      "category": "gear",
+      "subcategory": "writing",
+      "cost": 50,
+      "weight": 3.0
+    },
+    "acid_vial": {
+      "name": "Acid (vial)",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 25,
+      "weight": 0.5
+    },
+    "alchemists_fire": {
+      "name": "Alchemist's fire",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 50,
+      "weight": 1.0
+    },
+    "antitoxin_vial": {
+      "name": "Antitoxin (vial)",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 50,
+      "weight": 0.1
+    },
+    "holy_water_flask": {
+      "name": "Holy water (flask)",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 25,
+      "weight": 1.0
+    },
+    "healing_potion": {
+      "name": "Healing potion",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 50,
+      "weight": 0.5
+    },
+    "lock_simple": {
+      "name": "Lock, simple",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 10,
+      "weight": 1.0
+    },
+    "lock_good": {
+      "name": "Lock, good",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 40,
+      "weight": 1.0
+    },
+    "lock_superior": {
+      "name": "Lock, superior",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 150,
+      "weight": 1.0
+    },
+    "manacles": {
+      "name": "Manacles",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 2,
+      "weight": 2.0
+    },
+    "mirror_steel": {
+      "name": "Mirror, steel",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 5,
+      "weight": 0.5
+    },
+    "spyglass": {
+      "name": "Spyglass",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 1000,
+      "weight": 1.0
+    },
+    "magnifying_glass": {
+      "name": "Magnifying glass",
+      "category": "gear",
+      "subcategory": "special",
+      "cost": 100,
+      "weight": 0.1
+    },
+    "clothes_common": {
+      "name": "Common clothes",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 0.5,
+      "weight": 3.0
+    },
+    "clothes_traveler": {
+      "name": "Traveler's clothes",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 2,
+      "weight": 4.0
+    },
+    "clothes_fine": {
+      "name": "Fine clothes",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 15,
+      "weight": 4.0
+    },
+    "clothes_noble": {
+      "name": "Noble's outfit",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 75,
+      "weight": 6.0
+    },
+    "cloak": {
+      "name": "Cloak",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 1,
+      "weight": 2.0
+    },
+    "cloak_winter": {
+      "name": "Winter cloak",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 5,
+      "weight": 4.0
+    },
+    "boots": {
+      "name": "Boots",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 1,
+      "weight": 2.0
+    },
+    "hat": {
+      "name": "Hat",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 0.2,
+      "weight": 0.5
+    },
+    "gloves": {
+      "name": "Gloves",
+      "category": "gear",
+      "subcategory": "clothing",
+      "cost": 0.5,
+      "weight": 0.5
+    },
+    "rations_month_cram": {
+      "name": "One month cram",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 1,
+      "weight": 0.0,
+      "notes": "Doesn't expire; -1 after each month if eaten solely. gear.md gives no weight for month-scale rations (only Rations (1 day) has a weight entry)."
+    },
+    "rations_month_regular": {
+      "name": "One month regular",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 30,
+      "weight": 0.0,
+      "notes": "Spoils after a month. gear.md gives no weight for month-scale rations (only Rations (1 day) has a weight entry)."
+    },
+    "standard_pack": {
+      "name": "Standard Pack",
+      "category": "gear",
+      "subcategory": "basics",
+      "cost": 3.2,
+      "weight": 22.5,
+      "notes": "Bundle: waterskin, 50' rope (hemp), tinderbox, bedroll, blanket. gear.md gives no price for the bundle itself; cost and weight here are the sum of its component items."
+    },
+    "donkey_mule": {
+      "name": "Donkey/mule",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 8,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "horse_draft": {
+      "name": "Horse, draft",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 50,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "horse_riding": {
+      "name": "Horse, riding",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 75,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "warhorse": {
+      "name": "Warhorse",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 400,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "pony": {
+      "name": "Pony",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 30,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "cart": {
+      "name": "Cart",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 15,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "wagon": {
+      "name": "Wagon",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 35,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "carriage": {
+      "name": "Carriage",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 100,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "saddle_riding": {
+      "name": "Saddle, riding",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 10,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "saddlebags": {
+      "name": "Saddlebags",
+      "category": "gear",
+      "subcategory": "mounts_vehicles",
+      "cost": 4,
+      "weight": 0.0,
+      "notes": "gear.md's Mounts & Vehicles table gives no weight; not counted toward carried encumbrance."
+    },
+    "lodging_poor_inn": {
+      "name": "Poor inn",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.2,
+      "weight": 0.0,
+      "notes": "Per day. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "lodging_modest_inn": {
+      "name": "Modest inn",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 1,
+      "weight": 0.0,
+      "notes": "Per day. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "lodging_comfortable_inn": {
+      "name": "Comfortable inn",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 2,
+      "weight": 0.0,
+      "notes": "Per day. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "lodging_wealthy_inn": {
+      "name": "Wealthy inn",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 4,
+      "weight": 0.0,
+      "notes": "Per day. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "meal_poor": {
+      "name": "Poor meal",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.06,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "meal_modest": {
+      "name": "Modest meal",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.3,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "meal_comfortable": {
+      "name": "Comfortable meal",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.5,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "meal_wealthy": {
+      "name": "Wealthy meal",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 2,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "ale_mug": {
+      "name": "Ale (mug)",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.02,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "wine_common": {
+      "name": "Wine, common",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.2,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "wine_fine": {
+      "name": "Wine, fine",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 10,
+      "weight": 0.0,
+      "notes": "gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "messenger": {
+      "name": "Messenger",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.02,
+      "weight": 0.0,
+      "notes": "Per mile. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "coach_ride": {
+      "name": "Coach ride",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.03,
+      "weight": 0.0,
+      "notes": "Per mile. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    },
+    "ship_passage": {
+      "name": "Ship passage",
+      "category": "gear",
+      "subcategory": "lodging_services",
+      "cost": 0.1,
+      "weight": 0.0,
+      "notes": "Per mile. gear.md's Lodging & Services table gives no weight -- a service, not a carried item."
+    }
+  }
+}

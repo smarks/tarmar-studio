@@ -225,6 +225,30 @@ class RulesFileReaderTest(SimpleTestCase):
         self.assert_refused(invented_file(ceiling=True), "ceiling", "an integer")
         self.assert_refused(invented_file(cap=False), "cap", "an integer or null")
 
+    def test_a_number_is_finite_and_kept_as_written(self) -> None:
+        reader = InventedRulesReader(self.rules_file)
+        self.assertIs(type(reader.number(3, "weight")), int)
+        self.assertEqual(reader.number(0.25, "weight"), 0.25)
+        self.assertIsNone(reader.optional_number(None, "weight"))
+        self.assertEqual(reader.optional_number(-1.5, "weight"), -1.5)
+
+    def test_a_boolean_or_a_non_finite_value_is_not_a_number(self) -> None:
+        reader = InventedRulesReader(self.rules_file)
+        # json.loads reads the non-standard NaN and Infinity as floats.
+        for value in (True, "3", None, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaises(InventedRulesError) as caught:
+                    reader.number(value, "weight")
+                self.assertIn(str(self.rules_file), str(caught.exception))
+                self.assertIn("weight must be a finite number", str(caught.exception))
+        for value in (True, "3", float("-inf")):
+            with self.subTest(value=value):
+                with self.assertRaises(InventedRulesError) as caught:
+                    reader.optional_number(value, "weight")
+                self.assertIn(
+                    "weight must be a finite number or null", str(caught.exception)
+                )
+
     def test_a_boolean_must_be_true_or_false(self) -> None:
         self.assert_refused(invented_file(rounds_up=1), "rounds_up", "true or false")
 

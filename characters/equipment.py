@@ -29,17 +29,11 @@ penalty/restriction table.
 import json
 from pathlib import Path
 
+from .equipment_rules import CATALOG_GROUPS
+
 _CATALOG_PATH = Path(__file__).parent / "fixtures" / "equipment.json"
 _catalog_data = json.loads(_CATALOG_PATH.read_text())
 
-# The catalog's groups, in the order the picker lists them, with the picker's
-# labels. The keys are the fixture's top-level keys (#338 item 21).
-CATALOG_GROUPS: tuple[tuple[str, str], ...] = (
-    ("weapons", "Weapons"),
-    ("armor", "Armor"),
-    ("shields", "Shields"),
-    ("gear", "Gear"),
-)
 
 # What one item's own ``category`` may be, in the custom-item form's order and
 # with its labels. Only shields differ from their group: the group is
