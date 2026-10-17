@@ -76,14 +76,14 @@ class AttributeEditMovesMovementTest(SheetTestCase):
                     "movement_restriction_label",
                     "movement_modifier",
                     "gait_readout",
-                    "effective_strength",
+                    "lightest_load_limit",
                 ):
                     self.assertIn(key, data)
                 self.assertEqual(
                     data["movement_modifier"], self.character.movement_modifier
                 )
                 self.assertEqual(
-                    data["effective_strength"], self.character.effective_strength
+                    data["lightest_load_limit"], self.character.lightest_load_limit
                 )
                 self.assertEqual(data["gait_readout"], self.character.gait_readout)
 
@@ -109,13 +109,14 @@ class AttributeEditMovesMovementTest(SheetTestCase):
         self.character.refresh_from_db()
         self.assertEqual(data["character"]["weight_lbs"], self.character.weight_lbs)
         self.assertEqual(
-            data["movement"]["effective_strength"], self.character.effective_strength
+            data["movement"]["lightest_load_limit"],
+            self.character.lightest_load_limit,
         )
 
     def test_the_page_renders_the_capacity_the_painter_writes(self):
         page = self.client.get(self.url("edit")).content.decode()
         self.assertIn(
-            f'<span id="max-unencumbered">{self.character.effective_strength}</span>',
+            f'<span id="max-unencumbered">{self.character.lightest_load_limit}</span>',
             page,
         )
 
@@ -219,7 +220,7 @@ class IncompleteEquipmentTest(SheetTestCase):
         data = response.json()
         self.assertIsNone(data["encumbrance_level"])
         self.assertIsNone(data["movement_modifier"])
-        self.assertIsNone(data["effective_strength"])
+        self.assertIsNone(data["lightest_load_limit"])
         self.assertEqual(len(data["equipment"]), 1)
 
 
@@ -1069,7 +1070,8 @@ class OneRepaintPerResponseTest(SheetTestCase):
                 self.assertNotIn(key, data["movement"])
         # The movement payload still carries what updateEquipmentDisplay paints.
         self.assertEqual(
-            data["movement"]["effective_strength"], self.character.effective_strength
+            data["movement"]["lightest_load_limit"],
+            self.character.lightest_load_limit,
         )
         self.assertEqual(data["movement"]["equipment"], self.character.equipment)
 

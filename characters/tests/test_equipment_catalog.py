@@ -12,18 +12,20 @@ from characters.constants import (
     MAX_EQUIPMENT_MODIFIER,
 )
 from characters.equipment import (
-    calculate_encumbrance_level,
     combine_movement_restrictions,
     describe_movement_restrictions,
     get_armor_movement_restrictions,
     get_item,
     get_item_name,
-    get_movement_penalty,
-    get_movement_restrictions,
     get_restrictive_armor_names,
 )
 from characters.equipment_rules import equipment_catalog
 from characters.rules import load_character_rules
+from characters.tests.rules_fixtures import (
+    DEFAULT_EQUIPMENT_RULES,
+    seated_equipment_catalog,
+    seated_equipment_rules,
+)
 from reference.paths import CANON_CHARACTER_RULES_FILE_NAME, DEFAULT_CANON_DIR
 
 
@@ -60,44 +62,56 @@ class EquipmentCatalogTests(SimpleTestCase):
 
 
 class EncumbranceTests(SimpleTestCase):
+    """The default canon's levels, as movement.md states them."""
+
+    encumbrance = DEFAULT_EQUIPMENT_RULES.encumbrance
+
     def test_unencumbered_at_str_weight(self):
-        self.assertEqual(calculate_encumbrance_level(10.0, 10), "unencumbered")
+        self.assertEqual(self.encumbrance.level_for(10.0, 10), "unencumbered")
 
     def test_light_above_str(self):
         # STR 10 -> light is 10 < w <= 15.
-        self.assertEqual(calculate_encumbrance_level(11.0, 10), "light")
-        self.assertEqual(calculate_encumbrance_level(15.0, 10), "light")
+        self.assertEqual(self.encumbrance.level_for(11.0, 10), "light")
+        self.assertEqual(self.encumbrance.level_for(15.0, 10), "light")
 
     def test_medium_threshold(self):
         # STR 10 -> medium is 15 < w <= 20.
-        self.assertEqual(calculate_encumbrance_level(20.0, 10), "medium")
+        self.assertEqual(self.encumbrance.level_for(20.0, 10), "medium")
 
     def test_heavy_threshold(self):
         # STR 10 -> heavy is 20 < w <= 25.
-        self.assertEqual(calculate_encumbrance_level(25.0, 10), "heavy")
+        self.assertEqual(self.encumbrance.level_for(25.0, 10), "heavy")
 
     def test_overloaded(self):
-        self.assertEqual(calculate_encumbrance_level(100.0, 10), "overloaded")
+        self.assertEqual(self.encumbrance.level_for(100.0, 10), "overloaded")
 
     def test_movement_penalty_matches_level(self):
-        self.assertEqual(get_movement_penalty("unencumbered"), 0)
-        self.assertEqual(get_movement_penalty("light"), -1)
-        self.assertEqual(get_movement_penalty("medium"), -2)
-        self.assertEqual(get_movement_penalty("heavy"), -4)
+        self.assertEqual(self.encumbrance.penalty("unencumbered"), 0)
+        self.assertEqual(self.encumbrance.penalty("light"), -1)
+        self.assertEqual(self.encumbrance.penalty("medium"), -2)
+        self.assertEqual(self.encumbrance.penalty("heavy"), -4)
 
     def test_movement_restrictions(self):
-        self.assertEqual(get_movement_restrictions("unencumbered"), [])
-        self.assertIn("sprint", get_movement_restrictions("medium"))
-        self.assertIn("sprint", get_movement_restrictions("heavy"))
-        self.assertIn("sprint", get_movement_restrictions("overloaded"))
+        self.assertEqual(self.encumbrance.restrictions("unencumbered"), [])
+        self.assertIn("sprint", self.encumbrance.restrictions("medium"))
+        self.assertIn("sprint", self.encumbrance.restrictions("heavy"))
+        self.assertIn("sprint", self.encumbrance.restrictions("overloaded"))
 
     def test_unknown_level_safe_defaults(self):
-        self.assertEqual(get_movement_penalty("__nope__"), 0)
-        self.assertEqual(get_movement_restrictions("__nope__"), [])
+        self.assertEqual(self.encumbrance.penalty("__nope__"), 0)
+        self.assertEqual(self.encumbrance.restrictions("__nope__"), [])
 
 
 class ArmorMovementRestrictionTests(SimpleTestCase):
-    """Armor-derived movement restrictions (issue #128)."""
+    """Armor-derived movement restrictions (issue #128), on the default canon.
+
+    The armour ids and the gaits are the default canon's, seated whichever
+    canon is loaded.
+    """
+
+    def setUp(self):
+        self.enterContext(seated_equipment_catalog())
+        self.enterContext(seated_equipment_rules())
 
     def test_no_equipment_is_unrestricted(self):
         self.assertEqual(get_armor_movement_restrictions([]), [])
@@ -156,6 +170,10 @@ class ArmorMovementRestrictionTests(SimpleTestCase):
         self.assertEqual(combine_movement_restrictions([], []), [])
 
     def test_describe_movement_restrictions(self):
+        # The pages' three wordings, and any other gaits listed the same way.
+        self.assertEqual(
+            describe_movement_restrictions(["trot", "dash"]), "Cannot Trot or Dash"
+        )
         self.assertEqual(describe_movement_restrictions([]), "")
         self.assertEqual(describe_movement_restrictions(["sprint"]), "Cannot Sprint")
         self.assertEqual(

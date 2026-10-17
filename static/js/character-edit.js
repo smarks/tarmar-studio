@@ -1198,14 +1198,17 @@ function paintLiteracyRow(data) {
 function paintMovement(data) {
     paintText('carried-weight', data.carried_weight);
     paintText('pack-weight', data.pack_weight);
-    // The carrying capacity beside the load is effective STR (issue #763).
-    paintText('max-unencumbered', data.effective_strength);
+    // The carrying capacity beside the load is the lightest level's limit,
+    // a multiple of effective STR (issues #763 and #75).
+    paintText('max-unencumbered', data.lightest_load_limit);
 
     const levelBadge = document.getElementById('encumbrance-level');
     if (levelBadge && data.encumbrance_level !== undefined) {
         const level = data.encumbrance_level;
         levelBadge.textContent = level === null ? '—' : level.charAt(0).toUpperCase() + level.slice(1);
-        levelBadge.className = 'level-badge ' + (level === null ? 'unknown' : level);
+        // By the level's place, not its name: the classes are the server's
+        // (Character.encumbrance_badge_classes, issue #75).
+        levelBadge.className = 'level-badge ' + data.encumbrance_badge_classes;
     }
 
     const penaltyEl = document.getElementById('movement-penalty');

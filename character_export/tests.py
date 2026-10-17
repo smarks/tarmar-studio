@@ -268,8 +268,11 @@ class GenerateCharacterMarkdownTest(TestCase):
         """Verify markdown includes encumbrance thresholds."""
         md = generate_character_markdown(self.character)
         self.assertIn("### Encumbrance Thresholds", md)
-        self.assertIn("| Unencumbered |", md)
-        self.assertIn("| Light |", md)
+        # STR 16: one formatter, whole numbers without decimals (issue #75).
+        self.assertIn("| Unencumbered | 16 lbs |", md)
+        self.assertIn("| Light | 24 lbs |", md)
+        self.assertIn("| Heavy | 40 lbs |", md)
+        self.assertNotIn("| Overloaded |", md)
 
     def test_includes_combat_modifiers(self):
         """Verify markdown includes combat modifiers."""

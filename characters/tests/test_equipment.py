@@ -56,15 +56,16 @@ class EquipmentCatalogTest(TestCase):
         self.assertIsNone(get_item("nonexistent_item"))
 
     def test_encumbrance_calculation(self):
-        """Encumbrance level calculation."""
-        from characters.equipment import calculate_encumbrance_level
+        """Encumbrance level calculation, on the default canon's levels."""
+        from characters.tests.rules_fixtures import DEFAULT_EQUIPMENT_RULES
 
-        self.assertEqual(calculate_encumbrance_level(10, 15), "unencumbered")
-        self.assertEqual(calculate_encumbrance_level(15, 15), "unencumbered")
-        self.assertEqual(calculate_encumbrance_level(20, 15), "light")
-        self.assertEqual(calculate_encumbrance_level(25, 15), "medium")
-        self.assertEqual(calculate_encumbrance_level(35, 15), "heavy")
-        self.assertEqual(calculate_encumbrance_level(40, 15), "overloaded")
+        level_for = DEFAULT_EQUIPMENT_RULES.encumbrance.level_for
+        self.assertEqual(level_for(10, 15), "unencumbered")
+        self.assertEqual(level_for(15, 15), "unencumbered")
+        self.assertEqual(level_for(20, 15), "light")
+        self.assertEqual(level_for(25, 15), "medium")
+        self.assertEqual(level_for(35, 15), "heavy")
+        self.assertEqual(level_for(40, 15), "overloaded")
 
 
 class EquipmentModelTest(BaseTestCase):

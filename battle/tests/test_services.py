@@ -119,18 +119,14 @@ class SeatedFieldsTest(BaseTestCase):
         ):
             with self.subTest(armour=armour):
                 character, seated = self.seat(equipment=armour)
-                self.assertEqual(seated.move_walk, character.walk_distance)
+                distances = character.gait_distances
+                self.assertEqual(seated.move_walk, distances["walk"])
                 # A load that bars jogging (the default body under chainmail)
                 # charges and dodges at the walk, "Jog or less".
+                self.assertEqual(seated.move_jog, distances["jog"] or distances["walk"])
+                self.assertEqual(seated.move_run, 0 if run_barred else distances["run"])
                 self.assertEqual(
-                    seated.move_jog, character.jog_distance or character.walk_distance
-                )
-                self.assertEqual(
-                    seated.move_run, 0 if run_barred else character.run_distance
-                )
-                self.assertEqual(
-                    seated.move_sprint,
-                    0 if sprint_barred else character.sprint_distance,
+                    seated.move_sprint, 0 if sprint_barred else distances["sprint"]
                 )
                 self.assertGreater(seated.move_walk, 0)
 

@@ -9,6 +9,7 @@ canon's values are its own ``tests/expectations.json``'s.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,7 @@ from characters.equipment_rules import (
     load_equipment_rules,
 )
 from characters.tests.rules_fixtures import (
+    DEFAULT_CHARACTER_RULES,
     DEFAULT_EQUIPMENT_CATALOG,
     DEFAULT_EQUIPMENT_RULES,
     seated_equipment_catalog,
@@ -64,9 +66,13 @@ from reference.paths import (
     DEFAULT_CANON_DIR,
     EQUIPMENT_CATALOG_FILE,
     EQUIPMENT_RULES_FILE,
+    PUBLIC_RULES_DIR,
     REPO_ROOT,
 )
 from reference.rules_file import RulesFileError
+
+#: The page that states the defender's DEX-dodge.
+ATTACK_ROLLS_PAGE = PUBLIC_RULES_DIR / "combat" / "action-options" / "attack-rolls.md"
 
 #: A complete catalog with invented items, one of each kind the groups hold.
 INVENTED_CATALOG: dict[str, Any] = {
@@ -935,62 +941,6 @@ class EquipmentRulesValuesTest(SimpleTestCase):
         self.assertEqual(INVENTED_EQUIPMENT_RULES.gaits.slowest, "amble")
 
 
-class DefaultEquipmentRulesEquivalenceTest(SimpleTestCase):
-    """The default canon's rules are the Python constants they replace.
-
-    Slice A of issue #75 only: slice C seats the rules and deletes the
-    constants, and with them this test; the drift tests then hold the
-    default file to the pages.
-    """
-
-    rules = DEFAULT_EQUIPMENT_RULES
-
-    def test_the_encumbrance_levels_are_the_constants(self) -> None:
-        from characters.equipment import ENCUMBRANCE_LEVELS, ENCUMBRANCE_ORDER
-
-        self.assertEqual(self.rules.encumbrance.keys, ENCUMBRANCE_ORDER)
-        for level in self.rules.encumbrance.levels:
-            with self.subTest(level=level.key):
-                constant = ENCUMBRANCE_LEVELS[level.key]
-                max_multiplier = (
-                    float("inf")
-                    if level.max_multiplier is None
-                    else level.max_multiplier
-                )
-                self.assertEqual(max_multiplier, constant["max_multiplier"])
-                self.assertEqual(level.penalty, constant["penalty"])
-                self.assertEqual(list(level.forbidden_gaits), constant["restrictions"])
-                self.assertEqual(level.walk_limit, constant.get("walk_limit"))
-
-    def test_the_armour_codes_and_gaits_are_the_constants(self) -> None:
-        from characters.equipment import (
-            ARMOR_MOVEMENT_RESTRICTION_MODES,
-            MOVEMENT_MODE_ORDER,
-        )
-        from characters.movement import GAIT_BASE_DISTANCES, GAIT_ORDER
-
-        self.assertEqual(
-            {
-                code: list(gaits)
-                for code, gaits in self.rules.armour_restriction_codes.items()
-            },
-            ARMOR_MOVEMENT_RESTRICTION_MODES,
-        )
-        self.assertEqual(self.rules.gaits.order, GAIT_ORDER)
-        self.assertEqual(dict(self.rules.gaits.base_distances), GAIT_BASE_DISTANCES)
-        self.assertEqual(self.rules.gaits.restrictable_gaits, MOVEMENT_MODE_ORDER)
-
-    def test_the_missile_classes_and_dodge_bounds_are_the_constants(self) -> None:
-        from characters.attack import MAX_DEFENDER_DODGE, MIN_DEFENDER_DODGE
-        from characters.weapon_skill import MISSILE_CLASSES
-
-        self.assertEqual(self.rules.missile_classes, MISSILE_CLASSES)
-        self.assertEqual(
-            (self.rules.defender_dodge.minimum, self.rules.defender_dodge.maximum),
-            (MIN_DEFENDER_DODGE, MAX_DEFENDER_DODGE),
-        )
-
-
 class CanonCatalogWrittenBackTest(SimpleTestCase):
     """A canon's catalog reads back as its file holds it.
 
@@ -1075,6 +1025,37 @@ class CatalogClassesTest(SimpleTestCase):
             (message,) = check_equipment_catalog()
         self.assertEqual(message.id, EQUIPMENT_CATALOG_CHECK_ID)
         self.assertIn("armor.quilt.armour_tier 'Soft'", message.msg)
+
+
+class DefaultDodgeBoundsTest(SimpleTestCase):
+    """The default canon's dodge bounds follow the ruling's derivation.
+
+    attack-rolls.md gives the defender's DEX-dodge as
+    ``floor((effective DEX − 10) / 2)`` with a minimum and no maximum. The
+    ruling ``defender_dodge_bounds`` reads the page's minimum as the least,
+    and the formula at the canon's attribute ceiling as the most; this pins
+    both to the page and to the default character rules rather than to the
+    numbers (issue #75). The Tarmar canon's are its own expectations'
+    (``TarmarEquipmentFilesTest``).
+    """
+
+    def test_the_bounds_are_the_page_s_minimum_and_the_formula_at_the_ceiling(
+        self,
+    ) -> None:
+        text = ATTACK_ROLLS_PAGE.read_text(encoding="utf-8")
+        match = re.search(
+            r"\*\*Defender's DEX-dodge\*\* = `floor\(\(defender effective DEX "
+            r"− 10\) / 2\)`, minimum (\d+)\.",
+            text,
+        )
+        assert match is not None, "attack-rolls.md lost its DEX-dodge line"
+        ceiling = DEFAULT_CHARACTER_RULES.attributes.maximum
+        self.assertEqual(
+            DEFAULT_EQUIPMENT_RULES.defender_dodge,
+            DefenderDodgeRules(
+                minimum=int(match.group(1)), maximum=(ceiling - 10) // 2
+            ),
+        )
 
 
 class CanonEquipmentFilesTest(SimpleTestCase):

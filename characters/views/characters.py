@@ -64,7 +64,7 @@ from ..constants import (
 )
 from ..dice import build_point_buy_character_stats, roll_all_character_stats
 from ..equipment import ITEM_CATEGORIES, get_item
-from ..equipment_rules import CATALOG_GROUPS, equipment_catalog
+from ..equipment_rules import CATALOG_GROUPS, equipment_catalog, equipment_rules
 from ..import_service import (
     IMPORT_NOTICE_KEY,
     CharacterImportError,
@@ -121,7 +121,6 @@ FIXED_NUMBER_LIMITS: dict[str, int] = {
     "armor_dex_penalty": MAX_ARMOR_DEX_PENALTY_MAGNITUDE,
     "check_difficulty": MAX_DIFFICULTY,
     "mana_grant": MAX_MANA_GRANT,
-    "defender_dodge": attack.MAX_DEFENDER_DODGE,
     "situational": attack.MAX_SITUATIONAL,
 }
 
@@ -133,15 +132,22 @@ def character_number_limits() -> dict[str, int]:
     (2 to 12 on the public pages), read when a page asks, never at import
     (issue #70), as :func:`characters.skill_checks.skill_check` holds it.
 
+    The defender's dodge on the attack panel is held to the canon's bounds
+    (issue #75), as :func:`characters.attack.resolve` holds it.
+
     Returns:
-        :data:`FIXED_NUMBER_LIMITS` with ``check_total_minimum`` and
-        ``check_total_maximum``.
+        :data:`FIXED_NUMBER_LIMITS` with ``check_total_minimum``,
+        ``check_total_maximum``, ``defender_dodge_minimum`` and
+        ``defender_dodge_maximum``.
     """
     skill_check_dice = skill_rules().skill_check
+    defender_dodge = equipment_rules().defender_dodge
     return {
         **FIXED_NUMBER_LIMITS,
         "check_total_minimum": skill_check_dice.minimum,
         "check_total_maximum": skill_check_dice.maximum,
+        "defender_dodge_minimum": defender_dodge.minimum,
+        "defender_dodge_maximum": defender_dodge.maximum,
     }
 
 
@@ -1793,14 +1799,16 @@ def movement_response(character: Character) -> dict:
     Every value here derives from the equipment and from the effective STR,
     DEX and CON, so an equipment change, an attribute edit and a run of years
     all send it, and the page paints it with one painter (issues #163, #634,
-    #763). ``effective_strength`` is the carrying capacity the bar prints
-    beside the load.
+    #763). ``lightest_load_limit`` is the carrying capacity the bar prints
+    beside the load: the lightest level's limit, a multiple of effective STR
+    (issue #75).
     """
     return {
         "carried_weight": character.carried_weight,
         "pack_weight": character.pack_weight,
-        "effective_strength": character.effective_strength,
+        "lightest_load_limit": character.lightest_load_limit,
         "encumbrance_level": character.encumbrance_level,
+        "encumbrance_badge_classes": character.encumbrance_badge_classes,
         "movement_penalty": character.movement_penalty,
         "movement_restriction_label": character.movement_restriction_label,
         "movement_modifier": character.movement_modifier,

@@ -661,10 +661,10 @@ runs.
         <!-- Encumbrance Bar -->
         <div class="encumbrance-bar" id="encumbrance-bar">
             <span class="weight-info">
-                <span id="carried-weight">{{ character.carried_weight }}</span> / <span id="max-unencumbered">{{ character.effective_strength|default_if_none:"—" }}</span> lbs
+                <span id="carried-weight">{{ character.carried_weight }}</span> / <span id="max-unencumbered">{{ character.lightest_load_limit|default_if_none:"—" }}</span> lbs
             </span>
             {# What a load weighs on a character is priced against their STR, so an unrecorded STR leaves the level unknown (issue #630). #}
-            <span class="level-badge {{ character.encumbrance_level|default_if_none:"unknown" }}" id="encumbrance-level">{% if character.encumbrance_level is None %}—{% else %}{{ character.encumbrance_level|title }}{% endif %}</span>
+            <span class="level-badge {{ character.encumbrance_badge_classes }}" id="encumbrance-level">{% if character.encumbrance_level is None %}—{% else %}{{ character.encumbrance_level|title }}{% endif %}</span>
             {% if character.movement_penalty != 0 %}
             <span class="penalty" id="movement-penalty">{{ character.movement_penalty }} movement</span>
             {% else %}
@@ -819,7 +819,7 @@ runs.
             </div>
             <div class="attack-field">
                 <label for="attack-dodge">Defender dodge <span class="gm-supplied">(GM supplies)</span></label>
-                <input type="number" id="attack-dodge" value="0" min="0" max="{{ number_limits.defender_dodge }}">
+                <input type="number" id="attack-dodge" value="{{ number_limits.defender_dodge_minimum }}" min="{{ number_limits.defender_dodge_minimum }}" max="{{ number_limits.defender_dodge_maximum }}">
             </div>
             <div class="attack-field">
                 <label for="attack-situational">Situational</label>

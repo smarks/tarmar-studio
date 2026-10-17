@@ -34,20 +34,17 @@ from .dice import (
     parse_dice_expression,
 )
 from .equipment import (
-    ENCUMBRANCE_LEVELS,
-    calculate_encumbrance_level,
     combine_movement_restrictions,
     describe_movement_restrictions,
     entry_category,
+    format_pounds,
     get_armor_movement_restrictions,
     get_item,
-    get_movement_penalty,
-    get_movement_restrictions,
     get_restrictive_armor_names,
-    get_walk_limit,
     is_worn_armour,
 )
-from .movement import GAIT_ORDER, compute_gaits
+from .equipment_rules import equipment_rules
+from .movement import compute_gaits
 from .movement import movement_modifier as _movement_modifier
 from .rules import character_rules, scores_by_short_name
 from .skill_rules import skill_rules
@@ -1968,12 +1965,31 @@ class Character(models.Model):
         strength = self.effective_strength
         if strength is None:
             return None
-        return calculate_encumbrance_level(self.carried_weight, strength)
+        return equipment_rules().encumbrance.level_for(self.carried_weight, strength)
+
+    @property
+    def encumbrance_badge_classes(self) -> str:
+        """The encumbrance badge's classes, by the level's place, not its name.
+
+        ``load-<n>`` for the level's position, lightest first from 1, and
+        ``load-heaviest`` beside it for the heaviest level, so the sheet's
+        colours follow the loaded canon whatever it calls its levels (issue
+        #75); ``unknown`` while the level is (issue #630). The level's own key
+        is the badge's text.
+        """
+        level = self.encumbrance_level
+        if level is None:
+            return "unknown"
+        encumbrance = equipment_rules().encumbrance
+        classes = f"load-{encumbrance.keys.index(level) + 1}"
+        if level == encumbrance.heaviest.key:
+            classes += " load-heaviest"
+        return classes
 
     @property
     def movement_penalty(self):
-        """Movement penalty from encumbrance (0, -1, -2, or -4)."""
-        return get_movement_penalty(self.encumbrance_level)
+        """Movement penalty from encumbrance (the default canon's 0, -1, -2 or -4)."""
+        return equipment_rules().encumbrance.penalty(self.encumbrance_level)
 
     @property
     def movement_restrictions(self):
@@ -1983,7 +1999,7 @@ class Character(models.Model):
         either encumbrance or an equipped armor piece forbids it.
         """
         return combine_movement_restrictions(
-            get_movement_restrictions(self.encumbrance_level),
+            equipment_rules().encumbrance.restrictions(self.encumbrance_level),
             get_armor_movement_restrictions(self.equipment),
         )
 
@@ -2033,13 +2049,13 @@ class Character(models.Model):
         )
 
     @property
-    def gait_distances(self):
-        """Map gait ("sprint"/"run"/"jog"/"walk") to hex distance, or None.
+    def gait_distances(self) -> dict[str, int | None]:
+        """Map each of the loaded canon's gaits, fastest first, to hexes or None.
 
         None means the gait is unusable: forbidden by encumbrance or worn
-        armor (:attr:`movement_restrictions`), or -- for Walk under
-        Overloaded -- replaced by the "Walk only, 1 hex max" cap rather than
-        the normal formula.
+        armor (:attr:`movement_restrictions`). A level with a walk limit (the
+        default canon's Overloaded, "Walk only, 1 hex max") caps the slowest
+        gait at it instead of the normal formula.
 
         Every gait is None when :attr:`movement_modifier` is (issue #630) --
         the attributes the formulas need are not recorded, so no gait has a
@@ -2047,56 +2063,32 @@ class Character(models.Model):
         """
         modifier = self.movement_modifier
         if modifier is None:
-            return {gait: None for gait in GAIT_ORDER}
-        walk_limit = None
-        if self.encumbrance_level == "overloaded":
-            walk_limit = get_walk_limit(self.encumbrance_level)
+            return dict.fromkeys(equipment_rules().gaits.order)
         return compute_gaits(
             modifier,
             self.movement_penalty,
             self.movement_restrictions,
-            walk_limit=walk_limit,
+            walk_limit=equipment_rules().encumbrance.walk_limit(self.encumbrance_level),
         )
-
-    @property
-    def sprint_distance(self):
-        """Sprint gait distance in hexes, or None if sprinting is restricted."""
-        return self.gait_distances["sprint"]
-
-    @property
-    def run_distance(self):
-        """Run gait distance in hexes, or None if running is restricted."""
-        return self.gait_distances["run"]
-
-    @property
-    def jog_distance(self):
-        """Jog gait distance in hexes, or None if jogging is restricted."""
-        return self.gait_distances["jog"]
-
-    @property
-    def walk_distance(self):
-        """Walk gait distance in hexes (capped at 1 when Overloaded)."""
-        return self.gait_distances["walk"]
 
     @property
     def gait_readout(self):
         """Gaits as a list of sheet-ready dicts, fastest to slowest.
 
         Each entry is ``{"key", "label", "distance", "na"}`` -- the template
-        loops over this rather than calling the four distance properties
-        individually and re-deriving the restricted/label state itself
-        (following the server-computed-label convention used by
-        :attr:`movement_restriction_label`, issue #128).
+        loops over this rather than re-deriving the restricted/label state
+        itself (following the server-computed-label convention used by
+        :attr:`movement_restriction_label`, issue #128). The keys and labels
+        are the loaded canon's gait names.
         """
-        distances = self.gait_distances
         return [
             {
                 "key": gait,
                 "label": gait.title(),
-                "distance": distances[gait],
-                "na": distances[gait] is None,
+                "distance": distance,
+                "na": distance is None,
             }
-            for gait in GAIT_ORDER
+            for gait, distance in self.gait_distances.items()
         ]
 
     def _item_category(self, item: dict) -> str:
@@ -2296,23 +2288,37 @@ class Character(models.Model):
         return self._sum_weapon_mod("critical_mod")
 
     @property
-    def encumbrance_thresholds(self):
-        """Return weight thresholds for each encumbrance level, or None.
+    def lightest_load_limit(self) -> str | None:
+        """The most the lightest level carries, as the sheet prints it.
 
-        None when STR is not recorded (issue #630): every threshold is a
-        multiple of STR, so there is nothing to state. Effective (aged) STR,
-        per the ruling on #773.
+        STR times the lightest level's multiplier (STR itself in the default
+        canon), through :func:`characters.equipment.format_pounds`: the
+        carrying capacity the encumbrance bar prints beside the load (issues
+        #763 and #75). None when STR is not recorded, or when the lightest
+        level is the only one and so carries any weight.
+        """
+        thresholds = self.encumbrance_thresholds
+        if not thresholds:
+            return None
+        return format_pounds(next(iter(thresholds.values())))
+
+    @property
+    def encumbrance_thresholds(self) -> dict[str, float] | None:
+        """The most each encumbrance level carries, in pounds, by level key.
+
+        Every level with a multiplier (all but a heaviest that catches every
+        weight the others do not): STR times the level's multiplier, rounded
+        to one decimal, lightest first. None when STR is not recorded (issue
+        #630): every threshold is a multiple of STR, so there is nothing to
+        state. Effective (aged) STR, per the ruling on #773.
         """
         str_val = self.effective_strength
         if str_val is None:
             return None
         return {
-            "unencumbered": str_val,
-            "light": round(str_val * ENCUMBRANCE_LEVELS["light"]["max_multiplier"], 1),
-            "medium": round(
-                str_val * ENCUMBRANCE_LEVELS["medium"]["max_multiplier"], 1
-            ),
-            "heavy": round(str_val * ENCUMBRANCE_LEVELS["heavy"]["max_multiplier"], 1),
+            level.key: round(str_val * level.max_multiplier, 1)
+            for level in equipment_rules().encumbrance.levels
+            if level.max_multiplier is not None
         }
 
 

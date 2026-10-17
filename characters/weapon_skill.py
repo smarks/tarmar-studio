@@ -24,7 +24,7 @@ from reference.rules_file import derived_from_rules
 
 from .combat import SKILL_BONUS_PER_LEVEL, weapon_skill_bonus
 from .equipment import get_weapon_class, is_unusual_weapon
-from .equipment_rules import equipment_catalog
+from .equipment_rules import equipment_catalog, equipment_rules
 from .skills import get_skill_level, normalize_skill_name
 
 if TYPE_CHECKING:
@@ -33,11 +33,10 @@ if TYPE_CHECKING:
 #: The skill prior experience grants before it is tied to a weapon.
 UNRECORDED_WEAPON_SKILL = "weapon"
 
-#: The skill that is "in effect, the Weapon skill for shooting".
+#: The skill that is "in effect, the Weapon skill for shooting". The weapon
+#: classes it covers ("the two Missile classes") are the loaded canon's
+#: ``equipment-rules.json`` ``missile_classes`` (issue #75).
 ARCHERY_SKILL = "archery"
-
-#: The two weapon classes Archery covers ("the two Missile classes").
-MISSILE_CLASSES: frozenset[str] = frozenset({"Missile — Bows", "Missile — Crossbows"})
 
 _WEAPON_SKILL_PREFIX = "weapon ("
 
@@ -211,7 +210,7 @@ def resolve_weapon_skill(
                 candidate = WeaponSkill(skill_name, level, weapon_id, bonus, rule)
         elif (
             skill_name == ARCHERY_SKILL
-            and attack_class in MISSILE_CLASSES
+            and attack_class in equipment_rules().missile_classes
             and not is_unusual_weapon(attack_weapon_id)
         ):
             bonus = weapon_skill_bonus(level)

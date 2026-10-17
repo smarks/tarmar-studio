@@ -41,7 +41,7 @@ from characters.weapon_skill import resolve_weapon_skill
 
 from . import agreement, control, policy, profiles, turn_menu
 from .access import Actor, claimed_seat_q, commands_foes, decides_for, is_dm
-from .adaptation import snapshot_beast
+from .adaptation import engine_gait_names, snapshot_beast
 from .classic_adaptation import classic_state
 from .engine import hexes
 from .engine.state import (
@@ -296,14 +296,18 @@ def _seated_gaits(character: Character) -> SeatedGaits:
     formula reaches 0, and Jog at the Walk distance, since the engine's policy
     reads ``move_jog`` for a charge's reach and a figure that may not jog
     charges at its walk (tarmar-engine#17).
+
+    The sheet's gaits are the loaded canon's, each seated as the engine gait
+    in its place (:func:`battle.adaptation.engine_gait_names`, issue #75).
     """
     distances = character.gait_distances
-    walk = distances["walk"] or 1
+    canon_gaits = engine_gait_names()
+    walk = distances[canon_gaits["walk"]] or 1
     return SeatedGaits(
         walk=walk,
-        jog=distances["jog"] or walk,
-        run=distances["run"] or 0,
-        sprint=distances["sprint"] or 0,
+        jog=distances[canon_gaits["jog"]] or walk,
+        run=distances[canon_gaits["run"]] or 0,
+        sprint=distances[canon_gaits["sprint"]] or 0,
     )
 
 

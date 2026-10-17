@@ -281,10 +281,18 @@ Notes on the edges, each checkable:
   mostly by way of `characters/equipment.py`'s `get_item` and its siblings, and
   a refused file, an armour restriction code the equipment rules do not give,
   or a weapon class or armour tier the combat matrix lacks is reported by
-  `characters.E003`. The same module reads `equipment-rules.json`
-  (`characters.E004`). The values built from the catalog and cached (the
-  sheet's catalog payload, the Weapon-skill spellings, the Games Master's item
-  names) register with `derived_from_rules` as the skill values do.
+  `characters.E003`. The same module reads `equipment-rules.json` into
+  `EquipmentRules` (`characters.E004`): the encumbrance levels, the armour
+  restriction codes, the gaits and their base distances, the Missile classes
+  Archery covers and the defender's dodge bounds, read through the cached
+  `equipment_rules()` by `characters/equipment.py`, `movement.py`,
+  `weapon_skill.py`, `attack.py`, the sheet and the battle seating. The code
+  reads a level or a gait by its place, never its name; the battle engine's
+  four gaits are matched to the canon's by place, so a canon must name four
+  (`battle.E003`) until stage 6 seats the engine's own rules. The values built
+  from the catalog or the rules and cached (the sheet's catalog payload, the
+  Weapon-skill spellings, the Games Master's item names, a beast's gait
+  proportions) register with `derived_from_rules` as the skill values do.
   The rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
@@ -524,15 +532,15 @@ flowchart TD
     equip["equipment JSON"]
     carried["carried_weight<br/>equipment.get_item, pack_dropped"]
     equip --> carried
-    enc["equipment.calculate_encumbrance_level<br/>unencumbered to overloaded"]
+    enc["EncumbranceRules.level_for<br/>the canon's levels, lightest first"]
     carried --> enc
     eff --> enc
-    pen["get_movement_penalty<br/>0, -1, -2, -4"]
+    pen["EncumbranceRules.penalty<br/>default canon: 0, -1, -2, -4"]
     enc --> pen
-    restr["get_movement_restrictions +<br/>get_armor_movement_restrictions<br/>combined by combine_movement_restrictions"]
+    restr["EncumbranceRules.restrictions +<br/>get_armor_movement_restrictions<br/>combined by combine_movement_restrictions"]
     enc --> restr
     equip --> restr
-    gaits["movement.compute_gaits<br/>sprint 18 run 12 jog 7 walk 4"]
+    gaits["movement.compute_gaits<br/>the canon's gaits; default sprint 18 run 12 jog 7 walk 4"]
     mmod --> gaits
     pen --> gaits
     restr --> gaits

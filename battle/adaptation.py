@@ -21,8 +21,10 @@ the ``is_beast`` flag:
 * **Armour** — the beast's hide: its ``armour_tier`` and ``stops`` feed
   ``characters.combat`` unchanged. No shield.
 * **Movement** — ``Beast.movement`` is the creature's full move, so it maps
-  onto the run gait; walk and jog scale by movement.md's own 4:7:12 gait
-  proportions. A rooted beast (movement 0) cannot move at any gait.
+  onto the run gait; walk and jog scale by the loaded canon's own gait
+  proportions (movement.md's 4:7:12), each gait found by its place in the
+  canon's order (:func:`engine_gait_names`, issue #75). A rooted beast
+  (movement 0) cannot move at any gait.
   Two coordinator's rulings under the standing rule, Spencer may overrule
   (#867): a beast has no Sprint (the bestiary gives one full move, which is
   the run; no page gives a beast a faster gait), and its movement modifier,
@@ -39,12 +41,14 @@ the ``is_beast`` flag:
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 
 from bestiary.models import Beast
 from characters.dice import parse_dice_expression
-from characters.movement import GAIT_BASE_DISTANCES
+from characters.equipment_rules import equipment_rules
+from reference.rules_file import derived_from_rules
 
 from .engine.state import CombatantState, WeaponState, bare_handed_damage
 
@@ -101,20 +105,55 @@ class BeastAttack:
 # The roster/archetype label beasts carry in state and the UI.
 BEAST_ARCHETYPE = "beast"
 
-# A beast's gaits keep the proportions of a character's walk and jog to its
-# run (movement.md, as characters.movement states it), applied to its full move.
-GAIT_PROPORTIONS = {
-    gait: GAIT_BASE_DISTANCES[gait] / GAIT_BASE_DISTANCES["run"]
-    for gait in ("walk", "jog")
-}
+#: The engine's gaits, fastest first: the names its combatant fields carry
+#: (``move_sprint`` to ``move_walk``) and its turn menu reads. They are the
+#: engine's, fixed until stage 6 of rules-as-data seats the engine's own
+#: rules, so a canon must name exactly as many gaits (the ``battle.E003``
+#: system check, :func:`battle.checks.check_engine_gaits`).
+ENGINE_GAITS: tuple[str, ...] = ("sprint", "run", "jog", "walk")
+
+
+def engine_gait_names() -> dict[str, str]:
+    """The loaded canon's gait each engine gait seats, by place (issue #75).
+
+    The canon names its gaits; the engine's four are matched to them by their
+    place in the canon's order, fastest first: the fastest is the engine's
+    sprint, the second its run, the second-slowest its jog and the slowest
+    its walk.
+
+    Returns:
+        Each of :data:`ENGINE_GAITS` to the canon's gait.
+
+    Raises:
+        ValueError: The canon names other than four gaits, which
+            ``battle.E003`` refuses before any battle is seated.
+    """
+    return dict(zip(ENGINE_GAITS, equipment_rules().gaits.order, strict=True))
+
+
+@derived_from_rules
+@functools.cache
+def gait_proportions() -> dict[str, float]:
+    """The canon's walk and jog as fractions of its run, by engine gait.
+
+    A beast's gaits keep the proportions of a character's walk and jog to its
+    run (movement.md's 4:7:12 in the default canon), applied to its full
+    move. Built from the loaded rules the first time a beast is seated, never
+    at import.
+    """
+    canon_gaits = engine_gait_names()
+    base_distances = equipment_rules().gaits.base_distances
+    run = base_distances[canon_gaits["run"]]
+    return {gait: base_distances[canon_gaits[gait]] / run for gait in ("walk", "jog")}
 
 
 def beast_gaits(movement: int) -> tuple[int, int, int]:
     """(walk, jog, run) for a beast whose full move is ``movement`` hexes."""
     if movement <= 0:
         return 0, 0, 0
-    walk = max(1, round(movement * GAIT_PROPORTIONS["walk"]))
-    jog = max(1, round(movement * GAIT_PROPORTIONS["jog"]))
+    proportions = gait_proportions()
+    walk = max(1, round(movement * proportions["walk"]))
+    jog = max(1, round(movement * proportions["jog"]))
     return walk, jog, movement
 
 
@@ -212,7 +251,8 @@ def beast_movement_modifier(movement: int) -> int:
     its run (module docstring), so its modifier is the difference. A rooted
     beast (0) reads as the slowest thing on the field, which it is.
     """
-    return movement - GAIT_BASE_DISTANCES["run"]
+    run = engine_gait_names()["run"]
+    return movement - equipment_rules().gaits.base_distances[run]
 
 
 def snapshot_beast(

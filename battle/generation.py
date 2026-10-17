@@ -23,12 +23,8 @@ from dataclasses import dataclass
 
 from characters.constants import UNNAMED_CHARACTER, name_within_rule
 from characters.dice import roll_all_character_stats
-from characters.equipment import (
-    ENCUMBRANCE_ORDER,
-    calculate_encumbrance_level,
-    get_item,
-)
-from characters.equipment_rules import equipment_catalog
+from characters.equipment import get_item
+from characters.equipment_rules import equipment_catalog, equipment_rules
 from characters.models import Character, board_can_seat_weapon
 from characters.skills import points_for_level
 from characters.weapon_skill import weapon_skill_name
@@ -91,8 +87,9 @@ _SHIELD_STEPS: dict[str, tuple[str | None, ...]] = {
 }
 
 #: The heaviest load a generated fighter carries (issue #883): Medium, the
-#: last level at which a figure may still Jog (movement.md; equipment.py's
-#: ``ENCUMBRANCE_LEVELS``). Heavy bars Jog and Overloaded caps Walk at 1 hex,
+#: last level at which a figure may still Jog (movement.md; the canon's
+#: ``equipment-rules.json``, which must name it: a test holds every canon to
+#: it, issue #75). Heavy bars Jog and Overloaded caps Walk at 1 hex,
 #: so a figure dealt past Medium can neither charge nor close with a foe that
 #: steps away. Coordinator's ruling under the standing rule; Spencer may
 #: overrule.
@@ -334,7 +331,7 @@ def deal_equipment(
 
     The first kit from :func:`_kit_steps` whose load is no heavier than
     :data:`HEAVIEST_GENERATED_LOAD`, read by the sheet's own
-    :func:`~characters.equipment.calculate_encumbrance_level`; the lightest
+    :meth:`~characters.equipment_rules.EncumbranceRules.level_for`; the lightest
     kit when none is. The weapon in the kit comes first in the list, as it
     always has, and may be lighter than the one :func:`pick_weapon` dealt.
 
@@ -349,14 +346,12 @@ def deal_equipment(
     steps = _kit_steps(archetype, weapon_id, effective_strength)
     if not within_load:
         return _equipment_entries(*steps[0])
+    encumbrance = equipment_rules().encumbrance
+    heaviest_allowed = encumbrance.keys.index(HEAVIEST_GENERATED_LOAD)
     for weapon, protection in steps:
         entries = _equipment_entries(weapon, protection)
-        level = calculate_encumbrance_level(
-            _catalog_weight(entries), effective_strength
-        )
-        if ENCUMBRANCE_ORDER.index(level) <= ENCUMBRANCE_ORDER.index(
-            HEAVIEST_GENERATED_LOAD
-        ):
+        level = encumbrance.level_for(_catalog_weight(entries), effective_strength)
+        if encumbrance.keys.index(level) <= heaviest_allowed:
             return entries
     return _equipment_entries(*steps[-1])
 

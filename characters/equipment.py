@@ -21,19 +21,22 @@ Per-character overrides (``to_hit_mod``, ``damage_mod``, ``stops_mod``,
 ``dex_mod`` and analogues) live on the character's equipment entry, NOT here;
 this catalog is read-only.
 
-Encumbrance thresholds come from the character's effective Strength:
-``unencumbered ≤ STR``, ``light ≤ 1.5·STR``, ``medium ≤ 2·STR``,
-``heavy ≤ 2.5·STR``; beyond that the character is overloaded. See
-``calculate_encumbrance_level`` and ``get_movement_penalty`` for the
-penalty/restriction table.
+The encumbrance levels, the gaits and the armour restriction codes are the
+loaded canon's ``equipment-rules.json``
+(:func:`characters.equipment_rules.equipment_rules`), read when a function
+here runs: a character's level is
+:meth:`~characters.equipment_rules.EncumbranceRules.level_for` of their carried
+weight and effective Strength, and the restrictions below combine what the
+level and the armour worn forbid.
 """
 
 import functools
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from reference.rules_file import derived_from_rules
 
-from .equipment_rules import equipment_catalog
+from .equipment_rules import equipment_catalog, equipment_rules
 
 # What one item's own ``category`` may be, in the custom-item form's order and
 # with its labels. Only shields differ from their group: the group is
@@ -153,86 +156,36 @@ def settle_worn_armour(item: dict) -> None:
         item["in_pack"] = False
 
 
-# Encumbrance thresholds and penalties
-ENCUMBRANCE_LEVELS = {
-    "unencumbered": {"max_multiplier": 1.0, "penalty": 0, "restrictions": []},
-    "light": {"max_multiplier": 1.5, "penalty": -1, "restrictions": []},
-    "medium": {"max_multiplier": 2.0, "penalty": -2, "restrictions": ["run", "sprint"]},
-    "heavy": {
-        "max_multiplier": 2.5,
-        "penalty": -4,
-        "restrictions": ["jog", "run", "sprint"],
-    },
-    "overloaded": {
-        "max_multiplier": float("inf"),
-        "penalty": 0,
-        "restrictions": ["jog", "run", "sprint"],
-        "walk_limit": 1,
-    },
-}
+def format_pounds(pounds: float) -> str:
+    """A weight in pounds as the sheet and the export print a load limit.
 
+    A whole number prints without decimals and any other with one: ``10``,
+    ``15``, ``12.5`` (issue #75).
 
-# Lightest to heaviest; the first level whose max the carried weight fits under
-# wins. "overloaded" has an infinite multiplier so it catches everything else.
-ENCUMBRANCE_ORDER = ("unencumbered", "light", "medium", "heavy", "overloaded")
-
-
-def calculate_encumbrance_level(carried_weight: float, strength: int) -> str:
-    """Calculate encumbrance level based on carried weight and STR."""
-    for level in ENCUMBRANCE_ORDER:
-        if carried_weight <= strength * ENCUMBRANCE_LEVELS[level]["max_multiplier"]:
-            return level
-    return "overloaded"
-
-
-def get_movement_penalty(encumbrance_level: str | None) -> int:
-    """Get movement penalty for encumbrance level; 0 when the level is unknown."""
-    if encumbrance_level is None:
-        return 0
-    return ENCUMBRANCE_LEVELS.get(encumbrance_level, {}).get("penalty", 0)
-
-
-def get_movement_restrictions(encumbrance_level: str | None) -> list[str]:
-    """Restricted movement modes for the level; none when the level is unknown."""
-    if encumbrance_level is None:
-        return []
-    return ENCUMBRANCE_LEVELS.get(encumbrance_level, {}).get("restrictions", [])
-
-
-def get_walk_limit(encumbrance_level: str) -> int | None:
-    """Hex cap on Walk for encumbrance levels that impose one, else None.
-
-    Only ``overloaded`` carries a ``walk_limit`` entry -- "Walk only, 1 hex
-    max" (movement.md). Every other level walks at the normal gait formula.
+    Args:
+        pounds: The weight, already rounded to one decimal.
     """
-    return ENCUMBRANCE_LEVELS.get(encumbrance_level, {}).get("walk_limit")
+    if float(pounds).is_integer():
+        return str(int(pounds))
+    return f"{pounds:.1f}"
 
 
-# Canonical restricted-movement-mode order, lightest to heaviest gait. Matches
-# the order used by ENCUMBRANCE_LEVELS["heavy"]["restrictions"] above.
-MOVEMENT_MODE_ORDER = ("jog", "run", "sprint")
-
-# Maps an armor's catalog ``movement_restriction`` code to the gaits it
-# forbids. See ``reference/content/public-rules/equipment/armor-and-shields.md``:
-# Leather Armor is "Cannot Sprint", Chainmail/Half-Plate/Plate/Fine Plate are
-# "Cannot Run or Sprint".
-ARMOR_MOVEMENT_RESTRICTION_MODES: dict[str, list[str]] = {
-    "no_sprint": ["sprint"],
-    "no_run_sprint": ["run", "sprint"],
-}
-
-
-def combine_movement_restrictions(*restriction_lists: list[str]) -> list[str]:
-    """Merge restriction lists into their union, in canonical gait order.
+def combine_movement_restrictions(*restriction_lists: Iterable[str]) -> list[str]:
+    """Merge restriction lists into their union, in the gaits' order.
 
     Restrictions from different sources (encumbrance, worn armor) are not
     additive counts, just a set of forbidden gaits — the most restrictive
-    combination is simply the union of what each source forbids.
+    combination is simply the union of what each source forbids. The order
+    is the loaded rules' restrictable gaits, slowest first
+    (:attr:`characters.equipment_rules.GaitRules.restrictable_gaits`), the
+    order :func:`describe_movement_restrictions` names them in.
     """
-    combined = set()
+    combined: set[str] = set()
     for restrictions in restriction_lists:
         combined.update(restrictions)
-    return [mode for mode in MOVEMENT_MODE_ORDER if mode in combined]
+    return [
+        gait for gait in equipment_rules().gaits.restrictable_gaits if gait in combined
+    ]
 
 
 def _equipped_armor_restriction_codes(equipment: list[dict] | None):
@@ -265,30 +218,45 @@ def get_armor_movement_restrictions(equipment: list[dict] | None) -> list[str]:
     from its own stored ``movement_restriction`` field, matching how other
     per-item armor values (e.g. ``stops``) fall back to stored data.
     """
-    restricted: set[str] = set()
-    for code, _name in _equipped_armor_restriction_codes(equipment):
-        if code:
-            restricted.update(ARMOR_MOVEMENT_RESTRICTION_MODES.get(code, []))
-    return [mode for mode in MOVEMENT_MODE_ORDER if mode in restricted]
+    codes = equipment_rules().armour_restriction_codes
+    return combine_movement_restrictions(
+        *(
+            codes.get(code, ())
+            for code, _name in _equipped_armor_restriction_codes(equipment)
+            if code
+        )
+    )
 
 
 def get_restrictive_armor_names(equipment: list[dict] | None) -> list[str]:
     """Names of equipped armor pieces that impose a movement restriction."""
+    codes = equipment_rules().armour_restriction_codes
     return [
         name
         for code, name in _equipped_armor_restriction_codes(equipment)
-        if code in ARMOR_MOVEMENT_RESTRICTION_MODES
+        if code in codes
     ]
 
 
-def describe_movement_restrictions(restrictions: list[str]) -> str:
-    """Human-readable summary of restricted gaits, matching the rules doc wording."""
-    if not restrictions:
+def describe_movement_restrictions(restrictions: Sequence[str]) -> str:
+    """The restricted gaits as the pages word them, or ``""`` for none.
+
+    The gaits title-cased, listed in the order given and ending in "or", the
+    wording of movement.md and armor-and-shields.md: "Cannot Sprint",
+    "Cannot Run or Sprint", "Cannot Jog, Run, or Sprint". The names are the
+    loaded canon's gaits, whatever they are called.
+
+    Args:
+        restrictions: The forbidden gaits, as
+            :func:`combine_movement_restrictions` orders them.
+    """
+    names = [gait.title() for gait in restrictions]
+    if not names:
         return ""
-    if restrictions == ["sprint"]:
-        return "Cannot Sprint"
-    if restrictions == ["run", "sprint"]:
-        return "Cannot Run or Sprint"
-    if restrictions == ["jog", "run", "sprint"]:
-        return "Cannot Jog, Run, or Sprint"
-    return "Cannot " + ", ".join(mode.title() for mode in restrictions)
+    if len(names) == 1:
+        listed = names[0]
+    elif len(names) == 2:
+        listed = f"{names[0]} or {names[1]}"
+    else:
+        listed = f"{', '.join(names[:-1])}, or {names[-1]}"
+    return f"Cannot {listed}"

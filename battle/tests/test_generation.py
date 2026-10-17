@@ -18,11 +18,7 @@ from battle.generation import (
 from battle.services import HTH_WEAPON_IDS, snapshot_combatant
 from battle.spells import get_spell
 from characters.constants import CHARACTER_NAME_PATTERN
-from characters.equipment import (
-    ENCUMBRANCE_ORDER,
-    calculate_encumbrance_level,
-    get_item,
-)
+from characters.equipment import get_item
 from characters.equipment_rules import equipment_catalog, equipment_rules
 from common.test_helpers import BaseTestCase
 
@@ -299,28 +295,29 @@ class DealEquipmentTest(BaseTestCase):
         )
 
     def test_every_kit_is_the_heaviest_that_fits_at_every_strength(self):
-        medium = ENCUMBRANCE_ORDER.index("medium")
+        encumbrance = equipment_rules().encumbrance
+        medium = encumbrance.keys.index(generation.HEAVIEST_GENERATED_LOAD)
         for archetype in ARCHETYPES:
             for strength in range(3, 19):
                 with self.subTest(archetype=archetype, strength=strength):
                     weapon_id = pick_weapon(archetype, strength)
                     dealt = deal_equipment(archetype, weapon_id, strength)
-                    level = calculate_encumbrance_level(_weight(dealt), strength)
+                    level = encumbrance.level_for(_weight(dealt), strength)
                     full = deal_equipment(
                         archetype, weapon_id, strength, within_load=False
                     )
                     if dealt != full:
                         # Lightened only because the full kit was too heavy.
                         self.assertGreater(
-                            ENCUMBRANCE_ORDER.index(
-                                calculate_encumbrance_level(_weight(full), strength)
+                            encumbrance.keys.index(
+                                encumbrance.level_for(_weight(full), strength)
                             ),
                             medium,
                         )
                     # A weapon alone may still be too much for a low STR; the
                     # kit is then as light as it goes: no armour and no
                     # shield, and a weapon of the dealt one's class.
-                    if ENCUMBRANCE_ORDER.index(level) > medium:
+                    if encumbrance.keys.index(level) > medium:
                         carried = [
                             item
                             for item in _worn(dealt)

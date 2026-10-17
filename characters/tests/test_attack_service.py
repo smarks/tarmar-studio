@@ -10,6 +10,7 @@ file covers the arithmetic.
 from django.test import TestCase
 
 from characters import attack, combat
+from characters.equipment_rules import equipment_rules
 from characters.models import Character
 from characters.tests.rules_fixtures import DEFAULT_EQUIPMENT_CATALOG
 from common.test_helpers import TEST_PASSWORD
@@ -214,7 +215,8 @@ class AttackValidationTest(AttackServiceTestBase):
         self.assertEqual(result["to_hit"]["skill_bonus"], 3)
 
     def test_dodge_outside_its_band_is_refused(self):
-        for bad in (-1, attack.MAX_DEFENDER_DODGE + 1):
+        bounds = equipment_rules().defender_dodge
+        for bad in (bounds.minimum - 1, bounds.maximum + 1):
             with self.assertRaises(attack.AttackValidationError):
                 self.resolve(ScriptedRoller(), defender_dodge=bad)
 

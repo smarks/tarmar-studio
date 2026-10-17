@@ -99,12 +99,15 @@ What the rules' values mean, and what else is refused:
 
 The level keys and the gait names are the canon's to choose: the loader
 requires only that they be unique, and the code reads a level or a gait by
-its place and role, never by its name: :attr:`EncumbranceRules.lightest`,
-:attr:`EncumbranceRules.heaviest` and :attr:`GaitRules.slowest`. Slices B and
-C of issue #75 replace the code's literal ``"unencumbered"``,
-``"overloaded"`` and ``"walk"`` with them. The one key the code names is
+its place and role, never by its name (:attr:`EncumbranceRules.keys`,
+:attr:`EncumbranceRules.heaviest`, :attr:`GaitRules.order`,
+:attr:`GaitRules.slowest`). Two places name what the code itself decides:
 ``battle.generation``'s ``HEAVIEST_GENERATED_LOAD``, the generator's own
-choice, whose presence in the loaded levels slice B tests.
+choice of level, which a test holds every canon to naming; and the battle
+engine's four gaits (``battle.adaptation.ENGINE_GAITS``), matched to the
+canon's by place, so a canon must name exactly four, which the
+``battle.E003`` system check holds it to until stage 6 seats the engine's
+own rules.
 
 Both files are read the strict way every canon rules file shares
 (``reference.rules_file``): every field above is required unless marked
