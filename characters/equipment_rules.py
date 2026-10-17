@@ -219,7 +219,8 @@ class CatalogItem:
 
     def as_dict(self) -> dict[str, Any]:
         """The item as the file holds it: every field but the id, and an
-        optional field only when present.
+        optional field only when present, in the dataclass's declaration
+        order (the common fields first) rather than the file's.
 
         Returns:
             A new dict, which the caller may change.
@@ -382,6 +383,29 @@ class EquipmentCatalog:
         for items in self.groups.values():
             merged.update(items)
         return merged
+
+    def as_dict(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """The catalog as the file holds it, less any ``rulings``.
+
+        Returns:
+            Each group's items by id, each as :meth:`CatalogItem.as_dict`
+            writes it, by group key in :data:`CATALOG_GROUPS`' order; new
+            dicts, which the caller may change.
+        """
+        return {
+            group: {identifier: item.as_dict() for identifier, item in items.items()}
+            for group, items in self.groups.items()
+        }
+
+    def item_dicts(self) -> dict[str, dict[str, Any]]:
+        """Every item by id as the file holds it, the groups merged in order.
+
+        Returns:
+            New dicts, as :meth:`CatalogItem.as_dict` writes each item.
+        """
+        return {
+            identifier: item.as_dict() for identifier, item in self.all_items.items()
+        }
 
     def item(self, identifier: str) -> CatalogItem | None:
         """The item with id ``identifier``, or ``None``."""

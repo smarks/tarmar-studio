@@ -25,6 +25,7 @@ from django.test import SimpleTestCase
 from characters.checks import (
     EQUIPMENT_CATALOG_CHECK_ID,
     EQUIPMENT_RULES_CHECK_ID,
+    SKILL_RULES_CHECK_ID,
     check_equipment_catalog,
     check_equipment_rules,
 )
@@ -990,29 +991,40 @@ class DefaultEquipmentRulesEquivalenceTest(SimpleTestCase):
         )
 
 
-class DefaultEquipmentCatalogFixtureTest(SimpleTestCase):
-    """The default canon's catalog is the fixture the code reads today.
+class CanonCatalogWrittenBackTest(SimpleTestCase):
+    """A canon's catalog reads back as its file holds it.
 
-    Slices A and B of issue #75 only: slice B seats the catalog and deletes
-    ``characters/fixtures/equipment.json``, and with it this test.
+    The sheet's catalog endpoint serves :meth:`EquipmentCatalog.as_dict` and
+    every module reader answers from :meth:`EquipmentCatalog.item_dicts`
+    (``characters.equipment``), so neither may lose, add or reorder a group,
+    an item or a field value against the file (issue #75).
     """
 
-    def test_every_item_and_group_is_the_fixture_s(self) -> None:
-        from characters.equipment import CATALOG_BY_GROUP, EQUIPMENT_CATALOG
-
-        catalog = DEFAULT_EQUIPMENT_CATALOG
-        self.assertEqual(
-            {
-                identifier: catalog_item.as_dict()
-                for identifier, catalog_item in catalog.all_items.items()
-            },
-            EQUIPMENT_CATALOG,
-        )
-        self.assertEqual(list(catalog.all_items), list(EQUIPMENT_CATALOG))
-        self.assertEqual(list(catalog.groups), list(CATALOG_BY_GROUP))
-        for group, items in catalog.groups.items():
-            with self.subTest(group=group):
-                self.assertEqual(list(items), list(CATALOG_BY_GROUP[group]))
+    def test_each_canon_s_catalog_is_its_file_less_the_rulings(self) -> None:
+        for path in (
+            DEFAULT_CANON_DIR / CANON_EQUIPMENT_CATALOG_FILE_NAME,
+            EQUIPMENT_CATALOG_FILE,
+        ):
+            with self.subTest(path=str(path)):
+                stored = json.loads(path.read_text(encoding="utf-8"))
+                stored.pop("rulings", None)
+                catalog = load_equipment_catalog(path)
+                written = catalog.as_dict()
+                self.assertEqual(written, stored)
+                # Equality alone lets 5 stand for 5.0 and True for 1.
+                self.assertEqual(
+                    json.dumps(written, sort_keys=True),
+                    json.dumps(stored, sort_keys=True),
+                )
+                for group, items in written.items():
+                    self.assertEqual(list(items), list(stored[group]))
+                merged = {
+                    identifier: item
+                    for group_items in stored.values()
+                    for identifier, item in group_items.items()
+                }
+                self.assertEqual(catalog.item_dicts(), merged)
+                self.assertEqual(list(catalog.item_dicts()), list(merged))
 
 
 class CatalogClassesTest(SimpleTestCase):
@@ -1132,8 +1144,13 @@ class EquipmentChecksTest(SimpleTestCase):
                 self.assertIsInstance(refused[0], Error)
                 self.assertEqual(refused[0].msg, str(refusal))
                 self.assertIn("characters/equipment_rules.py", refused[0].hint or "")
-                # The other file's check reports nothing it cannot check.
-                other_ids = {EQUIPMENT_CATALOG_CHECK_ID, EQUIPMENT_RULES_CHECK_ID}
+                # The other files' checks report nothing they cannot check:
+                # the skill names are checked against the catalog's weapons.
+                other_ids = {
+                    EQUIPMENT_CATALOG_CHECK_ID,
+                    EQUIPMENT_RULES_CHECK_ID,
+                    SKILL_RULES_CHECK_ID,
+                }
                 other_ids.discard(check_id)
                 self.assertEqual(
                     [message for message in messages if message.id in other_ids], []
@@ -1247,6 +1264,11 @@ class EquipmentFilesReadOnlyWhenAskedTest(SimpleTestCase):
             "'tarmar_studio.settings')\n"
             "django.setup()\n"
             "import tarmar_studio.urls, characters.urls\n"
+            # Every module that reads the catalog, in case the URL
+            # configuration stops importing one of them.
+            "import characters.equipment, characters.weapon_skill\n"
+            "import characters.services, gm.character_schema\n"
+            "import battle.generation, battle.services\n"
             "from characters.equipment_rules import equipment_catalog, "
             "equipment_rules\n"
             "print('misses', equipment_catalog.cache_info().misses, "
@@ -1275,3 +1297,5 @@ class EquipmentFilesReadOnlyWhenAskedTest(SimpleTestCase):
                     EQUIPMENT_RULES_CHECK_ID,
                 } - {check_id}
                 self.assertNotIn(other_check_id, output)
+                # The skill names are checked only against a catalog that loads.
+                self.assertNotIn(SKILL_RULES_CHECK_ID, output)

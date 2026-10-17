@@ -12,19 +12,17 @@ from characters.constants import (
     MAX_EQUIPMENT_MODIFIER,
 )
 from characters.equipment import (
-    EQUIPMENT_CATALOG,
     calculate_encumbrance_level,
     combine_movement_restrictions,
     describe_movement_restrictions,
     get_armor_movement_restrictions,
     get_item,
     get_item_name,
-    get_item_weight,
-    get_items_by_category,
     get_movement_penalty,
     get_movement_restrictions,
     get_restrictive_armor_names,
 )
+from characters.equipment_rules import equipment_catalog
 from characters.rules import load_character_rules
 from reference.paths import CANON_CHARACTER_RULES_FILE_NAME, DEFAULT_CANON_DIR
 
@@ -33,31 +31,32 @@ class EquipmentCatalogTests(SimpleTestCase):
     def test_get_item_returns_none_for_unknown(self):
         self.assertIsNone(get_item("__nope__"))
 
-    def test_get_item_weight_unknown_is_zero(self):
-        self.assertEqual(get_item_weight("__nope__"), 0)
+    def test_an_unknown_item_weighs_nothing(self):
+        self.assertEqual(equipment_catalog().weight("__nope__"), 0)
 
     def test_get_item_name_unknown_returns_id(self):
         self.assertEqual(get_item_name("__nope__"), "__nope__")
 
     def test_catalog_items_have_required_keys(self):
         # Every catalog entry needs name, category, weight, cost.
-        for item_id, item in EQUIPMENT_CATALOG.items():
+        for item_id in equipment_catalog().all_items:
+            item = get_item(item_id)
             with self.subTest(item_id=item_id):
+                assert item is not None
                 for key in ("name", "category", "weight", "cost"):
                     self.assertIn(key, item, f"{item_id} missing {key}")
 
-    def test_get_items_by_category_filters_correctly(self):
-        weapons = get_items_by_category("weapons")
+    def test_items_by_category_filters_correctly(self):
+        catalog = equipment_catalog()
+        weapons = catalog.items_by_category("weapons")
         for item_id, item in weapons.items():
-            self.assertEqual(item["category"], "weapons", item_id)
+            self.assertEqual(item.category, "weapons", item_id)
         # Categories cover all items.
-        seen = (
-            len(get_items_by_category("weapons"))
-            + len(get_items_by_category("armor"))
-            + len(get_items_by_category("shield"))
-            + len(get_items_by_category("gear"))
+        seen = sum(
+            len(catalog.items_by_category(category))
+            for category in ("weapons", "armor", "shield", "gear")
         )
-        self.assertEqual(seen, len(EQUIPMENT_CATALOG))
+        self.assertEqual(seen, len(catalog.all_items))
 
 
 class EncumbranceTests(SimpleTestCase):

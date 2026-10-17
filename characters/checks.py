@@ -113,6 +113,26 @@ def check_character_rules(
     )
 
 
+def _skill_rules_against_catalog() -> None:
+    """Load the skill rules and check their skill names.
+
+    Whether a name is a Weapon skill depends on the catalog's weapons
+    (:func:`characters.weapon_skill.trained_weapon_id`), so the names are
+    checked only when the catalog loads; a refused catalog is
+    ``characters.E003``'s to report (issue #75).
+
+    Raises:
+        SkillRulesError: The rules are refused, or name a skill that is not
+            a glossary skill in its own right.
+    """
+    rules = skill_rules()
+    try:
+        equipment_catalog()
+    except EquipmentCatalogError:
+        return
+    validate_skill_names(rules, SKILL_RULES_FILE)
+
+
 @register()
 def check_skill_rules(
     app_configs: Sequence[AppConfig] | None = None, **kwargs: Any
@@ -133,7 +153,7 @@ def check_skill_rules(
         the loader's message, which names the file and the field.
     """
     return _rules_file_refusals(
-        lambda: validate_skill_names(skill_rules(), SKILL_RULES_FILE),
+        _skill_rules_against_catalog,
         SkillRulesError,
         CANON_SKILL_RULES_FILE_NAME,
         "characters/skill_rules.py",

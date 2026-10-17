@@ -37,7 +37,6 @@ from django.test import SimpleTestCase
 
 from characters import combat
 from characters.constants import SEVERE_INJURY_BAND_TOP
-from characters.equipment import EQUIPMENT_CATALOG
 from characters.models import Character
 from characters.movement import GAIT_BASE_DISTANCES
 from characters.rules import RollTable
@@ -57,10 +56,16 @@ from reference.paths import CONTENT_DIR, DM_RULES_DIR
 
 from .rules_fixtures import (
     DEFAULT_CHARACTER_RULES,
+    DEFAULT_EQUIPMENT_CATALOG,
     DEFAULT_SKILL_RULES,
     seated_character_rules,
     seated_skill_rules,
 )
+
+#: The default canon's catalog items by id as its ``equipment.json`` holds
+#: them, which the equipment drift tests hold to the public pages whichever
+#: canon is loaded (issue #75).
+DEFAULT_CATALOG_ITEMS = DEFAULT_EQUIPMENT_CATALOG.item_dicts()
 
 REFERENCE_CONTENT = CONTENT_DIR
 PUBLIC_RULES = REFERENCE_CONTENT / "public-rules"
@@ -949,9 +954,9 @@ class EquipmentCostRuleTest(SimpleTestCase):
     def test_catalog_torch_items_cost_one_copper_piece(self):
         # 1 cp = 0.01 gp-equivalent, per characters.equipment's cost convention.
         one_copper_piece_in_gp = 0.01
-        self.assertEqual(EQUIPMENT_CATALOG["torch"]["cost"], one_copper_piece_in_gp)
+        self.assertEqual(DEFAULT_CATALOG_ITEMS["torch"]["cost"], one_copper_piece_in_gp)
         self.assertEqual(
-            EQUIPMENT_CATALOG["torch_weapon"]["cost"], one_copper_piece_in_gp
+            DEFAULT_CATALOG_ITEMS["torch_weapon"]["cost"], one_copper_piece_in_gp
         )
 
 
@@ -1065,10 +1070,11 @@ class MissingCatalogEntriesTest(SimpleTestCase):
         assert cram is not None, "gear.md lost the month cram ration entry"
         assert regular is not None, "gear.md lost the month regular ration entry"
         self.assertEqual(
-            float(cram.group(1)), EQUIPMENT_CATALOG["rations_month_cram"]["cost"]
+            float(cram.group(1)), DEFAULT_CATALOG_ITEMS["rations_month_cram"]["cost"]
         )
         self.assertEqual(
-            float(regular.group(1)), EQUIPMENT_CATALOG["rations_month_regular"]["cost"]
+            float(regular.group(1)),
+            DEFAULT_CATALOG_ITEMS["rations_month_regular"]["cost"],
         )
 
     def test_standard_pack_bundle_lists_the_same_contents_as_gear_md(self):
@@ -1080,7 +1086,7 @@ class MissingCatalogEntriesTest(SimpleTestCase):
             if line.strip().startswith("-")
         ]
         self.assertTrue(bullets, "gear.md lost the Standard Pack contents list")
-        bundle = EQUIPMENT_CATALOG["standard_pack"]
+        bundle = DEFAULT_CATALOG_ITEMS["standard_pack"]
         notes = bundle["notes"]
         basics_rows = _section_rows(GEAR_RULES, "Basics")[1:]  # drop header row
 
@@ -1116,7 +1122,7 @@ class MissingCatalogEntriesTest(SimpleTestCase):
         header, *data_rows = rows
         self.assertEqual(header, ["Item", "Cost"])
 
-        by_name = {item["name"]: item for item in EQUIPMENT_CATALOG.values()}
+        by_name = {item["name"]: item for item in DEFAULT_CATALOG_ITEMS.values()}
         for name, cost_cell in data_rows:
             with self.subTest(name=name):
                 self.assertIn(name, by_name, f"{name!r} missing from the catalog")
@@ -1129,7 +1135,7 @@ class MissingCatalogEntriesTest(SimpleTestCase):
         header, *data_rows = rows
         self.assertEqual(header, ["Service", "Cost"])
 
-        by_name = {item["name"]: item for item in EQUIPMENT_CATALOG.values()}
+        by_name = {item["name"]: item for item in DEFAULT_CATALOG_ITEMS.values()}
         for name, cost_cell in data_rows:
             with self.subTest(name=name):
                 self.assertIn(name, by_name, f"{name!r} missing from the catalog")
@@ -1148,13 +1154,13 @@ class ToolPriceRangeRuleTest(SimpleTestCase):
         rows = _table_rows(GEAR_RULES)
         row = next(cells for cells in rows if cells[0] == "Artisan's tools")
         self.assertEqual(row[1], "10-50 gp")
-        self.assertIn("10-50 gp", EQUIPMENT_CATALOG["artisans_tools"]["notes"])
+        self.assertIn("10-50 gp", DEFAULT_CATALOG_ITEMS["artisans_tools"]["notes"])
 
     def test_musical_instrument_notes_the_printed_range(self):
         rows = _table_rows(GEAR_RULES)
         row = next(cells for cells in rows if cells[0] == "Musical instrument")
         self.assertEqual(row[1], "5-50 gp")
-        self.assertIn("5-50 gp", EQUIPMENT_CATALOG["musical_instrument"]["notes"])
+        self.assertIn("5-50 gp", DEFAULT_CATALOG_ITEMS["musical_instrument"]["notes"])
 
 
 class CrossbowRateOfFireRuleTest(SimpleTestCase):
@@ -1166,18 +1172,18 @@ class CrossbowRateOfFireRuleTest(SimpleTestCase):
         rows = _table_rows(WEAPONS_RULES)
         row = next(cells for cells in rows if cells[0].startswith("Light Crossbow"))
         self.assertEqual(row[-1], "Every other turn; every if 14+")
-        self.assertEqual(EQUIPMENT_CATALOG["light_crossbow"]["notes"], row[-1])
+        self.assertEqual(DEFAULT_CATALOG_ITEMS["light_crossbow"]["notes"], row[-1])
 
     def test_heavy_crossbow_notes_match_weapons_md_verbatim(self):
         rows = _table_rows(WEAPONS_RULES)
         row = next(cells for cells in rows if cells[0].startswith("Heavy Crossbow"))
         self.assertEqual(row[-1], "Every 3rd turn; every other 16+")
-        self.assertEqual(EQUIPMENT_CATALOG["heavy_crossbow"]["notes"], row[-1])
+        self.assertEqual(DEFAULT_CATALOG_ITEMS["heavy_crossbow"]["notes"], row[-1])
 
     def test_crossbow_notes_do_not_name_an_attribute(self):
         for item_id in ("light_crossbow", "heavy_crossbow"):
             with self.subTest(item_id=item_id):
-                notes = EQUIPMENT_CATALOG[item_id]["notes"]
+                notes = DEFAULT_CATALOG_ITEMS[item_id]["notes"]
                 self.assertNotIn("STR", notes)
                 self.assertNotIn("DEX", notes)
 

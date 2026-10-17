@@ -274,7 +274,18 @@ Notes on the edges, each checkable:
   Games Master's prompts, the patterns naming its skills and tracks)
   registers with `reference.rules_file.derived_from_rules`, so a test seating
   other rules clears it.
-  The three rules files are read by the one strict reader in
+- `characters/equipment_rules.py` reads the canon's `equipment.json`
+  (`reference.paths.EQUIPMENT_CATALOG_FILE`) into `EquipmentCatalog`: every
+  weapon, armour, shield and piece of gear a character may buy. Callers read
+  it through the cached `equipment_catalog()` when they run, never at import,
+  mostly by way of `characters/equipment.py`'s `get_item` and its siblings, and
+  a refused file, an armour restriction code the equipment rules do not give,
+  or a weapon class or armour tier the combat matrix lacks is reported by
+  `characters.E003`. The same module reads `equipment-rules.json`
+  (`characters.E004`). The values built from the catalog and cached (the
+  sheet's catalog payload, the Weapon-skill spellings, the Games Master's item
+  names) register with `derived_from_rules` as the skill values do.
+  The rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
 ### Frontend layering
@@ -511,7 +522,7 @@ flowchart TD
     mod --> mmod
 
     equip["equipment JSON"]
-    carried["carried_weight<br/>equipment.get_item_weight, pack_dropped"]
+    carried["carried_weight<br/>equipment.get_item, pack_dropped"]
     equip --> carried
     enc["equipment.calculate_encumbrance_level<br/>unencumbered to overloaded"]
     carried --> enc
@@ -602,8 +613,10 @@ by the HTTP views and the GM's executor. Rule refusals raise
 
 ### Equipment and attacks
 
-`characters/fixtures/equipment.json` is read once at import by
-`characters/equipment.py` — it is not a Django fixture and there is no table.
+The catalog is the loaded canon's `equipment.json`, read through
+`characters.equipment_rules.equipment_catalog()` the first time a reader asks
+(issue #75), and answered for the rest of the app by `characters/equipment.py`
+— there is no table.
 The six equipment endpoints (`equipment_add`, `equipment_update`,
 `equipment_remove`, `equipment_bulk_remove`, `equipment_toggle_pack`, plus the
 read-only `equipment_catalog`) all funnel through `_change_equipment` and answer
@@ -730,7 +743,7 @@ erDiagram
         datetime created_at
     }
     EQUIPMENT_CATALOG {
-        string name "fixtures/equipment.json, not a table"
+        string name "the canon's equipment.json, not a table"
         string category "weapons armor shields gear"
         string subcategory "weapon family"
         string damage
@@ -1535,8 +1548,8 @@ erDiagram
 ```
 
 Four things have no models at all and are worth naming so nobody looks for
-tables: the equipment catalog (`characters/fixtures/equipment.json`, read at
-import), the rules wiki (markdown under `reference/content/` plus
+tables: the equipment catalog (the loaded canon's `equipment.json`, read when
+asked), the rules wiki (markdown under `reference/content/` plus
 `reference/nav.py`), the generator tables — `ruins/tables.py` and
 `ruins/hooks.py` parse the loaded canon's `gm-tools/*.md` at load while
 `encounters/generation.py` holds its d20 and d10 tables in Python, keyed to
@@ -1761,7 +1774,7 @@ player can read.
 | A derived stat on the sheet | the property on `characters/models.py::Character`, then the module it delegates to (`skills.py`, `equipment.py`, `movement.py`, `dice.py`) |
 | Character creation or point buy | `characters/views/characters.py::character_create`, `characters/dice.py::roll_all_character_stats` / `build_point_buy_character_stats`, `static/js/point-buy.js` |
 | A limit or bound (attribute cap, name length, equipment size) | `characters/constants.py` |
-| The equipment catalog | `characters/fixtures/equipment.json`, read by `characters/equipment.py` |
+| The equipment catalog | the canon's `equipment.json` (schema in `characters/equipment_rules.py`; the default canon's copy in `reference/default_canon/`), read through `characters/equipment.py`; drift between the default file and the pages is pinned by `characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py`, and `characters/tests/test_catalog_follows_the_canon.py` seats an invented catalog to prove the readers follow it |
 | Attack resolution | `characters/attack.py::resolve` and `characters/combat.py`; the panel is `static/js/attack-panel.js` |
 | What a character export contains | `character_export/export_utils.py::EXPORTABLE_FIELDS` — import reads the same list |
 | Any write to a character record | `characters/services.py` — the HTTP views and the GM executor both go through it |

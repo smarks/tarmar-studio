@@ -15,13 +15,11 @@ from django.test import SimpleTestCase
 
 from characters import combat
 from characters.equipment import (
-    ARMOR,
-    SHIELDS,
-    WEAPONS,
     get_armour_tier,
     get_shield_bonus,
     get_weapon_class,
 )
+from characters.equipment_rules import equipment_catalog
 from characters.models import Character
 from reference.markdown_tables import split_table_row
 from reference.paths import CONTENT_DIR
@@ -294,7 +292,7 @@ class BalanceSurfaceTests(SimpleTestCase):
 
 class CatalogIntegrationTests(SimpleTestCase):
     def test_every_weapon_has_a_known_class(self):
-        for weapon_id in WEAPONS:
+        for weapon_id in equipment_catalog().weapons:
             if weapon_id in AMMUNITION:
                 self.assertIsNone(get_weapon_class(weapon_id))
                 continue
@@ -302,12 +300,12 @@ class CatalogIntegrationTests(SimpleTestCase):
                 self.assertIn(get_weapon_class(weapon_id), combat.MATRIX)
 
     def test_every_armour_has_a_known_tier(self):
-        for armour_id in ARMOR:
+        for armour_id in equipment_catalog().armour:
             with self.subTest(armour_id=armour_id):
                 self.assertIn(get_armour_tier(armour_id), combat.ARMOUR_TIERS)
 
     def test_every_shield_has_a_bonus(self):
-        for shield_id in SHIELDS:
+        for shield_id in equipment_catalog().shields:
             with self.subTest(shield_id=shield_id):
                 self.assertGreaterEqual(get_shield_bonus(shield_id), 1)
 

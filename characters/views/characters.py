@@ -63,7 +63,8 @@ from ..constants import (
     too_long,
 )
 from ..dice import build_point_buy_character_stats, roll_all_character_stats
-from ..equipment import CATALOG_GROUPS, ITEM_CATEGORIES, SHIELDS, get_item
+from ..equipment import ITEM_CATEGORIES, get_item
+from ..equipment_rules import CATALOG_GROUPS, equipment_catalog
 from ..import_service import (
     IMPORT_NOTICE_KEY,
     CharacterImportError,
@@ -1157,8 +1158,8 @@ class CharacterEditView(
             "attack_gm_adjudicated_weapons": gm_adjudicated,
             "attack_armour_tiers": ARMOUR_TIERS,
             "attack_shields": [
-                {"item_id": item_id, "name": data.get("name", item_id)}
-                for item_id, data in SHIELDS.items()
+                {"item_id": item_id, "name": shield.name}
+                for item_id, shield in equipment_catalog().shields.items()
             ],
             # Newest first: stored oldest-first like history, reversed for display.
             "combat_log_entries": list(reversed(self.object.combat_log or [])),

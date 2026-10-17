@@ -2,11 +2,12 @@
 
 A catalog group ("shields") and an item's own category ("shield") are two
 different lists that were typed into the template, the JavaScript and the
-validator separately. characters/equipment.py holds both now; these tests keep
-every consumer on them.
+validator separately. characters/equipment_rules.py holds the groups and
+characters/equipment.py the categories; these tests keep every consumer on
+them. That every loaded item's category is its group's is the catalog
+loader's check (``characters.equipment_rules``, issue #75).
 """
 
-import json
 import re
 from pathlib import Path
 
@@ -14,31 +15,12 @@ from django.conf import settings
 from django.test import SimpleTestCase
 from django.urls import reverse
 
-from characters.equipment import CATALOG_BY_GROUP, CATALOG_GROUPS, ITEM_CATEGORIES
+from characters.equipment import ITEM_CATEGORIES
+from characters.equipment_rules import CATALOG_GROUPS
 from characters.equipment_service import build_custom_equipment_item
 from common.test_helpers import BaseTestCase, create_character
 
 ROOT = Path(settings.BASE_DIR)
-
-
-class CatalogFollowsTheVocabularyTest(SimpleTestCase):
-    def test_the_fixtures_groups_are_the_catalog_groups_in_order(self):
-        fixture = json.loads(
-            (ROOT / "characters" / "fixtures" / "equipment.json").read_text()
-        )
-
-        self.assertEqual(list(fixture), [group for group, _label in CATALOG_GROUPS])
-        self.assertEqual(
-            list(CATALOG_BY_GROUP), [group for group, _label in CATALOG_GROUPS]
-        )
-
-    def test_every_catalog_item_has_a_known_category(self):
-        known = {category for category, _label in ITEM_CATEGORIES}
-        for group, items in CATALOG_BY_GROUP.items():
-            with self.subTest(group=group):
-                self.assertLessEqual(
-                    {item["category"] for item in items.values()}, known
-                )
 
 
 class CustomItemValidationTest(SimpleTestCase):

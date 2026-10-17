@@ -23,12 +23,12 @@ from bestiary.generation import DIFFICULTY_BANDS, pick_base
 from bestiary.models import CATEGORY_CHOICES, Beast
 from characters import services as character_services
 from characters.equipment import (
-    WEAPONS,
     get_armour_tier,
     get_item,
     get_shield_bonus,
     is_worn_armour,
 )
+from characters.equipment_rules import equipment_catalog
 from characters.magic import battle_loadout, current_mana, spell_mastery
 from characters.models import (
     Character,
@@ -198,7 +198,7 @@ def _weapon_skill_levels(character: Character) -> dict[str, int]:
     Levels of 0 are left out: the engine reads a missing weapon as 0.
     """
     levels: dict[str, int] = {}
-    for item_id in WEAPONS:
+    for item_id in equipment_catalog().weapons:
         if not board_can_seat_weapon({"item_id": item_id}):
             continue
         level = resolve_weapon_skill(character.skills, item_id).effective_level

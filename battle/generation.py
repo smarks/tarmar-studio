@@ -25,10 +25,10 @@ from characters.constants import UNNAMED_CHARACTER, name_within_rule
 from characters.dice import roll_all_character_stats
 from characters.equipment import (
     ENCUMBRANCE_ORDER,
-    WEAPONS,
     calculate_encumbrance_level,
     get_item,
 )
+from characters.equipment_rules import equipment_catalog
 from characters.models import Character, board_can_seat_weapon
 from characters.skills import points_for_level
 from characters.weapon_skill import weapon_skill_name
@@ -273,12 +273,12 @@ def _lighter_weapons(weapon_id: str, effective_strength: int) -> list[str]:
         return []
     weight = float(held.get("weight") or 0)
     lighter = [
-        (float(item.get("weight") or 0), item_id)
-        for item_id, item in WEAPONS.items()
-        if item.get("weapon_class") == weapon_class
-        and bool(item.get("two_handed")) == bool(held.get("two_handed"))
-        and float(item.get("weight") or 0) < weight
-        and (item.get("str_req") or 0) <= effective_strength
+        (float(weapon.weight), item_id)
+        for item_id, weapon in equipment_catalog().weapons.items()
+        if weapon.weapon_class == weapon_class
+        and weapon.two_handed == bool(held.get("two_handed"))
+        and weapon.weight < weight
+        and (weapon.str_req or 0) <= effective_strength
         and board_can_seat_weapon({"item_id": item_id})
     ]
     return [

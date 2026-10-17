@@ -3,6 +3,8 @@
 import random
 from unittest import mock
 
+from django.test import SimpleTestCase
+
 from battle import generation
 from battle.generation import (
     ARCHETYPES,
@@ -13,7 +15,7 @@ from battle.generation import (
     pick_weapon,
     spell_loadout,
 )
-from battle.services import snapshot_combatant
+from battle.services import HTH_WEAPON_IDS, snapshot_combatant
 from battle.spells import get_spell
 from characters.constants import CHARACTER_NAME_PATTERN
 from characters.equipment import (
@@ -21,6 +23,7 @@ from characters.equipment import (
     calculate_encumbrance_level,
     get_item,
 )
+from characters.equipment_rules import equipment_catalog, equipment_rules
 from common.test_helpers import BaseTestCase
 
 from .magic_fixtures import rules_with_channel, seated_rules
@@ -382,3 +385,60 @@ class DealEquipmentTest(BaseTestCase):
                             combatant.character.encumbrance_level,
                             ("unencumbered", "light", "medium"),
                         )
+
+
+class GeneratorNamesWhatTheCanonCarriesTest(SimpleTestCase):
+    """The generator's loadouts name catalog ids and an encumbrance level.
+
+    They are the generator's design choices, not the canon's (issue #75):
+    the ids each archetype is dealt and steps down through, the arrows dealt
+    with a bow, and the heaviest load it deals; and the battle's one
+    hand-to-hand weapon. The loaded canon must carry every one, in the group
+    the battle deals it from, whichever canon is loaded.
+    """
+
+    def test_every_id_the_generator_names_is_in_the_loaded_catalog(self):
+        catalog = equipment_catalog()
+        weapons = {
+            item_id
+            for candidates in generation._WEAPON_CANDIDATES.values()
+            for item_id in candidates
+        }
+        for item_id in sorted(weapons):
+            with self.subTest(item_id=item_id):
+                self.assertIsNotNone(catalog.weapon_class(item_id))
+        # The arrows an archer with a two-handed bow is dealt beside it.
+        self.assertIn("arrows_20", catalog.weapons)
+        # Each step-down table names pieces of its own group only.
+        for steps_by_piece, group in (
+            (generation._ARMOUR_STEPS, catalog.armour),
+            (generation._SHIELD_STEPS, catalog.shields),
+        ):
+            for piece, steps in steps_by_piece.items():
+                for item_id in (piece, *steps):
+                    if item_id is None:
+                        continue
+                    with self.subTest(piece=piece, item_id=item_id):
+                        self.assertIn(item_id, group)
+        # An archetype's piece is armour when it steps down as armour, a
+        # shield when it steps down as one, and otherwise kept as it is: the
+        # duelist's main-gauche, a parrying weapon worn as a shield.
+        for archetype, pieces in generation._ARMOUR.items():
+            for item_id in pieces:
+                group = (
+                    catalog.armour
+                    if item_id in generation._ARMOUR_STEPS
+                    else catalog.shields
+                )
+                with self.subTest(archetype=archetype, item_id=item_id):
+                    self.assertIn(item_id, group)
+
+    def test_the_hand_to_hand_weapon_is_a_loaded_weapon(self):
+        for item_id in sorted(HTH_WEAPON_IDS):
+            with self.subTest(item_id=item_id):
+                self.assertIsNotNone(equipment_catalog().weapon_class(item_id))
+
+    def test_the_heaviest_generated_load_is_a_loaded_level(self):
+        self.assertIn(
+            generation.HEAVIEST_GENERATED_LOAD, equipment_rules().encumbrance.keys
+        )

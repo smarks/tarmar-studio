@@ -17,7 +17,7 @@ from battle.services import (
     snapshot_combatant,
     starting_positions,
 )
-from characters.equipment import WEAPONS
+from characters.equipment_rules import equipment_catalog
 from characters.models import board_can_seat_weapon
 from characters.skills import points_for_level
 from characters.weapon_skill import resolve_weapon_skill
@@ -164,7 +164,7 @@ class SeatedFieldsTest(BaseTestCase):
         # The whole map, so no wrong extra entry passes: every seatable
         # catalog weapon the resolver gives a level above 0, and no other.
         expected = {}
-        for item_id in WEAPONS:
+        for item_id in equipment_catalog().weapons:
             if not board_can_seat_weapon({"item_id": item_id}):
                 continue
             level = resolve_weapon_skill(_character.skills, item_id).effective_level

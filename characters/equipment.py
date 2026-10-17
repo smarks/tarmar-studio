@@ -1,10 +1,12 @@
 """Equipment catalog for the character inventory system.
 
-This module is the single source of truth for catalog items, their properties
-(damage, weight, cost, stops, dex penalty, str requirements), and the helper
-functions that act on equipped equipment lists. The item data itself lives in
-``characters/fixtures/equipment.json`` so catalog edits are pure data changes
-and per-deployment customization is possible without touching code.
+The items themselves come from the loaded canon's ``equipment.json``, read by
+:mod:`characters.equipment_rules` the first time a function here is called,
+never at import (issue #75): the catalog is canon data, and a module that read
+it while importing would turn a canon without one into a crash instead of the
+``characters.E003`` system check. The functions here are the catalog's readers
+for the rest of the app and keep the shape they had when the catalog was a
+fixture: an item is a dict of the fields the file holds.
 
 Each item dict carries:
   - ``name``: human-readable label shown in the UI
@@ -21,19 +23,17 @@ this catalog is read-only.
 
 Encumbrance thresholds come from the character's effective Strength:
 ``unencumbered ≤ STR``, ``light ≤ 1.5·STR``, ``medium ≤ 2·STR``,
-``heavy ≤ 2.5·STR``; beyond that an item cannot be carried. See
+``heavy ≤ 2.5·STR``; beyond that the character is overloaded. See
 ``calculate_encumbrance_level`` and ``get_movement_penalty`` for the
 penalty/restriction table.
 """
 
-import json
-from pathlib import Path
+import functools
+from typing import Any
 
-from .equipment_rules import CATALOG_GROUPS
+from reference.rules_file import derived_from_rules
 
-_CATALOG_PATH = Path(__file__).parent / "fixtures" / "equipment.json"
-_catalog_data = json.loads(_CATALOG_PATH.read_text())
-
+from .equipment_rules import equipment_catalog
 
 # What one item's own ``category`` may be, in the custom-item form's order and
 # with its labels. Only shields differ from their group: the group is
@@ -46,39 +46,40 @@ ITEM_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("shield", "Shield"),
 )
 
-CATALOG_BY_GROUP: dict[str, dict[str, dict]] = {
-    group: _catalog_data[group] for group, _label in CATALOG_GROUPS
-}
 
-WEAPONS: dict[str, dict] = CATALOG_BY_GROUP["weapons"]
-ARMOR: dict[str, dict] = CATALOG_BY_GROUP["armor"]
-SHIELDS: dict[str, dict] = CATALOG_BY_GROUP["shields"]
-GEAR: dict[str, dict] = CATALOG_BY_GROUP["gear"]
+@derived_from_rules
+@functools.cache
+def catalog_by_group() -> dict[str, dict[str, dict[str, Any]]]:
+    """The loaded catalog as the file holds it: each group's items by id.
 
-# Combined catalog for lookup.
-EQUIPMENT_CATALOG: dict[str, dict] = {**WEAPONS, **ARMOR, **SHIELDS, **GEAR}
+    :meth:`characters.equipment_rules.EquipmentCatalog.as_dict` of the loaded
+    catalog, built the first time it is asked for and held for the process;
+    seating another catalog in a test forgets it
+    (:func:`reference.rules_file.derived_from_rules`). The dicts are shared:
+    callers read them and never change them.
+    """
+    return equipment_catalog().as_dict()
+
+
+@derived_from_rules
+@functools.cache
+def _items_by_id() -> dict[str, dict[str, Any]]:
+    """Every loaded item by id: :func:`catalog_by_group`'s groups merged in
+    order, the same dict for an item in both (the file holds no id twice)."""
+    merged: dict[str, dict[str, Any]] = {}
+    for items in catalog_by_group().values():
+        merged.update(items)
+    return merged
 
 
 def get_item(item_id: str) -> dict | None:
     """Get item data from catalog."""
-    return EQUIPMENT_CATALOG.get(item_id)
-
-
-def get_item_weight(item_id: str) -> float:
-    """Get item weight, returns 0 if not found."""
-    item = get_item(item_id)
-    return item.get("weight", 0) if item else 0
+    return _items_by_id().get(item_id)
 
 
 def get_item_name(item_id: str) -> str:
     """Get item name, returns item_id if not found."""
-    item = get_item(item_id)
-    return item.get("name", item_id) if item else item_id
-
-
-def get_items_by_category(category: str) -> dict[str, dict]:
-    """Get all items in a category."""
-    return {k: v for k, v in EQUIPMENT_CATALOG.items() if v.get("category") == category}
+    return equipment_catalog().name(item_id)
 
 
 def get_weapon_class(item_id: str) -> str | None:
@@ -87,8 +88,7 @@ def get_weapon_class(item_id: str) -> str | None:
     Ammunition and non-weapons have no class. Used by the d20 weapon-vs-armour
     resolution to look up the base Target Number.
     """
-    item = get_item(item_id)
-    return item.get("weapon_class") if item else None
+    return equipment_catalog().weapon_class(item_id)
 
 
 def is_unusual_weapon(item_id: str) -> bool:
@@ -98,8 +98,7 @@ def is_unusual_weapon(item_id: str) -> bool:
     skill tied to one transfers no bonus to or from any other weapon. See
     ``characters.combat.weapon_skill_bonus``.
     """
-    item = get_item(item_id)
-    return bool(item) and item.get("subcategory") == "unusual"
+    return equipment_catalog().is_unusual_weapon(item_id)
 
 
 def get_armour_tier(item_id: str) -> str | None:
@@ -107,14 +106,12 @@ def get_armour_tier(item_id: str) -> str | None:
 
     Unarmoured targets have no catalog item; callers default to ``"None"``.
     """
-    item = get_item(item_id)
-    return item.get("armour_tier") if item else None
+    return equipment_catalog().armour_tier(item_id)
 
 
 def get_shield_bonus(item_id: str) -> int:
     """Return a shield's bonus to the defender's Target Number (0 if none)."""
-    item = get_item(item_id)
-    return item.get("shield_bonus", 0) if item else 0
+    return equipment_catalog().shield_bonus(item_id)
 
 
 def entry_category(item: dict) -> str:
@@ -215,7 +212,7 @@ def get_walk_limit(encumbrance_level: str) -> int | None:
 # the order used by ENCUMBRANCE_LEVELS["heavy"]["restrictions"] above.
 MOVEMENT_MODE_ORDER = ("jog", "run", "sprint")
 
-# Maps an armor's fixture ``movement_restriction`` code to the gaits it
+# Maps an armor's catalog ``movement_restriction`` code to the gaits it
 # forbids. See ``reference/content/public-rules/equipment/armor-and-shields.md``:
 # Leather Armor is "Cannot Sprint", Chainmail/Half-Plate/Plate/Fine Plate are
 # "Cannot Run or Sprint".

@@ -81,7 +81,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 - `constants.py` — shared numeric/string bounds (attribute cap 30, equipment limits, regex patterns).
 - `help_text.py` — `HELP_TEXT` dict of in-UI rules explanations.
 - `templatetags/character_help.py` — `help_for` inline `?` disclosure tag.
-- `fixtures/equipment.json` — the weapons/armor/shield/gear catalog (single source for item data; weapon families live in `subcategory`).
+- `equipment_rules.py` — reads the loaded canon's `equipment.json` (the weapons/armor/shield/gear catalog; weapon families live in `subcategory`) and `equipment-rules.json`; `equipment.py` answers catalog lookups from it.
 - `templates/characters/` — character_edit, character_list, deleted_characters.
 - `tests/` — 16 modules (models, views, skills, equipment, dice, import, history, validation, rules-consistency drift guard, etc.).
 - `migrations/` — 7 files (0001 creates Character; later add is_played, equipment, money_earned, indexes+JSON validators, history, free_spell_points).
