@@ -13,10 +13,11 @@
  * deleted when the test ends, so retries and back-to-back runs inside the
  * limiter's window start from zero rather than stacking towards the lockout.
  *
- * The hint is drawn at random from common.gate.GATE_HINTS for every response
- * (issue #77), so the spec checks membership, not one sentence. The hints are
- * read from Python at run time rather than mirrored here: their wording is
- * Spencer's to change, and has changed twice while this spec has existed.
+ * The hints are configuration, not code: config/gate-hints.txt, loaded into
+ * settings.GATE_HINTS at startup, and one is drawn at random for every
+ * response (issue #77), so the spec checks membership, not one sentence. The
+ * hints and the threshold are read from the running settings rather than
+ * mirrored here: the file is Spencer's to edit, with no Python and no spec.
  */
 
 const { test, expect } = require('./fixtures');
@@ -28,16 +29,16 @@ const WRONG_PASSPHRASE = 'gandalf';
 const TEST_CLIENT_GATE_COUNTER_KEY = 'rate_limit:gate:127.0.0.1';
 
 /**
- * common.gate's GATE_HINTS and GATE_HINT_AFTER_WRONG_GUESSES, as the server in
- * hand has them. The shell prints its own "N objects imported" line first, so
- * the values follow a marker, the way seedCharacterFromExport reads an id.
+ * settings.GATE_HINTS and settings.GATE_HINT_AFTER_WRONG_GUESSES, as the server
+ * in hand has them. The shell prints its own "N objects imported" line first,
+ * so the values follow a marker, the way seedCharacterFromExport reads an id.
  * @returns {{hints: string[], wrongGuessesBeforeHint: number}}
  */
 function gateHintSettings() {
     const output = readDjangoShell(`
 import json
-from common.gate import GATE_HINTS, GATE_HINT_AFTER_WRONG_GUESSES
-print('GATE_HINT_SETTINGS', json.dumps({'hints': list(GATE_HINTS), 'wrongGuessesBeforeHint': GATE_HINT_AFTER_WRONG_GUESSES}))
+from django.conf import settings
+print('GATE_HINT_SETTINGS', json.dumps({'hints': list(settings.GATE_HINTS), 'wrongGuessesBeforeHint': settings.GATE_HINT_AFTER_WRONG_GUESSES}))
 `);
     const match = output.match(/GATE_HINT_SETTINGS (.*)/);
     expect(match, `no gate hint settings in: ${output}`).not.toBeNull();

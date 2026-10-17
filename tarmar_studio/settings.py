@@ -38,7 +38,11 @@ from common.base_url import (  # noqa: E402
     is_base_url,
     is_base_url_with_path,
 )
-from common.gate import DEV_GATE_PASSPHRASE, normalize_passphrase  # noqa: E402
+from common.gate import (  # noqa: E402
+    DEV_GATE_PASSPHRASE,
+    load_gate_hints,
+    normalize_passphrase,
+)
 from common.public_paths import LOGIN_PATH  # noqa: E402
 from common.services import ollama_client  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
@@ -135,6 +139,31 @@ _configured_gate_passphrase = os.environ.get("GATE_PASSPHRASE", DEV_GATE_PASSPHR
 # match; without this, a mixed-case GATE_PASSPHRASE would lock out the whole
 # site (issue #138).
 GATE_PASSPHRASE = normalize_passphrase(_configured_gate_passphrase)
+
+# The hints the gate shows after repeated wrong guesses (issues #55, #77).
+# Content, not code, so they live in a text file Spencer edits with no Python
+# (one hint per line; blank and # lines ignored), read once here so a missing
+# or empty file fails at startup, never in front of a visitor. GATE_HINTS_FILE
+# names another file; an empty value means the default. A relative value is
+# taken from the checkout root, not from whatever directory the process was
+# started in; an absolute value wins outright, because joining a Path with an
+# absolute right-hand side yields that absolute path.
+GATE_HINTS_FILE = BASE_DIR / (
+    os.environ.get("GATE_HINTS_FILE") or "config/gate-hints.txt"
+)
+GATE_HINTS = load_gate_hints(GATE_HINTS_FILE)
+
+# How many wrong guesses in a window before a hint is shown. Three because of
+# the #55 evidence, stated once beside the hints comment in common/gate.py. It
+# must stay below common.rate_limit.GUESS_MAX_ATTEMPTS, or the hint only ever
+# appears on the 429 page and helps nobody still at the door; that constant
+# cannot be imported here, because rate_limit imports common.models and this
+# file is still loading, so a unit test holds the two together. An empty value
+# (an uncommented blank line in .env) means the default; a value that is not a
+# whole number stops the server, since a typo there should not go unnoticed.
+GATE_HINT_AFTER_WRONG_GUESSES = int(
+    os.environ.get("GATE_HINT_AFTER_WRONG_GUESSES") or "3"
+)
 
 # Trust the reverse proxy's client-IP headers (X-Real-IP, then the last hop of
 # X-Forwarded-For). Off by default: with the app reachable directly those
