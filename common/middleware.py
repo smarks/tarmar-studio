@@ -10,7 +10,12 @@ from django.shortcuts import render
 from django.utils.functional import SimpleLazyObject
 from speak_friend.middleware import PassphraseMiddleware
 
-from common.gate import DEV_GATE_PASSPHRASE, normalize_passphrase
+from common.gate import (
+    DEV_GATE_PASSPHRASE,
+    GATE_HINT,
+    GATE_HINT_AFTER_WRONG_GUESSES,
+    normalize_passphrase,
+)
 from common.helpers import client_ip
 from common.public_paths import is_public_path
 from common.rate_limit import (
@@ -170,6 +175,20 @@ class GateRateLimitMiddleware:
     and ``cache.set(key, attempts + 1, WINDOW_SECONDS)`` pushed the entry's
     expiry forward on every wrong guess -- a rolling window that kept
     extending a lockout instead of ever letting it close (issue #161).
+
+    The same counter also decides when the gate offers a hint (issue #55; the
+    evidence is beside ``GATE_HINT`` in ``common/gate.py``). Once a client's
+    wrong guesses in the window reach ``GATE_HINT_AFTER_WRONG_GUESSES`` the
+    hint rides along with the refusal. No new state is kept for it: the count
+    ``charge()`` returns is the one already being kept for the lockout. The
+    hint is attached to the request as ``request.gate_hint`` rather than
+    rendered here, so speak_friend's own wrong-answer ``render(request,
+    "gate.html", ...)`` stays the one thing that draws the page and
+    ``gate.html`` reads the attribute through the ``request`` context
+    processor. It is set per response to a wrong POST: a GET of the gate never
+    reads the counter, so a reload shows no hint until the next wrong guess.
+    The 429 for a spent budget carries the hint too, since by then the count
+    is past the threshold by definition.
     """
 
     MAX_ATTEMPTS = GUESS_MAX_ATTEMPTS
@@ -183,18 +202,24 @@ class GateRateLimitMiddleware:
             identifier = client_ip(request)
             cache_key = f"rate_limit:gate:{identifier}"
             if current_count(cache_key) >= self.MAX_ATTEMPTS:
+                # A count at MAX_ATTEMPTS is already past
+                # GATE_HINT_AFTER_WRONG_GUESSES, so the hint goes on the 429
+                # without a second look at the threshold (issue #55).
                 return too_many_attempts(
                     "Too many wrong passphrases from this address.",
                     window_seconds=self.WINDOW_SECONDS,
                     request=request,
                     headline="The door has stopped answering.",
+                    hint=GATE_HINT,
                 )
             submitted = normalize_passphrase(request.POST.get("passphrase", ""))
             expected = normalize_passphrase(
                 getattr(settings, "GATE_PASSPHRASE", DEV_GATE_PASSPHRASE)
             )
             if submitted != expected:
-                charge(cache_key, self.WINDOW_SECONDS)
+                wrong_guesses_this_window = charge(cache_key, self.WINDOW_SECONDS)
+                if wrong_guesses_this_window >= GATE_HINT_AFTER_WRONG_GUESSES:
+                    request.gate_hint = GATE_HINT
         return self.get_response(request)
 
 
