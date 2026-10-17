@@ -37,7 +37,8 @@
     <div class="code">429</div>
     <h1>{{ headline }}</h1>
     <p class="quote">{{ message }}</p>
-    {% comment %}common.gate.GATE_HINT (issue #55): a visitor who spent
+    {% comment %}One of common.gate.GATE_HINTS, drawn at random (issue #77;
+       the hint itself is issue #55): a visitor who spent
        GUESS_MAX_ATTEMPTS guesses on the riddle has not understood it, and this
        page is the last thing they see before the wait, so it says what the
        gate would have said at GATE_HINT_AFTER_WRONG_GUESSES. Empty for the

@@ -12,8 +12,8 @@ from speak_friend.middleware import PassphraseMiddleware
 
 from common.gate import (
     DEV_GATE_PASSPHRASE,
-    GATE_HINT,
     GATE_HINT_AFTER_WRONG_GUESSES,
+    choose_gate_hint,
     normalize_passphrase,
 )
 from common.helpers import client_ip
@@ -177,10 +177,13 @@ class GateRateLimitMiddleware:
     extending a lockout instead of ever letting it close (issue #161).
 
     The same counter also decides when the gate offers a hint (issue #55; the
-    evidence is beside ``GATE_HINT`` in ``common/gate.py``). Once a client's
-    wrong guesses in the window reach ``GATE_HINT_AFTER_WRONG_GUESSES`` the
-    hint rides along with the refusal. No new state is kept for it: the count
-    ``charge()`` returns is the one already being kept for the lockout. The
+    evidence is beside ``GATE_HINTS`` in ``common/gate.py``). Once a client's
+    wrong guesses in the window reach ``GATE_HINT_AFTER_WRONG_GUESSES`` a
+    hint rides along with the refusal, drawn at random from ``GATE_HINTS`` by
+    ``choose_gate_hint()`` for each response, so a visitor who keeps guessing
+    is shown the riddle from another side each time (issue #77). No new state
+    is kept for it: the count ``charge()`` returns is the one already being
+    kept for the lockout, and which hint was drawn is not remembered. The
     hint is attached to the request as ``request.gate_hint`` rather than
     rendered here, so speak_friend's own wrong-answer ``render(request,
     "gate.html", ...)`` stays the one thing that draws the page and
@@ -210,7 +213,7 @@ class GateRateLimitMiddleware:
                     window_seconds=self.WINDOW_SECONDS,
                     request=request,
                     headline="The door has stopped answering.",
-                    hint=GATE_HINT,
+                    hint=choose_gate_hint(),
                 )
             submitted = normalize_passphrase(request.POST.get("passphrase", ""))
             expected = normalize_passphrase(
@@ -219,7 +222,7 @@ class GateRateLimitMiddleware:
             if submitted != expected:
                 wrong_guesses_this_window = charge(cache_key, self.WINDOW_SECONDS)
                 if wrong_guesses_this_window >= GATE_HINT_AFTER_WRONG_GUESSES:
-                    request.gate_hint = GATE_HINT
+                    request.gate_hint = choose_gate_hint()
         return self.get_response(request)
 
 

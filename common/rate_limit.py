@@ -80,7 +80,7 @@ def too_many_attempts(
         headline: The line above the message, so the gate and the sign-in can
             each say what has stopped answering.
         hint: A line of help shown under the message, or empty for none. The
-            gate passes ``common.gate.GATE_HINT`` (issue #55): a visitor who
+            gate passes one of ``common.gate.GATE_HINTS`` (issue #55): a visitor who
             spent ``GUESS_MAX_ATTEMPTS`` guesses on the riddle has not
             understood it, and the page that turns them away is the last
             chance to say so. The login limiter passes nothing; there is no

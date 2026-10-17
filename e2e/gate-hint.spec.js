@@ -13,8 +13,10 @@
  * deleted when the test ends, so retries and back-to-back runs inside the
  * limiter's window start from zero rather than stacking towards the lockout.
  *
- * The hint's wording is read from Python at run time rather than mirrored
- * here: it is Spencer's to change, and changed once while this was written.
+ * The hint is drawn at random from common.gate.GATE_HINTS for every response
+ * (issue #77), so the spec checks membership, not one sentence. The hints are
+ * read from Python at run time rather than mirrored here: their wording is
+ * Spencer's to change, and has changed twice while this spec has existed.
  */
 
 const { test, expect } = require('./fixtures');
@@ -26,16 +28,16 @@ const WRONG_PASSPHRASE = 'gandalf';
 const TEST_CLIENT_GATE_COUNTER_KEY = 'rate_limit:gate:127.0.0.1';
 
 /**
- * common.gate's GATE_HINT and GATE_HINT_AFTER_WRONG_GUESSES, as the server in
+ * common.gate's GATE_HINTS and GATE_HINT_AFTER_WRONG_GUESSES, as the server in
  * hand has them. The shell prints its own "N objects imported" line first, so
  * the values follow a marker, the way seedCharacterFromExport reads an id.
- * @returns {{hint: string, wrongGuessesBeforeHint: number}}
+ * @returns {{hints: string[], wrongGuessesBeforeHint: number}}
  */
 function gateHintSettings() {
     const output = readDjangoShell(`
 import json
-from common.gate import GATE_HINT, GATE_HINT_AFTER_WRONG_GUESSES
-print('GATE_HINT_SETTINGS', json.dumps({'hint': GATE_HINT, 'wrongGuessesBeforeHint': GATE_HINT_AFTER_WRONG_GUESSES}))
+from common.gate import GATE_HINTS, GATE_HINT_AFTER_WRONG_GUESSES
+print('GATE_HINT_SETTINGS', json.dumps({'hints': list(GATE_HINTS), 'wrongGuessesBeforeHint': GATE_HINT_AFTER_WRONG_GUESSES}))
 `);
     const match = output.match(/GATE_HINT_SETTINGS (.*)/);
     expect(match, `no gate hint settings in: ${output}`).not.toBeNull();
@@ -64,8 +66,9 @@ test('the gate offers its hint under the refusal after enough wrong guesses', as
         // The click waits for the navigation it starts, so the refusal check
         // runs against the new document; the response wait is there so a
         // POST the click did not start is never mistaken for one it did.
-        const { hint: expectedHint, wrongGuessesBeforeHint } = gateHintSettings();
+        const { hints, wrongGuessesBeforeHint } = gateHintSettings();
         expect(wrongGuessesBeforeHint).toBeGreaterThan(0);
+        expect(hints.length).toBeGreaterThan(0);
         for (let guess = 0; guess < wrongGuessesBeforeHint; guess += 1) {
             await passphraseField.fill(WRONG_PASSPHRASE);
             await Promise.all([
@@ -78,9 +81,11 @@ test('the gate offers its hint under the refusal after enough wrong guesses', as
 
         const hint = page.locator('.hint');
         await expect(hint).toBeVisible();
-        await expect(hint).toHaveText(expectedHint);
+        expect(hints).toContain((await hint.textContent()).trim());
     } finally {
-        await context.close();
+        // The release first: it is what the header promises, and it must not
+        // depend on the browser context closing cleanly.
         releaseGateGuesses();
+        await context.close();
     }
 });
