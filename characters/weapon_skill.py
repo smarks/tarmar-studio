@@ -16,11 +16,15 @@ carry) and ``"weapon (<catalog name>)"``. A bare ``"weapon"`` has not been
 tied to a weapon yet and adds nothing until it is.
 """
 
+import functools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from reference.rules_file import derived_from_rules
+
 from .combat import SKILL_BONUS_PER_LEVEL, weapon_skill_bonus
-from .equipment import WEAPONS, get_weapon_class, is_unusual_weapon
+from .equipment import get_weapon_class, is_unusual_weapon
+from .equipment_rules import equipment_catalog, equipment_rules
 from .skills import get_skill_level, normalize_skill_name
 
 if TYPE_CHECKING:
@@ -29,11 +33,10 @@ if TYPE_CHECKING:
 #: The skill prior experience grants before it is tied to a weapon.
 UNRECORDED_WEAPON_SKILL = "weapon"
 
-#: The skill that is "in effect, the Weapon skill for shooting".
+#: The skill that is "in effect, the Weapon skill for shooting". The weapon
+#: classes it covers ("the two Missile classes") are the loaded canon's
+#: ``equipment-rules.json`` ``missile_classes`` (issue #75).
 ARCHERY_SKILL = "archery"
-
-#: The two weapon classes Archery covers ("the two Missile classes").
-MISSILE_CLASSES: frozenset[str] = frozenset({"Missile — Bows", "Missile — Crossbows"})
 
 _WEAPON_SKILL_PREFIX = "weapon ("
 
@@ -51,13 +54,19 @@ def weapon_skill_name(item_id: str) -> str:
     return f"{_WEAPON_SKILL_PREFIX}{item_id.replace('_', ' ')})"
 
 
-def _weapon_lookup() -> dict[str, str]:
-    """Every spelling a skill may use for a catalog weapon, to its id."""
+@derived_from_rules
+@functools.cache
+def _weapon_by_spelling() -> dict[str, str]:
+    """Every spelling a skill may use for a catalog weapon, to its id.
+
+    Built from the loaded canon's catalog the first time a skill is read,
+    never at import (issue #75), and held for the process.
+    """
     lookup: dict[str, str] = {}
-    for item_id, weapon in WEAPONS.items():
-        if not weapon.get("weapon_class"):
+    for item_id, weapon in equipment_catalog().weapons.items():
+        if not weapon.weapon_class:
             continue  # ammunition is not a weapon and has no class
-        name = str(weapon.get("name", item_id))
+        name = weapon.name
         for spelling in (
             item_id,
             item_id.replace("_", " "),
@@ -66,9 +75,6 @@ def _weapon_lookup() -> dict[str, str]:
         ):
             lookup.setdefault(spelling, item_id)
     return lookup
-
-
-_WEAPON_BY_SPELLING: dict[str, str] = _weapon_lookup()
 
 
 def trained_weapon_id(skill_name: str) -> str | None:
@@ -82,8 +88,8 @@ def trained_weapon_id(skill_name: str) -> str | None:
     """
     if skill_name.startswith(_WEAPON_SKILL_PREFIX) and skill_name.endswith(")"):
         inner = skill_name[len(_WEAPON_SKILL_PREFIX) : -1].strip()
-        return _WEAPON_BY_SPELLING.get(inner)
-    return _WEAPON_BY_SPELLING.get(skill_name)
+        return _weapon_by_spelling().get(inner)
+    return _weapon_by_spelling().get(skill_name)
 
 
 def is_weapon_skill(skill_name: str) -> bool:
@@ -204,7 +210,7 @@ def resolve_weapon_skill(
                 candidate = WeaponSkill(skill_name, level, weapon_id, bonus, rule)
         elif (
             skill_name == ARCHERY_SKILL
-            and attack_class in MISSILE_CLASSES
+            and attack_class in equipment_rules().missile_classes
             and not is_unusual_weapon(attack_weapon_id)
         ):
             bonus = weapon_skill_bonus(level)
@@ -220,9 +226,9 @@ def weapon_choices() -> list[dict[str, str]]:
     """Every catalog weapon a Weapon skill can be taken for, by name."""
     return sorted(
         (
-            {"item_id": item_id, "name": str(weapon.get("name", item_id))}
-            for item_id, weapon in WEAPONS.items()
-            if weapon.get("weapon_class")
+            {"item_id": item_id, "name": weapon.name}
+            for item_id, weapon in equipment_catalog().weapons.items()
+            if weapon.weapon_class
         ),
         key=lambda choice: choice["name"],
     )
@@ -258,8 +264,7 @@ def record_weapon_skill(
     skills = dict(character.skills or {})
     if skill_name not in skills or not is_weapon_skill(skill_name):
         raise CharacterChangeError(f"{skill_name} is not a Weapon skill on this sheet")
-    weapon = WEAPONS.get(item_id)
-    if weapon is None or not weapon.get("weapon_class"):
+    if not equipment_catalog().weapon_class(item_id):
         raise CharacterChangeError(f"Unknown weapon: {item_id}")
     if not needs_weapon_tie(skill_name) and not is_game_master:
         raise CharacterChangeError(
@@ -272,7 +277,8 @@ def record_weapon_skill(
     points = int(skills.pop(skill_name) or 0)
     skills[target] = int(skills.get(target, 0) or 0) + points
     character.skills = skills
-    return f"{skill_name} tied to {weapon.get('name', item_id)}: now {target}"
+    weapon_name = equipment_catalog().name(item_id)
+    return f"{skill_name} tied to {weapon_name}: now {target}"
 
 
 def weapon_skill_for_granted(skills: dict[str, int], granted: str) -> str:

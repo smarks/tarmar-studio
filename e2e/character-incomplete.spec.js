@@ -9,6 +9,7 @@
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { loadedEquipment } = require('./equipment-rules');
 
 /**
  * Seed an incomplete character.
@@ -73,7 +74,7 @@ test.describe('Incomplete characters (#571)', () => {
         await expect(page.locator('#movement-modifier')).toHaveText('—');
         await expect(page.locator('#max-unencumbered')).toHaveText('—');
         await expect(page.locator('#encumbrance-level')).toHaveText('—');
-        for (const gait of ['sprint', 'run', 'jog', 'walk']) {
+        for (const gait of loadedEquipment().gait_order) {
             await expect(page.locator(`#gait-${gait} .gait-value`)).toHaveText('—');
         }
 

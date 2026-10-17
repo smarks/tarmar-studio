@@ -274,7 +274,26 @@ Notes on the edges, each checkable:
   Games Master's prompts, the patterns naming its skills and tracks)
   registers with `reference.rules_file.derived_from_rules`, so a test seating
   other rules clears it.
-  The three rules files are read by the one strict reader in
+- `characters/equipment_rules.py` reads the canon's `equipment.json`
+  (`reference.paths.EQUIPMENT_CATALOG_FILE`) into `EquipmentCatalog`: every
+  weapon, armour, shield and piece of gear a character may buy. Callers read
+  it through the cached `equipment_catalog()` when they run, never at import,
+  mostly by way of `characters/equipment.py`'s `get_item` and its siblings, and
+  a refused file, an armour restriction code the equipment rules do not give,
+  or a weapon class or armour tier the combat matrix lacks is reported by
+  `characters.E003`. The same module reads `equipment-rules.json` into
+  `EquipmentRules` (`characters.E004`): the encumbrance levels, the armour
+  restriction codes, the gaits and their base distances, the Missile classes
+  Archery covers and the defender's dodge bounds, read through the cached
+  `equipment_rules()` by `characters/equipment.py`, `movement.py`,
+  `weapon_skill.py`, `attack.py`, the sheet and the battle seating. The code
+  reads a level or a gait by its place, never its name; the battle engine's
+  four gaits are matched to the canon's by place, so a canon must name four
+  (`battle.E003`) until stage 6 seats the engine's own rules. The values built
+  from the catalog or the rules and cached (the sheet's catalog payload, the
+  Weapon-skill spellings, the Games Master's item names, a beast's gait
+  proportions) register with `derived_from_rules` as the skill values do.
+  The rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
 ### Frontend layering
@@ -511,17 +530,17 @@ flowchart TD
     mod --> mmod
 
     equip["equipment JSON"]
-    carried["carried_weight<br/>equipment.get_item_weight, pack_dropped"]
+    carried["carried_weight<br/>equipment.get_item, pack_dropped"]
     equip --> carried
-    enc["equipment.calculate_encumbrance_level<br/>unencumbered to overloaded"]
+    enc["EncumbranceRules.level_for<br/>the canon's levels, lightest first"]
     carried --> enc
     eff --> enc
-    pen["get_movement_penalty<br/>0, -1, -2, -4"]
+    pen["EncumbranceRules.penalty<br/>default canon: 0, -1, -2, -4"]
     enc --> pen
-    restr["get_movement_restrictions +<br/>get_armor_movement_restrictions<br/>combined by combine_movement_restrictions"]
+    restr["EncumbranceRules.restrictions +<br/>get_armor_movement_restrictions<br/>combined by combine_movement_restrictions"]
     enc --> restr
     equip --> restr
-    gaits["movement.compute_gaits<br/>sprint 18 run 12 jog 7 walk 4"]
+    gaits["movement.compute_gaits<br/>the canon's gaits; default sprint 18 run 12 jog 7 walk 4"]
     mmod --> gaits
     pen --> gaits
     restr --> gaits
@@ -602,8 +621,23 @@ by the HTTP views and the GM's executor. Rule refusals raise
 
 ### Equipment and attacks
 
-`characters/fixtures/equipment.json` is read once at import by
-`characters/equipment.py` — it is not a Django fixture and there is no table.
+The catalog is the loaded canon's `equipment.json`, read through
+`characters.equipment_rules.equipment_catalog()` the first time a reader asks
+(issue #75), and answered for the rest of the app by `characters/equipment.py`
+— there is no table. The numbers encumbrance and movement read (the levels,
+the armour restriction codes, the gaits and their base distances), the Missile
+classes (which Archery covers and the battle seats as missile weapons) and the
+bounds on the dodge the attack panel takes are
+the loaded canon's `equipment-rules.json`, read through
+`characters.equipment_rules.equipment_rules()`; the code reads a level or a
+gait by its place, never its name. The default canon's two files state the
+public pages' items and numbers, which the drift tests in
+`characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py` hold
+to the pages; `characters/tests/test_catalog_follows_the_canon.py` and
+`test_equipment_rules_follow_the_canon.py` seat an invented catalog and
+invented rules to prove every caller reads them, and the e2e specs read them
+through the Django shell (`e2e/equipment-rules.js`) rather than typing an item
+or a number.
 The six equipment endpoints (`equipment_add`, `equipment_update`,
 `equipment_remove`, `equipment_bulk_remove`, `equipment_toggle_pack`, plus the
 read-only `equipment_catalog`) all funnel through `_change_equipment` and answer
@@ -730,7 +764,7 @@ erDiagram
         datetime created_at
     }
     EQUIPMENT_CATALOG {
-        string name "fixtures/equipment.json, not a table"
+        string name "the canon's equipment.json, not a table"
         string category "weapons armor shields gear"
         string subcategory "weapon family"
         string damage
@@ -1535,8 +1569,8 @@ erDiagram
 ```
 
 Four things have no models at all and are worth naming so nobody looks for
-tables: the equipment catalog (`characters/fixtures/equipment.json`, read at
-import), the rules wiki (markdown under `reference/content/` plus
+tables: the equipment catalog (the loaded canon's `equipment.json`, read when
+asked), the rules wiki (markdown under `reference/content/` plus
 `reference/nav.py`), the generator tables — `ruins/tables.py` and
 `ruins/hooks.py` parse the loaded canon's `gm-tools/*.md` at load while
 `encounters/generation.py` holds its d20 and d10 tables in Python, keyed to
@@ -1761,7 +1795,7 @@ player can read.
 | A derived stat on the sheet | the property on `characters/models.py::Character`, then the module it delegates to (`skills.py`, `equipment.py`, `movement.py`, `dice.py`) |
 | Character creation or point buy | `characters/views/characters.py::character_create`, `characters/dice.py::roll_all_character_stats` / `build_point_buy_character_stats`, `static/js/point-buy.js` |
 | A limit or bound (attribute cap, name length, equipment size) | `characters/constants.py` |
-| The equipment catalog | `characters/fixtures/equipment.json`, read by `characters/equipment.py` |
+| The equipment catalog, encumbrance, gaits | the canon's `equipment.json` and `equipment-rules.json` (schemas in `characters/equipment_rules.py`; the default canon's copies in `reference/default_canon/`), read through `characters/equipment.py` and `characters/movement.py`; drift between the default files and the pages is pinned by `characters/tests/test_rules_consistency.py` and `test_dice_fidelity.py`, and `characters/tests/test_catalog_follows_the_canon.py` and `test_equipment_rules_follow_the_canon.py` seat invented files to prove the readers follow them |
 | Attack resolution | `characters/attack.py::resolve` and `characters/combat.py`; the panel is `static/js/attack-panel.js` |
 | What a character export contains | `character_export/export_utils.py::EXPORTABLE_FIELDS` — import reads the same list |
 | Any write to a character record | `characters/services.py` — the HTTP views and the GM executor both go through it |

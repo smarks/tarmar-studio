@@ -37,9 +37,8 @@ from django.test import SimpleTestCase
 
 from characters import combat
 from characters.constants import SEVERE_INJURY_BAND_TOP
-from characters.equipment import EQUIPMENT_CATALOG
+from characters.equipment import describe_movement_restrictions
 from characters.models import Character
-from characters.movement import GAIT_BASE_DISTANCES
 from characters.rules import RollTable
 from characters.skill_rules import AGING_ATTRIBUTES
 from characters.skills import (
@@ -57,10 +56,19 @@ from reference.paths import CONTENT_DIR, DM_RULES_DIR
 
 from .rules_fixtures import (
     DEFAULT_CHARACTER_RULES,
+    DEFAULT_EQUIPMENT_CATALOG,
+    DEFAULT_EQUIPMENT_RULES,
     DEFAULT_SKILL_RULES,
     seated_character_rules,
+    seated_equipment_catalog,
+    seated_equipment_rules,
     seated_skill_rules,
 )
+
+#: The default canon's catalog items by id as its ``equipment.json`` holds
+#: them, which the equipment drift tests hold to the public pages whichever
+#: canon is loaded (issue #75).
+DEFAULT_CATALOG_ITEMS = DEFAULT_EQUIPMENT_CATALOG.item_dicts()
 
 REFERENCE_CONTENT = CONTENT_DIR
 PUBLIC_RULES = REFERENCE_CONTENT / "public-rules"
@@ -83,6 +91,7 @@ EQUIPMENT_RULES = PUBLIC_RULES / "equipment"
 WEAPONS_RULES = EQUIPMENT_RULES / "weapons.md"
 GEAR_RULES = EQUIPMENT_RULES / "gear.md"
 MOVEMENT_RULES = PUBLIC_RULES / "combat" / "action-options" / "movement.md"
+ARMOR_AND_SHIELDS_RULES = EQUIPMENT_RULES / "armor-and-shields.md"
 
 # The glossary prints the level ladder in Roman numerals.
 ROMAN_TO_LEVEL = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}
@@ -949,35 +958,32 @@ class EquipmentCostRuleTest(SimpleTestCase):
     def test_catalog_torch_items_cost_one_copper_piece(self):
         # 1 cp = 0.01 gp-equivalent, per characters.equipment's cost convention.
         one_copper_piece_in_gp = 0.01
-        self.assertEqual(EQUIPMENT_CATALOG["torch"]["cost"], one_copper_piece_in_gp)
+        self.assertEqual(DEFAULT_CATALOG_ITEMS["torch"]["cost"], one_copper_piece_in_gp)
         self.assertEqual(
-            EQUIPMENT_CATALOG["torch_weapon"]["cost"], one_copper_piece_in_gp
+            DEFAULT_CATALOG_ITEMS["torch_weapon"]["cost"], one_copper_piece_in_gp
         )
 
 
 class MovementGaitRuleTest(SimpleTestCase):
-    """movement.md's gait table and worked example must match
-    characters.movement (issue #143)."""
+    """movement.md's gait table and worked example must match the default
+    canon's ``equipment-rules.json`` (issues #143 and #75)."""
 
     def test_gait_base_distances_match_the_rules_table(self):
-        """Each gait's '<N> + modifier' cell must match GAIT_BASE_DISTANCES."""
+        """Each gait's '<N> + modifier' cell must match its base distance, in
+        the table's order, fastest first."""
+        gaits = DEFAULT_EQUIPMENT_RULES.gaits
         rows = _table_rows(MOVEMENT_RULES)
         speed_cells = {
             cells[0]: cells[1]
             for cells in rows
-            if cells and cells[0] in ("Sprint", "Run", "Jog", "Walk")
+            if cells and re.fullmatch(r"\d+\s*\+\s*modifier", cells[1])
         }
-        self.assertEqual(
-            {speed.lower() for speed in speed_cells}, set(GAIT_BASE_DISTANCES)
-        )
+        self.assertEqual([speed.lower() for speed in speed_cells], list(gaits.order))
         for speed, cell in speed_cells.items():
             match = re.fullmatch(r"(\d+)\s*\+\s*modifier", cell)
-            if match is None:
-                self.fail(
-                    f"movement.md's {speed} distance cell changed shape: {cell!r}"
-                )
+            assert match is not None
             self.assertEqual(
-                int(match.group(1)), GAIT_BASE_DISTANCES[speed.lower()], speed
+                int(match.group(1)), gaits.base_distances[speed.lower()], speed
             )
 
     def test_movement_modifier_formula_is_documented(self):
@@ -986,22 +992,6 @@ class MovementGaitRuleTest(SimpleTestCase):
         self.assertIn(
             "**Movement Modifier:** CON modifier + STR modifier + DEX modifier",
             text,
-        )
-
-    def test_overloaded_walk_limit_matches_the_rules_prose(self):
-        """'Walk only, 1 hex max' must match equipment.py's walk_limit."""
-        from characters.equipment import ENCUMBRANCE_LEVELS
-
-        rows = _table_rows(MOVEMENT_RULES)
-        overloaded_row = next(
-            cells for cells in rows if cells and cells[0] == "Overloaded"
-        )
-        restrictions_cell = overloaded_row[-1]
-        match = re.search(r"(\d+) hex max", restrictions_cell)
-        if match is None:
-            self.fail("movement.md's Overloaded row lost its hex-max wording")
-        self.assertEqual(
-            int(match.group(1)), ENCUMBRANCE_LEVELS["overloaded"]["walk_limit"]
         )
 
     def test_worked_example_matches_the_code(self):
@@ -1016,12 +1006,113 @@ class MovementGaitRuleTest(SimpleTestCase):
             self.fail("movement.md lost its worked movement-modifier example")
         walk, jog, run, sprint = (int(group) for group in match.groups())
 
-        character = Character(constitution=14, strength=10, dexterity=12)
-        self.assertEqual(character.movement_modifier, 1)
-        self.assertEqual(character.walk_distance, walk)
-        self.assertEqual(character.jog_distance, jog)
-        self.assertEqual(character.run_distance, run)
-        self.assertEqual(character.sprint_distance, sprint)
+        with seated_equipment_catalog(), seated_equipment_rules():
+            character = Character(constitution=14, strength=10, dexterity=12)
+            self.assertEqual(character.movement_modifier, 1)
+            self.assertEqual(
+                character.gait_distances,
+                {"sprint": sprint, "run": run, "jog": jog, "walk": walk},
+            )
+
+
+class EncumbranceTableRuleTest(SimpleTestCase):
+    """movement.md's Encumbrance table must match the default canon's levels.
+
+    Each row is one level, lightest first: its name is the level's key, its
+    "Weight Carried" band ends at STR times the level's multiplier (the last,
+    "Over", has none), its Movement Penalty is the level's penalty (the
+    page's "—" for Overloaded is the ruling ``overloaded_movement_penalty``:
+    0), and its Restrictions are the gaits it forbids, worded as the sheet
+    words them, or "Walk only, N hex max" for a level that caps Walk (issue
+    #75).
+    """
+
+    def setUp(self):
+        rows = _table_rows(MOVEMENT_RULES)
+        header = next(cells for cells in rows if cells and cells[0] == "Load Level")
+        start = rows.index(header) + 1
+        self.rows = []
+        for cells in rows[start:]:
+            if len(cells) != len(header):
+                break
+            self.rows.append(cells)
+        self.levels = DEFAULT_EQUIPMENT_RULES.encumbrance.levels
+
+    def test_the_levels_are_the_table_s_rows_in_order(self):
+        self.assertEqual(
+            [cells[0].lower() for cells in self.rows],
+            [level.key for level in self.levels],
+        )
+
+    def test_each_band_ends_at_the_level_s_multiple_of_str(self):
+        for cells, level in zip(self.rows, self.levels, strict=True):
+            with self.subTest(level=level.key):
+                band = cells[1]
+                if band.startswith("Over "):
+                    self.assertIsNone(level.max_multiplier)
+                    continue
+                match = re.search(r"STR(?:×([\d.]+))? lbs$|STR×([\d.]+)$", band)
+                assert match is not None, band
+                multiplier = match.group(1) or match.group(2) or "1"
+                self.assertEqual(float(multiplier), level.max_multiplier)
+
+    def test_each_penalty_is_the_level_s(self):
+        for cells, level in zip(self.rows, self.levels, strict=True):
+            with self.subTest(level=level.key):
+                penalty = _normalize_number(cells[2])
+                expected = 0 if penalty == "" or penalty == "—" else int(penalty)
+                self.assertEqual(expected, level.penalty)
+
+    def test_each_restriction_is_the_level_s(self):
+        for cells, level in zip(self.rows, self.levels, strict=True):
+            with self.subTest(level=level.key):
+                restriction = cells[3]
+                walk_cap = re.fullmatch(r"Walk only, (\d+) hex max", restriction)
+                if walk_cap is not None:
+                    self.assertEqual(int(walk_cap.group(1)), level.walk_limit)
+                    self.assertEqual(
+                        level.forbidden_gaits,
+                        DEFAULT_EQUIPMENT_RULES.gaits.restrictable_gaits,
+                    )
+                    continue
+                self.assertIsNone(level.walk_limit)
+                wording = "" if restriction == "—" else restriction
+                self.assertEqual(
+                    describe_movement_restrictions(level.forbidden_gaits), wording
+                )
+
+
+class ArmourRestrictionWordingRuleTest(SimpleTestCase):
+    """armor-and-shields.md's Movement Restriction column must match each
+    default catalog armour's code, as the default rules word it (issue #75)."""
+
+    def test_each_armour_s_restriction_is_its_code_s(self):
+        rows = _table_rows(ARMOR_AND_SHIELDS_RULES)
+        restriction_by_name = {cells[0]: cells[-1] for cells in rows[1:]}
+        codes = DEFAULT_EQUIPMENT_RULES.armour_restriction_codes
+        for armour in DEFAULT_EQUIPMENT_CATALOG.armour.values():
+            with self.subTest(armour=armour.name):
+                self.assertIn(armour.name, restriction_by_name)
+                code = armour.movement_restriction
+                wording = describe_movement_restrictions(codes[code]) if code else ""
+                page = restriction_by_name[armour.name]
+                self.assertEqual("" if page == "—" else page, wording)
+
+
+class MissileClassesRuleTest(SimpleTestCase):
+    """The skills glossary's Missile classes, which Archery covers ("the two
+    Missile classes"), must be the default canon's ``missile_classes`` (issue
+    #75)."""
+
+    def test_the_missile_classes_are_the_glossary_s(self):
+        text = SKILLS_GLOSSARY.read_text(encoding="utf-8")
+        self.assertIn("across both Missile classes", text)
+        glossary_classes = {
+            cells[0]
+            for cells in _rows_from_text(text)
+            if cells and cells[0].startswith("Missile — ")
+        }
+        self.assertEqual(glossary_classes, DEFAULT_EQUIPMENT_RULES.missile_classes)
 
 
 _UNIT_TO_GP = {"gp": 1.0, "sp": 0.1, "cp": 0.01}
@@ -1065,10 +1156,11 @@ class MissingCatalogEntriesTest(SimpleTestCase):
         assert cram is not None, "gear.md lost the month cram ration entry"
         assert regular is not None, "gear.md lost the month regular ration entry"
         self.assertEqual(
-            float(cram.group(1)), EQUIPMENT_CATALOG["rations_month_cram"]["cost"]
+            float(cram.group(1)), DEFAULT_CATALOG_ITEMS["rations_month_cram"]["cost"]
         )
         self.assertEqual(
-            float(regular.group(1)), EQUIPMENT_CATALOG["rations_month_regular"]["cost"]
+            float(regular.group(1)),
+            DEFAULT_CATALOG_ITEMS["rations_month_regular"]["cost"],
         )
 
     def test_standard_pack_bundle_lists_the_same_contents_as_gear_md(self):
@@ -1080,7 +1172,7 @@ class MissingCatalogEntriesTest(SimpleTestCase):
             if line.strip().startswith("-")
         ]
         self.assertTrue(bullets, "gear.md lost the Standard Pack contents list")
-        bundle = EQUIPMENT_CATALOG["standard_pack"]
+        bundle = DEFAULT_CATALOG_ITEMS["standard_pack"]
         notes = bundle["notes"]
         basics_rows = _section_rows(GEAR_RULES, "Basics")[1:]  # drop header row
 
@@ -1116,7 +1208,7 @@ class MissingCatalogEntriesTest(SimpleTestCase):
         header, *data_rows = rows
         self.assertEqual(header, ["Item", "Cost"])
 
-        by_name = {item["name"]: item for item in EQUIPMENT_CATALOG.values()}
+        by_name = {item["name"]: item for item in DEFAULT_CATALOG_ITEMS.values()}
         for name, cost_cell in data_rows:
             with self.subTest(name=name):
                 self.assertIn(name, by_name, f"{name!r} missing from the catalog")
@@ -1129,7 +1221,7 @@ class MissingCatalogEntriesTest(SimpleTestCase):
         header, *data_rows = rows
         self.assertEqual(header, ["Service", "Cost"])
 
-        by_name = {item["name"]: item for item in EQUIPMENT_CATALOG.values()}
+        by_name = {item["name"]: item for item in DEFAULT_CATALOG_ITEMS.values()}
         for name, cost_cell in data_rows:
             with self.subTest(name=name):
                 self.assertIn(name, by_name, f"{name!r} missing from the catalog")
@@ -1148,13 +1240,13 @@ class ToolPriceRangeRuleTest(SimpleTestCase):
         rows = _table_rows(GEAR_RULES)
         row = next(cells for cells in rows if cells[0] == "Artisan's tools")
         self.assertEqual(row[1], "10-50 gp")
-        self.assertIn("10-50 gp", EQUIPMENT_CATALOG["artisans_tools"]["notes"])
+        self.assertIn("10-50 gp", DEFAULT_CATALOG_ITEMS["artisans_tools"]["notes"])
 
     def test_musical_instrument_notes_the_printed_range(self):
         rows = _table_rows(GEAR_RULES)
         row = next(cells for cells in rows if cells[0] == "Musical instrument")
         self.assertEqual(row[1], "5-50 gp")
-        self.assertIn("5-50 gp", EQUIPMENT_CATALOG["musical_instrument"]["notes"])
+        self.assertIn("5-50 gp", DEFAULT_CATALOG_ITEMS["musical_instrument"]["notes"])
 
 
 class CrossbowRateOfFireRuleTest(SimpleTestCase):
@@ -1166,18 +1258,18 @@ class CrossbowRateOfFireRuleTest(SimpleTestCase):
         rows = _table_rows(WEAPONS_RULES)
         row = next(cells for cells in rows if cells[0].startswith("Light Crossbow"))
         self.assertEqual(row[-1], "Every other turn; every if 14+")
-        self.assertEqual(EQUIPMENT_CATALOG["light_crossbow"]["notes"], row[-1])
+        self.assertEqual(DEFAULT_CATALOG_ITEMS["light_crossbow"]["notes"], row[-1])
 
     def test_heavy_crossbow_notes_match_weapons_md_verbatim(self):
         rows = _table_rows(WEAPONS_RULES)
         row = next(cells for cells in rows if cells[0].startswith("Heavy Crossbow"))
         self.assertEqual(row[-1], "Every 3rd turn; every other 16+")
-        self.assertEqual(EQUIPMENT_CATALOG["heavy_crossbow"]["notes"], row[-1])
+        self.assertEqual(DEFAULT_CATALOG_ITEMS["heavy_crossbow"]["notes"], row[-1])
 
     def test_crossbow_notes_do_not_name_an_attribute(self):
         for item_id in ("light_crossbow", "heavy_crossbow"):
             with self.subTest(item_id=item_id):
-                notes = EQUIPMENT_CATALOG[item_id]["notes"]
+                notes = DEFAULT_CATALOG_ITEMS[item_id]["notes"]
                 self.assertNotIn("STR", notes)
                 self.assertNotIn("DEX", notes)
 

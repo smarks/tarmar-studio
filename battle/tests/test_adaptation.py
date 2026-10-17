@@ -255,12 +255,21 @@ class SnapshotBeastTest(SimpleTestCase):
 
 class GaitProportionsSourceTest(SimpleTestCase):
     def test_proportions_follow_the_character_gait_table(self):
-        from battle.adaptation import GAIT_PROPORTIONS
-        from characters.movement import GAIT_BASE_DISTANCES
+        """The loaded canon's slowest and second-slowest gaits to its second
+        fastest, which the engine seats as walk, jog and run (#75)."""
+        from battle.adaptation import gait_proportions
+        from characters.equipment_rules import equipment_rules
 
-        run = GAIT_BASE_DISTANCES["run"]
-        self.assertEqual(GAIT_PROPORTIONS["walk"], GAIT_BASE_DISTANCES["walk"] / run)
-        self.assertEqual(GAIT_PROPORTIONS["jog"], GAIT_BASE_DISTANCES["jog"] / run)
+        gaits = equipment_rules().gaits
+        distances = gaits.base_distances
+        run = distances[gaits.order[1]]
+        self.assertEqual(
+            gait_proportions(),
+            {
+                "walk": distances[gaits.order[-1]] / run,
+                "jog": distances[gaits.order[-2]] / run,
+            },
+        )
 
 
 class CatalogSubstitutionDriftTest(SimpleTestCase):

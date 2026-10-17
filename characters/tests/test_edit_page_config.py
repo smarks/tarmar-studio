@@ -580,7 +580,8 @@ class NumberInputBoundsTest(BaseTestCase):
         "check_total_minimum": 3,
         "check_total_maximum": 14,
         "mana_grant": 101,
-        "defender_dodge": 15,
+        "defender_dodge_minimum": 2,
+        "defender_dodge_maximum": 15,
         "situational": 21,
     }
 
@@ -607,7 +608,10 @@ class NumberInputBoundsTest(BaseTestCase):
             "total": (odd["check_total_minimum"], odd["check_total_maximum"]),
             "amount": (-odd["mana_grant"], odd["mana_grant"]),
             "attack-stops": ("0", odd["armor_stops"]),
-            "attack-dodge": ("0", odd["defender_dodge"]),
+            "attack-dodge": (
+                odd["defender_dodge_minimum"],
+                odd["defender_dodge_maximum"],
+            ),
             "attack-situational": (-odd["situational"], odd["situational"]),
             "custom-weight": ("0", odd["equipment_weight"]),
             "custom-stops": ("0", odd["armor_stops"]),

@@ -1,0 +1,41 @@
+{
+  "encumbrance": {
+    "levels": [
+      {"key": "unencumbered", "max_multiplier": 1.0, "penalty": 0, "forbidden_gaits": [], "walk_limit": null},
+      {"key": "light", "max_multiplier": 1.5, "penalty": -1, "forbidden_gaits": [], "walk_limit": null},
+      {"key": "medium", "max_multiplier": 2.0, "penalty": -2, "forbidden_gaits": ["run", "sprint"], "walk_limit": null},
+      {"key": "heavy", "max_multiplier": 2.5, "penalty": -4, "forbidden_gaits": ["jog", "run", "sprint"], "walk_limit": null},
+      {"key": "overloaded", "max_multiplier": null, "penalty": 0, "forbidden_gaits": ["jog", "run", "sprint"], "walk_limit": 1}
+    ]
+  },
+  "armour_restriction_codes": {
+    "no_sprint": ["sprint"],
+    "no_run_sprint": ["run", "sprint"]
+  },
+  "gaits": {
+    "order": ["sprint", "run", "jog", "walk"],
+    "base_distances": {"sprint": 18, "run": 12, "jog": 7, "walk": 4}
+  },
+  "missile_classes": ["Missile — Bows", "Missile — Crossbows"],
+  "defender_dodge": {"minimum": 0, "maximum": 10},
+  "rulings": [
+    {
+      "key": "encumbrance_band_edges",
+      "reading": "movement.md's encumbrance table writes its bands in whole pounds ('Up to STR lbs', 'STR+1 to STR×1.5'), leaving a weight between one band's top and the next band's start, such as STR+0.5, or a top that is not whole, such as STR 11 × 1.5 = 16.5, unplaced. Ruled: each level's top is exactly STR × max_multiplier, unrounded, and a weight takes the first level whose top it does not exceed, so a weight just over STR is Light. This is the reading the app has always made.",
+      "page": "public-rules/combat/action-options/movement.md",
+      "for_spencer": true
+    },
+    {
+      "key": "overloaded_movement_penalty",
+      "reading": "movement.md gives Overloaded no movement penalty ('—') and the restriction 'Walk only, 1 hex max'. Ruled: penalty 0, Jog, Run and Sprint forbidden, and Walk capped at 1 hex (walk_limit 1), so there is no gait left for a penalty to shorten. This is the reading the app has always made.",
+      "page": "public-rules/combat/action-options/movement.md",
+      "for_spencer": true
+    },
+    {
+      "key": "defender_dodge_bounds",
+      "reading": "attack-rolls.md gives the defender's DEX-dodge as floor((effective DEX - 10) / 2), minimum 0, with no maximum. Ruled: the dodge the Game Master gives a defender on the attack panel runs from 0 to 10. 10 is the page's formula floor((DEX − 10) / 2) at the canon's attribute ceiling (30); whether a defender's Dodge/Defend +4 is entered here, and so whether the ceiling should be 14, is for Spencer.",
+      "page": "public-rules/combat/action-options/attack-rolls.md",
+      "for_spencer": true
+    }
+  ]
+}

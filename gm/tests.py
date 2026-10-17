@@ -266,13 +266,19 @@ class GMServiceTest(TestCase):
         through the shared rules-file reader) is where ``characters.dice``
         takes its numbers from once issue #59 seats them, and
         ``characters.skill_rules`` (issue #70) is read the same way, by
-        ``characters.skills``, whose tracks and modifiers the prompt lists — a
-        fresh interpreter proves none of them drags Django along. Run
-        out-of-process because this test runner has Django loaded already.
+        ``characters.skills``, whose tracks and modifiers the prompt lists, as
+        ``characters.equipment_rules`` (issue #75) is for the catalog and the
+        movement numbers, by ``characters.equipment``, which
+        ``characters.combat`` imports, and by ``characters.movement`` and
+        ``characters.weapon_skill`` — a fresh interpreter proves none of them
+        drags Django along. Run out-of-process because this test runner has
+        Django loaded already.
         """
         script = (
             "import sys, gm.engine, characters.rules, characters.skill_rules\n"
-            "import characters.skills\n"
+            "import characters.skills, characters.equipment_rules\n"
+            "import characters.equipment, characters.movement\n"
+            "import characters.weapon_skill\n"
             "loaded = sorted(m for m in sys.modules if m.split('.')[0] == 'django')\n"
             "assert not loaded, loaded\n"
         )

@@ -17,7 +17,7 @@ from battle.services import (
     snapshot_combatant,
     starting_positions,
 )
-from characters.equipment import WEAPONS
+from characters.equipment_rules import equipment_catalog
 from characters.models import board_can_seat_weapon
 from characters.skills import points_for_level
 from characters.weapon_skill import resolve_weapon_skill
@@ -119,18 +119,14 @@ class SeatedFieldsTest(BaseTestCase):
         ):
             with self.subTest(armour=armour):
                 character, seated = self.seat(equipment=armour)
-                self.assertEqual(seated.move_walk, character.walk_distance)
+                distances = character.gait_distances
+                self.assertEqual(seated.move_walk, distances["walk"])
                 # A load that bars jogging (the default body under chainmail)
                 # charges and dodges at the walk, "Jog or less".
+                self.assertEqual(seated.move_jog, distances["jog"] or distances["walk"])
+                self.assertEqual(seated.move_run, 0 if run_barred else distances["run"])
                 self.assertEqual(
-                    seated.move_jog, character.jog_distance or character.walk_distance
-                )
-                self.assertEqual(
-                    seated.move_run, 0 if run_barred else character.run_distance
-                )
-                self.assertEqual(
-                    seated.move_sprint,
-                    0 if sprint_barred else character.sprint_distance,
+                    seated.move_sprint, 0 if sprint_barred else distances["sprint"]
                 )
                 self.assertGreater(seated.move_walk, 0)
 
@@ -164,7 +160,7 @@ class SeatedFieldsTest(BaseTestCase):
         # The whole map, so no wrong extra entry passes: every seatable
         # catalog weapon the resolver gives a level above 0, and no other.
         expected = {}
-        for item_id in WEAPONS:
+        for item_id in equipment_catalog().weapons:
             if not board_can_seat_weapon({"item_id": item_id}):
                 continue
             level = resolve_weapon_skill(_character.skills, item_id).effective_level

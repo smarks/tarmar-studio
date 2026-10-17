@@ -6,19 +6,34 @@ See reference/content/public-rules/combat/action-options/movement.md:
     Sprint 18+modifier / Run 12+modifier / Jog 7+modifier / Walk 4+modifier
 
 and the Encumbrance table's Overloaded row: "Walk only, 1 hex max".
+
+Every case runs on the default canon's equipment rules and catalog, seated
+whichever canon is loaded (issue #75): the numbers are the public pages'.
 """
 
 from django.test import SimpleTestCase
 
 from characters.models import Character
 from characters.movement import (
-    GAIT_BASE_DISTANCES,
-    GAIT_ORDER,
     compute_gaits,
     gait_distance,
     movement_modifier,
 )
+from characters.tests.rules_fixtures import (
+    DEFAULT_EQUIPMENT_RULES,
+    seated_equipment_catalog,
+    seated_equipment_rules,
+)
 from common.test_helpers import BaseTestCase
+
+
+class DefaultEquipmentSeated(SimpleTestCase):
+    """Seats the default canon's equipment rules and catalog for each test."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(seated_equipment_catalog())
+        self.enterContext(seated_equipment_rules())
 
 
 class MovementModifierFunctionTest(SimpleTestCase):
@@ -31,14 +46,8 @@ class MovementModifierFunctionTest(SimpleTestCase):
         self.assertEqual(movement_modifier(-2, -1, -1), -4)
 
 
-class GaitDistanceFunctionTest(SimpleTestCase):
+class GaitDistanceFunctionTest(DefaultEquipmentSeated):
     """Pure-function tests for characters.movement.gait_distance."""
-
-    def test_base_distances_match_the_rules_table(self):
-        self.assertEqual(GAIT_BASE_DISTANCES["sprint"], 18)
-        self.assertEqual(GAIT_BASE_DISTANCES["run"], 12)
-        self.assertEqual(GAIT_BASE_DISTANCES["jog"], 7)
-        self.assertEqual(GAIT_BASE_DISTANCES["walk"], 4)
 
     def test_worked_example_from_movement_md(self):
         """CON 14 (+1), STR 10 (0), DEX 12 (0): walk 5, jog 8, run 13, sprint 19."""
@@ -57,7 +66,7 @@ class GaitDistanceFunctionTest(SimpleTestCase):
         self.assertEqual(gait_distance("walk", -10, movement_penalty=-4), 0)
 
 
-class ComputeGaitsFunctionTest(SimpleTestCase):
+class ComputeGaitsFunctionTest(DefaultEquipmentSeated):
     """Pure-function tests for characters.movement.compute_gaits."""
 
     def test_no_restrictions_computes_every_gait(self):
@@ -82,10 +91,10 @@ class ComputeGaitsFunctionTest(SimpleTestCase):
 
     def test_result_covers_every_gait_in_order(self):
         gaits = compute_gaits(0, 0, [])
-        self.assertEqual(list(gaits), list(GAIT_ORDER))
+        self.assertEqual(list(gaits), list(DEFAULT_EQUIPMENT_RULES.gaits.order))
 
 
-class CharacterMovementModifierTest(BaseTestCase):
+class CharacterMovementModifierTest(DefaultEquipmentSeated, BaseTestCase):
     """Character.movement_modifier from effective attributes (issue #143)."""
 
     def setUp(self):
@@ -131,23 +140,23 @@ class CharacterMovementModifierTest(BaseTestCase):
         self.assertEqual(self.character.movement_modifier, 1)
 
     def test_unencumbered_gait_distances(self):
-        self.assertEqual(self.character.sprint_distance, 21)
-        self.assertEqual(self.character.run_distance, 15)
-        self.assertEqual(self.character.jog_distance, 10)
-        self.assertEqual(self.character.walk_distance, 7)
+        self.assertEqual(self.character.gait_distances["sprint"], 21)
+        self.assertEqual(self.character.gait_distances["run"], 15)
+        self.assertEqual(self.character.gait_distances["jog"], 10)
+        self.assertEqual(self.character.gait_distances["walk"], 7)
 
     def test_worked_example_matches_movement_md(self):
         """CON 14, STR 10, DEX 12 -> walk 5, jog 8, run 13, sprint 19."""
         self.character.strength = 10
         self.character.save()
         self.assertEqual(self.character.movement_modifier, 1)
-        self.assertEqual(self.character.walk_distance, 5)
-        self.assertEqual(self.character.jog_distance, 8)
-        self.assertEqual(self.character.run_distance, 13)
-        self.assertEqual(self.character.sprint_distance, 19)
+        self.assertEqual(self.character.gait_distances["walk"], 5)
+        self.assertEqual(self.character.gait_distances["jog"], 8)
+        self.assertEqual(self.character.gait_distances["run"], 13)
+        self.assertEqual(self.character.gait_distances["sprint"], 19)
 
 
-class CharacterGaitRestrictionInteractionTest(BaseTestCase):
+class CharacterGaitRestrictionInteractionTest(DefaultEquipmentSeated, BaseTestCase):
     """Gait distances react to encumbrance and armor restrictions (issue #143)."""
 
     def setUp(self):
@@ -186,10 +195,10 @@ class CharacterGaitRestrictionInteractionTest(BaseTestCase):
         self.assertEqual(self.character.movement_penalty, -1)
         self.assertEqual(self.character.movement_restrictions, [])
         # Base (unencumbered) values are 21/15/10/7; light knocks 1 off each.
-        self.assertEqual(self.character.sprint_distance, 20)
-        self.assertEqual(self.character.run_distance, 14)
-        self.assertEqual(self.character.jog_distance, 9)
-        self.assertEqual(self.character.walk_distance, 6)
+        self.assertEqual(self.character.gait_distances["sprint"], 20)
+        self.assertEqual(self.character.gait_distances["run"], 14)
+        self.assertEqual(self.character.gait_distances["jog"], 9)
+        self.assertEqual(self.character.gait_distances["walk"], 6)
 
     def test_medium_encumbrance_forbids_run_and_sprint(self):
         # STR 15: medium is 22.5-30 lbs.
@@ -205,11 +214,11 @@ class CharacterGaitRestrictionInteractionTest(BaseTestCase):
         ]
         self.character.save()
         self.assertEqual(self.character.encumbrance_level, "medium")
-        self.assertIsNone(self.character.sprint_distance)
-        self.assertIsNone(self.character.run_distance)
+        self.assertIsNone(self.character.gait_distances["sprint"])
+        self.assertIsNone(self.character.gait_distances["run"])
         # Jog and walk are still usable, reduced by the -2 movement penalty.
-        self.assertEqual(self.character.jog_distance, 8)
-        self.assertEqual(self.character.walk_distance, 5)
+        self.assertEqual(self.character.gait_distances["jog"], 8)
+        self.assertEqual(self.character.gait_distances["walk"], 5)
 
     def test_heavy_encumbrance_forbids_jog_run_and_sprint(self):
         # STR 15: heavy is 30-37.5 lbs.
@@ -225,11 +234,11 @@ class CharacterGaitRestrictionInteractionTest(BaseTestCase):
         ]
         self.character.save()
         self.assertEqual(self.character.encumbrance_level, "heavy")
-        self.assertIsNone(self.character.sprint_distance)
-        self.assertIsNone(self.character.run_distance)
-        self.assertIsNone(self.character.jog_distance)
+        self.assertIsNone(self.character.gait_distances["sprint"])
+        self.assertIsNone(self.character.gait_distances["run"])
+        self.assertIsNone(self.character.gait_distances["jog"])
         # Walk still works, reduced by the -4 movement penalty.
-        self.assertEqual(self.character.walk_distance, 3)
+        self.assertEqual(self.character.gait_distances["walk"], 3)
 
     def test_armor_restriction_applies_even_when_unencumbered(self):
         """Plate armor forbids run/sprint on its own (issue #128), regardless
@@ -245,13 +254,13 @@ class CharacterGaitRestrictionInteractionTest(BaseTestCase):
         ]
         self.character.save()
         self.assertEqual(self.character.encumbrance_level, "unencumbered")
-        self.assertIsNone(self.character.sprint_distance)
-        self.assertIsNone(self.character.run_distance)
-        self.assertIsNotNone(self.character.jog_distance)
-        self.assertIsNotNone(self.character.walk_distance)
+        self.assertIsNone(self.character.gait_distances["sprint"])
+        self.assertIsNone(self.character.gait_distances["run"])
+        self.assertIsNotNone(self.character.gait_distances["jog"])
+        self.assertIsNotNone(self.character.gait_distances["walk"])
 
     def test_overloaded_caps_walk_and_forbids_everything_else(self):
-        """Overloaded: 'Walk only, 1 hex max' -- equipment.py's walk_limit."""
+        """Overloaded: 'Walk only, 1 hex max' -- the level's walk_limit."""
         self.character.equipment = [
             {
                 "item_id": "custom",
@@ -264,10 +273,10 @@ class CharacterGaitRestrictionInteractionTest(BaseTestCase):
         ]
         self.character.save()
         self.assertEqual(self.character.encumbrance_level, "overloaded")
-        self.assertIsNone(self.character.sprint_distance)
-        self.assertIsNone(self.character.run_distance)
-        self.assertIsNone(self.character.jog_distance)
-        self.assertEqual(self.character.walk_distance, 1)
+        self.assertIsNone(self.character.gait_distances["sprint"])
+        self.assertIsNone(self.character.gait_distances["run"])
+        self.assertIsNone(self.character.gait_distances["jog"])
+        self.assertEqual(self.character.gait_distances["walk"], 1)
 
     def test_gait_readout_shape_and_na_flags(self):
         self.character.equipment = [
@@ -290,7 +299,7 @@ class CharacterGaitRestrictionInteractionTest(BaseTestCase):
         self.assertEqual(readout["walk"]["label"], "Walk")
 
 
-class CharacterEditPageMovementDisplayTest(BaseTestCase):
+class CharacterEditPageMovementDisplayTest(DefaultEquipmentSeated, BaseTestCase):
     """The character sheet renders the movement modifier and gaits (issue #143)."""
 
     def setUp(self):

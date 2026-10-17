@@ -10,9 +10,10 @@ def watch_canon_files(sender: object, **kwargs: object) -> None:
 
     ``nav.json``, ``maps.json`` and ``canon.json`` (issue #918), the GM's
     world digest under ``gm-prompt/`` (issue #919), ``magic-rules.json``
-    (issue #960), ``character-rules.json`` (issue #59) and
-    ``skill-rules.json`` (issue #70) are read once per process, so an edit to
-    one reaches the site only through a restart.
+    (issue #960), ``character-rules.json`` (issue #59), ``skill-rules.json``
+    (issue #70), ``equipment.json`` and ``equipment-rules.json`` (issue #75)
+    are read once per process, so an edit to one reaches the site only through
+    a restart.
     Connected to ``autoreload_started``, whose sender is the reloader.
 
     Args:

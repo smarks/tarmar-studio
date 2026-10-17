@@ -33,14 +33,14 @@ from common.helpers import whole_number
 from . import combat, dice
 from .constants import MAX_ARMOR_STOPS
 from .equipment import get_item, get_shield_bonus
+from .equipment_rules import equipment_rules
 from .skill_checks import injury_penalty, unconscious_refusal
 from .weapon_skill import resolve_weapon_skill
 
-# Bounds on the two free-typed numbers the GM supplies. The dodge ceiling is
-# the design's; the situational band is the one issue #101 flagged as never
-# exercised by any caller.
-MIN_DEFENDER_DODGE = 0
-MAX_DEFENDER_DODGE = 10
+# The bound on the situational modifier the GM supplies: the band issue #101
+# flagged as never exercised by any caller. The other number the GM supplies,
+# the defender's dodge, is bounded by the loaded canon's
+# ``equipment-rules.json`` ``defender_dodge`` (issue #75).
 MAX_SITUATIONAL = 20
 
 
@@ -76,20 +76,24 @@ class AttackValidationError(ValueError):
     """
 
 
-def _bounded_int(params, key, minimum, maximum, label):
+def _bounded_int(params, key, minimum, maximum, label, default=0):
     """Read ``key`` off ``params`` as an int within ``[minimum, maximum]``.
 
-    An absent key means zero — both bounded numbers are optional modifiers
-    whose neutral value is 0. Anything present but unparseable or out of band
-    raises rather than being coerced, so a typo can never quietly change a roll.
+    An absent or empty key means ``default``: the optional modifiers' neutral
+    value, 0, or for the defender's dodge the canon's least (issue #75).
+    Every value, the default included, is held to the band, so a canon whose
+    band leaves out the default is refused rather than read. Anything present
+    but unparseable or out of band raises rather than being coerced, so a typo
+    can never quietly change a roll.
     """
-    raw = params.get(key, 0)
+    raw = params.get(key)
     if raw is None or raw == "":
-        return 0
-    try:
-        value = whole_number(raw)
-    except ValueError:
-        raise AttackValidationError(f"Invalid {label}") from None
+        value = default
+    else:
+        try:
+            value = whole_number(raw)
+        except ValueError:
+            raise AttackValidationError(f"Invalid {label}") from None
     if not minimum <= value <= maximum:
         raise AttackValidationError(f"{label} must be between {minimum} and {maximum}")
     return value
@@ -259,12 +263,14 @@ def resolve(character, params, roller: AttackRoller | ModuleType = dice) -> dict
     defender_stops = _bounded_int(
         params, "defender_stops", 0, MAX_ARMOR_STOPS, "Defender stops"
     )
+    dodge_bounds = equipment_rules().defender_dodge
     defender_dodge = _bounded_int(
         params,
         "defender_dodge",
-        MIN_DEFENDER_DODGE,
-        MAX_DEFENDER_DODGE,
+        dodge_bounds.minimum,
+        dodge_bounds.maximum,
         "Defender dodge",
+        default=dodge_bounds.minimum,
     )
     situational = _bounded_int(
         params, "situational", -MAX_SITUATIONAL, MAX_SITUATIONAL, "Situational modifier"

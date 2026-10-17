@@ -7,6 +7,7 @@ from datetime import datetime
 import bleach
 
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, CHARACTER_EXPORT_FORMAT
+from characters.equipment import format_pounds
 from characters.magic import known_spells
 from characters.purse import format_purse
 from characters.skills import track_label
@@ -376,10 +377,9 @@ def generate_character_markdown(character) -> str:
     lines.append("")
     lines.append("| Level | Max Weight |")
     lines.append("|-------|------------|")
-    lines.append(f"| Unencumbered | {thresholds['unencumbered']} lbs |")
-    lines.append(f"| Light | {thresholds['light']} lbs |")
-    lines.append(f"| Medium | {thresholds['medium']} lbs |")
-    lines.append(f"| Heavy | {thresholds['heavy']} lbs |")
+    # The loaded canon's levels, lightest first, by their own keys (issue #75).
+    for level, pounds in thresholds.items():
+        lines.append(f"| {level.title()} | {format_pounds(pounds)} lbs |")
     lines.append("")
 
     # Movement Restrictions

@@ -64,4 +64,22 @@ function readDjangoShell(script) {
     });
 }
 
-module.exports = { runDjangoCommand, runDjangoShell, readDjangoShell };
+/**
+ * Run a Django shell script that prints one line, ``<tag> <json>``, and return
+ * the parsed JSON: how a spec reads the loaded canon's rules, or values the
+ * server computes, without typing them.
+ * @param {string} script - prints ``tag + " " + json.dumps(...)`` once
+ * @param {string} tag - the line's first word
+ * @returns {any}
+ */
+function readDjangoJson(script, tag) {
+    const output = readDjangoShell(script);
+    const prefix = `${tag} `;
+    const line = output.split('\n').find((text) => text.startsWith(prefix));
+    if (line === undefined) {
+        throw new Error(`no ${tag} line in the shell's output:\n${output}`);
+    }
+    return JSON.parse(line.slice(prefix.length));
+}
+
+module.exports = { runDjangoCommand, runDjangoShell, readDjangoShell, readDjangoJson };

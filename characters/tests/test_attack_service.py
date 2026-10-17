@@ -10,8 +10,9 @@ file covers the arithmetic.
 from django.test import TestCase
 
 from characters import attack, combat
-from characters.equipment import WEAPONS
+from characters.equipment_rules import equipment_rules
 from characters.models import Character
+from characters.tests.rules_fixtures import DEFAULT_EQUIPMENT_CATALOG
 from common.test_helpers import TEST_PASSWORD
 
 CHARACTER_DEFAULTS = {
@@ -164,9 +165,10 @@ class AttackValidationTest(AttackServiceTestBase):
         Asserted by parsing rather than by a hardcoded list, so a catalog entry
         gaining or losing a real damage expression shows up here.
         """
+        weapons = DEFAULT_EQUIPMENT_CATALOG.as_dict()["weapons"]
         unrollable = {
             item_id
-            for item_id, data in WEAPONS.items()
+            for item_id, data in weapons.items()
             if data.get("weapon_class") and not attack.damage_is_rollable(data)
         }
         self.assertEqual(
@@ -180,7 +182,8 @@ class AttackValidationTest(AttackServiceTestBase):
             self.resolve(ScriptedRoller(d20s=[19]), weapon_index=6)
 
     def test_a_normal_weapon_is_rollable(self):
-        self.assertTrue(attack.damage_is_rollable(WEAPONS["saber"]))
+        saber = DEFAULT_EQUIPMENT_CATALOG.as_dict()["weapons"]["saber"]
+        self.assertTrue(attack.damage_is_rollable(saber))
 
     def test_unknown_armour_tier_is_refused(self):
         with self.assertRaises(attack.AttackValidationError):
@@ -212,7 +215,8 @@ class AttackValidationTest(AttackServiceTestBase):
         self.assertEqual(result["to_hit"]["skill_bonus"], 3)
 
     def test_dodge_outside_its_band_is_refused(self):
-        for bad in (-1, attack.MAX_DEFENDER_DODGE + 1):
+        bounds = equipment_rules().defender_dodge
+        for bad in (bounds.minimum - 1, bounds.maximum + 1):
             with self.assertRaises(attack.AttackValidationError):
                 self.resolve(ScriptedRoller(), defender_dodge=bad)
 

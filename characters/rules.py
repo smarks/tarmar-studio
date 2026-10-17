@@ -183,7 +183,7 @@ def _check_dice(dice: str) -> None:
         raise ValueError(f"dice {dice!r} must be written {standard!r}")
 
 
-def require_at_least(name: str, value: int, least: int) -> None:
+def require_at_least(name: str, value: float, least: float) -> None:
     """Refuse ``value`` below ``least``.
 
     Raises:
@@ -191,6 +191,16 @@ def require_at_least(name: str, value: int, least: int) -> None:
     """
     if value < least:
         raise ValueError(f"{name} must be at least {least}, got {value}")
+
+
+def require_at_most(name: str, value: float, most: float) -> None:
+    """Refuse ``value`` above ``most``.
+
+    Raises:
+        ValueError: ``value`` is above ``most``.
+    """
+    if value > most:
+        raise ValueError(f"{name} must be at most {most}, got {value}")
 
 
 @dataclass(frozen=True)
