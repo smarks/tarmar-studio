@@ -1,0 +1,24 @@
+# The hints the passphrase gate shows a visitor who has guessed wrong
+# GATE_HINT_AFTER_WRONG_GUESSES times (issues #55, #77). One is drawn at
+# random for every refusal from that guess on, and for the 429 once the
+# guessing budget is spent.
+#
+# This file is configuration, not code: Spencer edits it with no Python. One
+# hint per line. Blank lines and lines starting with # are ignored.
+# Apostrophes and quotation marks are allowed. The file is read once, when
+# Django's settings load (tarmar_studio/settings.py, GATE_HINTS), and a
+# missing or empty file stops the server at startup rather than at a
+# visitor's first wrong guess. Another file can be named with the
+# GATE_HINTS_FILE environment variable.
+#
+# The hints are meant to embarrass the asker for not knowing the lore, and to
+# stay sneaky: none says the word itself.
+
+The Doors of Durin stood for an age against orcs and worse. Against you they are not even trying.
+Gandalf solved this on a cold night with wolves behind him and something hungry in the lake. You have a search engine and a chair.
+Merry Brandybuck asked the one question that opens this door. He was a hobbit. He had never been further than Bree. Catch up.
+This is the most quoted door in fantasy literature. The answer is written on it. In Elvish. Read it again.
+Celebrimbor wrote the answer into the door in plain Elvish and assumed any passer-by could read it. He had never met you.
+Everyone who has read The Fellowship of the Ring knows this word. Everyone who has only seen the film knows it too. Which leaves you.
+The dwarves of Moria had words for guests who could not read the front door. None of them was friend.
+Elvish for friend. That is the whole riddle. A ten-year-old reading under the covers with a flashlight got it in 1954.

@@ -886,3 +886,101 @@ class RepositoryUrlSettingsTest(DotenvStagingMixin, TestCase):
             documented,
         )
         self.assertNotIn("REPOSITORY_PRIVATE_URL", documented)
+
+
+class GateHintSettingsTest(DotenvStagingMixin, TestCase):
+    """How settings.py reads the gate hints' configuration (issue #77).
+
+    The hints moved from a Python tuple to ``config/gate-hints.txt`` named by
+    ``GATE_HINTS_FILE``, with the threshold in ``GATE_HINT_AFTER_WRONG_GUESSES``.
+    The review of that change found two ways the environment could break
+    startup: a relative ``GATE_HINTS_FILE`` resolved against the process's
+    working directory, not the checkout, and an uncommented empty
+    ``GATE_HINT_AFTER_WRONG_GUESSES`` (what load_dotenv makes of a blank line
+    in .env) reached ``int()`` and died with a bare ValueError. Each test here
+    re-executes settings.py in a subprocess, the way the other setting tests
+    in this module do, so the value under test is what a real start-up gets.
+    """
+
+    #: The relative form .env.example documents for the hints file.
+    RELATIVE_HINTS_FILE = "config/gate-hints.txt"
+
+    def _gate_hint_settings(self, env, cwd=BASE_DIR):
+        """Import settings in a subprocess and return the gate hint settings.
+
+        ``cwd`` is where the subprocess runs; a test that must prove the
+        working directory does not matter passes one that is not the checkout,
+        so the checkout is put on ``sys.path`` by hand.
+        """
+        program = (
+            "import json, sys;"
+            f"sys.path.insert(0, {str(BASE_DIR)!r});"
+            "sys.argv = ['manage.py', 'test'];"
+            "import tarmar_studio.settings as settings;"
+            "print(json.dumps({"
+            "'hints_file': str(settings.GATE_HINTS_FILE),"
+            "'hints': list(settings.GATE_HINTS),"
+            "'threshold': settings.GATE_HINT_AFTER_WRONG_GUESSES,"
+            "}))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_a_relative_hints_file_is_taken_from_the_checkout_not_the_cwd(self):
+        """The bug the #77 review found: ``Path("config/gate-hints.txt")`` is
+        relative to wherever the process was started, so the .env.example
+        form worked from the checkout root and refused to start from anywhere
+        else. Run from a directory that holds no such file, the setting must
+        still be the checkout's copy, absolute, and the hints must load."""
+        env = self.subprocess_environment()
+        env["GATE_HINTS_FILE"] = self.RELATIVE_HINTS_FILE
+        elsewhere = Path(tempfile.mkdtemp(prefix="tarmar-not-the-checkout-"))
+        self.addCleanup(shutil.rmtree, elsewhere)
+
+        resolved = self._gate_hint_settings(env, cwd=elsewhere)
+
+        hints_file = Path(resolved["hints_file"])
+        self.assertTrue(hints_file.is_absolute())
+        self.assertEqual(hints_file, BASE_DIR / self.RELATIVE_HINTS_FILE)
+        self.assertGreater(len(resolved["hints"]), 0)
+
+    def test_an_absolute_hints_file_is_used_as_given(self):
+        """An absolute value wins the join outright, so a deploy host can keep
+        its hints anywhere; the file named is the one loaded."""
+        env = self.subprocess_environment()
+        hints_directory = Path(tempfile.mkdtemp(prefix="tarmar-gate-hints-"))
+        self.addCleanup(shutil.rmtree, hints_directory)
+        own_hints_file = hints_directory / "hints.txt"
+        own_hints_file.write_text("The only hint this host gives.\n")
+        env["GATE_HINTS_FILE"] = str(own_hints_file)
+
+        resolved = self._gate_hint_settings(env)
+
+        self.assertEqual(Path(resolved["hints_file"]), own_hints_file)
+        self.assertEqual(resolved["hints"], ["The only hint this host gives."])
+
+    def test_an_empty_threshold_means_the_default(self):
+        """The other bug the #77 review found: an uncommented blank
+        ``GATE_HINT_AFTER_WRONG_GUESSES=`` in .env arrives as ``""``, and
+        ``int("")`` stopped the server with a ValueError that named no
+        setting. It means the default now. The default is asserted as the
+        literal 3 on purpose: the fallback value settings.py states is the
+        thing under test, so nothing here may read it back from the module."""
+        env = self.subprocess_environment()
+        env["GATE_HINT_AFTER_WRONG_GUESSES"] = ""
+
+        self.assertEqual(self._gate_hint_settings(env)["threshold"], 3)
+
+    def test_the_threshold_still_comes_from_the_environment(self):
+        env = self.subprocess_environment()
+        env["GATE_HINT_AFTER_WRONG_GUESSES"] = "5"
+
+        self.assertEqual(self._gate_hint_settings(env)["threshold"], 5)

@@ -21,6 +21,17 @@ upstream, this function -- and the settings.py checks it powers -- need to
 change with it.
 """
 
+import random
+from pathlib import Path
+
+# settings.py imports this module while it is itself still loading, so the
+# settings object must not be read at import time here. ``django.conf.settings``
+# is lazy: importing it costs nothing, and only an attribute read (the one in
+# choose_gate_hint, at request time) makes it load, by which point settings.py
+# has long finished. That is what makes this import safe in both directions.
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+
 
 def normalize_passphrase(value: str) -> str:
     """Normalize a passphrase the way speak_friend normalizes login attempts."""
@@ -37,26 +48,71 @@ def normalize_passphrase(value: str) -> str:
 # locks a site out (issue #138).
 DEV_GATE_PASSPHRASE = "mellon"
 
-# The hint the gate offers once a visitor has guessed wrong
-# GATE_HINT_AFTER_WRONG_GUESSES times (issue #55). The evidence, stated once
-# here: of the only two outside visitors who found the gate in fifteen days,
-# one needed three tries and the other gave up after three wrong guesses. The
-# riddle is meant to be answered, not to turn people away. The hint is
-# deliberately oblique at Spencer's direction (2026-10-16, "very sneaky"): it
-# names neither the word nor the language, only sends the reader back to the
-# riddle already on the page. The wording stays his to change. It is kept
-# beside the dev passphrase because both describe the one door.
-GATE_HINT = (
-    "The door has already said the word. It is waiting to hear it in its own tongue."
-)
+# The gate offers a hint once a visitor has guessed wrong
+# settings.GATE_HINT_AFTER_WRONG_GUESSES times (issue #55). The evidence,
+# stated once here: of the only two outside visitors who found the gate in
+# fifteen days, one needed three tries and the other gave up after three wrong
+# guesses. The riddle is meant to be answered, not to turn people away.
+#
+# The hints themselves are configuration, not code: config/gate-hints.txt,
+# loaded into settings.GATE_HINTS at startup by load_gate_hints() below. They
+# were a tuple here until Spencer ruled otherwise (2026-10-17, issue #77):
+# strings that are content belong in configuration, and a literal belongs in
+# code only when it is used once. They are snarky on purpose, embarrassing the
+# asker for not knowing the lore, and sneaky still: none says the word. Their
+# wording is his to change, in that file, with no Python.
 
-# How many wrong guesses in a window before the hint is shown. Three, because
-# that is where both visitors in the evidence above stood when one of them
-# walked away. It must stay well under common.rate_limit.GUESS_MAX_ATTEMPTS so
-# the hint arrives before the lockout does; a hint that only ever appears on
-# the 429 page helps nobody still at the door. rate_limit is not imported here
-# to say so in code: tarmar_studio/settings.py and scripts/verify_deployment.py
-# import this module before Django's apps are loaded, and rate_limit imports
-# common.models, which cannot be imported that early. middleware.py imports
-# both and is where the two meet.
-GATE_HINT_AFTER_WRONG_GUESSES = 3
+
+def load_gate_hints(path: Path) -> tuple[str, ...]:
+    """The gate's hints, read from ``path``.
+
+    One hint per line; blank lines and lines starting with ``#`` are ignored,
+    so the file can carry its own header. Called once, by settings.py, so a
+    bad file stops the server at startup rather than at a visitor's first
+    wrong guess (issue #77): the gate is the first thing an outsider meets,
+    and a hint that fails to load there would fail in front of them.
+
+    Args:
+        path: The hints file, normally ``config/gate-hints.txt`` or whatever
+            ``GATE_HINTS_FILE`` names.
+
+    Returns:
+        The hints in file order, stripped, as an immutable tuple.
+
+    Raises:
+        ImproperlyConfigured: If the file cannot be read (missing, unreadable,
+            or a path through a file rather than a directory) or yields no
+            hints.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ImproperlyConfigured(
+            f"GATE_HINTS_FILE {path} cannot be read ({error}); the passphrase "
+            "gate needs its hints (issues #55, #77)."
+        ) from error
+    hints = tuple(
+        stripped
+        for stripped in (line.strip() for line in lines)
+        if stripped and not stripped.startswith("#")
+    )
+    if not hints:
+        raise ImproperlyConfigured(
+            f"GATE_HINTS_FILE {path} holds no hints: every line is blank or a "
+            "comment (issues #55, #77)."
+        )
+    return hints
+
+
+def choose_gate_hint() -> str:
+    """One of ``settings.GATE_HINTS``, drawn at random.
+
+    Several angles on one riddle, so a visitor who keeps guessing is shown a
+    different way in each time rather than the same sentence again (Spencer,
+    2026-10-17, issue #77). ``random`` is the right module here: a hint is
+    not a secret, and nothing is protected by which one is drawn.
+
+    Returns:
+        One hint, chosen uniformly from ``settings.GATE_HINTS``.
+    """
+    return random.choice(settings.GATE_HINTS)

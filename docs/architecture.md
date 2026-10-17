@@ -136,6 +136,15 @@ not an invite code. The subclass exists because `login()` and `logout()` cycle
 the session — it re-plants the flag on a public path when the response dropped
 it.
 
+Wrong guesses are counted per client address by
+`common/middleware.py::GateRateLimitMiddleware`, which sits outside the gate in
+`settings.MIDDLEWARE`. From `settings.GATE_HINT_AFTER_WRONG_GUESSES` wrong
+guesses on, the refusal carries a hint, and so does the 429 once the guessing
+budget is spent; each is drawn at random (`common/gate.py::choose_gate_hint`)
+from `settings.GATE_HINTS`, which `load_gate_hints` reads at startup from
+`config/gate-hints.txt` (the `GATE_HINTS_FILE` environment variable names
+another file). The hints are configuration, not code (issues #55, #77).
+
 ---
 
 ## 2. Application map
