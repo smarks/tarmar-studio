@@ -2,18 +2,19 @@
 
 A canon carries its rules as JSON files beside its pages:
 ``magic-rules.json`` (``battle.magic_rules``), from issue #59
-``character-rules.json`` (``characters.rules``) and from issue #70
-``skill-rules.json`` (``characters.skill_rules``). Each is read the same
-strict way, so a canon author's mistake stops the server instead of becoming
-a quiet default:
+``character-rules.json`` (``characters.rules``), from issue #70
+``skill-rules.json`` (``characters.skill_rules``) and from issue #75
+``equipment.json`` and ``equipment-rules.json``
+(``characters.equipment_rules``). Each is read the same strict way, so a
+canon author's mistake stops the server instead of becoming a quiet default:
 
 - a missing or unreadable file, or one that is not JSON, is refused;
 - a key repeated in one object is refused (``json.loads`` alone keeps the
   last and drops the first without a word);
 - an object must carry every field its schema requires and nothing else,
   since an unknown key is most likely a misspelling of a known one;
-- integers are not booleans, texts are not empty, and a list that stands
-  for a set repeats nothing;
+- integers and numbers are not booleans, texts are not empty, and a list
+  that stands for a set repeats nothing;
 - every file may carry an optional top-level ``rulings`` list, the canon's
   own record of the readings its pages left open: objects with a non-empty
   string ``key`` and ``reading`` and whatever else the author records
@@ -29,8 +30,9 @@ Free of Django on purpose, like ``reference.paths``: ``characters.dice`` is in
 ``gm.engine``'s import chain, which the offline CLI imports with no Django
 configured, and ``characters.rules``, which reads its file through here, is
 where ``characters.dice`` takes its numbers from once issue #59 seats them;
-``characters.skill_rules`` is read the same way (``gm.tests``'
-``test_engine_imports_without_django`` holds all three to that).
+``characters.skill_rules`` and ``characters.equipment_rules`` are read the
+same way (``gm.tests``' ``test_engine_imports_without_django`` holds them all
+to that).
 
 A value built from a loaded rules file and then cached (a Games Master prompt,
 a pattern naming the canon's skills) registers its cache with
@@ -38,6 +40,7 @@ a pattern naming the canon's skills) registers its cache with
 clear every one of them when a test seats other rules (issue #70).
 """
 
+import math
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -139,6 +142,17 @@ def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     if repeated:
         raise ValueError(f"an object repeats the key {repeated}")
     return dict(pairs)
+
+
+def _is_finite_number(value: Any) -> bool:
+    """Whether ``value`` is an ``int`` or a finite ``float``, not a ``bool``.
+
+    ``json.loads`` reads the non-standard ``NaN`` and ``Infinity`` as floats,
+    which no comparison with a bound would refuse.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    return math.isfinite(value)
 
 
 class Keyed(Protocol):
@@ -288,6 +302,22 @@ class RulesFileReader:
             return None
         if not isinstance(value, int) or isinstance(value, bool):
             self.fail(field_path, f"must be an integer or null, got {value!r}")
+        return value
+
+    def number(self, value: Any, field_path: str) -> float:
+        """A finite integer or decimal, kept as written (``3`` stays an
+        integer); ``true``, ``false``, ``NaN`` and ``Infinity`` are not
+        numbers here."""
+        if not _is_finite_number(value):
+            self.fail(field_path, f"must be a finite number, got {value!r}")
+        return value
+
+    def optional_number(self, value: Any, field_path: str) -> float | None:
+        """A number, as :meth:`number` reads one, or ``null``."""
+        if value is None:
+            return None
+        if not _is_finite_number(value):
+            self.fail(field_path, f"must be a finite number or null, got {value!r}")
         return value
 
     def boolean(self, value: Any, field_path: str) -> bool:

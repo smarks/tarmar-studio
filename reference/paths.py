@@ -23,9 +23,10 @@ is imported only on the path that raises it, so a correct configuration loads
 no Django module at all (``gm.tests`` holds ``gm.engine``'s import chain to
 that).
 
-A canon directory holds the ``dm-rules/`` pages plus six JSON files and
+A canon directory holds the ``dm-rules/`` pages plus eight JSON files and
 the Games Master's world digest, all read once per process (issues #918,
-#919, #960, #59 and #70; ``reference.apps`` has ``runserver`` watch them):
+#919, #960, #59, #70 and #75; ``reference.apps`` has ``runserver`` watch
+them):
 
 - ``canon.json`` (optional): ``{"name": "tarmar" | "default"}``, which canon
   this is, as :data:`CANON_NAME` reports it. Without the file a directory is
@@ -63,8 +64,31 @@ the Games Master's world digest, all read once per process (issues #918,
   the skill cost multipliers, the survival roll, the aging table, the
   attribute modifier table, and the skill and attribute checks, with an
   optional ``rulings`` list. Read by ``characters.skill_rules``, whose
-  docstring gives the full schema. The three rules files are read the one
-  strict way ``reference.rules_file`` holds.
+  docstring gives the full schema.
+- ``equipment.json`` (required: a canon without one fails the
+  ``characters.E003`` system check): the equipment catalog, the weapons,
+  armour, shields and gear a character may buy, each with its price, weight
+  and the fields its group carries (damage, strength requirement and weapon
+  class; stops, DEX penalty, tier and movement restriction; shield bonus), as
+  the public equipment pages list them. Read by ``characters.equipment_rules``,
+  whose docstring gives the full schema. The battle names some items by id
+  (the archetypes' kits and step-downs, the arrows and the bows' class, the
+  hand-to-hand weapon), which the canon must carry (``battle.E005``).
+- ``equipment-rules.json`` (required: a canon without one fails the
+  ``characters.E004`` system check): the numbers encumbrance and movement
+  read, as the public movement and armour pages state them: the encumbrance
+  levels with their multipliers, penalties, forbidden gaits and walk limit,
+  the armour restriction codes, the gaits' order and base distances, the
+  Missile weapon classes (the ones Archery covers and the battle seats as
+  missile weapons) and the bounds on a defender's dodge,
+  with an optional ``rulings`` list. Read by ``characters.equipment_rules``,
+  whose docstring gives the full schema. The level keys and gait names are the
+  canon's, but the battle engine seats exactly four gaits, the one it seats as
+  its run above 0 (``battle.E003``, until stage 6 of rules-as-data seats the
+  engine's own rules), and the battle generator deals no load past a level it
+  names, which the canon must carry (``battle.E004``).
+  The five rules files are read the one strict way ``reference.rules_file``
+  holds.
 - ``gm-prompt/world.md`` (optional): the world section of the Games Master's
   system prompt, used verbatim less its trailing newlines. Without it
   ``gm.engine`` uses a one-paragraph built-in fallback and logs a warning.
@@ -142,8 +166,9 @@ CANON_NAV_FILE_NAME = "nav.json"
 CANON_MAPS_FILE_NAME = "maps.json"
 # The canon JSON files the reference search index fingerprints
 # (``reference.search_index``): an edit to one rebuilds the index.
-# ``magic-rules.json``, ``character-rules.json`` and ``skill-rules.json`` are
-# not among them, since no page or nav entry depends on any of them.
+# ``magic-rules.json``, ``character-rules.json``, ``skill-rules.json``,
+# ``equipment.json`` and ``equipment-rules.json`` are not among them, since no
+# page or nav entry depends on any of them.
 CANON_JSON_FILE_NAMES: tuple[str, ...] = (
     CANON_MANIFEST_FILE_NAME,
     CANON_NAV_FILE_NAME,
@@ -350,6 +375,16 @@ CHARACTER_RULES_FILE = DM_RULES_DIR / CANON_CHARACTER_RULES_FILE_NAME
 # canon's holds the public pages' numbers.
 CANON_SKILL_RULES_FILE_NAME = "skill-rules.json"
 SKILL_RULES_FILE = DM_RULES_DIR / CANON_SKILL_RULES_FILE_NAME
+
+# The equipment catalog and the equipment rules (issue #75): the items a
+# character may buy, and the encumbrance levels, armour restriction codes,
+# gaits, Missile classes and dodge bounds, read the same strict way by
+# ``characters.equipment_rules``. Every canon carries both; the default
+# canon's hold the public pages' items and numbers.
+CANON_EQUIPMENT_CATALOG_FILE_NAME = "equipment.json"
+EQUIPMENT_CATALOG_FILE = DM_RULES_DIR / CANON_EQUIPMENT_CATALOG_FILE_NAME
+CANON_EQUIPMENT_RULES_FILE_NAME = "equipment-rules.json"
+EQUIPMENT_RULES_FILE = DM_RULES_DIR / CANON_EQUIPMENT_RULES_FILE_NAME
 
 # The rest of what a canon directory may hold beside its pages (issue #921):
 # the author's documents, the guides generated from the canon, the Tarmar-only

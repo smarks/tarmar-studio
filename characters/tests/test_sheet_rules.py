@@ -343,7 +343,10 @@ class AgedScoresTest(BaseTestCase):
         encumbrance = character.encumbrance_thresholds
         assert thresholds is not None and encumbrance is not None
         self.assertEqual(thresholds["fatigue"]["survival_save_target"], 12)
-        self.assertEqual(encumbrance["unencumbered"], 12)
+        self.assertEqual(
+            encumbrance,
+            {"unencumbered": 12, "light": 18, "medium": 24, "heavy": 30},
+        )
         self.assertEqual(character.movement_modifier, 0)
         # Base: the literacy check and weight, decided when the character is made.
         self.assertEqual(character.literacy_threshold, 12)

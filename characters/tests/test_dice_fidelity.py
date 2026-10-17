@@ -29,7 +29,6 @@ from django.conf import settings
 from django.test import SimpleTestCase
 
 from characters.dice import starting_coin_for_wealth
-from characters.equipment import ARMOR, SHIELDS, WEAPONS, get_shield_bonus
 from characters.models import Character
 from characters.skills import calculate_attribute_modifier
 from common.rolling import Roller
@@ -38,6 +37,7 @@ from reference.paths import PUBLIC_RULES_DIR
 
 from .rules_fixtures import (
     DEFAULT_CHARACTER_RULES,
+    DEFAULT_EQUIPMENT_CATALOG,
     DEFAULT_SKILL_RULES,
     seated_character_rules,
     seated_skill_rules,
@@ -324,15 +324,16 @@ class WeaponTableDocTest(SimpleTestCase):
         return rows
 
     def test_every_documented_weapon_matches_the_catalog(self):
-        catalog_by_name = {item["name"]: item for item in WEAPONS.values()}
+        weapons = DEFAULT_EQUIPMENT_CATALOG.weapons
+        catalog_by_name = {weapon.name: weapon for weapon in weapons.values()}
         documented = self._documented_rows()
-        self.assertEqual(len(documented), len(WEAPONS))
+        self.assertEqual(len(documented), len(weapons))
         for doc_name, damage_cell, str_cell in documented:
             name = self.NAME_OVERRIDES.get(doc_name, doc_name)
             self.assertIn(name, catalog_by_name, f"{name} missing from catalog")
             item = catalog_by_name[name]
             documented_damage = damage_cell.replace("−", "-")
-            catalog_damage = item.get("damage")
+            catalog_damage = item.damage
             if documented_damage == "—":
                 self.assertIsNone(
                     catalog_damage, f"{name}: doc has no damage, catalog does"
@@ -344,12 +345,10 @@ class WeaponTableDocTest(SimpleTestCase):
                     f"{name}: damage drifted between weapons.md and the catalog",
                 )
             if str_cell == "—":
-                self.assertIsNone(
-                    item.get("str_req"), f"{name}: doc has no STR requirement"
-                )
+                self.assertIsNone(item.str_req, f"{name}: doc has no STR requirement")
             else:
                 self.assertEqual(
-                    item.get("str_req"),
+                    item.str_req,
                     int(str_cell),
                     f"{name}: str_req drifted between weapons.md and the catalog",
                 )
@@ -361,19 +360,23 @@ class ArmourShieldTableDocTest(SimpleTestCase):
     def test_every_documented_item_matches_the_catalog(self):
         markdown = ARMOR_MD.read_text()
         rows = _table_rows(markdown, "# Armor and Shields")[1:]
-        catalog_by_name = {item["name"]: item for item in {**ARMOR, **SHIELDS}.values()}
+        catalog = DEFAULT_EQUIPMENT_CATALOG
+        catalog_by_name = {
+            item.name: item
+            for item in (*catalog.armour.values(), *catalog.shields.values())
+        }
         self.assertEqual(len(rows), len(catalog_by_name))
         for row in rows:
             name, stops_cell, dex_cell = row[0], row[1], row[2]
             self.assertIn(name, catalog_by_name, f"{name} missing from catalog")
             item = catalog_by_name[name]
             self.assertEqual(
-                item["stops"],
+                item.stops,
                 int(stops_cell),
                 f"{name}: stops drifted between armor-and-shields.md and catalog",
             )
             self.assertEqual(
-                item["dex_penalty"],
+                item.dex_penalty,
                 _number(dex_cell),
                 f"{name}: DEX penalty drifted between doc and catalog",
             )
@@ -399,9 +402,10 @@ class ShieldBonusDocTest(SimpleTestCase):
         )
 
     def test_catalog_shield_bonuses_match_the_documented_line(self):
-        self.assertEqual(set(self.DOCUMENTED_BONUSES), set(SHIELDS))
+        catalog = DEFAULT_EQUIPMENT_CATALOG
+        self.assertEqual(set(self.DOCUMENTED_BONUSES), set(catalog.shields))
         for shield_id, bonus in self.DOCUMENTED_BONUSES.items():
-            self.assertEqual(get_shield_bonus(shield_id), bonus, shield_id)
+            self.assertEqual(catalog.shield_bonus(shield_id), bonus, shield_id)
 
 
 class AuditPageReportsClosedIssuesAsClosedTest(SimpleTestCase):

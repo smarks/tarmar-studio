@@ -555,11 +555,14 @@ details.help .help-body {
     font-size: 0.85rem;
     font-weight: 500;
 }
-.encumbrance-bar .level-badge.unencumbered { background: var(--colour-load-unencumbered-surface); color: var(--colour-load-unencumbered-ink); }
-.encumbrance-bar .level-badge.light { background: var(--colour-load-light-surface); color: var(--colour-load-light-ink); }
-.encumbrance-bar .level-badge.medium { background: var(--colour-load-medium-surface); color: var(--colour-load-medium-ink); }
-.encumbrance-bar .level-badge.heavy { background: var(--colour-sheet-negative-border); color: var(--colour-load-heavy-ink); }
-.encumbrance-bar .level-badge.overloaded { background: var(--colour-sheet-negative-surface); color: var(--colour-load-overloaded-ink); font-weight: 700; }
+/* By the level's place, lightest first, not its name (issue #75): the canon
+   names its levels. The heaviest level wears its own colours whatever its
+   place, so it is declared last. */
+.encumbrance-bar .level-badge.load-1 { background: var(--colour-load-unencumbered-surface); color: var(--colour-load-unencumbered-ink); }
+.encumbrance-bar .level-badge.load-2 { background: var(--colour-load-light-surface); color: var(--colour-load-light-ink); }
+.encumbrance-bar .level-badge.load-3 { background: var(--colour-load-medium-surface); color: var(--colour-load-medium-ink); }
+.encumbrance-bar .level-badge.load-4 { background: var(--colour-sheet-negative-border); color: var(--colour-load-heavy-ink); }
+.encumbrance-bar .level-badge.load-heaviest { background: var(--colour-sheet-negative-surface); color: var(--colour-load-overloaded-ink); font-weight: 700; }
 /* STR is not recorded yet, so the load has no level to price it against (issue #630). */
 .encumbrance-bar .level-badge.unknown { background: var(--colour-grounding-surface); color: var(--colour-ink-muted); }
 .encumbrance-bar .penalty {

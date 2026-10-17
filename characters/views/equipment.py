@@ -29,7 +29,7 @@ from ..constants import (
     strip_control_characters,
     too_long,
 )
-from ..equipment import CATALOG_BY_GROUP, get_item, settle_worn_armour
+from ..equipment import catalog_by_group, get_item, settle_worn_armour
 from ..equipment_service import (
     HELD_CATEGORIES,
     build_catalog_equipment_item,
@@ -239,8 +239,8 @@ def _change_equipment(
 
 @login_required
 def equipment_catalog(request):
-    """Return the equipment catalog for the UI picker."""
-    return JsonResponse(CATALOG_BY_GROUP)
+    """Return the loaded canon's equipment catalog for the UI picker."""
+    return JsonResponse(catalog_by_group())
 
 
 @login_required

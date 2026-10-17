@@ -61,7 +61,8 @@ from .dice import (
     starting_coin_for_wealth,
     wealth_gives_coin,
 )
-from .equipment import EQUIPMENT_CATALOG, get_item_name
+from .equipment import get_item_name
+from .equipment_rules import equipment_catalog
 from .equipment_service import custom_equipment_item
 from .models import (
     CHARACTER_FIELDS,
@@ -1969,8 +1970,8 @@ def catalog_item_id(name: str) -> str:
         name: What the item was called.
     """
     wanted = name.strip().casefold()
-    for item_id, item in EQUIPMENT_CATALOG.items():
-        if str(item.get("name", "")).casefold() == wanted:
+    for item_id, item in equipment_catalog().all_items.items():
+        if item.name.casefold() == wanted:
             return item_id
     return ""
 

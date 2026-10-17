@@ -23,12 +23,8 @@ from dataclasses import dataclass
 
 from characters.constants import UNNAMED_CHARACTER, name_within_rule
 from characters.dice import roll_all_character_stats
-from characters.equipment import (
-    ENCUMBRANCE_ORDER,
-    WEAPONS,
-    calculate_encumbrance_level,
-    get_item,
-)
+from characters.equipment import get_item
+from characters.equipment_rules import equipment_catalog, equipment_rules
 from characters.models import Character, board_can_seat_weapon
 from characters.skills import points_for_level
 from characters.weapon_skill import weapon_skill_name
@@ -90,9 +86,17 @@ _SHIELD_STEPS: dict[str, tuple[str | None, ...]] = {
     "large_shield": ("large_shield", "small_shield", None),
 }
 
+# The arrows an archer is dealt beside a two-handed weapon of the bows' class
+# (a crossbow would take quarrels, and the generator deals none). Both are the
+# generator's choices, named in the loaded catalog, which ``battle.E005``
+# holds every canon to carrying (:func:`catalog_ids_refused`, issue #75).
+_ARROW_CLASS = "Missile — Bows"
+_ARROWS = "arrows_20"
+
 #: The heaviest load a generated fighter carries (issue #883): Medium, the
-#: last level at which a figure may still Jog (movement.md; equipment.py's
-#: ``ENCUMBRANCE_LEVELS``). Heavy bars Jog and Overloaded caps Walk at 1 hex,
+#: last level at which a figure may still Jog (movement.md; the canon's
+#: ``equipment-rules.json``, which must name it: a test holds every canon to
+#: it, issue #75). Heavy bars Jog and Overloaded caps Walk at 1 hex,
 #: so a figure dealt past Medium can neither charge nor close with a foe that
 #: steps away. Coordinator's ruling under the standing rule; Spencer may
 #: overrule.
@@ -138,6 +142,71 @@ _EPITHETS: tuple[str, ...] = (
 
 # Redraw budget before generate_name falls back to a numbered variant.
 _NAME_ATTEMPTS = 50
+
+
+def catalog_ids_refused() -> list[str]:
+    """Each catalog id or class the battle names that the loaded canon lacks.
+
+    The archetypes' weapons, armour and step-down tables, the arrows dealt
+    with a bow and the bows' class, and the one hand-to-hand weapon
+    (:data:`battle.services.HTH_WEAPON_IDS`) are the battle's own design
+    choices, read by id; a canon without one would fail the first battle a
+    Game Master generates. ``battle.E005`` reports these before any battle is
+    seated (issue #75).
+
+    Returns:
+        One sentence per id or class missing or of the wrong kind, each once,
+        in the order the tables name them; none when the canon carries all.
+    """
+    # Imported here: battle.services imports this module.
+    from .services import HTH_WEAPON_IDS
+
+    catalog = equipment_catalog()
+    refused: list[str] = []
+    for archetype, candidates in _WEAPON_CANDIDATES.items():
+        refused += [
+            f"_WEAPON_CANDIDATES[{archetype!r}] names {item_id!r}, which is no "
+            "weapon the battle board can seat"
+            for item_id in candidates
+            if not board_can_seat_weapon({"item_id": item_id})
+        ]
+    for archetype, pieces in _ARMOUR.items():
+        refused += [
+            f"_ARMOUR[{archetype!r}] names {item_id!r}, which is no armour or shield"
+            for item_id in pieces
+            if item_id not in catalog.armour and item_id not in catalog.shields
+        ]
+    for table_name, table, group, kind in (
+        ("_ARMOUR_STEPS", _ARMOUR_STEPS, catalog.armour, "armour"),
+        ("_SHIELD_STEPS", _SHIELD_STEPS, catalog.shields, "shield"),
+    ):
+        for piece, steps in table.items():
+            refused += [
+                f"{table_name}[{piece!r}] names {item_id!r}, which is no {kind}"
+                for item_id in (piece, *steps)
+                if item_id is not None and item_id not in group
+            ]
+    if _ARROWS not in catalog.weapons:
+        refused.append(f"_ARROWS names {_ARROWS!r}, which is no weapon")
+    if _ARROW_CLASS not in equipment_rules().missile_classes:
+        refused.append(f"_ARROW_CLASS {_ARROW_CLASS!r} is no Missile class")
+    two_handed_classes = {
+        catalog.weapons[item_id].weapon_class
+        for candidates in _WEAPON_CANDIDATES.values()
+        for item_id in candidates
+        if item_id in catalog.weapons and catalog.weapons[item_id].two_handed
+    }
+    if _ARROW_CLASS not in two_handed_classes:
+        refused.append(
+            f"_ARROW_CLASS {_ARROW_CLASS!r} is the class of no two-handed "
+            "weapon _WEAPON_CANDIDATES names"
+        )
+    refused += [
+        f"HTH_WEAPON_IDS names {item_id!r}, which is no weapon with a class"
+        for item_id in sorted(HTH_WEAPON_IDS)
+        if catalog.weapon_class(item_id) is None
+    ]
+    return list(dict.fromkeys(refused))
 
 
 def generate_name(rng: random.Random, used_names: set[str]) -> str:
@@ -238,8 +307,8 @@ def _equipment_entries(
     if weapon_id:
         entries.append({"item_id": weapon_id, "quantity": 1})
         weapon = get_item(weapon_id) or {}
-        if weapon.get("weapon_class") == "Missile — Bows" and weapon.get("two_handed"):
-            entries.append({"item_id": "arrows_20", "quantity": 1})
+        if weapon.get("weapon_class") == _ARROW_CLASS and weapon.get("two_handed"):
+            entries.append({"item_id": _ARROWS, "quantity": 1})
     for item_id in protection:
         item = get_item(item_id) or {}
         entry: dict = {"item_id": item_id, "quantity": 1}
@@ -269,16 +338,16 @@ def _lighter_weapons(weapon_id: str, effective_strength: int) -> list[str]:
     """
     held = get_item(weapon_id) or {}
     weapon_class = held.get("weapon_class")
-    if not weapon_class or str(weapon_class).startswith("Missile"):
+    if not weapon_class or weapon_class in equipment_rules().missile_classes:
         return []
     weight = float(held.get("weight") or 0)
     lighter = [
-        (float(item.get("weight") or 0), item_id)
-        for item_id, item in WEAPONS.items()
-        if item.get("weapon_class") == weapon_class
-        and bool(item.get("two_handed")) == bool(held.get("two_handed"))
-        and float(item.get("weight") or 0) < weight
-        and (item.get("str_req") or 0) <= effective_strength
+        (float(weapon.weight), item_id)
+        for item_id, weapon in equipment_catalog().weapons.items()
+        if weapon.weapon_class == weapon_class
+        and weapon.two_handed == bool(held.get("two_handed"))
+        and weapon.weight < weight
+        and (weapon.str_req or 0) <= effective_strength
         and board_can_seat_weapon({"item_id": item_id})
     ]
     return [
@@ -334,7 +403,7 @@ def deal_equipment(
 
     The first kit from :func:`_kit_steps` whose load is no heavier than
     :data:`HEAVIEST_GENERATED_LOAD`, read by the sheet's own
-    :func:`~characters.equipment.calculate_encumbrance_level`; the lightest
+    :meth:`~characters.equipment_rules.EncumbranceRules.level_for`; the lightest
     kit when none is. The weapon in the kit comes first in the list, as it
     always has, and may be lighter than the one :func:`pick_weapon` dealt.
 
@@ -349,14 +418,12 @@ def deal_equipment(
     steps = _kit_steps(archetype, weapon_id, effective_strength)
     if not within_load:
         return _equipment_entries(*steps[0])
+    encumbrance = equipment_rules().encumbrance
+    heaviest_allowed = encumbrance.keys.index(HEAVIEST_GENERATED_LOAD)
     for weapon, protection in steps:
         entries = _equipment_entries(weapon, protection)
-        level = calculate_encumbrance_level(
-            _catalog_weight(entries), effective_strength
-        )
-        if ENCUMBRANCE_ORDER.index(level) <= ENCUMBRANCE_ORDER.index(
-            HEAVIEST_GENERATED_LOAD
-        ):
+        level = encumbrance.level_for(_catalog_weight(entries), effective_strength)
+        if encumbrance.keys.index(level) <= heaviest_allowed:
             return entries
     return _equipment_entries(*steps[-1])
 

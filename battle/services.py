@@ -23,12 +23,12 @@ from bestiary.generation import DIFFICULTY_BANDS, pick_base
 from bestiary.models import CATEGORY_CHOICES, Beast
 from characters import services as character_services
 from characters.equipment import (
-    WEAPONS,
     get_armour_tier,
     get_item,
     get_shield_bonus,
     is_worn_armour,
 )
+from characters.equipment_rules import equipment_catalog, equipment_rules
 from characters.magic import battle_loadout, current_mana, spell_mastery
 from characters.models import (
     Character,
@@ -41,7 +41,7 @@ from characters.weapon_skill import resolve_weapon_skill
 
 from . import agreement, control, policy, profiles, turn_menu
 from .access import Actor, claimed_seat_q, commands_foes, decides_for, is_dm
-from .adaptation import snapshot_beast
+from .adaptation import engine_gait_names, snapshot_beast
 from .classic_adaptation import classic_state
 from .engine import hexes
 from .engine.state import (
@@ -163,13 +163,14 @@ class SeatedArms:
 def _catalog_weapon(item_id: str) -> WeaponState:
     """The engine's copy of one catalog weapon :func:`board_can_seat_weapon` passed.
 
-    A missile weapon's rate of fire is read off its weapons.md Notes cell by
-    the engine's own parser (``tarmar_engine.weapons.missile_rate_from_note``),
-    so the numbers are never retyped here (#781).
+    A missile weapon is one of the loaded canon's Missile classes (issue #75).
+    Its rate of fire is read off its weapons.md Notes cell by the engine's own
+    parser (``tarmar_engine.weapons.missile_rate_from_note``), so the numbers
+    are never retyped here (#781).
     """
     item_data = get_item(item_id) or {}
     weapon_class = str(item_data.get("weapon_class"))
-    is_missile = weapon_class.startswith("Missile")
+    is_missile = weapon_class in equipment_rules().missile_classes
     rate = missile_rate_from_note(item_data.get("notes") if is_missile else None)
     return WeaponState(
         item_id=item_id,
@@ -198,7 +199,7 @@ def _weapon_skill_levels(character: Character) -> dict[str, int]:
     Levels of 0 are left out: the engine reads a missing weapon as 0.
     """
     levels: dict[str, int] = {}
-    for item_id in WEAPONS:
+    for item_id in equipment_catalog().weapons:
         if not board_can_seat_weapon({"item_id": item_id}):
             continue
         level = resolve_weapon_skill(character.skills, item_id).effective_level
@@ -296,14 +297,18 @@ def _seated_gaits(character: Character) -> SeatedGaits:
     formula reaches 0, and Jog at the Walk distance, since the engine's policy
     reads ``move_jog`` for a charge's reach and a figure that may not jog
     charges at its walk (tarmar-engine#17).
+
+    The sheet's gaits are the loaded canon's, each seated as the engine gait
+    in its place (:func:`battle.adaptation.engine_gait_names`, issue #75).
     """
     distances = character.gait_distances
-    walk = distances["walk"] or 1
+    canon_gaits = engine_gait_names()
+    walk = distances[canon_gaits["walk"]] or 1
     return SeatedGaits(
         walk=walk,
-        jog=distances["jog"] or walk,
-        run=distances["run"] or 0,
-        sprint=distances["sprint"] or 0,
+        jog=distances[canon_gaits["jog"]] or walk,
+        run=distances[canon_gaits["run"]] or 0,
+        sprint=distances[canon_gaits["sprint"]] or 0,
     )
 
 

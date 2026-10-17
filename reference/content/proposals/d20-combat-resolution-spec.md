@@ -302,7 +302,8 @@ is data + pure functions; narration still lives with the GM.
 **Done (shipped in `characters/`):**
 
 1. ✅ `weapon_class` on every weapon, `armour_tier` on every armour,
-   `shield_bonus` on every shield — `characters/fixtures/equipment.json` (§5/§6).
+   `shield_bonus` on every shield — `characters/fixtures/equipment.json`
+   (now the canon's `equipment.json`, #75) (§5/§6).
    Javelin also carries `alt_class` (Thrusting in melee, Missile thrown).
 2. ✅ **Source of truth = `characters/combat.py`** — the §6 `MATRIX` plus the
    modifier functions (`dex_modifier`, `skill_bonus`, `strength_fit_penalty`,

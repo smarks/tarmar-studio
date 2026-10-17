@@ -1,9 +1,13 @@
 """Archetype generation: real Character rows, catalog-respecting loadouts."""
 
 import random
+from dataclasses import replace
 from unittest import mock
 
+from django.test import SimpleTestCase
+
 from battle import generation
+from battle.checks import GENERATOR_CATALOG_CHECK_ID, check_generator_catalog_ids
 from battle.generation import (
     ARCHETYPES,
     archetype_for_index,
@@ -16,10 +20,13 @@ from battle.generation import (
 from battle.services import snapshot_combatant
 from battle.spells import get_spell
 from characters.constants import CHARACTER_NAME_PATTERN
-from characters.equipment import (
-    ENCUMBRANCE_ORDER,
-    calculate_encumbrance_level,
-    get_item,
+from characters.equipment import get_item
+from characters.equipment_rules import equipment_rules
+from characters.tests.rules_fixtures import (
+    DEFAULT_EQUIPMENT_CATALOG,
+    DEFAULT_EQUIPMENT_RULES,
+    seated_equipment_catalog,
+    seated_equipment_rules,
 )
 from common.test_helpers import BaseTestCase
 
@@ -296,28 +303,29 @@ class DealEquipmentTest(BaseTestCase):
         )
 
     def test_every_kit_is_the_heaviest_that_fits_at_every_strength(self):
-        medium = ENCUMBRANCE_ORDER.index("medium")
+        encumbrance = equipment_rules().encumbrance
+        medium = encumbrance.keys.index(generation.HEAVIEST_GENERATED_LOAD)
         for archetype in ARCHETYPES:
             for strength in range(3, 19):
                 with self.subTest(archetype=archetype, strength=strength):
                     weapon_id = pick_weapon(archetype, strength)
                     dealt = deal_equipment(archetype, weapon_id, strength)
-                    level = calculate_encumbrance_level(_weight(dealt), strength)
+                    level = encumbrance.level_for(_weight(dealt), strength)
                     full = deal_equipment(
                         archetype, weapon_id, strength, within_load=False
                     )
                     if dealt != full:
                         # Lightened only because the full kit was too heavy.
                         self.assertGreater(
-                            ENCUMBRANCE_ORDER.index(
-                                calculate_encumbrance_level(_weight(full), strength)
+                            encumbrance.keys.index(
+                                encumbrance.level_for(_weight(full), strength)
                             ),
                             medium,
                         )
                     # A weapon alone may still be too much for a low STR; the
                     # kit is then as light as it goes: no armour and no
                     # shield, and a weapon of the dealt one's class.
-                    if ENCUMBRANCE_ORDER.index(level) > medium:
+                    if encumbrance.keys.index(level) > medium:
                         carried = [
                             item
                             for item in _worn(dealt)
@@ -382,3 +390,64 @@ class DealEquipmentTest(BaseTestCase):
                             combatant.character.encumbrance_level,
                             ("unencumbered", "light", "medium"),
                         )
+
+
+class GeneratorNamesWhatTheCanonCarriesTest(SimpleTestCase):
+    """The battle's loadouts name catalog ids and an encumbrance level.
+
+    They are the battle's design choices, not the canon's (issue #75): the ids
+    each archetype is dealt and steps down through, the arrows dealt with a
+    bow and the bows' class, the one hand-to-hand weapon, and the heaviest
+    load the generator deals. ``battle.E005`` and ``battle.E004`` hold the
+    loaded canon to carrying them, through the one list of refusals
+    (:func:`battle.generation.catalog_ids_refused`) this test reads too.
+    """
+
+    def test_the_loaded_canon_carries_every_id_the_battle_names(self):
+        self.assertEqual(generation.catalog_ids_refused(), [])
+        self.assertEqual(check_generator_catalog_ids(), [])
+
+    def test_a_canon_without_one_is_refused_by_the_check(self):
+        catalog = DEFAULT_EQUIPMENT_CATALOG
+        weapons = {
+            item_id: weapon
+            for item_id, weapon in catalog.weapons.items()
+            if item_id not in ("saber", "arrows_20")
+        }
+        shields = {
+            item_id: shield
+            for item_id, shield in catalog.shields.items()
+            if item_id != "small_shield"
+        }
+        without = replace(catalog, weapons=weapons, shields=shields)
+        with seated_equipment_catalog(without), seated_equipment_rules():
+            refused = generation.catalog_ids_refused()
+            (message,) = check_generator_catalog_ids()
+        self.assertIn(
+            "_WEAPON_CANDIDATES['unarmoured duelist'] names 'saber', which is no "
+            "weapon the battle board can seat",
+            refused,
+        )
+        self.assertIn(
+            "_SHIELD_STEPS['large_shield'] names 'small_shield', which is no shield",
+            refused,
+        )
+        self.assertIn("_ARROWS names 'arrows_20', which is no weapon", refused)
+        self.assertEqual(message.id, GENERATOR_CATALOG_CHECK_ID)
+        for sentence in refused:
+            self.assertIn(sentence, message.msg)
+
+    def test_the_bows_class_must_be_a_loaded_missile_class(self):
+        rules = replace(
+            DEFAULT_EQUIPMENT_RULES, missile_classes=frozenset({"Missile — Crossbows"})
+        )
+        with seated_equipment_catalog(), seated_equipment_rules(rules):
+            refused = generation.catalog_ids_refused()
+        self.assertEqual(
+            refused, [f"_ARROW_CLASS {generation._ARROW_CLASS!r} is no Missile class"]
+        )
+
+    def test_the_heaviest_generated_load_is_a_loaded_level(self):
+        self.assertIn(
+            generation.HEAVIEST_GENERATED_LOAD, equipment_rules().encumbrance.keys
+        )

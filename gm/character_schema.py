@@ -17,15 +17,17 @@ so a number the model misremembers cannot reach the sheet.
 module never validates anything itself, so there is one validator.
 """
 
+import functools
 import json
 from dataclasses import dataclass
 from typing import Any
 
 from characters.constants import CHARACTER_EXPORT_FORMAT
-from characters.equipment import EQUIPMENT_CATALOG
+from characters.equipment_rules import equipment_catalog
 from characters.rules import CharacterRules, DiceRollRules, character_rules
 from characters.skills import normalize_skill_name
 from common.services.sse import strip_thinking
+from reference.rules_file import derived_from_rules
 
 
 def _roll_text(name: str, roll: DiceRollRules) -> str:
@@ -392,13 +394,21 @@ def parse_extraction_reply(reply: str) -> Any:
     return json.loads(candidate)
 
 
-# Catalog items by their display name, lower-cased, so an item the model
-# names the way the rules do ("Dagger") is stored as the catalog entry
-# (weight, cost and combat class follow from the id) rather than as a
-# custom item with none of those.
-_CATALOG_IDS_BY_NAME = {
-    str(item["name"]).lower(): item_id for item_id, item in EQUIPMENT_CATALOG.items()
-}
+@derived_from_rules
+@functools.cache
+def _catalog_ids_by_name() -> dict[str, str]:
+    """The loaded catalog's ids by display name, lower-cased.
+
+    So an item the model names the way the rules do ("Dagger") is stored as
+    the catalog entry (weight, cost and combat class follow from the id)
+    rather than as a custom item with none of those. Built the first time an
+    extraction asks, never at import: the catalog is the loaded canon's
+    (issue #75).
+    """
+    return {
+        item.name.lower(): item_id
+        for item_id, item in equipment_catalog().all_items.items()
+    }
 
 
 def _equipment_item(entry: Any) -> Any:
@@ -412,12 +422,12 @@ def _equipment_item(entry: Any) -> Any:
         "in_pack": bool(entry.get("in_pack", False)),
         "notes": "",
     }
-    catalog_id = _CATALOG_IDS_BY_NAME.get(name.lower())
+    catalog_id = _catalog_ids_by_name().get(name.lower())
     if catalog_id is not None:
-        catalog_item = EQUIPMENT_CATALOG[catalog_id]
+        catalog_item = equipment_catalog().all_items[catalog_id]
         item["item_id"] = catalog_id
-        item["name"] = str(catalog_item["name"])
-        item["category"] = catalog_item.get("category", "gear")
+        item["name"] = catalog_item.name
+        item["category"] = catalog_item.category
     else:
         item["item_id"] = "custom"
         item["name"] = name

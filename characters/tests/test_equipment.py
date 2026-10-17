@@ -7,6 +7,7 @@ most of its imports inline inside test methods.
 from django.test import TestCase
 
 from characters.models import Character
+from characters.tests.rules_fixtures import DEFAULT_EQUIPMENT_CATALOG
 from common.test_helpers import BaseTestCase, mark_gate_passed
 
 
@@ -14,34 +15,30 @@ class EquipmentCatalogTest(TestCase):
     """Tests for equipment catalog data."""
 
     def test_catalog_has_weapons(self):
-        """Catalog has weapon entries."""
-        from characters.equipment import WEAPONS
-
-        self.assertIn("broadsword", WEAPONS)
-        self.assertEqual(WEAPONS["broadsword"]["damage"], "2d6")
-        self.assertEqual(WEAPONS["broadsword"]["weight"], 5.0)
+        """The default canon's catalog has weapon entries."""
+        weapons = DEFAULT_EQUIPMENT_CATALOG.as_dict()["weapons"]
+        self.assertIn("broadsword", weapons)
+        self.assertEqual(weapons["broadsword"]["damage"], "2d6")
+        self.assertEqual(weapons["broadsword"]["weight"], 5.0)
 
     def test_catalog_has_armor(self):
-        """Catalog has armor entries."""
-        from characters.equipment import ARMOR
-
-        self.assertIn("chainmail", ARMOR)
-        self.assertEqual(ARMOR["chainmail"]["stops"], 3)
-        self.assertEqual(ARMOR["chainmail"]["dex_penalty"], -3)
+        """The default canon's catalog has armor entries."""
+        armor = DEFAULT_EQUIPMENT_CATALOG.as_dict()["armor"]
+        self.assertIn("chainmail", armor)
+        self.assertEqual(armor["chainmail"]["stops"], 3)
+        self.assertEqual(armor["chainmail"]["dex_penalty"], -3)
 
     def test_catalog_has_shields(self):
-        """Catalog has shield entries."""
-        from characters.equipment import SHIELDS
-
-        self.assertIn("large_shield", SHIELDS)
-        self.assertEqual(SHIELDS["large_shield"]["stops"], 2)
+        """The default canon's catalog has shield entries."""
+        shields = DEFAULT_EQUIPMENT_CATALOG.as_dict()["shields"]
+        self.assertIn("large_shield", shields)
+        self.assertEqual(shields["large_shield"]["stops"], 2)
 
     def test_catalog_has_gear(self):
-        """Catalog has gear entries."""
-        from characters.equipment import GEAR
-
-        self.assertIn("backpack", GEAR)
-        self.assertEqual(GEAR["backpack"]["weight"], 2.0)
+        """The default canon's catalog has gear entries."""
+        gear = DEFAULT_EQUIPMENT_CATALOG.as_dict()["gear"]
+        self.assertIn("backpack", gear)
+        self.assertEqual(gear["backpack"]["weight"], 2.0)
 
     def test_get_item_returns_item(self):
         """get_item returns item data."""
@@ -59,15 +56,16 @@ class EquipmentCatalogTest(TestCase):
         self.assertIsNone(get_item("nonexistent_item"))
 
     def test_encumbrance_calculation(self):
-        """Encumbrance level calculation."""
-        from characters.equipment import calculate_encumbrance_level
+        """Encumbrance level calculation, on the default canon's levels."""
+        from characters.tests.rules_fixtures import DEFAULT_EQUIPMENT_RULES
 
-        self.assertEqual(calculate_encumbrance_level(10, 15), "unencumbered")
-        self.assertEqual(calculate_encumbrance_level(15, 15), "unencumbered")
-        self.assertEqual(calculate_encumbrance_level(20, 15), "light")
-        self.assertEqual(calculate_encumbrance_level(25, 15), "medium")
-        self.assertEqual(calculate_encumbrance_level(35, 15), "heavy")
-        self.assertEqual(calculate_encumbrance_level(40, 15), "overloaded")
+        level_for = DEFAULT_EQUIPMENT_RULES.encumbrance.level_for
+        self.assertEqual(level_for(10, 15), "unencumbered")
+        self.assertEqual(level_for(15, 15), "unencumbered")
+        self.assertEqual(level_for(20, 15), "light")
+        self.assertEqual(level_for(25, 15), "medium")
+        self.assertEqual(level_for(35, 15), "heavy")
+        self.assertEqual(level_for(40, 15), "overloaded")
 
 
 class EquipmentModelTest(BaseTestCase):
