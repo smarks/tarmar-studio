@@ -524,7 +524,7 @@ def _describe(name: str, value: object) -> str:
         return f"the experience log ({len(value)} entries)"
     if name == "dice_log":
         return "the dice log"
-    if name in services.PLAYER_CHOSEN_FACE_FIELDS:
+    if name in services.player_chosen_face_reasons():
         return (
             f"{name.replace('_', ' ')} {value} (a chain comes only from the dice "
             "or a Game Master, and no character of yours is the record this "

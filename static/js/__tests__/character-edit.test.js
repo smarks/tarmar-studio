@@ -48,6 +48,7 @@ const CONFIG_DEFAULTS = {
     survivalTargets: { merchant: 4, campaigner: 6, laborer: 5 },
     agingByAge: { 36: { str: -1, dex: -1 }, 40: { str: -1, dex: -1, con: -1 } },
     agingHorizonAge: 96,
+    agingEscalationNote: 'Continues to escalate past age 96 (roughly -1 to STR/DEX/CON every four years, plus -1 to INT/WIS every eight).',
     catalogUrl: '/tarmar/characters/equipment/catalog/',
     equipmentAddUrl: '/tarmar/characters/7/equipment/add/',
     equipmentUpdateUrl: '/tarmar/characters/7/equipment/update/',
@@ -1752,13 +1753,14 @@ describe('the experience workbench', () => {
         test('past the precomputed horizon, shows the general escalation note instead of going blank', async () => {
             // A very old character is past every precomputed change point --
             // previously this left the aging line blank, understating a real
-            // penalty (issue #163).
-            await loadPage({ currentAge: 100 });
+            // penalty (issue #163). The note is the server's, built from the
+            // loaded canon (issue #68): invented words here, so a sentence
+            // typed into the script would not pass.
+            const note = 'Continues to escalate past age 96 (roughly -1 to STR/DEX/CON every five years, plus -1 to INT/WIS every 15).';
+            await loadPage({ currentAge: 100, agingEscalationNote: note });
             document.getElementById('track-select').dispatchEvent(new Event('change'));
 
-            expect(document.getElementById('workbench-aging-preview').textContent).toContain(
-                'Continues to escalate past age 96'
-            );
+            expect(document.getElementById('workbench-aging-preview').textContent).toBe(note);
         });
 
         test('says so when nothing further lands before the horizon', async () => {

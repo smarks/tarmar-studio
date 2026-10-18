@@ -10,9 +10,9 @@ from .turn_engine.messages import (
     NOTHING_RAN,
     PLAN_ONLY,
     PLANNING_GUIDANCE,
-    PLANNING_RULES,
     narrate_message,
     plan_message,
+    planning_rules,
     replan_message,
 )
 from .turn_engine.plan import (
@@ -564,7 +564,7 @@ class TurnMessagesTest(SimpleTestCase):
         self.assertNotIn(AIDE_PLANNING_GUIDANCE, content)
         self.assertEqual(
             content,
-            f"STATE\n\n{PLANNING_GUIDANCE}\n{PLANNING_RULES}\n{PLAN_ONLY}\n\n"
+            f"STATE\n\n{PLANNING_GUIDANCE}\n{planning_rules()}\n{PLAN_ONLY}\n\n"
             "Latest message: twins, all 18s",
         )
 
@@ -1081,6 +1081,25 @@ class EmptyReferencesTest(SimpleTestCase):
 
         self.assertEqual(reading.errors, ())
         self.assertEqual(reading.actions[1].quantity, 1)
+
+    def test_a_track_named_by_its_label_reads_as_its_key(self):
+        """The prompt names tracks by label: "Hunter/Gatherer" (issue #68)."""
+        for said_as, key in (
+            ("Hunter/Gatherer", "hunter_gatherer"),
+            ("hunter-gatherer", "hunter_gatherer"),
+            ("Civil Service", "civil_service"),
+        ):
+            with self.subTest(said_as=said_as):
+                reading = self.read(
+                    {
+                        "action": "play_years",
+                        "character_id": 41,
+                        "track": said_as,
+                        "years": 2,
+                    }
+                )
+                self.assertEqual(reading.errors, ())
+                self.assertEqual(reading.actions[1].track, key)
 
     def test_a_required_number_left_empty_is_still_an_error(self):
         reading = self.read(

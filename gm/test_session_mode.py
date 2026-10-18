@@ -30,12 +30,12 @@ from .engine import (
     MODE_AIDE,
     MODE_PLAY,
     SECTION_DM_AIDE,
-    SECTION_DM_AUTHORITY,
     aide_system_prompt,
     default_mode_for,
     dm_play_system_prompt,
     dm_system_prompt,
     normalise_mode,
+    section_dm_authority,
     system_prompt,
     system_prompt_for,
     system_prompts_by_authority_and_mode,
@@ -87,11 +87,11 @@ class PromptMatrixTest(BaseTestCase):
         """Authority, then aide, after the shared prompt (issues #352, #353)."""
         self.assertEqual(
             dm_system_prompt(),
-            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
+            "\n\n".join((system_prompt(), section_dm_authority(), SECTION_DM_AIDE)),
         )
         self.assertEqual(
             dm_play_system_prompt(),
-            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY)),
+            "\n\n".join((system_prompt(), section_dm_authority())),
         )
         self.assertEqual(
             aide_system_prompt(), "\n\n".join((system_prompt(), SECTION_DM_AIDE))
@@ -133,14 +133,14 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
         for mode in GM_MODES:
             with self.subTest(mode=mode):
                 sent = get_system_message(player, mode)["content"]
-                self.assertNotIn(SECTION_DM_AUTHORITY, sent)
+                self.assertNotIn(section_dm_authority(), sent)
 
     def test_a_game_master_keeps_authority_in_either_mode(self):
         dm = self.create_dm()
         for mode in GM_MODES:
             with self.subTest(mode=mode):
                 self.assertIn(
-                    SECTION_DM_AUTHORITY, get_system_message(dm, mode)["content"]
+                    section_dm_authority(), get_system_message(dm, mode)["content"]
                 )
 
     def test_the_mode_endpoint_grants_a_player_nothing(self):
@@ -156,7 +156,7 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
         self.assertEqual(session.mode, MODE_AIDE)
         sent = self._system_message_sent(player, session)
         self.assertEqual(sent, aide_system_prompt())
-        self.assertNotIn(SECTION_DM_AUTHORITY, sent)
+        self.assertNotIn(section_dm_authority(), sent)
 
     def test_a_mode_posted_with_the_turn_cannot_grant_authority_either(self):
         """The first turn of a session carries its mode in the request body."""
@@ -184,7 +184,7 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
             b"".join(response.streaming_content)
         sent = streamed.call_args.args[1][0]["content"]
         self.assertEqual(sent, aide_system_prompt())
-        self.assertNotIn(SECTION_DM_AUTHORITY, sent)
+        self.assertNotIn(section_dm_authority(), sent)
 
     def test_a_game_master_in_play_mode_is_still_the_authority(self):
         """Spencer's own case: he plays, and his numbers are still his."""
@@ -193,7 +193,7 @@ class AuthorityAndMannerAreOrthogonalTest(BaseTestCase):
         session = GMSession.objects.create(name="Quest", user=dm, mode=MODE_PLAY)
         sent = self._system_message_sent(dm, session)
         self.assertEqual(sent, dm_play_system_prompt())
-        self.assertIn(SECTION_DM_AUTHORITY, sent)
+        self.assertIn(section_dm_authority(), sent)
         self.assertNotIn(SECTION_DM_AIDE, sent)
 
     def _system_message_sent(self, user, session: GMSession) -> str:

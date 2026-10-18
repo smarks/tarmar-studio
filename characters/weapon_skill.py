@@ -38,6 +38,9 @@ UNRECORDED_WEAPON_SKILL = "weapon"
 #: ``equipment-rules.json`` ``missile_classes`` (issue #75).
 ARCHERY_SKILL = "archery"
 
+#: The parry taken with a weapon, a skill of its own beside the Weapon skill.
+WEAPON_PARRY_SKILL = "weapon parry"
+
 _WEAPON_SKILL_PREFIX = "weapon ("
 
 

@@ -38,7 +38,11 @@ from characters.purse import CUSTOM_COMBAT_CATEGORIES, MAX_COIN_MOVEMENT
 from characters.rules import character_rules
 from characters.skill_checks import MAX_DIFFICULTY
 from characters.skill_rules import skill_rules
-from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN, selectable_tracks
+from characters.skills import (
+    MAX_EXPERIENCE_YEARS_PER_RUN,
+    selectable_tracks,
+    track_key_for,
+)
 
 from ..models import (
     CampaignState,
@@ -728,11 +732,7 @@ def _read_action(
     elif name == "play_years":
         reader.target()
         track = entry.get("track")
-        normalised = (
-            str(track).strip().casefold().replace(" ", "_").replace("-", "_")
-            if isinstance(track, str)
-            else ""
-        )
+        normalised = track_key_for(track) if isinstance(track, str) else ""
         allowed_tracks = selectable_tracks()
         if normalised not in allowed_tracks:
             reader.fail("track must be one of " + ", ".join(allowed_tracks))

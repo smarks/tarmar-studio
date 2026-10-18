@@ -891,7 +891,9 @@ class PlanPromptTest(SimpleTestCase):
                 self.assertTrue(prompt.startswith(prompts.system_prompt()))
                 self.assertIn(prompts.section_plan_schema(), prompt)
                 self.assertIs(prompts.system_prompt_for(is_game_master, mode), prompt)
-                self.assertEqual(prompts.SECTION_DM_AUTHORITY in prompt, is_game_master)
+                self.assertEqual(
+                    prompts.section_dm_authority() in prompt, is_game_master
+                )
                 self.assertEqual(
                     prompts.SECTION_DM_AIDE in prompt, mode == prompts.MODE_AIDE
                 )

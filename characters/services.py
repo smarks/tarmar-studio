@@ -139,20 +139,29 @@ class FieldRule:
 
     Attributes:
         author: Who may set it.
-        reason: For a Game-Master-only value, the persistent note the sheet
-            prints beside it for a player, and the refusal a player's
-            field update gets. Empty for the other two kinds.
+        explanation: For a Game-Master-only value, what :attr:`reason` says:
+            the words, or a builder for words that state a number the
+            loaded canon holds, called each time it is read (issue #68).
+            Empty for the other two kinds.
     """
 
     author: FieldAuthor
-    reason: str = ""
+    explanation: str | Callable[[], str] = ""
+
+    @property
+    def reason(self) -> str:
+        """The persistent note the sheet prints beside a Game-Master-only
+        value for a player, and the refusal a player's field update gets."""
+        if callable(self.explanation):
+            return self.explanation()
+        return self.explanation
 
 
 def _player() -> FieldRule:
     return FieldRule(FieldAuthor.PLAYER)
 
 
-def _game_master(reason: str) -> FieldRule:
+def _game_master(reason: str | Callable[[], str]) -> FieldRule:
     return FieldRule(FieldAuthor.GAME_MASTER, reason)
 
 
@@ -186,10 +195,35 @@ POOLS_GAME_MASTER_ONLY = (
     "owed; a fight on the board records them on its own"
 )
 
-_ATTRIBUTE_REASON = (
-    "Rolled (3d6) or bought (65 points); only a Game Master can change a "
-    "recorded score."
-)
+
+def _attribute_reason() -> str:
+    """Why a player may not change a recorded score: how scores are made.
+
+    The canon's attribute dice and point-buy total (issue #68).
+    """
+    rules = character_rules()
+    return (
+        f"Rolled ({rules.attribute_roll.dice}) or bought "
+        f"({rules.attributes.point_buy.total} points); only a Game Master can "
+        "change a recorded score."
+    )
+
+
+def _fatigue_roll_reason() -> str:
+    """Why a player may not change the Fatigue roll, with the canon's dice."""
+    return (
+        f"Rolled ({character_rules().fatigue_roll.dice}) once; only a Game "
+        "Master can change it."
+    )
+
+
+def _literacy_roll_reason() -> str:
+    """Why a player may not change the literacy roll, with the canon's dice."""
+    return (
+        f"Rolled ({character_rules().literacy_roll.dice}) once; only a Game "
+        "Master can have it rolled again."
+    )
+
 
 #: Every stored field of ``Character`` and who may set it (issue #748). A test
 #: walks the model and holds this table to it, so a new field has to be decided
@@ -230,21 +264,17 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "equipment": _player(),
         "pack_dropped": _player(),
         # Rolled or awarded.
-        "strength": _game_master(_ATTRIBUTE_REASON),
-        "dexterity": _game_master(_ATTRIBUTE_REASON),
-        "intelligence": _game_master(_ATTRIBUTE_REASON),
-        "wisdom": _game_master(_ATTRIBUTE_REASON),
-        "constitution": _game_master(_ATTRIBUTE_REASON),
-        "charisma": _game_master(_ATTRIBUTE_REASON),
+        "strength": _game_master(_attribute_reason),
+        "dexterity": _game_master(_attribute_reason),
+        "intelligence": _game_master(_attribute_reason),
+        "wisdom": _game_master(_attribute_reason),
+        "constitution": _game_master(_attribute_reason),
+        "charisma": _game_master(_attribute_reason),
         "appearance_roll": _game_master(
             "Rolled (1d6); only a Game Master can change it or qualify a 1 or a 6."
         ),
-        "fatigue_roll": _game_master(
-            "Rolled (2d6) once; only a Game Master can change it."
-        ),
-        "literacy_roll": _game_master(
-            "Rolled (3d6) once; only a Game Master can have it rolled again."
-        ),
+        "fatigue_roll": _game_master(_fatigue_roll_reason),
+        "literacy_roll": _game_master(_literacy_roll_reason),
         # The Game Master's word at "Consult GM", which has no check (#743).
         "literacy_ruling": _game_master(LITERACY_RULING_GAME_MASTER_ONLY),
         # What a "Consult GM" origin is (#801): the Game Master's word again.
@@ -412,12 +442,18 @@ def check_field_author(
 #: ("Strength: point-buy = 12") and on the sheet.
 POINT_BUY_LOG_MARKER = "point-buy = "
 
-#: Why a player who has typed a score may not roll the rest (the
-#: coordinator's ruling on the #748 review, applying the standing rule).
-BOUGHT_NOT_ROLLED_REASON = (
-    "Typed scores committed this character to the 65-point buy; type the rest "
-    "(the six must total 65), or ask a Game Master"
-)
+
+def bought_not_rolled_reason() -> str:
+    """Why a player who has typed a score may not roll the rest.
+
+    The coordinator's ruling on the #748 review, applying the standing rule;
+    the total is the canon's point buy (issue #68).
+    """
+    total = character_rules().attributes.point_buy.total
+    return (
+        f"Typed scores committed this character to the {total}-point buy; type "
+        f"the rest (the six must total {total}), or ask a Game Master"
+    )
 
 
 def bought_scores(character: Character) -> bool:
@@ -497,14 +533,23 @@ def check_point_buy(character: Character, name: str, value: int) -> str:
 #: the chain an exploding height roll can make comes only from the dice or a
 #: Game Master (issue #748).
 PLAYER_D6_FACES: frozenset[str] = frozenset({"", "1", "2", "3", "4", "5", "6"})
-PLAYER_CHOSEN_FACE_FIELDS: Mapping[str, str] = MappingProxyType(
-    {
-        "height_roll": "A player chooses one height face, 1 to 6; a longer "
-        "chain comes only from a roll or a Game Master.",
-        "weight_roll": "A player chooses one base-weight face, 1 to 6 (8 to 13 "
-        "stones).",
-    }
-)
+
+
+def player_chosen_face_reasons() -> Mapping[str, str]:
+    """Each face a player chooses, and what a player is told outside it.
+
+    The base weight's stones are the canon's ``weight.stones_by_face``, its
+    lowest and highest (issue #68); the faces are the d6's.
+    """
+    stones = character_rules().weight.stones_by_face
+    return MappingProxyType(
+        {
+            "height_roll": "A player chooses one height face, 1 to 6; a longer "
+            "chain comes only from a roll or a Game Master.",
+            "weight_roll": "A player chooses one base-weight face, 1 to 6 "
+            f"({min(stones)} to {max(stones)} stones).",
+        }
+    )
 
 
 #: Why a player may not set a "choose or roll" field once it is rolled. The
@@ -562,7 +607,7 @@ def check_player_choice(
     Raises:
         CharacterChangeError: A player's height or weight outside one d6 face.
     """
-    reason = PLAYER_CHOSEN_FACE_FIELDS.get(field_name)
+    reason = player_chosen_face_reasons().get(field_name)
     if reason and not is_game_master and str(value).strip() not in PLAYER_D6_FACES:
         raise CharacterChangeError(reason)
 
@@ -2791,7 +2836,7 @@ def may_roll_physical(
     A Game Master may roll any time. A player rolls a blank one, once: a
     character whose dice log records a roll of it has had its roll, so
     clearing the cell does not buy another. A player who would rather choose
-    a face types it instead, before any roll (:data:`PLAYER_CHOSEN_FACE_FIELDS`);
+    a face types it instead, before any roll (:func:`player_chosen_face_reasons`);
     after one the cell is fixed for them (:func:`field_rolled`, #948).
     """
     if is_game_master:
@@ -2860,7 +2905,7 @@ def apply_sheet_attribute_roll(
     if not missing:
         return apply_rolled_attributes(character, is_game_master=is_game_master)
     if bought_scores(character) and not is_game_master:
-        raise CharacterChangeError(BOUGHT_NOT_ROLLED_REASON)
+        raise CharacterChangeError(bought_not_rolled_reason())
     rolled = []
     for name in missing:
         total, log = roll_attribute_logged()

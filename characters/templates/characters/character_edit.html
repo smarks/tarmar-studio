@@ -134,10 +134,10 @@ runs.
         these once and may not type them; a Game Master may roll again or type.
         Each control renders when the server would take the roll.{% endcomment %}
         {% if can_edit and point_buy_open %}
-        <p class="formula" id="point-buy-note">Type a missing score from 3 to 18: typed scores are a 65-point buy, so the six must total 65. Or roll the missing ones, 3d6 each. Each score locks once recorded.</p>
+        <p class="formula" id="point-buy-note">Type a missing score from {{ point_buy.minimum }} to {{ point_buy.maximum }}: typed scores are a {{ point_buy.total }}-point buy, so the six must total {{ point_buy.total }}. Or roll the missing ones, {{ attribute_dice }} each. Each score locks once recorded.</p>
         {% endif %}
         {% if can_edit and sheet_rolls.attributes.available %}
-        <button type="button" class="button secondary sheet-roll-btn" id="roll-attributes-btn" data-roll-kind="attributes" data-roll-url="{% url 'characters:roll' character.pk 'attributes' %}"{% if sheet_rolls.attributes.confirm %} data-confirm="{{ sheet_rolls.attributes.confirm }}"{% endif %}>Roll attributes (3d6 each)</button>
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-attributes-btn" data-roll-kind="attributes" data-roll-url="{% url 'characters:roll' character.pk 'attributes' %}"{% if sheet_rolls.attributes.confirm %} data-confirm="{{ sheet_rolls.attributes.confirm }}"{% endif %}>Roll attributes ({{ attribute_dice }} each)</button>
         {% endif %}
     </div>
 
@@ -204,7 +204,7 @@ runs.
             <tr>
                 <th>Fatigue{% help_for "fatigue" %}</th>
                 <td><span class="derived-value" id="fatigue">{{ character.fatigue|default_if_none:"—" }}</span></td>
-                <td class="formula">CON + WIS + INT + max(DEX,STR) + roll</td>
+                <td class="formula">{{ fatigue_formula }}</td>
             </tr>
             {% comment %}The Fatigue roll's own control (issue #636). It was the one
             field in CHARACTER_FIELDS with no widget anywhere on the page: a character
@@ -217,10 +217,10 @@ runs.
                 <td>
                     <span class="derived-value" id="fatigue-roll">{{ character.fatigue_roll|default_if_none:"—" }}</span>
                     {% if can_edit and can_roll_fatigue %}
-                    <button type="button" id="roll-fatigue-btn" class="button secondary">Roll Fatigue (2d6)</button>
+                    <button type="button" id="roll-fatigue-btn" class="button secondary">Roll Fatigue ({{ fatigue_dice }})</button>
                     {% endif %}
                 </td>
-                <td class="formula">2d6, rolled once</td>
+                <td class="formula">{{ fatigue_dice }}, rolled once</td>
             </tr>
             <tr>
                 <th>Body{% help_for "body" %}</th>
@@ -308,7 +308,7 @@ runs.
                     <span id="literacy-check">{{ character.location_literacy_check }}</span>
                     <span class="formula" id="literacy-result">{{ character.literacy_result }}</span>
                     {% if can_edit %}
-                    <button type="button" id="roll-literacy-btn" class="button secondary"{% if not can_roll_literacy %} hidden{% endif %}>Roll literacy (3d6)</button>
+                    <button type="button" id="roll-literacy-btn" class="button secondary"{% if not can_roll_literacy %} hidden{% endif %}>Roll literacy ({{ literacy_dice }})</button>
                     {% endif %}
                     {% if may_rule_literacy %}
                     {% comment %}The Game Master's ruling (issue #743): "Consult GM" has no check to roll, so he decides. Hidden, not left out, away from Consult GM, since changing the Origin can bring it back.{% endcomment %}
@@ -461,10 +461,10 @@ runs.
                         </div>
                         <div class="workbench-preview-row">
                             <dt>Aging</dt>
-                            <dd id="workbench-aging-preview">{% if next_aging_change_age %}{% for attr, penalty in next_aging_change_penalties.items %}{{ attr|upper|slice:":3" }} {{ penalty }}{% if not forloop.last %}, {% endif %}{% endfor %} at age {{ next_aging_change_age }}{% elif past_aging_horizon %}Continues to escalate past age {{ aging_preview_horizon_age }} (roughly -1 to STR/DEX/CON every four years, plus -1 to INT/WIS every eight).{% else %}No further aging before age {{ aging_preview_horizon_age }}{% endif %}</dd>
+                            <dd id="workbench-aging-preview">{% if next_aging_change_age %}{% for attr, penalty in next_aging_change_penalties.items %}{{ attr|upper|slice:":3" }} {{ penalty }}{% if not forloop.last %}, {% endif %}{% endfor %} at age {{ next_aging_change_age }}{% elif past_aging_horizon %}{{ aging_escalation_note }}{% else %}No further aging before age {{ aging_preview_horizon_age }}{% endif %}</dd>
                         </div>
                     </dl>
-                    <p class="workbench-note">Triple ones always kill; triple sixes always survive.</p>
+                    <p class="workbench-note">{{ survival_naturals_note }}</p>
                     <button id="roll-years-btn" class="button workbench-roll-btn">Roll {{ default_run_years }} year</button>
                 </div>
                 {% endif %}

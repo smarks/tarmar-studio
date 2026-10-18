@@ -34,6 +34,7 @@ from characters.skills import (
     normalize_skill_name,
     survival_rule_description,
     survival_targets,
+    track_key_for,
 )
 
 #: The longest a subject may be, so a plan cannot smuggle prose in here.
@@ -68,7 +69,7 @@ def _survival(track: str = "") -> str:
     )
     if not track:
         return f"{general} Survivability targets: {targets_written()}."
-    named = track.strip().casefold().replace(" ", "_")
+    named = track_key_for(track)
     targets = survival_targets()
     if named not in targets:
         # A lookup always answers. The model phrases the narrowing field

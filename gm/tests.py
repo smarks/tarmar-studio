@@ -270,15 +270,16 @@ class GMServiceTest(TestCase):
         ``characters.equipment_rules`` (issue #75) is for the catalog and the
         movement numbers, by ``characters.equipment``, which
         ``characters.combat`` imports, and by ``characters.movement`` and
-        ``characters.weapon_skill`` — a fresh interpreter proves none of them
-        drags Django along. Run out-of-process because this test runner has
-        Django loaded already.
+        ``characters.weapon_skill``, and as ``characters.help_text`` builds the
+        sheet's help from all three (issue #68) — a fresh interpreter proves
+        none of them drags Django along. Run out-of-process because this test
+        runner has Django loaded already.
         """
         script = (
             "import sys, gm.engine, characters.rules, characters.skill_rules\n"
             "import characters.skills, characters.equipment_rules\n"
             "import characters.equipment, characters.movement\n"
-            "import characters.weapon_skill\n"
+            "import characters.weapon_skill, characters.help_text\n"
             "loaded = sorted(m for m in sys.modules if m.split('.')[0] == 'django')\n"
             "assert not loaded, loaded\n"
         )
@@ -298,9 +299,10 @@ class GMServiceTest(TestCase):
         its rules files, which nothing may read while modules import: a canon
         missing one must fail ``manage.py check`` (``characters.E001``,
         ``E002``), not crash the URL import. Every cache registered with
-        ``reference.rules_file.derived_from_rules``, and both rules files'
-        own, must show no miss once the URLs have loaded. Run out of process:
-        this runner has built them already.
+        ``reference.rules_file.derived_from_rules``, and all four rules files'
+        own, must show no miss once the URLs, and the sheet's help tag that
+        no URL imports (issue #68), have loaded. Run out of process: this
+        runner has built them already.
         """
         script = (
             "import os, django\n"
@@ -308,11 +310,14 @@ class GMServiceTest(TestCase):
             "'tarmar_studio.settings')\n"
             "django.setup()\n"
             "import tarmar_studio.urls\n"
+            "import characters.templatetags.character_help\n"
             "from characters.rules import character_rules\n"
             "from characters.skill_rules import skill_rules\n"
+            "from characters.equipment_rules import equipment_catalog, "
+            "equipment_rules\n"
             "from reference.rules_file import caches_derived_from_rules\n"
-            "for cached in (character_rules, skill_rules, "
-            "*caches_derived_from_rules()):\n"
+            "for cached in (character_rules, skill_rules, equipment_catalog, "
+            "equipment_rules, *caches_derived_from_rules()):\n"
             "    print(cached.__name__, cached.cache_info().misses)\n"
         )
         completed = subprocess.run(
@@ -325,8 +330,15 @@ class GMServiceTest(TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         misses = dict(line.split() for line in completed.stdout.splitlines())
-        # The URLs reach the prompts and the turn policy's pattern.
-        for name in ("system_prompt", "dm_system_prompt", "_check_words"):
+        # The URLs reach the prompts, the plan call's rules line and the turn
+        # policy's pattern.
+        for name in (
+            "system_prompt",
+            "dm_system_prompt",
+            "planning_rules",
+            "_check_words",
+            "help_text",
+        ):
             self.assertIn(name, misses)
         self.assertEqual(
             {name: count for name, count in misses.items() if count != "0"}, {}
@@ -1131,14 +1143,14 @@ class GMSystemPromptContentTest(SimpleTestCase):
         """
         from gm.engine import (
             SECTION_DM_AIDE,
-            SECTION_DM_AUTHORITY,
             dm_system_prompt,
+            section_dm_authority,
             system_prompt,
         )
 
         self.assertEqual(
             dm_system_prompt(),
-            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
+            "\n\n".join((system_prompt(), section_dm_authority(), SECTION_DM_AIDE)),
         )
 
     def test_the_world_section_sits_between_equipment_and_guidelines(self):

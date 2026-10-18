@@ -4,7 +4,7 @@ from django import template
 from django.utils.html import escape
 from django.utils.safestring import SafeString, mark_safe
 
-from characters.help_text import HELP_TEXT
+from characters.help_text import help_text
 
 register = template.Library()
 
@@ -19,7 +19,7 @@ def help_for(key: str) -> SafeString:
     user input), so the body isn't HTML-escaped — future entries can include
     links or emphasis if needed.
     """
-    text = HELP_TEXT.get(key)
+    text = help_text().get(key)
     if not text:
         return SafeString("")
     label = escape(key.replace("_", " "))

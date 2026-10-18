@@ -6,7 +6,12 @@ changes -- the state block, the planning guidance, the results, the latest
 message -- lives only in the last message, and is never saved to the history.
 """
 
+import functools
 from collections.abc import Sequence
+
+from characters.rules import character_rules
+from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN
+from reference.rules_file import derived_from_rules
 
 from .policy import TurnPolicy
 
@@ -84,13 +89,27 @@ PLANNING_GUIDANCE = (
     "old. A ruling he takes back is retired with retire_house_rule."
 )
 
-#: The short rules line the plan message carries.
-PLANNING_RULES = (
-    "Rules: attributes are 3d6 each; Fatigue needs all six attributes and the "
-    "2d6 Fatigue roll, which is rolled when a character is made; years of "
-    "experience are played 1 to 20 at a time on a track, after the "
-    "attributes are recorded, and each year can kill."
-)
+
+@derived_from_rules
+@functools.cache
+def planning_rules() -> str:
+    """The short rules line the plan message carries.
+
+    The attribute and Fatigue dice are the loaded canon's
+    ``character-rules.json`` (issue #68), so it is built the first time a plan
+    is asked for, never at import, and held for the process like the system
+    prompt. The years a run may play are the code's
+    (:data:`characters.skills.MAX_EXPERIENCE_YEARS_PER_RUN`).
+    """
+    rules = character_rules()
+    return (
+        f"Rules: attributes are {rules.attribute_roll.dice} each; Fatigue needs "
+        f"all six attributes and the {rules.fatigue_roll.dice} Fatigue roll, "
+        "which is rolled when a character is made; years of experience are "
+        f"played 1 to {MAX_EXPERIENCE_YEARS_PER_RUN} at a time on a track, after "
+        "the attributes are recorded, and each year can kill."
+    )
+
 
 #: The plan message's last instruction.
 PLAN_ONLY = 'Reply with only the JSON plan, {"actions": [...]}.'
@@ -130,7 +149,7 @@ def plan_message(state: str, latest: str, policy: TurnPolicy) -> dict[str, str]:
     return {
         "role": "user",
         "content": (
-            f"{state}\n\n{guidance}\n{PLANNING_RULES}\n{PLAN_ONLY}\n\n"
+            f"{state}\n\n{guidance}\n{planning_rules()}\n{PLAN_ONLY}\n\n"
             f"Latest message: {latest}"
         ),
     }

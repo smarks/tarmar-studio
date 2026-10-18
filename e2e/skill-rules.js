@@ -15,6 +15,9 @@ const { readDjangoJson } = require('./django');
  * Every number the specs check, from ``characters.skill_rules.skill_rules()``.
  *
  * ``governed_skills`` are the skills a check may be rolled on, sorted.
+ * ``survival_roll.death_name`` and ``survival_name`` are its automatic totals
+ * as the workbench names them (``dice_display.natural_total_name``, else "a
+ * natural N").
  * ``natural_success_seed`` is the first seed whose pinned dice (e2e/dice.js)
  * make the skill check's natural success, found by rolling the check's dice
  * the way the server does inside ``common.rolling.pinned_dice``.
@@ -28,6 +31,7 @@ from characters.rules import character_rules
 from characters.skill_checks import MAX_DIFFICULTY
 from characters.skill_rules import AGING_ATTRIBUTES, PHYSICAL_AGING_ATTRIBUTES, skill_rules
 from characters.skills import ARCANE_SKILL_NAME, RANDOM_TRACK_KEY, RANDOM_TRACK_LABEL
+from characters.templatetags.dice_display import natural_total_name
 from characters.views.characters import AGING_PREVIEW_HORIZON_STAGE
 from common.rolling import pinned_dice
 rules = skill_rules()
@@ -52,7 +56,15 @@ print("SKILL_RULES " + json.dumps({
         }
         for key, track in rules.tracks.tracks.items()
     ],
-    "survival_roll": {"dice": rules.survival_roll.dice},
+    "survival_roll": {
+        "dice": rules.survival_roll.dice,
+        "death_name": natural_total_name(
+            rules.survival_roll.dice, rules.survival_roll.automatic_death_total, 0
+        ) or f"a natural {rules.survival_roll.automatic_death_total}",
+        "survival_name": natural_total_name(
+            rules.survival_roll.dice, rules.survival_roll.automatic_survival_total, 1
+        ) or f"a natural {rules.survival_roll.automatic_survival_total}",
+    },
     "arcane": {
         "name": ARCANE_SKILL_NAME,
         "multiplier": rules.skill_cost.multiplier_for(ARCANE_SKILL_NAME),

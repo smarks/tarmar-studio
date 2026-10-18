@@ -22,7 +22,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from characters.constants import CHARACTER_EXPORT_FORMAT
+from characters.constants import CHARACTER_EXPORT_FORMAT, DEFAULT_WEALTH_LEVEL
 from characters.equipment_rules import equipment_catalog
 from characters.rules import CharacterRules, DiceRollRules, character_rules
 from characters.skills import normalize_skill_name
@@ -73,6 +73,25 @@ def extraction_prompt(*, for_game_master: bool = False) -> str:
         "they like. Report exactly the numbers the conversation settled on, "
         f"including attributes above {rules.attributes.point_buy.maximum} and "
         "skills no experience paid for; do not cap, round or normalise them."
+    )
+
+
+def _starting_coin_description(rules: CharacterRules) -> str:
+    """The starting coin field's description, with the default level's coin.
+
+    "Coin the character starts with (100 for Moderate if unrolled)": the
+    canon's coin for :data:`DEFAULT_WEALTH_LEVEL`, the level an unrolled
+    character has (issue #68). A canon with no such level names no default.
+
+    Args:
+        rules: The loaded canon's creation rules.
+    """
+    row = rules.wealth.row_labelled(DEFAULT_WEALTH_LEVEL)
+    if row is None:
+        return "Coin the character starts with"
+    return (
+        f"Coin the character starts with ({row.coin_text} for "
+        f"{DEFAULT_WEALTH_LEVEL} if unrolled)"
     )
 
 
@@ -250,7 +269,7 @@ def _character_fields(
         SchemaField(
             "starting_coin",
             "integer",
-            "Coin the character starts with (100 for Moderate if unrolled)",
+            _starting_coin_description(rules),
             minimum=0,
         ),
         SchemaField(

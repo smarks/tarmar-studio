@@ -19,6 +19,7 @@ const {
     test, expect, loginAs, logout, createCharacter, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
 const { runDjangoShell, readDjangoShell } = require('./django');
+const { loadedCharacterRules } = require('./character-rules');
 
 /** The character id from the editor's URL. */
 function characterId(page) {
@@ -46,6 +47,8 @@ async function postFieldUpdate(page, id, field, value) {
 
 test.describe('Rolled and awarded values (#748, #749, #752)', () => {
     test('a player sees rolled values read-only, with why, and the server agrees', async ({ page }) => {
+        // The reasons state the loaded canon's dice and point buy (#68).
+        const rules = loadedCharacterRules();
         await loginAs(page, TEST_USER);
         await createCharacter(page);
         const id = characterId(page);
@@ -56,7 +59,8 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
             await expect(page.locator(`[data-locked-field="${field}"]`), field).toBeVisible();
         }
         await expect(page.locator('[data-locked-field="strength"]')).toHaveText(
-            'Rolled (3d6) or bought (65 points); only a Game Master can change a recorded score.'
+            `Rolled (${rules.attribute_dice}) or bought (${rules.point_buy.total} points); only a `
+            + 'Game Master can change a recorded score.'
         );
         // What the rules let a player choose stays an input.
         await expect(page.locator('[data-field="name"]')).toHaveCount(1);
@@ -87,7 +91,8 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         const strength = await postFieldUpdate(page, id, 'strength', 30);
         const coin = await postFieldUpdate(page, id, 'starting_coin', 1000000);
         expect(fatigue).toEqual({
-            status: 400, body: { error: 'Rolled (2d6) once; only a Game Master can change it.' },
+            status: 400,
+            body: { error: `Rolled (${rules.fatigue.dice}) once; only a Game Master can change it.` },
         });
         expect(strength.status).toBe(400);
         expect(coin.status).toBe(400);
@@ -152,7 +157,9 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
             await expect(page.locator(`[data-readonly-field="${field}"]`), field).toHaveText(/^\d+$/);
         }
         await expect(page.locator('#point-buy-note')).toHaveCount(0);
-        await expect(page.locator('#dice-log')).toContainText('charisma: 3d6');
+        await expect(page.locator('#dice-log')).toContainText(
+            `charisma: ${loadedCharacterRules().attribute_dice}`
+        );
 
         await page.locator('#roll-appearance-btn').click();
         await expect(page.locator('#roll-appearance-btn')).toHaveCount(0);

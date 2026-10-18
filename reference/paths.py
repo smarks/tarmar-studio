@@ -56,7 +56,8 @@ them):
   attribute, Fatigue and literacy rolls, the height and weight tables, and the
   provenance, location and wealth percentile tables, with an optional
   ``rulings`` list. Read by ``characters.rules``, whose docstring gives the
-  full schema.
+  full schema; the sheet's sentences and the Games Master's prompt state its
+  numbers from there (issue #68).
 - ``skill-rules.json`` (required: a canon without one fails the
   ``characters.E002`` system check): the numbers skills, prior experience and
   the checks read, as the public prior experience, attributes and skills pages
@@ -64,16 +65,19 @@ them):
   the skill cost multipliers, the survival roll, the aging table, the
   attribute modifier table, and the skill and attribute checks, with an
   optional ``rulings`` list. Read by ``characters.skill_rules``, whose
-  docstring gives the full schema.
+  docstring gives the full schema; the sheet's sentences and the Games
+  Master's prompt state its numbers from there (issue #68).
 - ``equipment.json`` (required: a canon without one fails the
   ``characters.E003`` system check): the equipment catalog, the weapons,
   armour, shields and gear a character may buy, each with its price, weight
   and the fields its group carries (damage, strength requirement and weapon
   class; stops, DEX penalty, tier and movement restriction; shield bonus), as
   the public equipment pages list them. Read by ``characters.equipment_rules``,
-  whose docstring gives the full schema. The battle names some items by id
-  (the archetypes' kits and step-downs, the arrows and the bows' class, the
-  hand-to-hand weapon), which the canon must carry (``battle.E005``).
+  whose docstring gives the full schema; the Games Master's prompt lists its
+  weapons, armour and shields from there (issue #68). The battle names some
+  items by id (the archetypes' kits and step-downs, the arrows and the bows'
+  class, the hand-to-hand weapon), which the canon must carry
+  (``battle.E005``).
 - ``equipment-rules.json`` (required: a canon without one fails the
   ``characters.E004`` system check): the numbers encumbrance and movement
   read, as the public movement and armour pages state them: the encumbrance
@@ -82,8 +86,10 @@ them):
   Missile weapon classes (the ones Archery covers and the battle seats as
   missile weapons) and the bounds on a defender's dodge,
   with an optional ``rulings`` list. Read by ``characters.equipment_rules``,
-  whose docstring gives the full schema. The level keys and gait names are the
-  canon's, but the battle engine seats exactly four gaits, the one it seats as
+  whose docstring gives the full schema; the sheet's help and the Games
+  Master's prompt state its levels and gaits from there (issue #68). The level
+  keys and gait names are the canon's, but the battle engine seats exactly
+  four gaits, the one it seats as
   its run above 0 (``battle.E003``, until stage 6 of rules-as-data seats the
   engine's own rules), and the battle generator deals no load past a level it
   names, which the canon must carry (``battle.E004``).

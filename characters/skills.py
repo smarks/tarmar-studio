@@ -15,7 +15,9 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
-from .constants import ATTRIBUTE_BONUS_FIELDS
+from common.number_words import number_in_words
+
+from .constants import ATTRIBUTE_BONUS_FIELDS, CORE_ATTRIBUTE_FIELDS
 
 # The survival roll's dice are the canon's (issue #70; 3d6 on the public
 # pages since issue #223). This is the local name, and the patch target the
@@ -28,6 +30,8 @@ from .rules import character_rules
 from .skill_names import normalize_skill_name as normalize_skill_name
 from .skill_rules import (
     AGING_ATTRIBUTES,
+    MENTAL_AGING_ATTRIBUTES,
+    PHYSICAL_AGING_ATTRIBUTES,
     ExperienceLevel,
     SkillRules,
     SkillRulesError,
@@ -203,6 +207,28 @@ RANDOM_TRACK_LABEL = "Random"
 def track_keys() -> tuple[str, ...]:
     """The canon's prior-experience tracks, by key, in the canon's order."""
     return tuple(skill_rules().tracks.tracks)
+
+
+#: What prose or a plan puts between a track's words: a space, an underscore,
+#: a hyphen, or the slash the canon's labels use ("Hunter/Gatherer", issue #68).
+TRACK_WORD_JOINER = r"[\s_/-]"
+
+
+def track_key_for(said: str) -> str:
+    """The track key a track named in prose or a plan stands for.
+
+    "Hunter/Gatherer", "hunter-gatherer" and "Civil Service" are
+    ``hunter_gatherer`` and ``civil_service``: the one reading the plan
+    reader, the rules lookup and the behaviour check share (issue #68). Whether
+    the key names a track is the caller's question.
+
+    Args:
+        said: The track as written.
+
+    Returns:
+        It case-folded, with each joiner between its words an underscore.
+    """
+    return re.sub(TRACK_WORD_JOINER, "_", said.strip().casefold())
 
 
 def selectable_tracks() -> tuple[str, ...]:
@@ -394,6 +420,34 @@ def next_aging_change_after_age(
         if non_zero:
             return age_for_aging_stage(stage), non_zero
     return None
+
+
+def aging_escalation_note(horizon_age: int) -> str:
+    """What the workbench says of aging past its preview's horizon (issue #68).
+
+    "Continues to escalate past age 96 (roughly -1 to STR/DEX/CON every four
+    years, plus -1 to INT/WIS every eight)." The years are the canon's: a
+    stage's length (``age.years_per_stage``) for the physical attributes and
+    ``aging.stages_per_mental_step`` stages for the mental ones; the point a
+    step is :meth:`characters.skill_rules.AgingRules.penalties_for`'s.
+
+    Args:
+        horizon_age: The age the preview stops at.
+
+    Returns:
+        The note, one sentence.
+    """
+    stage_years = character_rules().age.years_per_stage
+    mental_years = stage_years * skill_rules().aging.stages_per_mental_step
+    short_names = dict(CORE_ATTRIBUTE_FIELDS)
+    physical = "/".join(short_names[name] for name in PHYSICAL_AGING_ATTRIBUTES)
+    mental = "/".join(short_names[name] for name in MENTAL_AGING_ATTRIBUTES)
+    years = "year" if stage_years == 1 else "years"
+    return (
+        f"Continues to escalate past age {horizon_age} (roughly -1 to {physical} "
+        f"every {number_in_words(stage_years)} {years}, plus -1 to {mental} "
+        f"every {number_in_words(mental_years)})."
+    )
 
 
 #: The glossary skills taken with a chosen part, recorded in the skill's own

@@ -29,6 +29,18 @@ New tests added by this audit: `characters/tests/test_dice_fidelity.py`
 mirroring, spell-affinity guard). Everything else cited below already existed;
 this audit verified it covers the seam it is cited for.
 
+The sentences that state the numbers of sections E, F and G are built from the
+same loaded rules as the rolls (issue #68), except those the prompt leaves for
+stages 6 and 7 (see `docs/architecture.md`), so no prose can restate a number
+the rules no longer hold: the sheet's help, its refusals and reasons, the
+creation and edit pages' controls and formula cells, the workbench's aging and
+survival notes, the extraction schema's default coin and the Characters
+pane's Fatigue note (`characters/tests/test_sheet_prose_follows_the_rules.py`),
+and the Games Master's prompt (`gm/test_prompt_follows_the_rules.py`). Each
+test pins the default canon's text and seats invented rules; the browser test
+`e2e/sheet-prose-rules.spec.js` reads the loaded rules through the Django shell
+(`e2e/character-rules.js`) and holds the pages to them under both canons.
+
 ## A. d20 combat — attack-rolls.md, dex-adjustments.md, d20 spec §2–§8
 
 | # | Mechanic (doc cite) | Dice / target / comparison | doc→engine | engine→event | event→UI |

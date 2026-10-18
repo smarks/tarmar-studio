@@ -79,7 +79,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 - `equipment.py` — the catalog lookups the app reads (`get_item` and its siblings) and the movement restrictions a level and worn armour combine to, all from the loaded canon through `equipment_rules.py` (issue #75).
 - `dice.py` — character-creation dice (d6, d100, 3d6, demon-die, fatigue), with logged variants.
 - `constants.py` — shared numeric/string bounds (attribute cap 30, equipment limits, regex patterns).
-- `help_text.py` — `HELP_TEXT` dict of in-UI rules explanations.
+- `help_text.py` — `help_text()`, the in-UI rules explanations, its rule numbers built from the loaded canon (issue #68).
 - `templatetags/character_help.py` — `help_for` inline `?` disclosure tag.
 - `equipment_rules.py` — reads the loaded canon's `equipment.json` into `EquipmentCatalog` (the weapons/armor/shield/gear catalog; weapon families live in `subcategory`) and its `equipment-rules.json` into `EquipmentRules` (the encumbrance levels, armour restriction codes, gaits, Missile classes and dodge bounds); the cached `equipment_catalog()` and `equipment_rules()` are the one path they come by, never at import (issue #75). `movement.py` holds the gait arithmetic on the loaded gaits.
 - `templates/characters/` — character_edit, character_list, deleted_characters.
@@ -94,7 +94,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 ### `gm/` — AI Game Master
 - `models.py` — `GMSession`: persists a conversation as JSON history; `message_count` excludes system messages.
 - `views.py` — `GMChatView` (page), `gm_stream` (SSE: streams Ollama tokens, strips `<think>`, persists on completion, handles `state`/`rules`/`roll` commands; logs failures), `gm_save`/`gm_delete`.
-- `engine.py` — framework-free pieces shared with the offline CLI (`cli/gm.py`): `system_prompt()` and its three siblings, chosen by `system_prompt_for` (the full GM prompt, built on first use and cached: role, rules digest with code-rendered matrix/crit/fumble fragments, magic, equipment, a world digest of `reference/content/`, GM guidelines), `roll_dice`, `DEFAULT_RULES_DIR` (canonical `reference/content/public-rules`), `load_rules_from_dir` (reads a rules dir into one string).
+- `engine.py` — framework-free pieces shared with the offline CLI (`cli/gm.py`): `system_prompt()` and its three siblings, chosen by `system_prompt_for` (the full GM prompt, built on first use and cached: role, rules digest with code-rendered matrix/crit/fumble fragments and the canon rules numbers it states built from the loaded rules files, except those left for stages 6 and 7 (issue #68), magic, equipment, a world digest of `reference/content/`, GM guidelines), `roll_dice`, `DEFAULT_RULES_DIR` (canonical `reference/content/public-rules`), `load_rules_from_dir` (reads a rules dir into one string).
 - `model_config.py` — Django-free `GMModelConfig`: env names and defaults for `GM_MODEL`, `GM_NUM_CTX`, `GM_TEMPERATURE`, read by `settings.py` and by `cli/gm.py`.
 - `services.py` — `get_gm_model`/`get_gm_options` (from `settings.GM_MODEL`/`GM_NUM_CTX`/`GM_TEMPERATURE`), `get_system_message`, `load_rules` (calls `engine.load_rules_from_dir` against `settings.RULES_DIR`), `roll_dice` (`NdM±K`), message builders.
 - `urls.py` — chat, stream, save, delete. `admin.py` — registers `GMSession`.
@@ -111,6 +111,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 
 ### `common/` — shared helpers
 - `helpers.py` — JSON view helpers (`_json_error`, `_can_edit_object`, `_parse_json_body`, `_require_field`).
+- `number_words.py` — `number_in_words()`, small counts spelled out for prose built from the canon's rules (Django-free; issue #68).
 - `mixins.py` — `AdminOrDMRequiredMixin`, `ActivePageMixin`.
 - `services/ollama_client.py` — httpx Ollama client (`stream_chat`).
 - `services/sse.py` — `strip_thinking`, `sse_stream` SSE wrapper.
@@ -157,7 +158,7 @@ Markdown tree; slugs map 1:1 to `reference/nav.py`.
 - `manage.py` — Django entrypoint.
 - `scripts/health_check.py` — per-port deploy health check (`/health/`, redirects). `verify_deployment.py` — prod end-to-end verifier (gate, pages, HTML validity, error markers). `update_coverage_threshold.py` / `update_js_coverage_threshold.py` — coverage ratchets (py / js), run by hand only; hooks and CI never rewrite a threshold.
 - `scripts/ci-runner/` — the self-hosted GitHub Actions runner on the Mac Studio (#576): `install-runner.sh` (run once with sudo; creates the `tarmarci` account, installs the runner and its LaunchDaemon), `protect-main.sh` (requires the CI check on `main`), the daemon plist, and a README. Held together with `ci.yml` by `scripts/test_ci_runner.py`.
-- `e2e/` — Playwright suite: `global-setup.js` (seeds users + characters), `global-teardown.js`, `fixtures.js` (gate/login helpers, coverage wrap), `django.js` (Django shell helpers), `skill-rules.js` (the loaded canon's skills and experience rules, read through the shell so specs type no rule number), `equipment-rules.js` (the loaded canon's equipment catalog and equipment rules, read the same way), `coverage.js` (V8→Istanbul), specs (`auth`, `character-list`, `character-edit`).
+- `e2e/` — Playwright suite: `global-setup.js` (seeds users + characters), `global-teardown.js`, `fixtures.js` (gate/login helpers, coverage wrap), `django.js` (Django shell helpers), `skill-rules.js` (the loaded canon's skills and experience rules, read through the shell so specs type no rule number), `equipment-rules.js` (the loaded canon's equipment catalog and equipment rules, read the same way), `character-rules.js` (the loaded canon's character creation rules and the sheet's Fatigue sum, read the same way), `coverage.js` (V8→Istanbul), specs (`auth`, `character-list`, `character-edit`).
 - Config: `pyproject.toml` (deps, ruff, pytest `--cov-fail-under=98`, a fixed gate), `pyrightconfig.json`, `jest.config.js`/`jest.setup.js`, `playwright.config.js`, `package.json` (`jsCoverageThreshold`), `uv.lock`, `package-lock.json`, `.pre-commit-config.yaml` (ruff + ruff-format + pyright + makemigrations check + guides check; none rewrites a tracked file. pytest, Jest and Playwright run in CI).
 - `.github/workflows/ci.yml` — runs `./run check`; `deploy.yml` — blue-green deploy over SSH, started by `./run gate` once it records a pass for the head of main.
 

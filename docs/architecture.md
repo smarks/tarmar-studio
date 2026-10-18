@@ -270,6 +270,14 @@ Notes on the edges, each checkable:
   read it through the cached `character_rules()` when they run, never at
   import, so the offline CLI's import chain stays free of Django and a canon
   whose file is refused is reported by the `characters.E001` system check.
+  The Games Master's prompt sentences that state these numbers are built from
+  it and cached as the skill values below are (issue #68). So are the sheet's:
+  `characters.help_text.help_text()` (cached and registered), the refusals
+  and reasons in `characters/services.py` (built when a refusal is made), the
+  creation page's and the sheet's own sentences (passed in the view's
+  context), the workbench's aging note (`characters.skills.aging_escalation_note`,
+  rendered and handed to the script in the page config), the extraction
+  schema's default coin and the Characters pane's Fatigue note.
 - `characters/skill_rules.py` reads the canon's `skill-rules.json`
   (`reference.paths.SKILL_RULES_FILE`) into `SkillRules`: every number skills,
   prior experience and the checks use (the tracks and their d20 tables, the
@@ -300,8 +308,9 @@ Notes on the edges, each checkable:
   four gaits are matched to the canon's by place, so a canon must name four
   (`battle.E003`) until stage 6 seats the engine's own rules. The values built
   from the catalog or the rules and cached (the sheet's catalog payload, the
-  Weapon-skill spellings, the Games Master's item names, a beast's gait
-  proportions) register with `derived_from_rules` as the skill values do.
+  Weapon-skill spellings, the Games Master's item names and its prompt's
+  weapon, armour and encumbrance sentences, a beast's gait proportions)
+  register with `derived_from_rules` as the skill values do.
   The rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
@@ -1131,17 +1140,17 @@ graph TD
         s1["ROLE, PHILOSOPHY, NOT_DND, CORE"]
         s2["CHARACTER_CREATION"]
         s3["RECORDS - you do not do arithmetic"]
-        s4["COMBAT - matrix, crit and fumble<br/>rendered from characters/combat.py"]
+        s4["COMBAT - matrix, crit and fumble<br/>rendered from characters/combat.py;<br/>shields and encumbrance from the canon"]
         s5["MAGIC, EQUIPMENT, WORLD, GUIDELINES"]
         s6["OUTCOMES - dice come to you as results"]
         s7["PLAN_SCHEMA - last, so it stays in the prefix cache"]
-        addenda["plus SECTION_DM_AUTHORITY and/or SECTION_DM_AIDE<br/>four cached strings, 2 by 2 selector"]
+        addenda["plus section_dm_authority() and/or SECTION_DM_AIDE<br/>four cached strings, 2 by 2 selector"]
     end
     sys --> sections
 
     subgraph last["The one changing last message"]
         sb["state_block"]
-        planm["plan call: PLANNING_GUIDANCE, PLANNING_RULES,<br/>PLAN_ONLY, Latest message"]
+        planm["plan call: PLANNING_GUIDANCE, planning_rules(),<br/>PLAN_ONLY, Latest message"]
         narrm["narrate call: Server results, Latest message,<br/>NARRATE plus policy.manner"]
         sb --> planm
         sb --> narrm
@@ -1156,10 +1165,36 @@ turn asks and the same string for the life of the process, never per request:
 `system_prompt()`, `aide_system_prompt()`, `dm_play_system_prompt()`,
 `dm_system_prompt()`, selected by
 `system_prompts_by_authority_and_mode()[(is_game_master, mode)]`. They are
-built on first use rather than at import because three sections are built from
-the loaded canon's `skill-rules.json` (issue #70), which no module may read
-while it imports. The schema section is last on purpose so the growing
-prefix stays cacheable on the Ollama side.
+built on first use rather than at import because five of the sections and
+the authority addendum state numbers from the loaded canon's rules files
+(issues #68, #70), which no module may read while it imports. The schema
+section is last on purpose so the growing prefix stays cacheable on the Ollama
+side.
+
+Each sentence that states a number a canon rules file holds is built from the
+rules object that holds it, by a cached builder registered with
+`derived_from_rules` (issue #68):
+
+| Section builder | Built from |
+|---|---|
+| `section_core()` | `skill_rules()`: the attribute and skill checks' dice and naturals, the modifier table. `character_rules()`: the attribute dice and point buy, the height and weight bands, the Fatigue sum (`FatigueRollRules.formula`, the one rendering the sheet uses too) |
+| `section_character_creation()` | `character_rules()`: the attribute, Fatigue and literacy dice, the point buy, the provenance bands, the starting age. `skill_rules()`: each track's label and XP a year, whether weapon skills lead most tracks, the experience ladder |
+| `section_combat()` | `skill_rules()`: the skill and attribute checks' dice. `equipment_catalog()`: each shield's Target Number bonus. `equipment_rules()`: every encumbrance level, its band of STR, its penalty and the gaits it forbids or caps |
+| `section_equipment()` | `equipment_catalog()`: every weapon (damage, STR, class, notes), armour (stops, DEX, tier) and shield; `equipment_rules()`: the gaits each armour's restriction code forbids |
+| `section_plan_schema()` | `skill_rules()`: the tracks it lists and the first one, named in two examples, and the attribute check's dice. `character_rules()`: the attribute, Fatigue and literacy dice |
+| `section_dm_authority()` | `character_rules()`: the attribute dice and the point buy's total and top |
+
+The plan call's rules line (`gm.turn_engine.messages.planning_rules()`, cached
+and registered the same way) states the canon's attribute and Fatigue dice.
+One sentence states canon content by hand: `TRACK_YIELDS_SENTENCE`, what the
+Magic, Underworld, Craft and Laborer tracks yield. No rules file says what a
+track is known for, and the behaviour check's scenarios assume these tracks;
+it is to be revisited if a canon changes its tracks. Left as code, among them
+(`gm/engine.py`'s module docstring lists them all): the engine's own numbers for
+stages 6 and 7 (initiative, crits and fumbles, the matrix, the survival save,
+the injury bands, the casting dice, the megahex, hand-to-hand's 4d6, the
+defender dodge), Movement Speeds' base distances (the canon holds them, but not
+each gait's prose), and the plan format's illustrative values.
 
 ### Canon retrieval (rules lookup, issues #605 and #333)
 
@@ -1815,7 +1850,7 @@ player can read.
 | Who may control a seat | `battle/access.py::decides_for` / `can_control`, `battle/control.py` |
 | A new rules profile | `battle/profiles.py` (`BattleProfile` subclass), `battle/persistence.py::PROFILE_CHOICES`, `battle/viewmodel.py` |
 | What the arena draws | `battle/viewmodel.py` for the payload, `static/js/battle.js` for the drawing, `battle/templates/battle/_arena.html` |
-| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, `section_core()`, `section_plan_schema()` and `system_prompt_sections()` |
+| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, the `section_*()` builders that state the canon's rules numbers (`section_core()`, `section_character_creation()`, `section_combat()`, `section_equipment()`, `section_plan_schema()`, `section_dm_authority()`; issue #68) and `system_prompt_sections()` |
 | Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::section_plan_schema` |
 | What the model is told about the session | `gm/turn_engine/state.py::state_block` |
 | The two model calls' wording | `gm/turn_engine/messages.py` |

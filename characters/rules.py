@@ -343,6 +343,28 @@ class FatigueRollRules(DiceRollRules):
         best = max((scores[name] for name in self.best_of), default=0)
         return sum(scores[name] for name in self.attributes) + best + roll
 
+    def formula(self, roll_term: str) -> str:
+        """The sum written out: "CON + WIS + INT + max(DEX, STR) + roll".
+
+        In :meth:`total`'s shape: the attributes, the best of ``best_of``
+        (plainly when it names one), then the roll. The one rendering of the
+        sum, for the sheet, its help and the Games Master's prompt (issue #68).
+
+        Args:
+            roll_term: What the roll is called at the end: ``"roll"``,
+                ``"fatigue roll"``, or the dice.
+
+        Returns:
+            The formula.
+        """
+        terms = list(self.attributes)
+        if len(self.best_of) > 1:
+            terms.append(f"max({', '.join(self.best_of)})")
+        else:
+            terms.extend(self.best_of)
+        terms.append(roll_term)
+        return " + ".join(terms)
+
     def __post_init__(self) -> None:
         super().__post_init__()
         if not self.attributes:
@@ -634,6 +656,16 @@ class WealthRow(TableRow):
     """
 
     coin: int | CoinRoll | None
+
+    @property
+    def coin_text(self) -> str:
+        """The starting coin as the sheet writes it: "100", "100 + d100" or
+        "by GM" (issue #68)."""
+        if self.coin is None:
+            return "by GM"
+        if isinstance(self.coin, CoinRoll):
+            return f"{self.coin.base} + {self.coin.dice_label}"
+        return str(self.coin)
 
     def __post_init__(self) -> None:
         if isinstance(self.coin, int):

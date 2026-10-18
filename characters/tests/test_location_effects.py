@@ -16,7 +16,7 @@ from characters.dice import (
     roll_all_character_stats,
     roll_secondary_character_stats,
 )
-from characters.help_text import HELP_TEXT
+from characters.help_text import help_text
 from characters.models import Character
 from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
@@ -300,4 +300,4 @@ class LiteracyCheckDisplayTest(BaseTestCase):
         self.assertIn("3d6 ≤ INT − 2", body)
 
     def test_sheet_explains_the_location_effects(self):
-        self.assertIn(HELP_TEXT["location"], self._sheet())
+        self.assertIn(help_text()["location"], self._sheet())

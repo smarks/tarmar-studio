@@ -800,6 +800,9 @@ _DICE_COMPARISON = re.compile(
     r"\s*(\d+)?",
     re.IGNORECASE,
 )
+#: A survival figure is one or two digits, never the front of a longer number:
+#: "Campaigner: 1,200 XP a year" is no target of 1 (review of #68).
+_NOT_A_LONGER_NUMBER = r"(?![\d,.]\d)"
 # "The target for the Campaigner track is 9" names what the target is for
 # between the word and the figure; the live run of 2026-09-28 read that
 # correct answer as no target at all (issue #760).
@@ -810,7 +813,8 @@ _NAMED_TARGET = re.compile(
     # "the track's target number (9 for Campaigners)" puts the figure in
     # brackets (board of 2026-09-29, run 5).
     # "The track's target, which is 9" (board of 2026-09-29, run 6).
-    r"(?:number\s*)?(?:,?\s*(?:which|that)\s+is|of|is|:|=)?\s*\(?\s*(\d{1,2})\b",
+    r"(?:number\s*)?(?:,?\s*(?:which|that)\s+is|of|is|:|=)?\s*\(?\s*(\d{1,2})\b"
+    + _NOT_A_LONGER_NUMBER,
     re.IGNORECASE,
 )
 _LOW_DIRECTION = re.compile(
@@ -838,7 +842,7 @@ _HIGH_OPERATORS = (">=", "≥", ">", "or more", "or higher", "or over")
 # or less is death" names an override, not the track's target.
 #: What a count is of, when a figure is one rather than a threshold: "5 or
 #: more years", "at least 3 dice".
-_COUNTED_NOUN = r"(?!\s+(?:years?|dice|d6|times|points?|skill|levels?|days?)\b)"
+_COUNTED_NOUN = r"(?!\s+(?:years?|dice|d6|times|points?|skill|levels?|days?|xp)\b)"
 _BARE_THRESHOLD = re.compile(
     r"\b(\d{1,2})\s+or\s+(?:higher|more|greater|better|above|over|less|lower|"
     rf"under|fewer|below)\b{_COUNTED_NOUN}",
@@ -851,7 +855,8 @@ _LEADING_THRESHOLD = re.compile(
     r"\b(?:at\s+least|at\s+most|(?:equal|meet)s?\s+or\s+(?:exceed|beat)s?|reach(?:es)?|"
     r"(?:equal\s+to\s+or\s+(?:greater|more|higher)|(?:greater|more|higher)\s+than"
     r"\s+or\s+equal\s+to)(?:\s+than)?|"
-    rf"beats?|exceeds?)\s+(?:a\s+)?(?:total\s+of\s+)?(\d{{1,2}})\b{_COUNTED_NOUN}",
+    rf"beats?|exceeds?)\s+(?:a\s+)?(?:total\s+of\s+)?(\d{{1,2}})\b"
+    rf"{_NOT_A_LONGER_NUMBER}{_COUNTED_NOUN}",
     re.IGNORECASE,
 )
 #: A part about a natural roll: named so, or as the faces that make one
@@ -1096,8 +1101,12 @@ _CONCESSION = re.compile(r"\beven\s+(?:if|though|when|with)\b", re.IGNORECASE)
 
 
 def _track_pattern(track: str) -> str:
-    """A track key as prose writes it: ``civil_service`` is "civil service"."""
-    return r"[\s_-]".join(re.escape(part) for part in track.split("_"))
+    """A track key as prose writes it: ``civil_service`` is "civil service".
+
+    Its words joined as :data:`characters.skills.TRACK_WORD_JOINER` allows,
+    so "Hunter/Gatherer" is read as the canon's label writes it (issue #68).
+    """
+    return skills.TRACK_WORD_JOINER.join(re.escape(part) for part in track.split("_"))
 
 
 def _tracks_alternation() -> str:
@@ -1117,17 +1126,13 @@ def _track_name() -> re.Pattern[str]:
     return re.compile(r"\b(" + _tracks_alternation() + r")", re.IGNORECASE)
 
 
-def _track_key(said: str) -> str:
-    """The track key a track name in prose stands for."""
-    return re.sub(r"[\s-]", "_", said.casefold())
-
-
 @derived_from_rules
 @functools.cache
 def _figure_for_track() -> re.Pattern[str]:
     """A figure followed by the track it is for: "8 for Underworld"."""
     return re.compile(
-        r"(\d{1,2})\s*(?:\+|or\s+(?:more|higher|better|above))?\s+(?:for|on)\s+"
+        r"(?<!\d)(?<!\d[,.])(\d{1,2})\s*(?:\+|or\s+(?:more|higher|better|above))?"
+        r"\s+(?:for|on)\s+"
         r"(?:the\s+)?(" + _tracks_alternation() + r")",
         re.IGNORECASE,
     )
@@ -1147,14 +1152,14 @@ def _nearest_track(clause: str, position: int) -> str | None:
     """
     named_after = _figure_for_track().match(clause, position)
     if named_after is not None:
-        return _track_key(named_after.group(2))
+        return skills.track_key_for(named_after.group(2))
     before = [
         match for match in _track_name().finditer(clause) if match.start() < position
     ]
     if before:
-        return _track_key(before[-1].group(1))
+        return skills.track_key_for(before[-1].group(1))
     after = _track_name().search(clause, position)
-    return _track_key(after.group(1)) if after else None
+    return skills.track_key_for(after.group(1)) if after else None
 
 
 def _outcome_of(clause: str, blanked: str, start: int, end: int, after_to: int) -> str:
@@ -1262,6 +1267,7 @@ def _track_figure() -> re.Pattern[str]:
         r"\b("
         + _tracks_alternation()
         + r")(?:\s+track)?\s*[:|=–-]?\s*\|?\s*(\d{1,2})\b"
+        + _NOT_A_LONGER_NUMBER
         + _COUNTED_NOUN,
         re.IGNORECASE,
     )
@@ -1309,11 +1315,15 @@ def read_clause(clause: str) -> ClauseReading:
                 (match.start(1), figure, _nearest_track(blanked, match.start(1)))
             )
     for match in _track_figure().finditer(blanked):
-        found.append((match.start(2), int(match.group(2)), _track_key(match.group(1))))
+        found.append(
+            (match.start(2), int(match.group(2)), skills.track_key_for(match.group(1)))
+        )
     # "(8 for Underworld, 12 for Campaigners)": the figure first, then its
     # track (fourth review of #760).
     for match in _figure_for_track().finditer(blanked):
-        found.append((match.start(1), int(match.group(1)), _track_key(match.group(2))))
+        found.append(
+            (match.start(1), int(match.group(1)), skills.track_key_for(match.group(2)))
+        )
     comparison = _DICE_COMPARISON.search(blanked)
     if comparison is not None and comparison.group(3):
         found.append(

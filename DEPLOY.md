@@ -203,10 +203,11 @@ with nothing to do never shows red. `--force` reads no record, so it makes no co
 
 Three things follow from both colours reading one checkout. The canon's pages
 are read per request, so the live colour serves canon pages from the moment
-the deploy moves the checkout to them, while its nav, maps and prompt (read at import) change
-only when it restarts. `deploy.sh rollback` switches the code back but not the
-canon. And the GM retrieval index is rebuilt by `build_gm_index` when the
-corpus hash changes, which a canon change alone does.
+the deploy moves the checkout to them, while its nav, maps and prompt (read at
+import, or built from the rules files on first use and then held for the
+process) change only when it restarts. `deploy.sh rollback` switches the code
+back but not the canon. And the GM retrieval index is rebuilt by
+`build_gm_index` when the corpus hash changes, which a canon change alone does.
 
 Before pushing a canon change, regenerate its guides from a studio checkout
 with `TARMAR_CANON_DIR` pointing at it: `uv run python scripts/build_guides.py`
@@ -481,8 +482,12 @@ the same LAN, reached through `OLLAMA_BASE_URL` in `.env`, which names
 `tarmar-llm` rather than an address — the Mac publishes its own DHCP address
 into this host's `/etc/hosts` under that name.
 
-`deploy.sh` warms the GM prompt cache at the end of every deploy. The other
-half, warming after Ollama itself restarts, is a LaunchAgent on the Mac:
+`deploy.sh` warms the GM prompt cache at the end of every deploy (`manage.py
+warm_gm`). A deploy that changes the prompt's text, by its code or by the
+canon's rules files, whose numbers the prompt states (issue #68), stores one
+new `GMPromptSnapshot` per prompt on its first turn and starts Ollama's prefix
+cache afresh, which the warm-up refills. The other half, warming after Ollama
+itself restarts, is a LaunchAgent on the Mac:
 `scripts/llm-host/`, with its own README covering what it does, how to install
 it and what it deliberately does not cover.
 

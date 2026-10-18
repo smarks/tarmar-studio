@@ -36,6 +36,17 @@ class LookUpTest(SimpleTestCase):
                 self.assertIn(str(target), said)
                 self.assertIn(track, said)
 
+    def test_a_track_named_by_its_label_gets_its_own_target(self):
+        """The prompt names tracks by label: "Hunter/Gatherer" (issue #68)."""
+        target = survival_targets()["hunter_gatherer"]
+        for said_as in ("Hunter/Gatherer", "hunter-gatherer", "Hunter Gatherer"):
+            with self.subTest(said_as=said_as):
+                said = rules_lookup.look_up("survival", said_as)
+                self.assertIn(
+                    f"The hunter_gatherer track's survivability target is {target}",
+                    said,
+                )
+
     def test_the_answer_says_which_way_the_roll_goes(self):
         """#370 was a rule stated backwards; the direction is the point."""
         said = rules_lookup.look_up("survival", "campaigner").casefold()

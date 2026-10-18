@@ -17,10 +17,10 @@ from common.test_helpers import BaseTestCase
 
 from .engine import (
     SECTION_DM_AIDE,
-    SECTION_DM_AUTHORITY,
     SECTION_GUIDELINES,
     SECTION_ROLE,
     dm_system_prompt,
+    section_dm_authority,
     system_prompt,
     system_prompt_for,
     system_prompt_sections,
@@ -38,7 +38,7 @@ class AidePromptShapeTest(BaseTestCase):
         self.assertEqual(
             dm_system_prompt(),
             "\n\n".join(
-                (*system_prompt_sections(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
+                (*system_prompt_sections(), section_dm_authority(), SECTION_DM_AIDE)
             ),
         )
 

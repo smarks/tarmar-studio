@@ -785,7 +785,8 @@ class ReviewFollowUpTest(SheetTestCase):
         refused = self.update("weight_roll", None)
         self.assertEqual(refused.status_code, 400)
         self.assertEqual(
-            refused.json()["error"], services.PLAYER_CHOSEN_FACE_FIELDS["weight_roll"]
+            refused.json()["error"],
+            services.player_chosen_face_reasons()["weight_roll"],
         )
 
     def test_a_custom_one_handed_weapon_is_not_the_default_beside_a_shield(self):
