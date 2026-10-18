@@ -2,10 +2,15 @@
  *
  * The tab's markup is gm/templates/gm/_panel_characters.html: a picker of the
  * player's living characters and the attached characters' sheets. This file
- * wires the two controls to the attach/detach endpoints and then reloads the
- * page, so the sheets on screen are always what the server rendered from the
- * model — never a client-side reconstruction that could drift from what the
- * GM was told.
+ * wires the two controls to the attach/detach endpoints and then refetches
+ * the tab, so the sheets on screen are always what the server rendered from
+ * the model — never a client-side reconstruction that could drift from what
+ * the GM was told. The rest of the page stays as it is (issue #15): a reload
+ * threw away every earlier page of the chat and of the resolved threads the
+ * reader had loaded. The one line elsewhere that follows the attached
+ * characters, the Battle tab's bare-handed warning (issue #844), is repainted
+ * from the endpoint's answer. Only an attach that made the session navigates,
+ * since the page has no session to show yet.
  *
  * While a turn runs, the tab refetches its contents from the server
  * (charactersPanelUrlTemplate, campaignPanelUrlTemplate) whenever chat.js
@@ -50,7 +55,7 @@ if (typeof module !== 'undefined' && module.exports) {
   }
 
   function errorElement() {
-    return root.document.getElementById('gm-panel-characters-error');
+    return root.document.getElementById(CHARACTERS_TAB.errorId);
   }
 
   /**
@@ -111,23 +116,43 @@ if (typeof module !== 'undefined' && module.exports) {
   }
 
   /**
-   * Attach a character to the session (creating the session if the chat has
-   * none yet) and reload on that session.
+   * Show an attach or detach the server has recorded, in place (issue #15):
+   * the Characters tab as the server now renders it, through the refetch a
+   * turn's frames use, and the Battle tab's bare-handed line from the
+   * answer (``bare_handed``, gm/views.py's _session_characters_payload).
+   * @param {{bare_handed: (string|undefined)}} data - The endpoint's answer.
+   * @returns {Promise<boolean>} Whether the tab's contents were replaced.
+   */
+  async function showAttachedChange(data) {
+    if (root.gmPanelBattle) root.gmPanelBattle.paintBareHanded(data.bare_handed);
+    return refreshOne(CHARACTERS_TAB);
+  }
+
+  /**
+   * Attach a character to the session and show it in the tab. With no
+   * session yet the server makes one, and the page goes to it.
    * @param {number|string} characterId
+   * @returns {Promise<boolean>} Whether the attach was recorded.
    */
   async function attachCharacter(characterId) {
+    const sessionId = currentSessionId();
     const data = await post(config.attachUrl, {
-      session_id: currentSessionId(),
+      session_id: sessionId,
       character_id: Number(characterId),
     });
     if (!data) return false;
-    root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
+    if (data.session_id !== sessionId) {
+      root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
+      return true;
+    }
+    await showAttachedChange(data);
     return true;
   }
 
   /**
-   * Detach a character from the session and reload.
+   * Detach a character from the session and take its sheet off the tab.
    * @param {number|string} characterId
+   * @returns {Promise<boolean>} Whether the detach was recorded.
    */
   async function detachCharacter(characterId) {
     const sessionId = currentSessionId();
@@ -140,7 +165,7 @@ if (typeof module !== 'undefined' && module.exports) {
       character_id: Number(characterId),
     });
     if (!data) return false;
-    root.pageNavigation.reload();
+    await showAttachedChange(data);
     return true;
   }
 
@@ -192,11 +217,7 @@ if (typeof module !== 'undefined' && module.exports) {
       const buttons = Array.from(picker.querySelectorAll('[data-picker-page]'));
       direction = buttons.indexOf(active) === 0 ? 'previous' : 'next';
     }
-    // A page of an earlier search is no page of the one typed since.
-    const search = picker.querySelector('[data-picker-search]');
-    const typed = search ? search.value.trim() : '';
-    const sameSearch = (picker.dataset.pickerShownQuery || '') === typed;
-    return { page: sameSearch ? picker.dataset.pickerShownPage || '1' : '1', direction };
+    return { page: root.picker ? root.picker.shownPage(picker) : '1', direction };
   }
 
   /** A tab with nothing the refetch needs to carry over. */
@@ -236,13 +257,14 @@ if (typeof module !== 'undefined' && module.exports) {
    * change mid-turn exactly as a character does. ``keepView`` is what a tab
    * carries through its own refetch (issue #982).
    */
+  const CHARACTERS_TAB = {
+    containerId: 'gm-panel-characters',
+    urlKey: 'charactersPanelUrlTemplate',
+    called: 'characters',
+    errorId: 'gm-panel-characters-error',
+  };
   const REFRESHABLE = [
-    {
-      containerId: 'gm-panel-characters',
-      urlKey: 'charactersPanelUrlTemplate',
-      called: 'characters',
-      errorId: 'gm-panel-characters-error',
-    },
+    CHARACTERS_TAB,
     {
       containerId: 'gm-panel-campaign',
       urlKey: 'campaignPanelUrlTemplate',
@@ -347,7 +369,7 @@ if (typeof module !== 'undefined' && module.exports) {
   function init() {
     // Delegated from the tab's section, which stays in place when a refresh
     // replaces everything inside it.
-    const container = root.document.getElementById('gm-panel-characters');
+    const container = root.document.getElementById(CHARACTERS_TAB.containerId);
     if (container) {
       container.addEventListener('submit', (event) => {
         const luckForm = event.target.closest('.gm-luck-form');

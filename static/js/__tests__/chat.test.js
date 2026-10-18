@@ -196,10 +196,10 @@ describe('deleteSession', () => {
         expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/');
     });
 
-    test('reloads instead of redirecting when a non-active session is deleted', async () => {
+    test('neither reloads nor redirects when a non-active session is deleted (#15)', async () => {
         fetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true }) });
         await deleteSession(99, 'Other Session'); // not the config's sessionId
-        expect(pageNavigation.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
         expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
@@ -218,6 +218,202 @@ describe('deleteSession', () => {
         fetch.mockRejectedValue(new Error('Network error'));
         await deleteSession(42, 'Test Session');
         expect(alert).toHaveBeenCalledWith('Delete failed: Network error');
+    });
+});
+
+/**
+ * Deleting another session leaves the page as it is (issue #15): a reload
+ * threw away every earlier page of the chat the reader had loaded (#972).
+ * The session leaves the rail and the menu, and each picker asks the server
+ * again for the page it shows.
+ */
+describe('deleting another session', () => {
+    const RAIL_URL = '/tarmar/gm/sessions/rail/';
+    const MENU_URL = '/tarmar/gm/sessions/menu/';
+    let chatModule;
+
+    /** The page on session ``sessionId``, with sessions 42 and 99 listed. */
+    function setUpPage({ sessionId = 42, active = '?active=42', extra = '' } = {}) {
+        const chatConfig = JSON.stringify({
+            streamUrl: '/tarmar/gm/stream/',
+            saveUrl: '/tarmar/gm/save/',
+            deleteUrl: '/tarmar/gm/delete/',
+            sessionId,
+            mode: 'play',
+        });
+        document.body.innerHTML = `
+            <script id="chat-config" type="application/json">${chatConfig}<\/script>
+            <div data-picker id="session-menu-picker" data-picker-url="${MENU_URL}${active}">
+                <input type="search" data-picker-search>
+                <div data-picker-body>
+                    <select id="mobile-session-select">
+                        <option value="42">The crypt</option><option value="99">The road</option>
+                    </select>
+                </div>
+            </div>
+            <div data-picker id="session-rail-picker" data-picker-url="${RAIL_URL}${active}">
+                <input type="search" data-picker-search>
+                <div data-picker-body>
+                    <ul id="session-list">
+                        <li class="session-item active" data-id="42">The crypt</li>
+                        <li class="session-item" data-id="99">The road</li>
+                    </ul>
+                    <p data-picker-status>2 sessions</p>
+                </div>
+            </div>
+            ${extra}
+            <div id="messages">
+                <div class="message user" id="loaded-earlier"><div class="message-content">From an earlier page</div></div>
+                <div class="message assistant"><div class="message-content" data-markdown>The latest reply</div></div>
+            </div>
+            <input id="user-input">
+            <button id="send-btn"></button>
+        `;
+        jest.resetModules();
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        window.picker = require('../picker.js');
+        chatModule = require('../chat.js');
+        confirm.mockReturnValue(true);
+        fetch.mockReset();
+        fetch.mockImplementation((url) => {
+            const asked = new URL(url, 'http://localhost/');
+            if (asked.pathname === '/tarmar/gm/delete/') {
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+            }
+            const body = asked.pathname === RAIL_URL
+                ? `<ul id="session-list"><li class="session-item" data-id="7">Page ${asked.searchParams.get('page')}</li></ul>`
+                : '<select id="mobile-session-select"><option value="7">The ford</option></select>';
+            return Promise.resolve({ ok: true, text: () => Promise.resolve(body) });
+        });
+    }
+
+    /** What the session pickers asked their endpoints for. */
+    function pickerAsks() {
+        return fetch.mock.calls
+            .map(([url]) => new URL(url, 'http://localhost/'))
+            .filter((asked) => asked.pathname === RAIL_URL || asked.pathname === MENU_URL);
+    }
+
+    async function settle() {
+        for (let tick = 0; tick < 6; tick += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+    }
+
+    afterEach(() => { delete window.picker; });
+
+    test('takes it off the rail and the menu, and keeps the chat pages loaded', async () => {
+        setUpPage();
+        // Held, so what the page shows between the delete and the refetch
+        // can be read.
+        fetch.mockImplementationOnce(() => Promise.resolve({
+            ok: true, json: () => Promise.resolve({ ok: true }),
+        }));
+        const pickerAnswers = [];
+        const answerPickers = fetch.getMockImplementation();
+        fetch.mockImplementation((url) => new Promise((resolve) => {
+            pickerAnswers.push(() => resolve(answerPickers(url)));
+        }));
+
+        await chatModule.deleteSession(99, 'The road');
+
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(document.querySelector('.session-item[data-id="99"]')).toBeNull();
+        expect(document.querySelector('#mobile-session-select option[value="99"]')).toBeNull();
+        expect(document.querySelector('.session-item[data-id="42"]')).not.toBeNull();
+        expect(document.getElementById('loaded-earlier')).not.toBeNull();
+        pickerAnswers.forEach((answer) => answer());
+        await settle();
+        expect(document.getElementById('loaded-earlier')).not.toBeNull();
+    });
+
+    test('each picker asks again for the page it shows, keeping the open session pinned', async () => {
+        setUpPage();
+        document.getElementById('session-rail-picker').dataset.pickerShownPage = '3';
+        document.getElementById('session-rail-picker').dataset.pickerShownQuery = '';
+
+        await chatModule.deleteSession(99, 'The road');
+        await settle();
+
+        const rail = pickerAsks().find((asked) => asked.pathname === RAIL_URL);
+        const menu = pickerAsks().find((asked) => asked.pathname === MENU_URL);
+        expect(rail.searchParams.get('page')).toBe('3');
+        expect(rail.searchParams.get('active')).toBe('42');
+        expect(menu.searchParams.get('page')).toBe('1');
+        expect(document.querySelector('#session-list').textContent).toContain('Page 3');
+    });
+
+    test('drops the line saying the open session continues the deleted one', async () => {
+        setUpPage({
+            extra: '<p class="session-continued" id="gm-session-continued" data-continued-from="99">Continues the campaign of The road</p>',
+        });
+        await chatModule.deleteSession(99, 'The road');
+        expect(document.getElementById('gm-session-continued')).toBeNull();
+    });
+
+    test('keeps that line when it names another session', async () => {
+        setUpPage({
+            extra: '<p class="session-continued" id="gm-session-continued" data-continued-from="5">Continues the campaign of The ford</p>',
+        });
+        await chatModule.deleteSession(99, 'The road');
+        expect(document.getElementById('gm-session-continued')).not.toBeNull();
+    });
+
+    test('asks the server again for an offer to continue the deleted session', async () => {
+        // The offer is shown only on a page with no history, so the reload
+        // loses nothing loaded; the server picks the session to offer.
+        setUpPage({
+            sessionId: null,
+            active: '',
+            extra: `<form id="gm-campaign-continue"><input type="hidden" name="session_id" value="99"></form>`,
+        });
+        await chatModule.deleteSession(99, 'The road');
+        expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
+    });
+
+    test('leaves an offer to continue another session alone, without a reload', async () => {
+        setUpPage({
+            sessionId: null,
+            active: '',
+            extra: `<form id="gm-campaign-continue"><input type="hidden" name="session_id" value="5"></form>`,
+        });
+        await chatModule.deleteSession(99, 'The road');
+        await settle();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(document.querySelector('#gm-campaign-continue input').value).toBe('5');
+        expect(document.querySelector('.session-item[data-id="99"]')).toBeNull();
+    });
+
+    test('a session the first message made stays pinned in the pickers it asks', async () => {
+        setUpPage({ sessionId: null, active: '' });
+        const encoder = new TextEncoder();
+        const frames = [
+            'data: {"session_id":12,"session_name":"The ford"}\n\n',
+            'data: {"done":true,"full_response":"You wade in."}\n\n',
+        ].map((frame) => encoder.encode(frame));
+        const answerOthers = fetch.getMockImplementation();
+        fetch.mockImplementationOnce(() => Promise.resolve({
+            ok: true,
+            status: 200,
+            body: {
+                getReader: () => ({
+                    read: () => Promise.resolve(frames.length
+                        ? { done: false, value: frames.shift() }
+                        : { done: true, value: undefined }),
+                }),
+            },
+        }));
+        fetch.mockImplementation(answerOthers);
+
+        await chatModule.streamMessage({ message: 'I wade into the ford' });
+        await chatModule.deleteSession(99, 'The road');
+        await settle();
+
+        expect(pickerAsks()).toHaveLength(2);
+        pickerAsks().forEach((asked) => expect(asked.searchParams.get('active')).toBe('12'));
     });
 });
 

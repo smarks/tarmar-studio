@@ -93,6 +93,7 @@ from .persistence import (
 )
 from .pickers import SETUP_PICKER_KINDS, claim_picker, setup_picker
 from .services import (
+    BARE_HANDED_KEY,
     MAX_COMBATANTS,
     MAX_TEAM_NAME,
     MIN_COMBATANTS,
@@ -1339,7 +1340,7 @@ def battle_payload(
         # Who fights, or would fight, bare-handed (#844): the figures while
         # the fight is on, the session's attached characters once it is over,
         # repainted with the board so the line follows either.
-        "bare_handed": bare_handed_line(battle),
+        BARE_HANDED_KEY: bare_handed_line(battle),
         # Why a record-writing fight will not go on, and the Game Master's
         # control, rendered once for every response (#842): a poll while a
         # player's move is awaited shows it too, and "" clears it.

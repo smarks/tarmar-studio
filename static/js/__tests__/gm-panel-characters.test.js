@@ -2,10 +2,12 @@
  * Unit tests for gm-panel-characters.js — the Characters tab's attach and
  * detach controls (issue #341).
  *
- * The tab reloads the page after a successful change so the sheets are
- * always server-rendered; these tests assert the request each control
- * makes, the navigation that follows, and that failures land in the tab's
- * own error element (which stays until the next action — no toasts).
+ * The tab refetches itself after a successful change so the sheets are
+ * always server-rendered, and leaves the rest of the page alone (issue #15);
+ * only an attach that made the session navigates to it. These tests assert
+ * the request each control makes, what follows it, and that failures land
+ * in the tab's own error element (which stays until the next action — no
+ * toasts).
  */
 
 function setUpDom({ sessionId = null, withPicker = true, live = false, withCampaign = false } = {}) {
@@ -41,6 +43,10 @@ function setUpDom({ sessionId = null, withPicker = true, live = false, withCampa
 }
 
 const { resolvedJsonResponse: jsonResponse } = require('./test-helpers');
+
+function htmlResponse(body, ok = true) {
+    return Promise.resolve({ ok, statusText: ok ? 'OK' : 'Server Error', text: () => Promise.resolve(body) });
+}
 
 let panelCharacters;
 
@@ -182,7 +188,7 @@ describe('attach', () => {
 });
 
 describe('detach', () => {
-    test('clicking a sheet\'s detach button posts and reloads', async () => {
+    test('clicking a sheet\'s detach button posts, and the page is not reloaded (#15)', async () => {
         setUpDom({ sessionId: 5 });
         global.fetch.mockReturnValue(jsonResponse({ ok: true, session_id: 5, characters: [] }));
         loadTab();
@@ -193,7 +199,8 @@ describe('detach', () => {
         const [url, options] = global.fetch.mock.calls[0];
         expect(url).toBe('/tarmar/gm/characters/detach/');
         expect(JSON.parse(options.body)).toEqual({ session_id: 5, character_id: 3 });
-        expect(pageNavigation.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('a click elsewhere in the sheets does nothing', () => {
@@ -223,6 +230,118 @@ describe('detach', () => {
     });
 });
 
+describe('attach and detach leave the rest of the page as it is (issue #15)', () => {
+    const PANEL_URL = '/tarmar/gm/sessions/5/characters/';
+    const PICKER_URL = '/tarmar/gm/characters/attachable/';
+    const ATTACH_URL = '/tarmar/gm/characters/attach/';
+    const DETACH_URL = '/tarmar/gm/characters/detach/';
+
+    /** One page of the attach picker, as the picker's endpoint renders it. */
+    const pickerBody = (page) => `
+        <select id="gm-character-select"><option value="7">Aldwin</option></select>
+        <span class="page-current">Page ${page}</span>
+        <button type="button" data-picker-page="${page + 1}">Older</button>`;
+    const picker = (page) => `
+        <form id="gm-character-picker" data-draft-key="attach">
+            <div data-picker data-picker-url="${PICKER_URL}?session=5">
+                <input type="search" data-picker-search value="">
+                <div data-picker-body>${pickerBody(page)}</div>
+            </div>
+        </form>`;
+    const SHEET = `
+        <article class="gm-sheet" data-character-id="3">
+            <button type="button" class="gm-sheet-detach" data-character-id="3">x</button>
+        </article>`;
+
+    /**
+     * The GM page with a chat page loaded through "Show earlier" (#972), a
+     * Battle tab warning about a bare-handed character (#844), and the
+     * Characters tab's picker on its first page. The server answers the
+     * endpoint with ``answer`` and renders the tab with ``sheets`` in it.
+     */
+    function setUpPage({ answer, sheets }) {
+        setUpDom({ sessionId: 5, live: true, withPicker: false });
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="messages">
+                <div class="message" id="loaded-earlier">From an earlier page</div>
+                <div class="message">The latest reply</div>
+            </div>
+            <p id="gm-panel-unarmed" role="status">Aldwin carries no weapon.</p>`);
+        document.getElementById('gm-panel-characters').insertAdjacentHTML('afterbegin', picker(1));
+        window.picker = require('../picker.js');
+        window.picker.initPickers(document);
+        window.gmPanelBattle = require('../gm-panel-battle.js');
+        global.fetch.mockImplementation((url) => {
+            const asked = new URL(url, 'http://localhost/');
+            if (asked.pathname === ATTACH_URL || asked.pathname === DETACH_URL) {
+                return jsonResponse(answer);
+            }
+            if (asked.pathname === PANEL_URL) {
+                return htmlResponse(`${picker(1)}
+                    <p id="gm-panel-characters-error" role="alert" hidden></p>
+                    <div id="gm-sheets">${sheets}</div>`);
+            }
+            return htmlResponse(pickerBody(Number(asked.searchParams.get('page'))));
+        });
+        loadTab();
+    }
+
+    afterEach(() => {
+        delete window.picker;
+        delete window.gmPanelBattle;
+    });
+
+    /** Turn the attach picker to its second page, as the reader does. */
+    async function turnPickerToPageTwo() {
+        document.querySelector('[data-picker-page="2"]').click();
+        await flushPromises();
+        expect(document.querySelector('.page-current').textContent).toBe('Page 2');
+    }
+
+    test('a detach refetches the tab and keeps the loaded chat pages and the picker\'s page', async () => {
+        setUpPage({ answer: { ok: true, session_id: 5, characters: [], bare_handed: '' }, sheets: '' });
+        await turnPickerToPageTwo();
+
+        document.querySelector('.gm-sheet-detach').click();
+        for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(document.getElementById('loaded-earlier')).not.toBeNull();
+        expect(global.fetch.mock.calls.map(([url]) => url)).toContain(PANEL_URL);
+        expect(document.querySelector('.gm-sheet')).toBeNull();
+        expect(document.querySelector('.page-current').textContent).toBe('Page 2');
+        // The detached character was the bare-handed one: the Battle tab
+        // stops warning about it, from the endpoint's answer.
+        const unarmed = document.getElementById('gm-panel-unarmed');
+        expect(unarmed.textContent).toBe('');
+        expect(unarmed.hidden).toBe(true);
+    });
+
+    test('an attach to the open session does the same, the picker staying on its page', async () => {
+        setUpPage({
+            answer: {
+                ok: true, session_id: 5, characters: [{ id: 7, name: 'Aldwin' }],
+                bare_handed: 'Aldwin carries no weapon and would fight bare-handed.',
+            },
+            sheets: SHEET,
+        });
+        document.querySelector('.gm-sheet').remove();
+        await turnPickerToPageTwo();
+
+        expect(await panelCharacters.attachCharacter(7)).toBe(true);
+        for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(document.getElementById('loaded-earlier')).not.toBeNull();
+        expect(document.querySelector('.gm-sheet[data-character-id="3"]')).not.toBeNull();
+        expect(document.querySelector('.page-current').textContent).toBe('Page 2');
+        expect(document.getElementById('gm-panel-unarmed').textContent)
+            .toBe('Aldwin carries no weapon and would fight bare-handed.');
+    });
+});
+
 describe('page without the tab markup', () => {
     test('init tolerates a page with no picker, sheets or config', () => {
         document.body.innerHTML = '';
@@ -232,10 +351,6 @@ describe('page without the tab markup', () => {
 });
 
 describe('live refresh (issue #571)', () => {
-    function htmlResponse(body, ok = true) {
-        return Promise.resolve({ ok, statusText: ok ? 'OK' : 'Server Error', text: () => Promise.resolve(body) });
-    }
-
     const FRAGMENT = `
         <form id="gm-character-picker"><select id="gm-character-select"><option value="9">Wren</option></select></form>
         <p id="gm-panel-characters-error" role="alert" hidden></p>

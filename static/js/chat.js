@@ -34,6 +34,13 @@ const TURN_URL_TEMPLATE = CHAT_CONFIG.turnUrlTemplate;
 const RUNNING_TURN = CHAT_CONFIG.runningTurn || null;
 const TURN_POLL_MS = typeof CHAT_CONFIG.turnPollMs === 'number' ? CHAT_CONFIG.turnPollMs : 2000;
 
+// The sidebar's session rail and the small screen's session menu
+// (gm/_session_rail_rows.html, gm/_session_menu_options.html), each the rows
+// of a session picker (issue #864), and a session's entry in the rail.
+const SESSION_LIST_ID = 'session-list';
+const SESSION_MENU_ID = 'mobile-session-select';
+const SESSION_ITEM_CLASS = 'session-item';
+
 // Assistant message content comes from the Ollama model, which is
 // influenceable via prompt injection in user-supplied text (issue #141).
 // marked.parse() passes raw HTML straight through, so every marked.parse()
@@ -490,6 +497,34 @@ function adoptSessionId(id, details) {
   url.searchParams.set('session', sessionId);
   history.replaceState(null, '', url);
   showNewSessionInRail(id, details);
+  pinSessionInPickers(id);
+}
+
+/**
+ * The session pickers on the page: the rail, and the small screen's menu.
+ * @returns {HTMLElement[]} their `[data-picker]` elements
+ */
+function sessionPickers() {
+  return [SESSION_LIST_ID, SESSION_MENU_ID]
+    .map((elementId) => document.getElementById(elementId))
+    .map((rows) => rows && rows.closest('[data-picker]'))
+    .filter(Boolean);
+}
+
+/**
+ * Name the open session in each session picker's address (gm/pickers.py's
+ * ``active``), so every page a picker asks for keeps it listed and marked
+ * open. The server names it when it renders the page; a session this page's
+ * first message made is named here, or a search of the rail, or the
+ * refetch after a delete (issue #15), would leave it out.
+ * @param {number} id - the open session
+ */
+function pinSessionInPickers(id) {
+  sessionPickers().forEach((picker) => {
+    const url = new URL(picker.dataset.pickerUrl, document.baseURI);
+    url.searchParams.set('active', String(id));
+    picker.dataset.pickerUrl = `${url.pathname}${url.search}`;
+  });
 }
 
 /**
@@ -507,13 +542,13 @@ function adoptSessionId(id, details) {
  *   for it and its creation instant, ISO-8601.
  */
 function showNewSessionInRail(id, details) {
-  const list = document.getElementById('session-list');
+  const list = document.getElementById(SESSION_LIST_ID);
   if (!list || list.querySelector(`[data-id="${id}"]`)) return;
   const name = (details && details.name) || 'New Session';
   const started = (details && details.started) || new Date().toISOString();
 
   const item = document.createElement('li');
-  item.className = 'session-item active';
+  item.className = `${SESSION_ITEM_CLASS} active`;
   item.dataset.id = String(id);
 
   const link = document.createElement('a');
@@ -1371,11 +1406,11 @@ const sessionNameField = document.getElementById('session-name');
 function applySessionName(id, name) {
   const key = String(id);
   const entry = document.querySelector(
-    `.session-item[data-id="${key}"] .session-name`,
+    `.${SESSION_ITEM_CLASS}[data-id="${key}"] .session-name`,
   );
   if (entry) entry.textContent = name;
   const option = document.querySelector(
-    `#mobile-session-select option[value="${key}"]`,
+    `#${SESSION_MENU_ID} option[value="${key}"]`,
   );
   if (option) {
     option.dataset.name = name;
@@ -1397,7 +1432,7 @@ function applySessionName(id, name) {
  */
 function mobileOptionLabel(option) {
   const railName = document.querySelector(
-    `.session-item[data-id="${option.value}"] .session-name`,
+    `.${SESSION_ITEM_CLASS}[data-id="${option.value}"] .session-name`,
   );
   const name = option.dataset.name
     || (railName && railName.textContent)
@@ -1428,11 +1463,11 @@ function refreshSessionAfterTurn(id, name, count) {
   }
   if (typeof count !== 'number') return;
   const counted = document.querySelector(
-    `.session-item[data-id="${key}"] .session-count`,
+    `.${SESSION_ITEM_CLASS}[data-id="${key}"] .session-count`,
   );
   if (counted) counted.textContent = `${count} msg${count === 1 ? '' : 's'}`;
   const option = document.querySelector(
-    `#mobile-session-select option[value="${key}"]`,
+    `#${SESSION_MENU_ID} option[value="${key}"]`,
   );
   if (option) {
     option.dataset.messageCount = String(count);
@@ -1548,11 +1583,43 @@ async function deleteSession(id, name, started) {
       // Deleted the active session — drop back to a blank chat.
       pageNavigation.go(window.location.pathname);
     } else {
-      pageNavigation.reload();
+      removeDeletedSession(id);
     }
   } catch (err) {
     uiNotify(`Delete failed: ${err.message}`);
   }
+}
+
+/**
+ * Take another session the reader deleted off the page, which otherwise
+ * stays as it is (issue #15): a reload threw away every earlier page of the
+ * chat and of the resolved threads the reader had loaded.
+ *
+ * Its entry leaves the rail and the menu at once, and each picker then asks
+ * the server again for the page it shows, so the page fills back up and its
+ * count is the server's. The line saying this session continues the deleted
+ * one goes, as the server no longer renders it (continued_from is cleared).
+ * The offer to continue a campaign is the one place the server chose the
+ * session, so an offer of the deleted one is asked for again by reloading;
+ * it is shown only on a page with no history, so nothing loaded is lost.
+ * @param {number} id - the deleted session
+ */
+function removeDeletedSession(id) {
+  const key = String(id);
+  const offered = document.querySelector('#gm-campaign-continue input[name="session_id"]');
+  if (offered && offered.value === key) {
+    pageNavigation.reload();
+    return;
+  }
+  const continued = document.getElementById('gm-session-continued');
+  if (continued && continued.dataset.continuedFrom === key) continued.remove();
+  document.querySelectorAll(
+    `.${SESSION_ITEM_CLASS}[data-id="${key}"], #${SESSION_MENU_ID} option[value="${key}"]`,
+  ).forEach((element) => element.remove());
+  if (!window.picker) return;
+  sessionPickers().forEach((picker) => {
+    window.picker.loadPage(picker, window.picker.shownPage(picker));
+  });
 }
 
 /**

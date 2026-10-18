@@ -66,6 +66,23 @@
         if (focusDirection) focusPager(picker, focusDirection);
     }
 
+    /**
+     * The page a picker shows, as the page to ask for again when what holds
+     * it is refetched (issue #16) or a row on it is deleted (issue #15): the
+     * page last loaded, while the search box still holds the search it was
+     * loaded for. A page of an earlier search is no page of the one typed
+     * since, so then the first; and a picker never paged shows the first.
+     *
+     * @param {HTMLElement} picker - The `[data-picker]` element.
+     * @returns {string}
+     */
+    function shownPage(picker) {
+        const search = picker.querySelector('[data-picker-search]');
+        const typed = search ? search.value.trim() : '';
+        const sameSearch = (picker.dataset.pickerShownQuery || '') === typed;
+        return sameSearch ? picker.dataset.pickerShownPage || '1' : '1';
+    }
+
     /** Write a failed search into the picker's status line, to stay. */
     function showFailure(picker, error) {
         const status = picker.querySelector('[data-picker-status]');
@@ -138,7 +155,9 @@
         initPickers(document);
     }
 
-    const api = { initPickers, initPicker, loadPage, SEARCH_DELAY_MS };
+    const api = {
+        initPickers, initPicker, loadPage, shownPage, SEARCH_DELAY_MS,
+    };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
     }
