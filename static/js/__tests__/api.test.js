@@ -491,17 +491,24 @@ describe('global publication', () => {
         // Consumer files (character-management.js, chat.js, autosave.js) and
         // inline template scripts call these as bare globals — base.html loads
         // api.js in <head> so the names exist before any of them parse.
-        expect(globalThis.csrfToken).toBe(csrfToken);
-        expect(globalThis.postWithCsrf).toBe(postWithCsrf);
-        expect(globalThis.postJson).toBe(postJson);
-        expect(globalThis.postForSuccess).toBe(postForSuccess);
-        expect(globalThis.bindCommitKeys).toBe(bindCommitKeys);
-        expect(globalThis.formatSigned).toBe(formatSigned);
-        expect(globalThis.showFieldError).toBe(showFieldError);
-        expect(globalThis.clearFieldError).toBe(clearFieldError);
-        expect(globalThis.uiNotify).toBe(uiNotify);
-        expect(globalThis.uiConfirm).toBe(uiConfirm);
-        expect(globalThis.uiPrompt).toBe(uiPrompt);
+        //
+        // Every load of api.js republishes the globals, and the pageNavigation
+        // test below loads it again in isolation, so the functions imported at
+        // the top of this file are the globals only when this test happens to
+        // run first. Load it here and compare with that load's own exports, so
+        // the answer does not depend on the order the tests run in.
+        let loaded;
+        jest.isolateModules(() => {
+            loaded = require('../api.js');
+        });
+        for (const name of [
+            'csrfToken', 'postWithCsrf', 'postJson', 'postForSuccess', 'bindCommitKeys',
+            'formatSigned', 'showFieldError', 'clearFieldError', 'uiNotify', 'uiConfirm',
+            'uiPrompt',
+        ]) {
+            expect(typeof loaded[name]).toBe('function');
+            expect(globalThis[name]).toBe(loaded[name]);
+        }
     });
 });
 
