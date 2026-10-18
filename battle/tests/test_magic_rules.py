@@ -38,7 +38,11 @@ from reference.paths import (
     DM_RULES_DIR,
     MAGIC_RULES_FILE,
 )
-from reference.rules_file import RulesFileError
+from reference.rules_file import (
+    BLOCK_PLACEHOLDER,
+    UNKNOWN_BLOCK_EXPLANATION,
+    RulesFileError,
+)
 
 # A complete file with invented numbers: every field present, both kinds of
 # Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell,
@@ -643,6 +647,20 @@ class MalformedMagicRulesTest(MagicRulesFileTestCase):
                 rules = invented_rules()
                 malform(rules)
                 self.assert_refused(rules, field_path)
+
+    def test_a_block_this_studio_does_not_read_says_the_canon_is_ahead(
+        self,
+    ) -> None:
+        # Issue #36: a canon carried counterspell before the studio read it,
+        # and the refusal sent the reader to migrations. It names the block
+        # and what it likely means.
+        rules = invented_rules()
+        rules["shieldwall"] = {"strength": 3}
+        refusal = self.assert_refused(rules, "shieldwall is not a field")
+        self.assertIn(
+            UNKNOWN_BLOCK_EXPLANATION.replace(BLOCK_PLACEHOLDER, "shieldwall"),
+            str(refusal),
+        )
 
 
 class EngineValidationTest(MagicRulesFileTestCase):

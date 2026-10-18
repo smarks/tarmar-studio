@@ -12,7 +12,10 @@ canon author's mistake stops the server instead of becoming a quiet default:
 - a key repeated in one object is refused (``json.loads`` alone keeps the
   last and drops the first without a word);
 - an object must carry every field its schema requires and nothing else,
-  since an unknown key is most likely a misspelling of a known one;
+  since an unknown key is most likely a misspelling of a known one; at the
+  top level, where each field is a block, the refusal adds that the canon may
+  carry a block this studio does not read yet (issue #36), in wording read
+  from ``config/unknown-canon-block.txt``;
 - integers and numbers are not booleans, texts are not empty, and a list
   that stands for a set repeats nothing;
 - every file may carry an optional top-level ``rulings`` list, the canon's
@@ -46,7 +49,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar, NoReturn, Protocol
 
+from common.config_text import config_lines
 from common.json_text import parse_json_text
+from reference.paths import CONFIG_DIR
 
 #: The optional top-level field every rules file may carry (see above).
 RULINGS_FIELD = "rulings"
@@ -126,6 +131,54 @@ class RulesFileError(Exception):
     pull Django into this module, and not a ``ValueError``, which
     :meth:`RulesFileReader.wrapped_value_errors` would wrap a second time.
     """
+
+
+#: What a refusal of an unknown top-level block adds after "is not a field
+#: this file takes" (issue #36): configuration, since it is wording someone
+#: may change with no Python.
+UNKNOWN_BLOCK_EXPLANATION_FILE = CONFIG_DIR / "unknown-canon-block.txt"
+#: Where :data:`UNKNOWN_BLOCK_EXPLANATION` names the block it is about.
+BLOCK_PLACEHOLDER = "{block}"
+
+
+def unknown_block_explanation(path: Path) -> str:
+    """The text a refusal of an unknown top-level block adds, read from ``path``.
+
+    A rules file's top-level fields are its blocks, one per mechanic. An
+    unknown one is seldom a typo: it is usually a canon that has moved ahead
+    of the studio reading it, a block merged in the canon before the studio
+    commit that reads it (seen 2026-10-14 with ``counterspell``, which failed
+    the gate at its migration check with nothing pointing at the canon).
+
+    Args:
+        path: The configuration file; its content lines, joined with single
+            spaces, are the text, with :data:`BLOCK_PLACEHOLDER` where the
+            block's name goes.
+
+    Returns:
+        The text, placeholder and all.
+
+    Raises:
+        RulesFileError: The file cannot be read or holds only blank lines
+            and comments, so the module that every canon rules file is read
+            through stops at import rather than at a refusal.
+    """
+    try:
+        lines = config_lines(path)
+    except OSError as error:
+        raise RulesFileError(
+            f"{path} cannot be read ({error}); a refusal of an unknown canon "
+            "block needs its explanation (issue #36)"
+        ) from error
+    if not lines:
+        raise RulesFileError(
+            f"{path} holds no explanation: every line is blank or a comment (issue #36)"
+        )
+    return " ".join(lines)
+
+
+#: Read once, when this module loads (see :func:`unknown_block_explanation`).
+UNKNOWN_BLOCK_EXPLANATION = unknown_block_explanation(UNKNOWN_BLOCK_EXPLANATION_FILE)
 
 
 def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -250,7 +303,11 @@ class RulesFileReader:
         if not isinstance(value, dict):
             self.fail("the file", f"must hold a JSON object, got {value!r}")
         fields = self.json_object(
-            value, "", required_fields, (*optional_fields, RULINGS_FIELD)
+            value,
+            "",
+            required_fields,
+            (*optional_fields, RULINGS_FIELD),
+            whole_file=True,
         )
         if RULINGS_FIELD in fields:
             self.rulings(fields[RULINGS_FIELD], RULINGS_FIELD)
@@ -262,14 +319,35 @@ class RulesFileReader:
         field_path: str,
         required_fields: tuple[str, ...],
         optional_fields: tuple[str, ...] = (),
+        *,
+        whole_file: bool = False,
     ) -> dict[str, Any]:
-        """An object carrying every required field and nothing unknown."""
+        """An object carrying every required field and nothing unknown.
+
+        Args:
+            value: The parsed JSON value.
+            field_path: Where the object is in the file; ``""`` at the top.
+            required_fields: The fields it must carry.
+            optional_fields: The fields it may carry as well.
+            whole_file: The object is the file itself, as :meth:`file_object`
+                reads it, so each field is a block and an unknown one is
+                refused with :data:`UNKNOWN_BLOCK_EXPLANATION` (issue #36).
+
+        Returns:
+            ``value``, checked.
+        """
         if not isinstance(value, dict):
             self.fail(field_path, f"must be an object, got {value!r}")
         prefix = f"{field_path}." if field_path else ""
         for name in value:
             if name not in required_fields and name not in optional_fields:
-                self.fail(f"{prefix}{name}", "is not a field this file takes")
+                problem = "is not a field this file takes"
+                if whole_file:
+                    explanation = UNKNOWN_BLOCK_EXPLANATION.replace(
+                        BLOCK_PLACEHOLDER, name
+                    )
+                    problem = f"{problem}; {explanation}"
+                self.fail(f"{prefix}{name}", problem)
         for name in required_fields:
             if name not in value:
                 self.fail(f"{prefix}{name}", "is missing")

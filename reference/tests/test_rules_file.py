@@ -15,7 +15,14 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from reference.rules_file import RulesFileError, RulesFileReader
+from reference.rules_file import (
+    BLOCK_PLACEHOLDER,
+    UNKNOWN_BLOCK_EXPLANATION,
+    UNKNOWN_BLOCK_EXPLANATION_FILE,
+    RulesFileError,
+    RulesFileReader,
+    unknown_block_explanation,
+)
 
 
 class InventedRulesError(RulesFileError):
@@ -216,6 +223,29 @@ class RulesFileReaderTest(SimpleTestCase):
     def test_an_unknown_key_is_refused(self) -> None:
         self.assert_refused(invented_file(cieling=18), "cieling", "not a field")
 
+    def test_an_unknown_top_level_block_says_the_canon_is_ahead(self) -> None:
+        # Issue #36: a block the studio does not read yet is the usual cause,
+        # so the refusal says so, naming the block, from the configured text.
+        self.assert_refused(
+            invented_file(counterspell={}),
+            "counterspell is not a field this file takes; "
+            + UNKNOWN_BLOCK_EXPLANATION.replace(BLOCK_PLACEHOLDER, "counterspell"),
+        )
+
+    def test_an_unknown_key_inside_a_block_is_refused_without_that_text(
+        self,
+    ) -> None:
+        # Below the top level an unknown name is a misspelling, not a block.
+        contents = invented_file()
+        contents["stages"][0]["yeers"] = 10
+        with self.assertRaises(InventedRulesError) as caught:
+            self.load(self.write_text(json.dumps(contents)))
+        self.assertTrue(
+            str(caught.exception).endswith(
+                "stages[0].yeers is not a field this file takes"
+            )
+        )
+
     def test_a_missing_field_is_refused(self) -> None:
         contents = invented_file()
         del contents["stages"][1]["years"]
@@ -315,3 +345,40 @@ class RulesFileReaderTest(SimpleTestCase):
         self.assert_refused(
             invented_file(stages=stages), "stages[0]:", "at least a year, got 0"
         )
+
+
+class UnknownBlockExplanationTest(SimpleTestCase):
+    """The configured text a refusal of an unknown block adds (issue #36)."""
+
+    def setUp(self) -> None:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.config_file = directory / "unknown-canon-block.txt"
+
+    def test_the_shipped_text_is_the_file_s_and_names_the_block(self) -> None:
+        self.assertEqual(
+            UNKNOWN_BLOCK_EXPLANATION,
+            unknown_block_explanation(UNKNOWN_BLOCK_EXPLANATION_FILE),
+        )
+        self.assertIn(BLOCK_PLACEHOLDER, UNKNOWN_BLOCK_EXPLANATION)
+
+    def test_comments_are_dropped_and_wrapped_lines_joined(self) -> None:
+        self.config_file.write_text(
+            "# a header\n\nthe canon carries ({block})\n  ahead of the studio\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            unknown_block_explanation(self.config_file),
+            "the canon carries ({block}) ahead of the studio",
+        )
+
+    def test_a_missing_file_is_refused_naming_it(self) -> None:
+        with self.assertRaises(RulesFileError) as caught:
+            unknown_block_explanation(self.config_file)
+        self.assertIn(str(self.config_file), str(caught.exception))
+        self.assertIsInstance(caught.exception.__cause__, FileNotFoundError)
+
+    def test_a_file_of_only_comments_is_refused(self) -> None:
+        self.config_file.write_text("# nothing else\n\n", encoding="utf-8")
+        with self.assertRaises(RulesFileError) as caught:
+            unknown_block_explanation(self.config_file)
+        self.assertIn("holds no explanation", str(caught.exception))

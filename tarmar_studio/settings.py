@@ -48,6 +48,7 @@ from common.services import ollama_client  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
 from reference.paths import (  # noqa: E402
     CANON_NAME,
+    CONFIG_DIR,
     PUBLIC_RULES_DIR,
     warn_if_production_lacks_its_canon,
 )
@@ -148,8 +149,11 @@ GATE_PASSPHRASE = normalize_passphrase(_configured_gate_passphrase)
 # taken from the checkout root, not from whatever directory the process was
 # started in; an absolute value wins outright, because joining a Path with an
 # absolute right-hand side yields that absolute path.
-GATE_HINTS_FILE = BASE_DIR / (
-    os.environ.get("GATE_HINTS_FILE") or "config/gate-hints.txt"
+_configured_gate_hints_file = os.environ.get("GATE_HINTS_FILE")
+GATE_HINTS_FILE = (
+    BASE_DIR / _configured_gate_hints_file
+    if _configured_gate_hints_file
+    else CONFIG_DIR / "gate-hints.txt"
 )
 GATE_HINTS = load_gate_hints(GATE_HINTS_FILE)
 

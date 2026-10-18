@@ -11,7 +11,11 @@ directory, so they exercise the git plumbing the gate actually runs rather than
 a stand-in for it.
 """
 
+import os
+import signal
 import subprocess
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -370,6 +374,164 @@ def test_the_first_failing_step_stops_the_run_and_records_nothing(
     assert status == 3
     assert not (checkout / "ran-later").exists()
     assert note_on(checkout, gate.head_commit_sha(checkout)) is None
+
+
+def test_a_failing_step_s_report_repeats_the_end_of_its_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #36: the report names what failed, not only the exit code.
+
+    The stub fails as makemigrations did on an unknown canon block: more
+    output than the report keeps, and the refusal itself last, on stderr.
+    """
+    checkout, _ = make_repository_with_remote(tmp_path)
+    commit_sha = gate.head_commit_sha(checkout)
+    early_lines = gate.FAILED_STEP_TAIL_LINES
+    refusal = "magic-rules.json: shieldwall is not a field this file takes"
+    script = (
+        f'for number in $(seq 1 {early_lines}); do echo "progress $number"; done; '
+        f'echo "{refusal}" >&2; exit 1'
+    )
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        lambda *, e2e_port, default_canon_e2e_port: [
+            gate.GateStep("makemigrations", ["bash", "-c", script])
+        ],
+    )
+
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
+
+    assert status == 1
+    printed = capsys.readouterr().out
+    # The whole output still goes to the log as the step runs ...
+    assert "progress 1\n" in printed
+    # ... and the report after the exit code repeats its end: the refusal and
+    # the lines before it, as many as the report keeps, and no more.
+    assert "[gate] makemigrations failed (exit 1) after " in printed
+    summary_end = f"; nothing recorded for {commit_sha}. The end of its output:\n"
+    assert summary_end in printed
+    report = printed.split(summary_end, 1)[1].splitlines()
+    assert report == [
+        *(f"  progress {number}" for number in range(2, early_lines + 1)),
+        f"  {refusal}",
+    ]
+    assert note_on(checkout, commit_sha) is None
+
+
+def test_a_failing_step_that_printed_nothing_says_so(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        lambda *, e2e_port, default_canon_e2e_port: [
+            gate.GateStep("silent", ["bash", "-c", "exit 2"])
+        ],
+    )
+
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
+
+    assert status == 2
+    assert capsys.readouterr().out.rstrip().endswith("; it printed nothing")
+
+
+def test_a_python_step_s_output_arrives_in_the_order_it_was_written(
+    tmp_path: Path,
+) -> None:
+    # Through a pipe Python block-buffers stdout but not stderr, so without
+    # the gate's PYTHONUNBUFFERED the stderr line would come out first.
+    environment = {
+        name: value for name, value in os.environ.items() if name != "PYTHONUNBUFFERED"
+    }
+    script = "import sys; print('first'); print('second', file=sys.stderr)"
+    step = gate.GateStep("python", [sys.executable, "-c", script])
+
+    result = gate.run_step(step, repository_root=tmp_path, environment=environment)
+
+    assert result.output_tail == ("first", "second")
+
+
+def test_an_interrupted_step_s_remaining_output_is_still_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Ctrl-C reaches the step too; what it prints while it stops must still be
+    # read and shown, not left in a pipe nobody reads.
+    echoed: list[str] = []
+
+    def interrupted_at_the_first_line(line: str, **kwargs: object) -> None:
+        """Stand in for print; Ctrl-C arrives as the first line is shown."""
+        echoed.append(line)
+        if len(echoed) == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(gate, "print", interrupted_at_the_first_line, raising=False)
+    step = gate.GateStep(
+        "interrupted", ["bash", "-c", "echo running; echo stopping; echo stopped"]
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        gate.run_step(step, repository_root=tmp_path, environment=dict(os.environ))
+
+    assert echoed == ["running", "stopping", "stopped"]
+
+
+def test_a_background_process_holding_the_output_does_not_hold_the_gate(
+    tmp_path: Path,
+) -> None:
+    # The step exits, but a process it left running shares its output and
+    # would keep the pipe open for thirty seconds.
+    step = gate.GateStep(
+        "leaves a sleeper",
+        ["bash", "-c", "echo started; sleep 30 & echo $!; exit 0"],
+    )
+    started = time.monotonic()
+
+    result = gate.run_step(step, repository_root=tmp_path, environment=dict(os.environ))
+
+    elapsed = time.monotonic() - started
+    started_line, sleeper = result.output_tail
+    os.kill(int(sleeper), signal.SIGTERM)
+    assert started_line == "started"
+    assert result.passed
+    # Well short of the sleeper's thirty seconds: the grace, a check
+    # interval, and room for a loaded machine.
+    assert elapsed < gate.STRAY_OUTPUT_GRACE_SECONDS + gate.STEP_EXIT_CHECK_SECONDS + 5
+
+
+def test_a_background_process_that_keeps_printing_is_cut_off_at_the_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A leftover that prints more often than the grace never lets the pipe go
+    # quiet; the cap, counted from the step's exit, stops the reading anyway.
+    monkeypatch.setattr(gate, "STRAY_OUTPUT_CAP_SECONDS", 1.0)
+    pid_file = tmp_path / "leftover.pid"
+    script = (
+        "echo started; (while true; do echo tick; sleep 0.2; done) & "
+        f"echo $! > {pid_file}; exit 0"
+    )
+    step = gate.GateStep("leaves a chatty loop", ["bash", "-c", script])
+    started = time.monotonic()
+
+    result = gate.run_step(step, repository_root=tmp_path, environment=dict(os.environ))
+
+    elapsed = time.monotonic() - started
+    os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGTERM)
+    assert result.passed
+    assert result.output_tail[0] == "started"
+    assert "tick" in result.output_tail
+    # The loop would print until killed; the cap, a check interval and room
+    # for a loaded machine bound the wait instead.
+    assert elapsed < 1.0 + gate.STEP_EXIT_CHECK_SECONDS + 5
 
 
 def test_a_tree_changed_by_the_suites_is_not_recorded(
