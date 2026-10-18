@@ -20,6 +20,15 @@ let loaded = null;
  * ``characters.rules.character_rules()`` and, for the aging rate,
  * ``characters.skill_rules.skill_rules()``.
  *
+ * ``literacy_range`` is the lowest and highest total the literacy dice can
+ * roll (``LiteracyRollRules.minimum`` and ``maximum``), as the server bounds
+ * a stored roll.
+ *
+ * ``origins`` lists the location table's rows in order: each origin's label,
+ * its literacy ``modifier`` (``null`` where the Game Master decides, so there
+ * is no check to roll) and the ``check`` the sheet prints for it
+ * (``Character.location_literacy_check``).
+ *
  * ``fatigue.formula`` and ``fatigue.help_formula`` are the sum as the sheet's
  * formula cell and its help write it
  * (``characters.rules.FatigueRollRules.formula``).
@@ -35,6 +44,7 @@ function loadedCharacterRules() {
     loaded = readDjangoJson(`
 import json
 from characters.constants import CORE_ATTRIBUTE_FIELDS
+from characters.models import Character
 from characters.rules import character_rules
 from characters.skill_rules import MENTAL_AGING_ATTRIBUTES, PHYSICAL_AGING_ATTRIBUTES, skill_rules
 from characters.views.characters import aging_preview_horizon_age
@@ -55,6 +65,15 @@ print("CHARACTER_RULES " + json.dumps({
         "help_formula": rules.fatigue_roll.formula("fatigue roll"),
     },
     "literacy_dice": rules.literacy_roll.dice,
+    "literacy_range": [rules.literacy_roll.minimum, rules.literacy_roll.maximum],
+    "origins": [
+        {
+            "label": row.label,
+            "modifier": row.literacy_modifier,
+            "check": Character(location=row.label).location_literacy_check,
+        }
+        for row in rules.location.rows
+    ],
     "aging": {
         "horizon_age": aging_preview_horizon_age(),
         "stage_years_words": number_in_words(stage_years),
@@ -67,4 +86,20 @@ print("CHARACTER_RULES " + json.dumps({
     return loaded;
 }
 
-module.exports = { loadedCharacterRules };
+/**
+ * The origin the loaded canon's location table gives a percentile roll.
+ *
+ * Read through the server's own lookup (``LocationTable.row_for``), so a spec
+ * that pins a roll's face does not search the table's thresholds itself.
+ * @param {number} face - A d100 result, 1 to 100.
+ * @returns {string} The origin's label.
+ */
+function originForPercentile(face) {
+    return readDjangoJson(`
+import json
+from characters.rules import character_rules
+print("ORIGIN " + json.dumps(character_rules().location.row_for(${Number(face)}).label))
+`, 'ORIGIN');
+}
+
+module.exports = { loadedCharacterRules, originForPercentile };
