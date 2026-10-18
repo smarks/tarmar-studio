@@ -19,6 +19,7 @@ from django.test import SimpleTestCase
 from common.css_contrast import (
     DECORATIVE_COMPONENTS,
     audit_conditionals,
+    audit_faded,
     audit_text_on_ground,
     audit_theme,
     colour_literals,
@@ -841,15 +842,20 @@ class ConditionalBlocksAreAuditedTest(SimpleTestCase):
     def test_the_live_sheets_really_do_have_layers_to_audit(self):
         """Guards the tests above: no blocks would make them vacuous.
 
-        base.css's own three blocks move layout and nothing else, so what they
-        change is legitimately empty and asserting otherwise would only pin a
-        fact about base.css that is not the audit's doing. Both facts are
-        stated: the blocks exist, and across every sheet the site loads two
-        components are painted inside a block and reported from it.
+        base.css's own three blocks move layout, and set one text colour: the
+        stacked table's cell labels. Text that paints no ground is read in a
+        block since #49, so that label is reported from it (and passes). Both
+        facts are stated: the blocks exist, and across every sheet the site
+        loads components are painted inside a block and reported from it.
         """
         base = stylesheet("base.css")
         self.assertGreater(len(conditional_layers(base)), 0)
-        self.assertEqual(audit_conditionals(base, "", "tarmar"), [])
+        reported = audit_conditionals(base, "", "tarmar")
+        self.assertEqual(
+            [pairing.selector for pairing in reported],
+            ["table.table-stack td[data-label]::before"],
+        )
+        self.assertTrue(all(pairing.passes for pairing in reported))
 
         theme_sheets = {
             Path(theme.stylesheet).name for theme in THEMES.values() if theme.stylesheet
@@ -905,3 +911,249 @@ class ConditionalBlocksAreAuditedTest(SimpleTestCase):
 
         self.assertEqual([pairing.selector for pairing in unreadable], [".card"])
         self.assertIn("max-width: 600px", unreadable[0].theme)
+
+
+class AFadedElementIsMeasuredAsBlendedTest(SimpleTestCase):
+    """``opacity`` fades text towards its ground, so the audit must see it (#49).
+
+    ``.combatant-card.is-down { opacity: 0.55 }`` took a card's text from
+    about 5.4:1 to about 2.3:1 and the audit, which read colours only, stayed
+    green. Each test here states the page it audits, so the fade is the only
+    thing that can make it fail.
+    """
+
+    PAGE = "body { background: #ffffff; color: #333333; }\n"
+
+    def _blended(self, foreground: str, backdrop: str, opacity: float) -> float:
+        """The issue's formula, worked per channel in the test, not imported."""
+        channels = []
+        for start in (1, 3, 5):
+            over = int(foreground[start : start + 2], 16)
+            under = int(backdrop[start : start + 2], 16)
+            channels.append(int(under + (over - under) * opacity + 0.5))
+        return contrast_ratio(
+            "#" + "".join(f"{value:02x}" for value in channels), backdrop
+        )
+
+    def test_a_faded_rule_that_drops_text_below_aa_fails(self):
+        sheet = self.PAGE + ".note { opacity: 0.4; }"
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([pairing.selector for pairing in unreadable], [".note"])
+        self.assertAlmostEqual(
+            unreadable[0].ratio, self._blended("#333333", "#ffffff", 0.4), places=2
+        )
+        self.assertLess(unreadable[0].ratio, 4.5)
+        self.assertIn("opacity 0.4", str(unreadable[0]))
+
+    def test_the_same_rule_at_opacity_one_is_unchanged(self):
+        sheet = self.PAGE + ".note { opacity: 1; }"
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+        self.assertEqual(audit_faded(sheet), [])
+
+    def test_a_rule_with_no_opacity_is_measured_exactly_as_before(self):
+        sheet = self.PAGE + ".note { color: #777777; }"
+
+        (pairing,) = [
+            found for found in audit_text_on_ground(sheet) if found.selector == ".note"
+        ]
+
+        self.assertEqual(pairing.opacity, 1.0)
+        self.assertAlmostEqual(pairing.ratio, contrast_ratio("#777777", "#ffffff"))
+
+    def test_a_mild_fade_that_still_clears_aa_passes(self):
+        sheet = self.PAGE + ".note { opacity: 0.8; }"
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+        self.assertEqual(
+            [pairing.selector for pairing in audit_faded(sheet)], [".note"]
+        )
+
+    def test_a_percentage_opacity_is_read(self):
+        sheet = self.PAGE + ".note { opacity: 40%; }"
+
+        self.assertEqual([p.selector for p in failures(sheet, "", "tarmar")], [".note"])
+
+    def test_a_painted_component_fades_its_ground_with_its_text(self):
+        """White on black at half opacity is white on #808080, not on black."""
+        sheet = (
+            self.PAGE + ".panel { background: #000000; color: #ffffff; opacity: 0.5; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([pairing.selector for pairing in unreadable], [".panel"])
+        self.assertAlmostEqual(
+            unreadable[0].ratio, contrast_ratio("#ffffff", "#808080"), places=2
+        )
+
+    def test_the_card_that_motivated_the_issue_fails(self):
+        """A modifier that only fades is the component it modifies, faded."""
+        sheet = (
+            self.PAGE
+            + ".card { background: #ffffff; color: #333333; }\n"
+            + ".card.is-down { opacity: 0.2; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".card.is-down"])
+
+    def test_opacities_compose_down_through_nested_elements(self):
+        """0.8 alone clears AA; 0.8 inside 0.8 (0.64) does not."""
+        alone = self.PAGE + ".inner { opacity: 0.8; }"
+        nested = self.PAGE + ".outer { opacity: 0.8; }\n.outer .inner { opacity: 0.8; }"
+
+        self.assertEqual(failures(alone, "", "tarmar"), [])
+        unreadable = failures(nested, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".outer .inner"])
+        self.assertAlmostEqual(unreadable[0].opacity, 0.64)
+
+    def test_text_inside_a_faded_modifier_is_faded_with_it(self):
+        """The rename note on the downed card, not the card, was the 2.25:1."""
+        sheet = (
+            self.PAGE
+            + ".row { background: #ffffff; }\n"
+            + ".row .weight { color: #666666; }\n"
+            + ".row.dropped { opacity: 0.5; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertIn(".row.dropped .weight", [p.selector for p in unreadable])
+
+    def test_a_disabled_control_may_be_faded(self):
+        """WCAG 1.4.3 exempts inactive components, as the rest of the audit does."""
+        sheet = self.PAGE + "button:disabled { opacity: 0.3; }"
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+
+    def test_a_fade_inside_a_media_block_is_reported_under_that_block(self):
+        sheet = self.PAGE + "@media (max-width: 600px) { .note { opacity: 0.4; } }"
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".note"])
+        self.assertIn("max-width: 600px", unreadable[0].theme)
+
+    def test_the_live_sheets_have_faded_rules_to_measure(self):
+        """Guards the guard: no faded pairings at all would be a silent pass."""
+        every_sheet = "\n".join(stylesheet(name) for name in stylesheet_names())
+
+        faded = {pairing.selector for pairing in audit_faded(every_sheet)}
+
+        self.assertIn(".beast-meta", faded)
+
+    def test_a_faded_element_inside_a_faded_painted_ancestor_is_faded_once_each(self):
+        """The inner group lands on the outer ground unfaded; the outer fades it.
+
+        White page, ``.outer`` black at 0.7, ``.inner`` white text at 0.6. A
+        browser paints the text as 255 * 0.6 = 153 over black, then fades that
+        against the white page: 255 + (153 - 255) * 0.7 = 183.6 -> #b8b8b8. The
+        black ground fades once: 255 + (0 - 255) * 0.7 = 76.5 -> #4d4d4d. The
+        ratio is 4.2-ish, below AA; fading the ground twice reported 5.40:1.
+        """
+        sheet = (
+            self.PAGE
+            + ".outer { background: #000000; opacity: 0.7; }\n"
+            + ".outer .inner { color: #ffffff; opacity: 0.6; }"
+        )
+
+        (inner,) = [p for p in failures(sheet, "", "tarmar") if "inner" in p.selector]
+
+        self.assertAlmostEqual(
+            inner.ratio, contrast_ratio("#b8b8b8", "#4d4d4d"), places=2
+        )
+        self.assertLess(inner.ratio, 4.5)
+        self.assertEqual(inner.background, "#000000")
+        self.assertAlmostEqual(inner.opacity, 0.42)
+
+    def test_text_that_paints_nothing_is_faded_with_the_ground_it_stands_on(self):
+        """A bare ``.inner`` on a faded ``.outer`` sees ``.outer``'s ground once."""
+        sheet = (
+            self.PAGE
+            + ".outer { background: #000000; color: #ffffff; opacity: 0.7; }\n"
+            + ".outer .inner { color: #ffffff; }"
+        )
+
+        (inner,) = [p for p in audit_text_on_ground(sheet) if "inner" in p.selector]
+
+        self.assertAlmostEqual(
+            inner.ratio, contrast_ratio("#ffffff", "#4d4d4d"), places=2
+        )
+
+    def test_a_media_block_that_only_fades_a_text_colour_rule_is_audited(self):
+        sheet = (
+            self.PAGE
+            + ".note { color: #555555; }\n"
+            + "@media (max-width: 600px) { .note { opacity: 0.4; } }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".note"])
+        self.assertIn("max-width: 600px", unreadable[0].theme)
+        self.assertLess(unreadable[0].ratio, 2.5)
+
+    def test_a_media_block_that_only_recolours_a_text_colour_rule_is_audited(self):
+        sheet = (
+            self.PAGE
+            + ".chip { color: #555555; }\n"
+            + "@media (max-width: 600px) { .chip { color: #bbbbbb; } }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".chip"])
+        self.assertIn("max-width: 600px", unreadable[0].theme)
+
+    def test_a_state_rule_inside_a_faded_modifier_is_faded_with_it(self):
+        sheet = (
+            self.PAGE
+            + ".row { background: #ffffff; }\n"
+            + ".row .action:hover { color: #666666; }\n"
+            + ".row.dropped { opacity: 0.5; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertIn(".row.dropped .action:hover", [p.selector for p in unreadable])
+
+    def test_a_descendant_that_only_fades_is_measured_inside_a_faded_modifier(self):
+        sheet = (
+            self.PAGE
+            + ".row { background: #ffffff; }\n"
+            + ".row .hint { opacity: 0.9; }\n"
+            + ".row.dropped { opacity: 0.5; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertIn(".row.dropped .hint", [p.selector for p in unreadable])
+
+    def test_a_descendant_reports_the_ground_it_was_measured_on(self):
+        sheet = (
+            self.PAGE
+            + ".row { background: #ffffff; }\n"
+            + ".row .weight { color: #666666; }\n"
+            + ".row.dropped { opacity: 0.5; background: #f5f5f5; }"
+        )
+
+        (weight,) = [
+            p for p in audit_faded(sheet) if p.selector == ".row.dropped .weight"
+        ]
+
+        self.assertEqual(weight.background, "#f5f5f5")
+
+    def test_important_does_not_hide_a_fade(self):
+        sheet = self.PAGE + ".note { opacity: 0.4 !important; }"
+
+        self.assertEqual([p.selector for p in failures(sheet, "", "tarmar")], [".note"])
+
+    def test_fully_transparent_text_is_invisible_not_a_failure(self):
+        sheet = self.PAGE + ".hidden { color: #333333; opacity: 0; }"
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
