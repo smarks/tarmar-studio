@@ -11,7 +11,9 @@
  * character-edit.js writes it. A reload used to be the only way to see it.
  */
 
-const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const {
+    test, expect, loginAs, TEST_USER, TEST_ADMIN, escaped,
+} = require('./fixtures');
 const { readDjangoShell } = require('./django');
 const { pinDice } = require('./dice');
 const {
@@ -472,7 +474,7 @@ print('CHARACTER', character.pk)
         await expect(page).toHaveTitle(newName);
         await expect(page.locator('.breadcrumb [aria-current="page"]')).toHaveText(newName);
         await expect(page.locator('#roll-survival-save-btn')).toHaveAttribute(
-            'data-confirm', new RegExp(`^Roll ${newName}'s survival save\\?`));
+            'data-confirm', new RegExp(`^Roll ${escaped(newName)}'s survival save\\?`));
         await expect(page.locator('#sessions-holding [data-name-chrome]').first()).toHaveText(newName);
         // The slot's own label; the session picker's search box carries a
         // second, screen-reader label beside it (#973).

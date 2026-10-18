@@ -12,7 +12,7 @@
  * Sprint, carried out in Final Movement instead (turn-sequence.md).
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 
 /**
  * Start a two-duelist battle played by hand and stop at the first figure.
@@ -43,7 +43,7 @@ async function firstManualTurn(page, label) {
 async function choose(page, name) {
     const panel = page.locator('#turn-panel');
     const option = panel.locator('.turn-option').filter({
-        has: page.locator('.turn-option-name', { hasText: new RegExp(`^${name.replace(/[()]/g, '\\$&')}$`) }),
+        has: page.locator('.turn-option-name', { hasText: new RegExp(`^${escaped(name)}$`) }),
     });
     await expect(option).toHaveCount(1);
     await option.click();

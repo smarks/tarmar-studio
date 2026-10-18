@@ -13,10 +13,15 @@
  * pointer at any step, from arriving at the panel to the turn committing.
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const {
+    test, expect, createBattleViaSetup, escaped,
+} = require('./fixtures');
 
 const focusKeyOfActiveElement = (page) =>
     page.evaluate(() => (document.activeElement || {}).dataset?.focusKey || null);
+
+/** A pattern matching `text` and nothing longer, so "Duel 1" is not "Duel 10". */
+const exactly = (text) => new RegExp(`^\\s*${escaped(text)}\\s*$`);
 
 test.describe('Taking a turn from the keyboard', () => {
     test('a selection keeps focus, and the whole turn is reachable by Tab',
@@ -61,6 +66,9 @@ test.describe('Taking a turn from the keyboard', () => {
             // the confirm button is a short walk from the option in hand
             // rather than a walk from <body> through the whole menu.
             const turnGroup = adminPage.locator('.turn-group[data-turn="1"]');
+            const actPath = new URL(
+                await panel.getAttribute('data-act-url'), adminPage.url()
+            ).pathname;
             for (let pause = 0; pause < 6; pause += 1) {
                 if (await turnGroup.count()) { break; }
                 await expect(panel.locator('.turn-prompt')).toBeVisible();
@@ -75,18 +83,25 @@ test.describe('Taking a turn from the keyboard', () => {
                 expect(await focusKeyOfActiveElement(adminPage)).toBe('option-0');
                 await expect(panel.locator('.turn-confirm')).toBeEnabled();
                 await panel.locator('.turn-confirm').focus();
+                const answered = adminPage.waitForResponse((response) => (
+                    response.request().method() === 'POST'
+                    && new URL(response.url()).pathname === actPath
+                ));
                 await adminPage.keyboard.press('Enter');
-                // Wait for the server's answer before reading the panel
-                // again: either the turn committed, or it paused on the
-                // next figure. While the action is in flight the confirm
-                // button is disabled, which is not the same thing.
-                await expect(async () => {
-                    const committed = (await turnGroup.count()) > 0;
-                    const prompt = panel.locator('.turn-prompt strong');
-                    const movedOn = (await prompt.count()) > 0
-                        && (await prompt.textContent()).trim() !== awaited;
-                    expect(committed || movedOn).toBe(true);
-                }).toPass({ timeout: 20000 });
+                // Wait for the server's answer, then for the page to show
+                // it: either the turn committed, or it paused on the next
+                // figure. While the action is in flight the confirm button
+                // is disabled, which is not the same thing.
+                //
+                // One locator, asked in one query, says which (#9). Reading
+                // the prompt's count and then its text was two queries: an
+                // answer that committed the turn in between emptied the
+                // panel, and the text read then waited for a prompt that
+                // never came back, for as long as the wait allowed.
+                await answered;
+                const nextFigure = panel.locator('.turn-prompt strong')
+                    .filter({ hasNotText: exactly(awaited) });
+                await expect(turnGroup.or(nextFigure).first()).toBeVisible();
             }
 
             await expect(turnGroup).toBeVisible();

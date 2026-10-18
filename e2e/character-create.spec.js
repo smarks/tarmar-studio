@@ -12,7 +12,9 @@
  * the Tarmar canon's file states too today.
  */
 
-const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const {
+    test, expect, loginAs, TEST_USER, TEST_ADMIN, escaped,
+} = require('./fixtures');
 const { readDjangoShell } = require('./django');
 
 const CREATE_URL = '/tarmar/characters/create/';
@@ -294,14 +296,6 @@ function logLine(diceLog, pattern) {
     const match = diceLog.match(pattern);
     expect(match, `the dice log has a line matching ${pattern}`).not.toBeNull();
     return match;
-}
-
-/**
- * A pattern for a regular-expression-safe piece of text.
- * @param {string} text
- */
-function escaped(text) {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

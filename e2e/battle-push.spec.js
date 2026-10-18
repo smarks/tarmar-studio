@@ -250,16 +250,18 @@ async function claimAWizard(page, seed) {
 async function bothChoose(players) {
     const waiting = [...players];
     while (waiting.length) {
+        // The page the poll found asked, kept from that same read (#9): a
+        // second read could miss a prompt that went in between, and
+        // splice(-1, 1) would then take the wrong player.
+        let askedIndex = -1;
         await expect.poll(async () => {
             const asked = await Promise.all(waiting.map(
                 ({ page }) => page.locator('#turn-panel .turn-prompt').isVisible()
             ));
-            return asked.indexOf(true);
+            askedIndex = asked.indexOf(true);
+            return askedIndex;
         }, { timeout: 15000 }).toBeGreaterThan(-1);
-        const asked = await Promise.all(waiting.map(
-            ({ page }) => page.locator('#turn-panel .turn-prompt').isVisible()
-        ));
-        const [player] = waiting.splice(asked.indexOf(true), 1);
+        const [player] = waiting.splice(askedIndex, 1);
         await player.choose();
         await expect(player.page.locator('#turn-panel .turn-prompt')).toHaveCount(0);
     }
