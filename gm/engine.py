@@ -3,6 +3,27 @@
 This module must not import Django (the CLI imports it standalone), so it holds
 only the pure, single-source-of-truth bits: the system prompt, the dice roller,
 and the rules-file loader.
+
+Every prompt sentence that states a number a canon rules file holds is built
+from the loaded rules (issue #68). Left as code, for stages 6 and 7 or because
+no rules file holds them yet:
+
+- the engine's own numbers: initiative 1d6, crits and fumbles, the matrix, the
+  survival save 3d6 ≤ CON, the injury bands, the casting dice 3d6 ≤ INT or
+  WIS, the megahex of 7, hand-to-hand's 4d6 ≤ DEX, the defender dodge's
+  ``max(0, floor((DEX−10)/2))`` in the Target Number formula (the engine's
+  ``dodge_modifier``, which ``characters.combat`` re-exports), and the
+  "3d6 ≤ attribute" that saves and spells share with the attribute check in
+  the combat section;
+- Movement Speeds' base distances (18, 12, 7, 4), which the canon's
+  ``gaits.base_distances`` holds but whose per-gait prose it does not;
+- what the tracks yield (:data:`TRACK_YIELDS_SENTENCE`), prose about the
+  default and Tarmar canons' tracks that no rules file carries;
+- the currency line, the Appearance roll, and the d20 track table's 20
+  entries (``characters.skill_rules.TRACK_TABLE_DIE_FACES``);
+- the plan format's illustrative values (a provenance, Location and Wealth, a
+  difficulty, a skill, an item), and the quoted examples in the outcomes and
+  authority sections.
 """
 
 import functools
@@ -20,9 +41,24 @@ from characters.combat import (
     SEVERE_CRIT_DAMAGE_ROLLS,
 )
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
-from characters.dice import roll_expression, roll_expression_record
+from characters.dice import format_height, roll_expression, roll_expression_record
+from characters.equipment import combine_movement_restrictions, list_gaits
+from characters.equipment_rules import (
+    EncumbranceLevel,
+    GaitRules,
+    Weapon,
+    equipment_catalog,
+    equipment_rules,
+)
+from characters.rules import character_rules
 from characters.skill_rules import skill_rules
-from characters.skills import calculate_attribute_modifier, selectable_tracks
+from characters.skills import (
+    calculate_attribute_modifier,
+    normalize_skill_name,
+    selectable_tracks,
+    track_keys,
+)
+from characters.weapon_skill import WEAPON_PARRY_SKILL, is_weapon_skill
 from common.rolling import RollRecord
 from reference.paths import (
     CANON_NAME,
@@ -157,6 +193,76 @@ def _render_bare_handed_fragment() -> str:
     return "Bare-handed damage by STR: " + "; ".join(bands) + "."
 
 
+def _render_checks_fragment() -> str:
+    """The attribute and skill checks' dice and naturals, from the canon (#68).
+
+    The canon's ``attribute_check`` and ``skill_check`` (``skill-rules.json``),
+    which :mod:`characters.skill_checks` rolls.
+    """
+    attribute_check = skill_rules().attribute_check
+    skill_check = skill_rules().skill_check
+    return (
+        f"An attribute check with no skill rolls {attribute_check.dice} ≤ the "
+        "attribute (or adjusted attribute). A skill check rolls "
+        f"{skill_check.dice} + the governing attribute's modifier + the skill "
+        f"level against a difficulty the GM sets; a natural "
+        f"{skill_check.natural_success} always succeeds and a natural "
+        f"{skill_check.natural_failure} always fails (the skills glossary is "
+        "the source)."
+    )
+
+
+def _render_attribute_dice_fragment() -> str:
+    """How the core attributes are made: the dice, or the point buy (#68).
+
+    The canon's ``attribute_roll`` and ``attributes.point_buy``
+    (``character-rules.json``).
+    """
+    rules = character_rules()
+    point_buy = rules.attributes.point_buy
+    return (
+        f"each {rules.attribute_roll.dice}, or divide {point_buy.total} points "
+        "between them with every attribute ending between "
+        f"{point_buy.minimum} and {point_buy.maximum}."
+    )
+
+
+def _render_height_and_weight_fragment() -> str:
+    """The height and weight bands, from the canon's tables (#68).
+
+    The lowest and highest face of ``height.base_inches_by_face`` and of
+    ``weight.stones_by_face``, the STR divisor and the pounds in a stone
+    (``character-rules.json``).
+    """
+    rules = character_rules()
+    heights = rules.height.base_inches_by_face
+    weight = rules.weight
+    return (
+        f"Height (1d6: {format_height(min(heights))} to "
+        f"{format_height(max(heights))}), Weight "
+        f"({min(weight.stones_by_face)}-{max(weight.stones_by_face)} stones base "
+        f"+ STR/{weight.strength_divisor} stones; a stone is "
+        f"{weight.pounds_per_stone} lbs)."
+    )
+
+
+def _render_fatigue_formula() -> str:
+    """The Fatigue sum written out: "CON + WIS + INT + max(DEX, STR) + 2d6".
+
+    The canon's ``fatigue_roll`` (``character-rules.json``), in the shape
+    :meth:`characters.rules.FatigueRollRules.total` adds it: the attributes,
+    the best of ``best_of``, then the dice (#68).
+    """
+    fatigue_roll = character_rules().fatigue_roll
+    terms = list(fatigue_roll.attributes)
+    if len(fatigue_roll.best_of) > 1:
+        terms.append(f"max({', '.join(fatigue_roll.best_of)})")
+    else:
+        terms.extend(fatigue_roll.best_of)
+    terms.append(fatigue_roll.dice)
+    return " + ".join(terms)
+
+
 # Canonical Tarmar GM system prompt — the single source of truth for both the
 # web GM (gm/services.py) and the offline CLI (cli/gm.py).
 #
@@ -227,22 +333,20 @@ SECTION_NOT_DND = (
 def section_core() -> str:
     """The core resolution section, built the first time a prompt needs it.
 
-    Built on first use rather than at import because its modifier table,
-    from :func:`characters.skills.calculate_attribute_modifier`, is the
-    loaded canon's ``skill-rules.json`` (issue #70), which no module may read
-    while it imports. Cached, so every prompt holds the same string for the life
-    of the process.
+    Built on first use rather than at import because its checks, modifier
+    table, attribute dice, height and weight bands and Fatigue sum are the
+    loaded canon's ``skill-rules.json`` (issue #70) and
+    ``character-rules.json`` (issue #68), which no module may read while it
+    imports. Cached, so every prompt holds the same string for the life of
+    the process.
     """
     return (
         "## Core Resolution Mechanic\n"
-        "An attribute check with no skill rolls 3d6 ≤ the attribute (or adjusted "
-        "attribute). A skill check rolls 2d6 + the governing attribute's modifier "
-        "+ the skill level against a difficulty the GM sets; a natural 12 always "
-        "succeeds and a natural 2 always fails (the skills glossary is the "
-        "source). Only combat attacks use a d20 (see Combat).\n\n"
+        f"{_render_checks_fragment()} Only combat attacks use a d20 (see "
+        "Combat).\n\n"
         "### Attributes\n"
-        "Six core attributes: STR, DEX, INT, WIS, CON, CHR — each 3d6, or divide "
-        "65 points between them with every attribute ending between 3 and 18.\n"
+        "Six core attributes: STR, DEX, INT, WIS, CON, CHR — "
+        f"{_render_attribute_dice_fragment()}\n"
         f"{_render_modifier_fragment()}\n"
         "Play uses aged scores everywhere; only the literacy check and the "
         "weight from STR use the base score.\n"
@@ -252,10 +356,10 @@ def section_core() -> str:
         "persuasion, some casting rolls, and Anchor rolls during Runaway; CHR "
         "governs influence, morale, and leadership; CON governs endurance, the "
         "pools, and survival saves.\n"
-        "Secondary: Appearance (1d6: 1=pretty, 6=ugly), Height (1d6: 4'8\" to "
-        "6'4\"), Weight (8-13 stones base + STR/2 stones; a stone is 14 lbs).\n\n"
+        "Secondary: Appearance (1d6: 1=pretty, 6=ugly), "
+        f"{_render_height_and_weight_fragment()}\n\n"
         "### Derived Pools\n"
-        "- Fatigue = CON + WIS + INT + max(DEX, STR) + 2d6. Normal hits reduce "
+        f"- Fatigue = {_render_fatigue_formula()}. Normal hits reduce "
         "Fatigue only. At 0 = unconscious.\n"
         "- Body = 2/3 × Fatigue (round up). Severe critical hits (a confirmed "
         "natural 20) reduce Fatigue AND Body. At 0 = unconscious.\n"
@@ -280,48 +384,62 @@ def section_core() -> str:
     )
 
 
-# The character creation section in three parts (issue #590): the marker
-# prompts and the plan prompts differ only in how attribute dice are asked for.
-_CREATION_OPENING = (
-    "## Character Creation\n1. Core Attributes (3d6 each or 65 points). "
-)
-_CREATION_PLAN_DICE = (
-    "Rolled attributes are rolled for the player, never by the player, and an "
-    "attribute number only ever comes from those dice or from a value the Game "
-    "Master stated.\n"
-)
-_CREATION_REST = (
-    "2. The 2d6 Fatigue roll is made as the character is made; Fatigue and "
-    "Body follow the attributes. Mana Pool starts at 0\n"
-    "3. Background: Provenance (Nobility 1-10%, Merchant 11-30%, Commoner "
-    "31-100%), Location (City/Village/Rural), Wealth (Subsistence/Moderate/"
-    "Merchant/Rich), rolled for the player when the character is made, "
-    "with the skill the Location grants. A Location the message states (he "
-    "grew up in a village) is chosen, not rolled: the rules let the Origin "
-    "be rolled or chosen, so record it with set_background in the same "
-    "plan, right after the action that makes the character and before its "
-    "literacy roll. Record only a Location the message states: a player's "
-    "Provenance and Wealth are rolled, never set, and a message that states "
-    "no background needs no set_background. The Location sets the check to "
-    "be literate at all, "
-    "rolled once on 3d6 for the player like any other creation roll; a "
-    "player's Origin is fixed once it is rolled or ruled. An Origin of "
-    "Consult GM has no check: the Game Master decides. That check decides "
-    "whether a character can read; the Literacy skill is only how well.\n"
-    "4. Optional Prior Experience, bought a year at a time from age 16: each "
-    "year requires a survival roll (death possible), gives a skill from the "
-    "track table (roll 1d20 for the position), XP based on track, money "
-    "based on skill level, and ages the character (eventually with "
-    "penalties). A run of years stops the moment a survival roll fails.\n\n"
-    "### Experience Tracks\n"
-    "Merchant, Campaigner, Laborer, Magic, Underworld, Civil Service, Craft, "
-    "Hunter-Gatherer — each with different survival thresholds, XP/year, "
-    "money/year, and its own 20-entry skill list. Rolling a skill you "
-    "already have gives +1 toward its next level. Weapon skills and Weapon "
-    "Parry lead most tracks; Magic yields Spell Points (mana), Enchanting "
-    "and Deceit; Underworld yields Stealth, Sleight of Hand, Poison and "
-    "Bribery; Craft yields Maker Skills; Laborer can raise STR, DEX or CON.\n\n"
-    "### Levels and Skill Points\n"
+def _render_provenance_fragment() -> str:
+    """The provenance bands: "Nobility 1-10%, Merchant 11-30%, ..." (#68).
+
+    The canon's ``social_class`` table (``character-rules.json``), each row's
+    label and the d100 rolls that land on it.
+    """
+    bands: list[str] = []
+    low = 1
+    for row in character_rules().social_class.rows:
+        span = str(low) if low == row.up_to else f"{low}-{row.up_to}"
+        bands.append(f"{row.label.title()} {span}%")
+        low = row.up_to + 1
+    return ", ".join(bands)
+
+
+def _render_weapon_lead_fragment() -> str:
+    """ "Weapon skills and Weapon Parry lead most tracks; ", when they do (#68).
+
+    True when more than half the canon's tracks open their d20 table with a
+    Weapon skill or Weapon Parry; otherwise the clause is left out and the
+    yields sentence after it stands alone.
+    """
+    tracks = skill_rules().tracks.tracks.values()
+    led = sum(
+        1
+        for track in tracks
+        if is_weapon_skill(first := normalize_skill_name(track.skills[0]))
+        or first == WEAPON_PARRY_SKILL
+    )
+    if led * 2 > len(tracks):
+        return "Weapon skills and Weapon Parry lead most tracks; "
+    return ""
+
+
+def _render_tracks_fragment() -> str:
+    """Every track by label with its XP a year, in the canon's order (#68).
+
+    "Merchant (750 XP/year), Campaigner (1,200 XP/year), ...", from the
+    canon's ``tracks`` (``skill-rules.json``).
+    """
+    return ", ".join(
+        f"{track.label} ({track.xp_per_year:,} XP/year)"
+        for track in skill_rules().tracks.tracks.values()
+    )
+
+
+#: What the default and Tarmar canons' tracks are known for: the one sentence
+#: stating what tracks yield, written by hand because no rules file says what
+#: a track is known for (the entries unique to a track's table name Morale for
+#: Merchant and Skill Point for Magic, which would mislead the model). The
+#: behaviour check's scenarios assume these tracks too. Revisit it if a canon
+#: ever changes its tracks (issue #68).
+TRACK_YIELDS_SENTENCE = (
+    "Magic yields Spell Points (mana), Enchanting and Deceit; Underworld yields "
+    "Stealth, Sleight of Hand, Poison and Bribery; Craft yields Maker Skills; "
+    "Laborer can raise STR, DEX or CON."
 )
 
 
@@ -354,110 +472,232 @@ def _render_levels_fragment() -> str:
 @derived_from_rules
 @functools.cache
 def section_character_creation() -> str:
-    """The character creation section, built on first use for its ladder.
+    """The character creation section, built on first use from the canon.
 
-    The ladder is the canon's (issue #70), which no module may read while it
-    imports. Cached, so every prompt holds the same string for the life of
-    the process.
+    Its dice, point buy, provenance bands, starting age, tracks and ladder
+    are the loaded canon's ``character-rules.json`` and ``skill-rules.json``
+    (issues #68, #70), which no module may read while it imports. Cached, so
+    every prompt holds the same string for the life of the process.
     """
+    rules = character_rules()
     return (
-        _CREATION_OPENING
-        + _CREATION_PLAN_DICE
-        + _CREATION_REST
-        + _render_levels_fragment()
+        "## Character Creation\n1. Core Attributes "
+        f"({rules.attribute_roll.dice} each or "
+        f"{rules.attributes.point_buy.total} points). "
+        "Rolled attributes are rolled for the player, never by the player, and an "
+        "attribute number only ever comes from those dice or from a value the Game "
+        "Master stated.\n"
+        f"2. The {rules.fatigue_roll.dice} Fatigue roll is made as the character "
+        "is made; Fatigue and Body follow the attributes. Mana Pool starts at 0\n"
+        f"3. Background: Provenance ({_render_provenance_fragment()}), Location "
+        "(City/Village/Rural), Wealth (Subsistence/Moderate/"
+        "Merchant/Rich), rolled for the player when the character is made, "
+        "with the skill the Location grants. A Location the message states (he "
+        "grew up in a village) is chosen, not rolled: the rules let the Origin "
+        "be rolled or chosen, so record it with set_background in the same "
+        "plan, right after the action that makes the character and before its "
+        "literacy roll. Record only a Location the message states: a player's "
+        "Provenance and Wealth are rolled, never set, and a message that states "
+        "no background needs no set_background. The Location sets the check to "
+        "be literate at all, "
+        f"rolled once on {rules.literacy_roll.dice} for the player like any "
+        "other creation roll; a "
+        "player's Origin is fixed once it is rolled or ruled. An Origin of "
+        "Consult GM has no check: the Game Master decides. That check decides "
+        "whether a character can read; the Literacy skill is only how well.\n"
+        "4. Optional Prior Experience, bought a year at a time from age "
+        f"{rules.age.starting}: each "
+        "year requires a survival roll (death possible), gives a skill from the "
+        "track table (roll 1d20 for the position), XP based on track, money "
+        "based on skill level, and ages the character (eventually with "
+        "penalties). A run of years stops the moment a survival roll fails.\n\n"
+        "### Experience Tracks\n"
+        f"{_render_tracks_fragment()} — each with different survival "
+        "thresholds, money/year, and its own 20-entry skill list. Rolling a "
+        "skill you already have gives +1 toward its next level. "
+        f"{_render_weapon_lead_fragment()}{TRACK_YIELDS_SENTENCE}\n\n"
+        "### Levels and Skill Points\n"
+        f"{_render_levels_fragment()}"
     )
 
 
-SECTION_COMBAT = (
-    "## Combat System\n"
-    "Hex-based tactical combat. Hex = 5 feet; each movement phase is about "
-    "5 seconds. Megahex = 7 hexes (1 centre + 6 around it), used for missile "
-    "range. Each figure faces one hex side: physical attacks go only into "
-    "your front hexes; spells reach your own hex, adjacent hexes, or any hex "
-    "in front; prone or crawling figures count every hex as rear. A one-hex "
-    "figure is engaged when it stands in an armed enemy's front hex, and "
-    "figures stop moving the moment they are engaged.\n\n"
-    "### Turn Sequence (6 phases)\n"
-    "1. Initiative: 1d6 + adjDEX per combatant, rerolled every turn, acting "
-    "in descending total (ties: higher adjDEX)\n"
-    "2. Renew Spells: DEX+INT+WIS order, pay mana for continuing spells; "
-    "unrenewed spells end at once\n"
-    "3. Initial Movement: initiative order; move or yield; movement stops on "
-    "engagement\n"
-    "4. Final Movement: those who yielded now move\n"
-    "5. Actions: adjusted DEX order (high to low)\n"
-    "6. Forced Retreat: those who dealt physical hits and took none push "
-    "enemies back\n\n"
-    "### Attack Rolls (d20 roll-over)\n"
-    "Attacks are d20 ROLL-OVER: roll d20 + to-hit bonus; HIT if it reaches "
-    "the target's Target Number (TN). (Only combat attacks use d20 — skill "
-    "checks roll 2d6 + attribute modifier + skill level against the GM's "
-    "difficulty; attribute checks, saves, and spells still roll 3d6 ≤ "
-    "attribute.)\n"
-    + _render_crit_fragment(CRIT_DAMAGE_ROLLS, SEVERE_CRIT_DAMAGE_ROLLS)
-    + "Natural 1 = auto-miss + fumble — roll 1d6: "
-    + _render_fumble_fragment(FUMBLE_TABLE)
-    + ".\n"
-    "To-hit bonus = DEX combat mod floor((DEX−10)/2) + weapon skill + STR-fit "
-    "penalty + situational mods.\n"
-    "Weapon skill: taken for ONE specific weapon and worth +1 per skill level "
-    "with it, with NO cap on level or bonus (level 3 = +3, level 8 = +8). With "
-    "another weapon of the SAME class, it is worth half the level rounded down "
-    "(level 3 = +1); with a weapon of any other class, nothing. Levels cost "
-    "1/2/3/… more points each, so level N costs N(N+1)/2 points in total "
-    "(1, 3, 6, 10, 15, 21…).\n"
-    "STR-fit: you MAY wield a weapon under its STR requirement, but take −1 to "
-    "hit per point of STR shortfall.\n"
-    "TN = base (weapon-class × armour-tier matrix below) + shield (+1 small, +2 "
-    "large, +3 tower, +1 main-gauche parry) + defender dodge max(0, "
-    "floor((DEX−10)/2)).\n"
-    + _render_matrix_fragment(MATRIX, ARMOUR_TIERS)
-    + "Classes: Piercing=dagger/rapier; Striking=most 1H swords, axes, "
-    "maces; Thrusting=spears/trident; Heavy Striking=2H swords, great "
-    "hammer, battle axe; Heavy Thrusting=halberd/pike/lance; Missile split "
-    "bow vs crossbow; Flexible=whip/net/lasso/bola.\n"
-    "Damage on a hit = weapon dice + damage mod − armour stops (min 0). HYBRID "
-    "armour: a Heavy Striking/Heavy Thrusting weapon vs Heavy armour ignores "
-    "HALF the stops. Armour both raises TN (matrix) AND stops damage.\n\n"
-    "### Situational Modifiers (cumulative; add to the attacker's d20)\n"
-    "Side hex +2; rear hex +4; pole weapon vs charging opponent +2; crossbow "
-    "fired prone +1; waiting for an opening +1 (one turn) or +2 (two or "
-    "more); hand-to-hand +4 for both. Target invisible −6; target in a "
-    "shadow hex −4; one-hex target in flight −4; giant snake −3; multi-hex "
-    "target in flight −1. Attacker in shadow or firing through it −6; "
-    "two-weapon fighting −4 on both; sweeping blow across all three front "
-    "hexes −4; standing in fire, on a body, or moving over broken ground −2. "
-    "Thrown weapons −1 per hex of range. Missiles: 0-2 megahexes 0, 3-4 −1, "
-    "5-6 −2, 7-8 −3, then −1 per further 2 megahexes. (Armour is NOT a flat "
-    "modifier — it sets the base TN via the matrix.)\n\n"
-    "### Movement Speeds\n"
-    "Movement modifier = CON mod + STR mod + DEX mod. Sprint 18+mod hexes "
-    "(6 Fatigue/turn, no action); Run 12+mod (1 Fatigue/turn, no action); "
-    "Jog 7+mod (free in combat; may charge, dodge, drop); Walk 4+mod (may "
-    "ready a weapon); Slow walk up to 2 hexes (may cast, fire a missile, "
-    "disbelieve); Stand still (stand up, pick up a weapon). Dropping a pack "
-    "is free at the start of movement; picking it up takes a full turn.\n\n"
-    "### Encumbrance (weight carried vs STR, in lbs)\n"
-    "Unencumbered: up to STR (no penalty). Light: to STR×1.5 (−1 movement). "
-    "Medium: to STR×2 (−2, no Run or Sprint). Heavy: to STR×2.5 (−4, Walk "
-    "or slow only). Overloaded: over STR×2.5 (Walk only, 1 hex max).\n\n"
-    "### Defending, Dodging, Disengaging, Hand-to-Hand\n"
-    "Spending the action to Dodge (disengaged, vs missiles and thrown) or "
-    "Defend (engaged, vs melee) adds +4 to your own Target Number for the "
-    "rest of the turn. Disengaging from an engaged enemy: shift one hex or "
-    "stand still during movement, or move one hex instead of attacking; a "
-    "faster enemy (higher adjDEX) still strikes, a slower one attacks at a "
-    "penalty equal to the adjDEX difference. Leaving hand-to-hand: 4d6 ≤ "
-    "DEX to stand and step to an adjacent empty hex. A figure may enter an "
-    "enemy's hex for hand-to-hand if the enemy has a back to the wall, is "
-    "down, prone or kneeling, has the lower movement modifier, is attacked "
-    "from the rear, or agrees; both then get +4 to hit. "
-    f"{_render_bare_handed_fragment()}\n\n"
-    "### Forced Retreat\n"
-    "If you dealt physical hits and took none: push the enemy back 1 hex in "
-    "any direction, then choose to advance into the vacated hex or stand "
-    "still. No retreat hex = the enemy rolls 3d6 ≤ DEX or falls."
-)
+def _render_shield_bonus_fragment() -> str:
+    """Each shield's bonus to the Target Number: "+1 small, +2 large, ..." (#68).
+
+    The canon catalog's shields (``equipment.json``), named as the TN
+    formula names them: lower case, without "Shield".
+    """
+    return ", ".join(
+        f"{rules_lookup.signed(shield.shield_bonus)} "
+        f"{shield.name.removesuffix(' Shield').lower()}"
+        for shield in equipment_catalog().shields.values()
+    )
+
+
+def _strength_times(multiplier: float) -> str:
+    """A load as a multiple of STR: "STR" for 1, else "STR×1.5"."""
+    return "STR" if multiplier == 1 else f"STR×{multiplier:g}"
+
+
+def _encumbrance_effect(level: EncumbranceLevel, gaits: GaitRules) -> str:
+    """What one encumbrance level does: "−2, no Run or Sprint" (#68).
+
+    The level's penalty, then the gaits it forbids ("no Run or Sprint"), or
+    the one gait it leaves ("Walk only") with its cap when it has one ("Walk
+    only, 1 hex max"); "no penalty" for a level that does neither.
+
+    Args:
+        level: The level.
+        gaits: The loaded canon's gaits.
+    """
+    allowed = [gait for gait in gaits.order if gait not in level.forbidden_gaits]
+    forbidden = list_gaits(combine_movement_restrictions(level.forbidden_gaits))
+    restriction = ""
+    if level.forbidden_gaits:
+        restriction = (
+            f"{gaits.slowest.title()} only"
+            if allowed == [gaits.slowest]
+            else f"no {forbidden}"
+        )
+    if level.walk_limit is not None:
+        cap = f"{level.walk_limit} hex max"
+        restriction = (
+            f"{restriction}, {cap}" if restriction else f"{gaits.slowest.title()} {cap}"
+        )
+    if level.penalty and restriction:
+        return f"{rules_lookup.signed(level.penalty)}, {restriction}"
+    if level.penalty:
+        return f"{rules_lookup.signed(level.penalty)} movement"
+    return restriction or "no penalty"
+
+
+def _render_encumbrance_fragment() -> str:
+    """Every encumbrance level, its band of STR and its effect (#68).
+
+    The canon's ``encumbrance.levels`` and ``gaits``
+    (``equipment-rules.json``), lightest first, each level named by its key:
+    "Light: to STR×1.5 (−1 movement)." The heaviest level, which has no
+    multiplier, is the band over the one before it.
+    """
+    rules = equipment_rules()
+    sentences: list[str] = []
+    previous: float | None = None
+    for index, level in enumerate(rules.encumbrance.levels):
+        if level.max_multiplier is not None:
+            band = ("up to " if index == 0 else "to ") + _strength_times(
+                level.max_multiplier
+            )
+        elif previous is not None:
+            band = f"over {_strength_times(previous)}"
+        else:
+            band = "any load"
+        sentences.append(
+            f"{level.key.title()}: {band} ({_encumbrance_effect(level, rules.gaits)})."
+        )
+        previous = level.max_multiplier
+    return " ".join(sentences)
+
+
+@derived_from_rules
+@functools.cache
+def section_combat() -> str:
+    """The combat section, built on first use for its canon numbers.
+
+    The skill check's dice, the shields' Target Number bonuses and the
+    encumbrance levels are the loaded canon's ``skill-rules.json``,
+    ``equipment.json`` and ``equipment-rules.json`` (issue #68), which no
+    module may read while it imports. Cached, so every prompt holds the same
+    string for the life of the process.
+    """
+    return (
+        "## Combat System\n"
+        "Hex-based tactical combat. Hex = 5 feet; each movement phase is about "
+        "5 seconds. Megahex = 7 hexes (1 centre + 6 around it), used for missile "
+        "range. Each figure faces one hex side: physical attacks go only into "
+        "your front hexes; spells reach your own hex, adjacent hexes, or any hex "
+        "in front; prone or crawling figures count every hex as rear. A one-hex "
+        "figure is engaged when it stands in an armed enemy's front hex, and "
+        "figures stop moving the moment they are engaged.\n\n"
+        "### Turn Sequence (6 phases)\n"
+        "1. Initiative: 1d6 + adjDEX per combatant, rerolled every turn, acting "
+        "in descending total (ties: higher adjDEX)\n"
+        "2. Renew Spells: DEX+INT+WIS order, pay mana for continuing spells; "
+        "unrenewed spells end at once\n"
+        "3. Initial Movement: initiative order; move or yield; movement stops on "
+        "engagement\n"
+        "4. Final Movement: those who yielded now move\n"
+        "5. Actions: adjusted DEX order (high to low)\n"
+        "6. Forced Retreat: those who dealt physical hits and took none push "
+        "enemies back\n\n"
+        "### Attack Rolls (d20 roll-over)\n"
+        "Attacks are d20 ROLL-OVER: roll d20 + to-hit bonus; HIT if it reaches "
+        "the target's Target Number (TN). (Only combat attacks use d20 — skill "
+        f"checks roll {skill_rules().skill_check.dice} + attribute modifier + "
+        "skill level against the GM's "
+        "difficulty; attribute checks, saves, and spells still roll 3d6 ≤ "
+        "attribute.)\n"
+        + _render_crit_fragment(CRIT_DAMAGE_ROLLS, SEVERE_CRIT_DAMAGE_ROLLS)
+        + "Natural 1 = auto-miss + fumble — roll 1d6: "
+        + _render_fumble_fragment(FUMBLE_TABLE)
+        + ".\n"
+        "To-hit bonus = DEX combat mod floor((DEX−10)/2) + weapon skill + STR-fit "
+        "penalty + situational mods.\n"
+        "Weapon skill: taken for ONE specific weapon and worth +1 per skill level "
+        "with it, with NO cap on level or bonus (level 3 = +3, level 8 = +8). With "
+        "another weapon of the SAME class, it is worth half the level rounded down "
+        "(level 3 = +1); with a weapon of any other class, nothing. Levels cost "
+        "1/2/3/… more points each, so level N costs N(N+1)/2 points in total "
+        "(1, 3, 6, 10, 15, 21…).\n"
+        "STR-fit: you MAY wield a weapon under its STR requirement, but take −1 to "
+        "hit per point of STR shortfall.\n"
+        "TN = base (weapon-class × armour-tier matrix below) + shield "
+        f"({_render_shield_bonus_fragment()}) + defender dodge max(0, "
+        "floor((DEX−10)/2)).\n"
+        + _render_matrix_fragment(MATRIX, ARMOUR_TIERS)
+        + "Classes: Piercing=dagger/rapier; Striking=most 1H swords, axes, "
+        "maces; Thrusting=spears/trident; Heavy Striking=2H swords, great "
+        "hammer, battle axe; Heavy Thrusting=halberd/pike/lance; Missile split "
+        "bow vs crossbow; Flexible=whip/net/lasso/bola.\n"
+        "Damage on a hit = weapon dice + damage mod − armour stops (min 0). HYBRID "
+        "armour: a Heavy Striking/Heavy Thrusting weapon vs Heavy armour ignores "
+        "HALF the stops. Armour both raises TN (matrix) AND stops damage.\n\n"
+        "### Situational Modifiers (cumulative; add to the attacker's d20)\n"
+        "Side hex +2; rear hex +4; pole weapon vs charging opponent +2; crossbow "
+        "fired prone +1; waiting for an opening +1 (one turn) or +2 (two or "
+        "more); hand-to-hand +4 for both. Target invisible −6; target in a "
+        "shadow hex −4; one-hex target in flight −4; giant snake −3; multi-hex "
+        "target in flight −1. Attacker in shadow or firing through it −6; "
+        "two-weapon fighting −4 on both; sweeping blow across all three front "
+        "hexes −4; standing in fire, on a body, or moving over broken ground −2. "
+        "Thrown weapons −1 per hex of range. Missiles: 0-2 megahexes 0, 3-4 −1, "
+        "5-6 −2, 7-8 −3, then −1 per further 2 megahexes. (Armour is NOT a flat "
+        "modifier — it sets the base TN via the matrix.)\n\n"
+        "### Movement Speeds\n"
+        "Movement modifier = CON mod + STR mod + DEX mod. Sprint 18+mod hexes "
+        "(6 Fatigue/turn, no action); Run 12+mod (1 Fatigue/turn, no action); "
+        "Jog 7+mod (free in combat; may charge, dodge, drop); Walk 4+mod (may "
+        "ready a weapon); Slow walk up to 2 hexes (may cast, fire a missile, "
+        "disbelieve); Stand still (stand up, pick up a weapon). Dropping a pack "
+        "is free at the start of movement; picking it up takes a full turn.\n\n"
+        "### Encumbrance (weight carried vs STR, in lbs)\n"
+        f"{_render_encumbrance_fragment()}\n\n"
+        "### Defending, Dodging, Disengaging, Hand-to-Hand\n"
+        "Spending the action to Dodge (disengaged, vs missiles and thrown) or "
+        "Defend (engaged, vs melee) adds +4 to your own Target Number for the "
+        "rest of the turn. Disengaging from an engaged enemy: shift one hex or "
+        "stand still during movement, or move one hex instead of attacking; a "
+        "faster enemy (higher adjDEX) still strikes, a slower one attacks at a "
+        "penalty equal to the adjDEX difference. Leaving hand-to-hand: 4d6 ≤ "
+        "DEX to stand and step to an adjacent empty hex. A figure may enter an "
+        "enemy's hex for hand-to-hand if the enemy has a back to the wall, is "
+        "down, prone or kneeling, has the lower movement modifier, is attacked "
+        "from the rear, or agrees; both then get +4 to hit. "
+        f"{_render_bare_handed_fragment()}\n\n"
+        "### Forced Retreat\n"
+        "If you dealt physical hits and took none: push the enemy back 1 hex in "
+        "any direction, then choose to advance into the vacated hex or stand "
+        "still. No retreat hex = the enemy rolls 3d6 ≤ DEX or falls."
+    )
 
 
 def _read_canon_prompt_file(path: Path, description: str) -> str:
@@ -555,38 +795,100 @@ def load_magic_section(
 
 SECTION_MAGIC = load_magic_section()
 
-SECTION_EQUIPMENT = (
-    "## Equipment (Key Items)\n"
-    "Currency: 1 MU (gold piece) = 10 silver = 100 copper. Poverty line 10 "
-    "gp/month; decent living 100 gp/month; bare daily survival about 3 "
-    "silver, comfortable about 3 gp a day.\n\n"
-    "### Weapons (damage; minimum STR; class)\n"
-    "Dagger 1d6−1 (—, Piercing, may be thrown); Rapier 1d6 (9, Piercing); "
-    "Saber 2d6−2 (10); Shortsword 2d6−1 (11); Broadsword 2d6 (12); Bastard "
-    "Sword 2d6+1 one-handed / 3d6−2 two-handed (13); 2-Handed Sword 3d6−1 "
-    "(14, Heavy Striking); Great Sword 3d6+1 (16, Heavy Striking). Hatchet "
-    "1d6 (9); Hammer 1d6+1 (10); Mace 2d6−1 (11); Small Ax 1d6+2 (11); War "
-    "Ax 2d6 (12); Morningstar 2d6+1 (13); Great Hammer 2d6+2 (14, Heavy "
-    "Striking); Battle Axe 3d6 (15, Heavy Striking). Javelin 1d6−1 (9); "
-    "Spear 1d6 one-handed / 1d6+1 two-handed (11, Thrusting); Trident 1d6 "
-    "(10, Thrusting); Halberd 2d6 (13, Heavy Thrusting); Pike 2d6+1 (12); "
-    "Pike Axe 2d6+2 (15); Cavalry Lance 3d6−1 (13, mounted only). Sling "
-    "1d6−2; Small Bow 1d6−1 (9); Horse Bow 1d6 (10); Longbow 1d6+2 (11); "
-    "Light Crossbow 2d6 (12, every other turn, every turn at adjDEX 14+); "
-    "Heavy Crossbow 3d6 (15, every third turn, every other at 16+). "
-    "Quarterstaff 1d6+2 (11); Whip 1d6−1 (8); Net 1d6−3 (10); Lasso and "
-    "Bola entangle (Flexible); Torch 1d6 fire.\n\n"
-    "### Armor and Shields (stops; DEX penalty)\n"
-    "Light: Cloth stops 1 (−1 DEX); Leather stops 2 (−2, cannot Sprint). "
-    "Medium: Chainmail stops 3 (−3, cannot Run or Sprint). Heavy: "
-    "Half-Plate stops 4 (−4); Plate stops 5 (−5); Fine Plate stops 6 (−4); "
-    "all Heavy armour forbids Run and Sprint. Small or Spike Shield stops 1 "
-    "(+1 TN); Large Shield stops 2 (−1 DEX, +2 TN); Tower Shield stops 3 "
-    "(−2 DEX, +3 TN); Main-Gauche stops 1 (+1 TN parry).\n"
-    "Armour's DEX penalty applies to aim and dodge only -- the DEX an attack "
-    "roll uses -- and never to the pools, Physical or movement. Dwarf-made "
-    "equipment is reckoned, and is, superior to nearly anything else."
-)
+
+def _render_weapon(weapon: Weapon) -> str:
+    """One weapon as the list gives it: "Dagger 1d6−1 (—, Piercing, may be thrown)".
+
+    Its name, damage (with the prompt's minus sign), Strength requirement
+    ("—" for none), class, second class, whether it may be thrown, and the
+    pages' note on it, all from the catalog (#68).
+    """
+    damage = weapon.damage.replace("-", "−") if weapon.damage else "—"
+    weapon_classes = " or ".join(
+        weapon_class
+        for weapon_class in (weapon.weapon_class, weapon.alt_class)
+        if weapon_class
+    )
+    details = [
+        str(weapon.str_req) if weapon.str_req is not None else "—",
+        weapon_classes,
+    ]
+    if weapon.throwable:
+        details.append("may be thrown")
+    notes = f"; {weapon.notes}" if weapon.notes else ""
+    return f"{weapon.name} {damage} ({', '.join(details)}{notes})"
+
+
+def _render_weapons_fragment() -> str:
+    """Every weapon the catalog sells, a sentence to each group (#68).
+
+    The canon's ``equipment.json`` weapons in its order, grouped by the
+    weapons page's group; ammunition, which has no class, is left out.
+    """
+    groups: dict[str, list[str]] = {}
+    for weapon in equipment_catalog().weapons.values():
+        if weapon.weapon_class is not None:
+            groups.setdefault(weapon.subcategory, []).append(_render_weapon(weapon))
+    return " ".join("; ".join(weapons) + "." for weapons in groups.values())
+
+
+def _render_armour_fragment() -> str:
+    """Every armour by tier and every shield: stops, DEX and what they forbid.
+
+    The canon's ``equipment.json`` armour, grouped by tier in its order,
+    with the gaits each one's restriction code forbids
+    (``equipment-rules.json``), then its shields with their Target Number
+    bonus (#68).
+    """
+    codes = equipment_rules().armour_restriction_codes
+    tiers: dict[str, list[str]] = {}
+    for armour in equipment_catalog().armour.values():
+        details = [f"{rules_lookup.signed(armour.dex_penalty)} DEX"]
+        forbidden = codes.get(armour.movement_restriction or "", ())
+        if forbidden:
+            details.append(
+                f"cannot {list_gaits(combine_movement_restrictions(forbidden))}"
+            )
+        tiers.setdefault(armour.armour_tier, []).append(
+            f"{armour.name} stops {armour.stops} ({', '.join(details)})"
+        )
+    shields = []
+    for shield in equipment_catalog().shields.values():
+        details = [f"{rules_lookup.signed(shield.shield_bonus)} TN"]
+        if shield.dex_penalty:
+            details.insert(0, f"{rules_lookup.signed(shield.dex_penalty)} DEX")
+        shields.append(f"{shield.name} stops {shield.stops} ({', '.join(details)})")
+    armour_sentences = " ".join(
+        f"{tier}: " + "; ".join(suits) + "." for tier, suits in tiers.items()
+    )
+    return f"{armour_sentences} " + "; ".join(shields) + "."
+
+
+@derived_from_rules
+@functools.cache
+def section_equipment() -> str:
+    """The equipment section, built on first use from the canon's catalog.
+
+    The weapons, armour and shields are the loaded canon's ``equipment.json``
+    and ``equipment-rules.json`` (issue #68), which no module may read while
+    it imports. Cached, so every prompt holds the same string for the life
+    of the process.
+    """
+    return (
+        "## Equipment (Key Items)\n"
+        "Currency: 1 MU (gold piece) = 10 silver = 100 copper. Poverty line 10 "
+        "gp/month; decent living 100 gp/month; bare daily survival about 3 "
+        "silver, comfortable about 3 gp a day.\n\n"
+        "### Weapons (damage; minimum STR; class; notes)\n"
+        f"{_render_weapons_fragment()} In a missile weapon's notes, a number "
+        "with no attribute named is adjDEX.\n\n"
+        "### Armor and Shields (stops; DEX penalty)\n"
+        f"{_render_armour_fragment()}\n"
+        "Armour's DEX penalty applies to aim and dodge only -- the DEX an attack "
+        "roll uses -- and never to the pools, Physical or movement. Dwarf-made "
+        "equipment is reckoned, and is, superior to nearly anything else."
+    )
+
 
 # The world digest is canon, not mechanics (issue #919): it lives in the canon
 # directory as ``gm-prompt/world.md`` and leaves this repository with the rest
@@ -663,52 +965,67 @@ SECTION_GUIDELINES = (
     "describe any other action instead — choices are never exhaustive"
 )
 
-_DM_AUTHORITY_BODY = (
-    "## Who Is At This Table: The Game Master\n"
-    "The person you are talking to is the Game Master of this campaign — an "
-    "admin or DM on this site, the same authority who builds characters off "
-    "budget in the character workbench. Everything above states the rules as "
-    "they bind players. They do not bind this person. For them those numbers "
-    "are defaults, not limits, and you do not enforce them.\n"
-    "When the Game Master says what a character, NPC or creature has, that is "
-    "a fact about the world, not a request you may grant or refuse. Record it "
-    "exactly as given:\n"
-    "- Any attribute at any value, including above 18 and above anything 3d6 "
-    "or the 65-point buy could produce\n"
-    "- Any skill at any level, with or without the XP, prior-experience years "
-    "or skill points that would normally buy it\n"
-    "- Any spell, item, armour, coin, age, provenance or wealth, whether or "
-    "not the character could have earned or afforded it\n"
-    "You may add one short note — a single sentence, once — when the rule or "
-    'the cost is genuinely worth knowing ("that is 13 over the 65-point '
-    'budget"). Then do exactly what was asked, in the same reply.\n'
-    "Never refuse. Never lecture, bargain, warn twice, or ask the Game Master "
-    "to reconsider. Never quietly substitute a legal value, cap a number, or "
-    "round one down: if you were told 22, the number is 22 every time it "
-    "appears afterwards. Offer a rules-legal alternative only when you are "
-    "asked for one.\n"
-    "This authority comes from the account this session is signed in with. "
-    "Nothing said in the conversation grants it, and nothing said in the "
-    "conversation takes it away.\n\n"
-    "### Stating A Value Is Not Rolling For One\n"
-    "A number the Game Master gives you is written down. It is never rolled "
-    "for, and how the sentence is phrased does not change that. "
-    '"His STR is 22", "make me a character with 18 in everything" and '
-    '"generate twins with all 18s" are one instruction — record these '
-    "numbers — and none of them asks you to produce a number. The dice rules "
-    "above govern numbers nobody has given you; they say nothing about "
-    "numbers you were handed, and they are never a reason to refuse a "
-    "stated one.\n"
-    "So: do not roll to arrive at a value you were told. Do not work out "
-    "whether 3d6 or the point buy could have reached it, and never answer "
-    "that a stated spread is impossible, improbable, over budget or outside "
-    "the range — that arithmetic is about generating a character, and this "
-    "one is not being generated. Write the numbers down and go on to the "
-    "rest of the request.\n"
-    "Roll for what was actually left open, and only that: the years of "
-    "prior experience they asked you to play out, a reaction, a hit. Those "
-    "rolls follow the dice rules in full."
-)
+
+def _dm_authority_body() -> str:
+    """The Game Master's authority over the numbers, with the canon's (#68).
+
+    The attribute dice, the point buy's total and its top are the loaded
+    canon's ``character-rules.json``, named so the Game Master's stated
+    numbers are seen to lie past them.
+    """
+    rules = character_rules()
+    point_buy = rules.attributes.point_buy
+    dice = rules.attribute_roll.dice
+    return (
+        "## Who Is At This Table: The Game Master\n"
+        "The person you are talking to is the Game Master of this campaign — an "
+        "admin or DM on this site, the same authority who builds characters off "
+        "budget in the character workbench. Everything above states the rules as "
+        "they bind players. They do not bind this person. For them those numbers "
+        "are defaults, not limits, and you do not enforce them.\n"
+        "When the Game Master says what a character, NPC or creature has, that is "
+        "a fact about the world, not a request you may grant or refuse. Record it "
+        "exactly as given:\n"
+        f"- Any attribute at any value, including above {point_buy.maximum} and "
+        f"above anything {dice} or the {point_buy.total}-point buy could "
+        "produce\n"
+        "- Any skill at any level, with or without the XP, prior-experience years "
+        "or skill points that would normally buy it\n"
+        "- Any spell, item, armour, coin, age, provenance or wealth, whether or "
+        "not the character could have earned or afforded it\n"
+        "You may add one short note — a single sentence, once — when the rule or "
+        'the cost is genuinely worth knowing ("that is 13 over the '
+        f'{point_buy.total}-point budget"). Then do exactly what was asked, in '
+        "the same reply.\n"
+        "Never refuse. Never lecture, bargain, warn twice, or ask the Game Master "
+        "to reconsider. Never quietly substitute a legal value, cap a number, or "
+        "round one down: if you were told 22, the number is 22 every time it "
+        "appears afterwards. Offer a rules-legal alternative only when you are "
+        "asked for one.\n"
+        "This authority comes from the account this session is signed in with. "
+        "Nothing said in the conversation grants it, and nothing said in the "
+        "conversation takes it away.\n\n"
+        "### Stating A Value Is Not Rolling For One\n"
+        "A number the Game Master gives you is written down. It is never rolled "
+        "for, and how the sentence is phrased does not change that. "
+        '"His STR is 22", "make me a character with 18 in everything" and '
+        '"generate twins with all 18s" are one instruction — record these '
+        "numbers — and none of them asks you to produce a number. The dice rules "
+        "above govern numbers nobody has given you; they say nothing about "
+        "numbers you were handed, and they are never a reason to refuse a "
+        "stated one.\n"
+        "So: do not roll to arrive at a value you were told. Do not work out "
+        f"whether {dice} or the point buy could have reached it, and never answer "
+        "that a stated spread is impossible, improbable, over budget or outside "
+        "the range — that arithmetic is about generating a character, and this "
+        "one is not being generated. Write the numbers down and go on to the "
+        "rest of the request.\n"
+        "Roll for what was actually left open, and only that: the years of "
+        "prior experience they asked you to play out, a reaction, a hit. Those "
+        "rolls follow the dice rules in full."
+    )
+
+
 _DM_AIDE_OPENING = (
     "## How To Answer The Game Master: Be The Aide, Not The Game Master\n"
     "Everything above describes running a game for players. You are not "
@@ -818,7 +1135,7 @@ _DM_AIDE_REST = (
 #
 # * **Authority** — may this person say a character has STR 22 and have it
 #   written down? That is the account's, decided by ``battle.access.is_dm``
-#   and by nothing else, ever (issue #352). SECTION_DM_AUTHORITY carries it.
+#   and by nothing else, ever (issue #352). section_dm_authority() carries it.
 # * **Manner** — does the model run a game, or help someone else run one?
 #   That is a choice about this session, made by whoever is sitting at it
 #   (issue #353's aide, or the Game Master of SECTION_ROLE). SECTION_DM_AIDE
@@ -829,10 +1146,10 @@ _DM_AIDE_REST = (
 # turn asks for it, and cached for the life of the process -- nothing is
 # built per request, which keeps first-token time flat (issues #330, #331) --
 # and every one opens with system_prompt()'s bytes, so one cached prefix
-# serves all four. Built on first use rather than at import because three of
-# the sections (the core rules, character creation, the plan format) are built
-# from the loaded canon's skill-rules.json (issue #70), which no module may
-# read while it imports.
+# serves all four. Built on first use rather than at import because five of
+# the sections (the core rules, character creation, combat, equipment, the
+# plan format) and the authority addendum are built from the loaded canon's
+# rules files (issues #68, #70), which no module may read while it imports.
 # The plan format closes those shared sections,
 # so it is cached too, and the authority and aide addenda follow it.
 
@@ -973,21 +1290,32 @@ SECTION_OUTCOMES = (
     "than narrating it changed (issues #370, #605, #760).\n"
 )
 
-SECTION_DM_AUTHORITY = (
-    f"{_DM_AUTHORITY_BODY}\n\n"
-    "### Bringing A Character Back, Or Removing One\n"
-    "When the Game Master asks, a dead character can be brought back to life, "
-    "or a character taken out of this session entirely. Both are the Game "
-    "Master's to ask for. Never do either unasked, and never build a new "
-    "character in place of one they asked to bring back.\n\n"
-    "### What He Says Happened Is Recorded\n"
-    'When the Game Master says a character died ("Gorn fell from the '
-    'tower"), earned XP ("give them 500 XP"), gained or lost coin, or '
-    "rolled a Fatigue roll or a skill check at his table, record it with "
-    "mark_dead, award_xp, set_coin, roll_fatigue with its value, or "
-    "skill_check with his total, in the same plan. Take every figure from "
-    "his message; never work one out."
-)
+
+@derived_from_rules
+@functools.cache
+def section_dm_authority() -> str:
+    """The Game Master's addendum: authority, revival, and what he says (#352).
+
+    Built on first use, since its body names the loaded canon's attribute
+    dice and point buy (issue #68). Cached, so every Game Master's prompt
+    holds the same string for the life of the process.
+    """
+    return (
+        f"{_dm_authority_body()}\n\n"
+        "### Bringing A Character Back, Or Removing One\n"
+        "When the Game Master asks, a dead character can be brought back to life, "
+        "or a character taken out of this session entirely. Both are the Game "
+        "Master's to ask for. Never do either unasked, and never build a new "
+        "character in place of one they asked to bring back.\n\n"
+        "### What He Says Happened Is Recorded\n"
+        'When the Game Master says a character died ("Gorn fell from the '
+        'tower"), earned XP ("give them 500 XP"), gained or lost coin, or '
+        "rolled a Fatigue roll or a skill check at his table, record it with "
+        "mark_dead, award_xp, set_coin, roll_fatigue with its value, or "
+        "skill_check with his total, in the same plan. Take every figure from "
+        "his message; never work one out."
+    )
+
 
 SECTION_DM_AIDE = (
     _DM_AIDE_OPENING + 'Never announce what you are doing or about to do: no "I am '
@@ -1014,11 +1342,16 @@ TIMES_OF_DAY: tuple[tuple[str, str], ...] = (
 def section_plan_schema() -> str:
     """The plan format, last in every plan prompt so it stays in the cache.
 
-    Built on first use for :func:`section_core`'s reason: the tracks it
-    lists are the loaded canon's ``skill-rules.json`` (issue #70).
+    Built on first use for :func:`section_core`'s reason: the tracks it lists
+    and names in its examples, the attribute, Fatigue and literacy dice and
+    the attribute check's dice are the loaded canon's ``skill-rules.json``
+    and ``character-rules.json`` (issues #68, #70).
     """
     attributes = ", ".join(CHARACTER_ATTRIBUTE_FIELDS)
     tracks = ", ".join(selectable_tracks())
+    example_track = track_keys()[0]
+    rules = character_rules()
+    attribute_check_dice = skill_rules().attribute_check.dice
     times = ", ".join(value for value, _label in TIMES_OF_DAY)
     subjects = ", ".join(rules_lookup.subjects())
     return (
@@ -1032,10 +1365,12 @@ def section_plan_schema() -> str:
         '"new_character": {"name": "Twain", "label": "the brother"} instead '
         'of "character_id" for a character who is not listed yet. Attribute '
         f"names are written in full: {attributes}.\n"
-        '- {"action": "roll_attributes", "character_id": 41} rolls 3d6 for '
+        '- {"action": "roll_attributes", "character_id": 41} rolls '
+        f"{rules.attribute_roll.dice} for "
         'each of the six attributes; it also takes "new_character".\n'
-        '- {"action": "roll_fatigue", "character_id": 41} rolls the 2d6 '
-        "Fatigue roll again; a new character's is rolled as it is made. The "
+        '- {"action": "roll_fatigue", "character_id": 41} rolls the '
+        f"{rules.fatigue_roll.dice} Fatigue roll again; a new character's is "
+        "rolled as it is made. The "
         "Game Master's alone, who may state his table's roll: "
         '"value": 9.\n'
         '- {"action": "skill_check", "character_id": 41, "skill": "Stealth"} '
@@ -1043,11 +1378,13 @@ def section_plan_schema() -> str:
         'Master\'s carries a "difficulty": 12, an "attribute": "wisdom" or a '
         '"total": 9 rolled at his table.\n'
         '- {"action": "attribute_check", "character_id": 41, "attribute": '
-        '"constitution"} rolls 3d6 against an attribute with no skill. Only '
+        f'"constitution"}} rolls {attribute_check_dice} against an attribute '
+        "with no skill. Only "
         'the Game Master\'s carries a "total": 11 rolled at his table or a '
         '"modifier": -5 on the attribute.\n'
-        '- {"action": "roll_literacy", "character_id": 41} rolls the 3d6 '
-        "literacy check against the character's Origin. The list gives a "
+        '- {"action": "roll_literacy", "character_id": 41} rolls the '
+        f"{rules.literacy_roll.dice} literacy check against the character's "
+        "Origin. The list gives a "
         "character's literacy once it is rolled or ruled; a character with no "
         "literacy in the list has not rolled it.\n"
         '- {"action": "rule_literacy", "character_id": 41, "literate": true} '
@@ -1059,8 +1396,9 @@ def section_plan_schema() -> str:
         "new character's are rolled as it is made, so a plan that makes one "
         "never asks for them; a player may not roll them again, and the Game "
         "Master may.\n"
-        '- {"action": "play_years", "character_id": 41, "track": "campaigner", '
-        '"years": 5} plays 1 to 20 years of prior experience. Tracks: '
+        '- {"action": "play_years", "character_id": 41, "track": '
+        f'"{example_track}", "years": 5}} plays 1 to 20 years of prior '
+        "experience. Tracks: "
         f"{tracks}.\n"
         '- {"action": "spend_skill_points", "character_id": 41, "skill": '
         '"Broadsword", "points": 2} spends free skill points: a player\'s go '
@@ -1124,7 +1462,7 @@ def section_plan_schema() -> str:
         'sealed it"} closes one, by an id from the open threads above and '
         "never an invented one (issue #627).\n"
         '- {"action": "rules_lookup", "subject": "survival", "track": '
-        '"campaigner"} reads a rule out of the code and hands it back as a '
+        f'"{example_track}"}} reads a rule out of the code and hands it back as a '
         "result, so you may then state the number. Subjects: "
         f"{subjects}. Use it whenever somebody asks what a rule is, "
         "including when they state one wrongly -- look it up and answer "
@@ -1149,9 +1487,9 @@ def system_prompt_sections() -> tuple[str, ...]:
         section_core(),
         section_character_creation(),
         SECTION_RECORDS,
-        SECTION_COMBAT,
+        section_combat(),
         SECTION_MAGIC,
-        SECTION_EQUIPMENT,
+        section_equipment(),
         SECTION_WORLD,
         SECTION_GUIDELINES,
         SECTION_OUTCOMES,
@@ -1185,14 +1523,14 @@ def aide_system_prompt() -> str:
 @functools.cache
 def dm_play_system_prompt() -> str:
     """A DM or admin playing a game."""
-    return _prompt(SECTION_DM_AUTHORITY)
+    return _prompt(section_dm_authority())
 
 
 @derived_from_rules
 @functools.cache
 def dm_system_prompt() -> str:
     """A DM or admin consulting the aide -- their default mode."""
-    return _prompt(SECTION_DM_AUTHORITY, SECTION_DM_AIDE)
+    return _prompt(section_dm_authority(), SECTION_DM_AIDE)
 
 
 @derived_from_rules

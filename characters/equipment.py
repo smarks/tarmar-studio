@@ -238,25 +238,39 @@ def get_restrictive_armor_names(equipment: list[dict] | None) -> list[str]:
     ]
 
 
+def list_gaits(gaits: Sequence[str]) -> str:
+    """The gaits title-cased and listed in the order given, ending in "or".
+
+    The pages' way of naming gaits: "Sprint", "Run or Sprint", "Jog, Run, or
+    Sprint". The one wording both the sheet's restriction
+    (:func:`describe_movement_restrictions`) and the Games Master's prompt
+    (``gm.engine``) name gaits in. The names are the loaded canon's gaits,
+    whatever they are called.
+
+    Args:
+        gaits: The gaits, in the order to name them.
+
+    Returns:
+        The list, or ``""`` for none.
+    """
+    names = [gait.title() for gait in gaits]
+    if len(names) <= 1:
+        return "".join(names)
+    if len(names) == 2:
+        return f"{names[0]} or {names[1]}"
+    return f"{', '.join(names[:-1])}, or {names[-1]}"
+
+
 def describe_movement_restrictions(restrictions: Sequence[str]) -> str:
     """The restricted gaits as the pages word them, or ``""`` for none.
 
-    The gaits title-cased, listed in the order given and ending in "or", the
-    wording of movement.md and armor-and-shields.md: "Cannot Sprint",
-    "Cannot Run or Sprint", "Cannot Jog, Run, or Sprint". The names are the
-    loaded canon's gaits, whatever they are called.
+    The wording of movement.md and armor-and-shields.md: "Cannot Sprint",
+    "Cannot Run or Sprint", "Cannot Jog, Run, or Sprint", the gaits named by
+    :func:`list_gaits`.
 
     Args:
         restrictions: The forbidden gaits, as
             :func:`combine_movement_restrictions` orders them.
     """
-    names = [gait.title() for gait in restrictions]
-    if not names:
-        return ""
-    if len(names) == 1:
-        listed = names[0]
-    elif len(names) == 2:
-        listed = f"{names[0]} or {names[1]}"
-    else:
-        listed = f"{', '.join(names[:-1])}, or {names[-1]}"
-    return f"Cannot {listed}"
+    listed = list_gaits(restrictions)
+    return f"Cannot {listed}" if listed else ""

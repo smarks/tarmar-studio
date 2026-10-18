@@ -20,7 +20,11 @@ from characters.models import Character
 from characters.purse import format_purse
 from characters.skill_checks import governing_attribute
 from characters.skills import format_skill_level
-from characters.weapon_skill import is_weapon_skill
+from characters.weapon_skill import (
+    ARCHERY_SKILL,
+    WEAPON_PARRY_SKILL,
+    is_weapon_skill,
+)
 
 from .. import roster, summary
 from ..character_sheet import pools_line
@@ -224,7 +228,7 @@ def _attribute(character: Character, name: str, short: str) -> str:
 
 
 #: The skills an attack reads besides the Weapon skill itself.
-_ATTACK_SKILLS = frozenset({"weapon parry", "archery", "brawling"})
+_ATTACK_SKILLS = frozenset({WEAPON_PARRY_SKILL, ARCHERY_SKILL, "brawling"})
 
 
 def _skill_listing_order(skill: str) -> tuple[int, str]:

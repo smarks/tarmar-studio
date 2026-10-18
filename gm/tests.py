@@ -298,7 +298,7 @@ class GMServiceTest(TestCase):
         its rules files, which nothing may read while modules import: a canon
         missing one must fail ``manage.py check`` (``characters.E001``,
         ``E002``), not crash the URL import. Every cache registered with
-        ``reference.rules_file.derived_from_rules``, and both rules files'
+        ``reference.rules_file.derived_from_rules``, and all four rules files'
         own, must show no miss once the URLs have loaded. Run out of process:
         this runner has built them already.
         """
@@ -310,9 +310,11 @@ class GMServiceTest(TestCase):
             "import tarmar_studio.urls\n"
             "from characters.rules import character_rules\n"
             "from characters.skill_rules import skill_rules\n"
+            "from characters.equipment_rules import equipment_catalog, "
+            "equipment_rules\n"
             "from reference.rules_file import caches_derived_from_rules\n"
-            "for cached in (character_rules, skill_rules, "
-            "*caches_derived_from_rules()):\n"
+            "for cached in (character_rules, skill_rules, equipment_catalog, "
+            "equipment_rules, *caches_derived_from_rules()):\n"
             "    print(cached.__name__, cached.cache_info().misses)\n"
         )
         completed = subprocess.run(
@@ -1131,14 +1133,14 @@ class GMSystemPromptContentTest(SimpleTestCase):
         """
         from gm.engine import (
             SECTION_DM_AIDE,
-            SECTION_DM_AUTHORITY,
             dm_system_prompt,
+            section_dm_authority,
             system_prompt,
         )
 
         self.assertEqual(
             dm_system_prompt(),
-            "\n\n".join((system_prompt(), SECTION_DM_AUTHORITY, SECTION_DM_AIDE)),
+            "\n\n".join((system_prompt(), section_dm_authority(), SECTION_DM_AIDE)),
         )
 
     def test_the_world_section_sits_between_equipment_and_guidelines(self):

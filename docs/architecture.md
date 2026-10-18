@@ -270,6 +270,8 @@ Notes on the edges, each checkable:
   read it through the cached `character_rules()` when they run, never at
   import, so the offline CLI's import chain stays free of Django and a canon
   whose file is refused is reported by the `characters.E001` system check.
+  The Games Master's prompt sentences that state these numbers are built from
+  it and cached as the skill values below are (issue #68).
 - `characters/skill_rules.py` reads the canon's `skill-rules.json`
   (`reference.paths.SKILL_RULES_FILE`) into `SkillRules`: every number skills,
   prior experience and the checks use (the tracks and their d20 tables, the
@@ -300,8 +302,9 @@ Notes on the edges, each checkable:
   four gaits are matched to the canon's by place, so a canon must name four
   (`battle.E003`) until stage 6 seats the engine's own rules. The values built
   from the catalog or the rules and cached (the sheet's catalog payload, the
-  Weapon-skill spellings, the Games Master's item names, a beast's gait
-  proportions) register with `derived_from_rules` as the skill values do.
+  Weapon-skill spellings, the Games Master's item names and its prompt's
+  weapon, armour and encumbrance sentences, a beast's gait proportions)
+  register with `derived_from_rules` as the skill values do.
   The rules files are read by the one strict reader in
   `reference/rules_file.py`.
 
@@ -1135,7 +1138,7 @@ graph TD
         s5["MAGIC, EQUIPMENT, WORLD, GUIDELINES"]
         s6["OUTCOMES - dice come to you as results"]
         s7["PLAN_SCHEMA - last, so it stays in the prefix cache"]
-        addenda["plus SECTION_DM_AUTHORITY and/or SECTION_DM_AIDE<br/>four cached strings, 2 by 2 selector"]
+        addenda["plus section_dm_authority() and/or SECTION_DM_AIDE<br/>four cached strings, 2 by 2 selector"]
     end
     sys --> sections
 
@@ -1815,7 +1818,7 @@ player can read.
 | Who may control a seat | `battle/access.py::decides_for` / `can_control`, `battle/control.py` |
 | A new rules profile | `battle/profiles.py` (`BattleProfile` subclass), `battle/persistence.py::PROFILE_CHOICES`, `battle/viewmodel.py` |
 | What the arena draws | `battle/viewmodel.py` for the payload, `static/js/battle.js` for the drawing, `battle/templates/battle/_arena.html` |
-| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, `section_core()`, `section_plan_schema()` and `system_prompt_sections()` |
+| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, the `section_*()` builders that state the canon's rules numbers (`section_core()`, `section_character_creation()`, `section_combat()`, `section_equipment()`, `section_plan_schema()`, `section_dm_authority()`; issue #68) and `system_prompt_sections()` |
 | Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::section_plan_schema` |
 | What the model is told about the session | `gm/turn_engine/state.py::state_block` |
 | The two model calls' wording | `gm/turn_engine/messages.py` |

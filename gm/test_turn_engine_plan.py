@@ -1082,6 +1082,25 @@ class EmptyReferencesTest(SimpleTestCase):
         self.assertEqual(reading.errors, ())
         self.assertEqual(reading.actions[1].quantity, 1)
 
+    def test_a_track_named_by_its_label_reads_as_its_key(self):
+        """The prompt names tracks by label: "Hunter/Gatherer" (issue #68)."""
+        for said_as, key in (
+            ("Hunter/Gatherer", "hunter_gatherer"),
+            ("hunter-gatherer", "hunter_gatherer"),
+            ("Civil Service", "civil_service"),
+        ):
+            with self.subTest(said_as=said_as):
+                reading = self.read(
+                    {
+                        "action": "play_years",
+                        "character_id": 41,
+                        "track": said_as,
+                        "years": 2,
+                    }
+                )
+                self.assertEqual(reading.errors, ())
+                self.assertEqual(reading.actions[1].track, key)
+
     def test_a_required_number_left_empty_is_still_an_error(self):
         reading = self.read(
             {"action": "play_years", "character_id": 41, "track": "random", "years": ""}

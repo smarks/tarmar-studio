@@ -2791,3 +2791,44 @@ def test_only_the_logs_dice_count_as_rolled():
     assert {"10", "16", "2", "1", "3", "4", "5", "12"} <= numbers
     # A TN, a hex count and a save's target are on the log, not dice.
     assert not {"17", "7", "13", "20"} & numbers
+
+
+@pytest.mark.parametrize(
+    "spelling", ("Hunter/Gatherer", "hunter-gatherer", "hunter gatherer")
+)
+def test_a_track_is_read_however_its_words_are_joined(spelling):
+    """The canon's label joins a track's words with a slash (issue #68).
+
+    The Games Master's prompt names each track by the canon's label, so the
+    model writes "Hunter/Gatherer" as readily as "hunter-gatherer"; a figure
+    stated for it either way is that track's, and a wrong one is caught.
+    """
+    rule = harness.survival_rule_from_code("hunter_gatherer")
+    wrong = rule.target + 3
+    assert harness.read_clause(f"{spelling} {wrong}").figures == (
+        (wrong, "hunter_gatherer"),
+    )
+    assert harness.read_clause(f"{wrong} for {spelling}").figures == (
+        (wrong, "hunter_gatherer"),
+    )
+    assert harness.contradicting_survival_claims(
+        f"The {spelling} survivability target is {wrong}.", rule
+    )
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Campaigner: 1,200 XP a year",
+        "Underworld - 1,000 XP/year",
+        "Campaigner 1,200 XP/year, survival target unknown",
+    ),
+)
+def test_a_tracks_xp_a_year_is_no_survival_figure(sentence, campaigner_rule):
+    """The prompt lists each track's XP a year beside its label (issue #68).
+
+    The figure stops at a thousands separator, so the "1" of "1,200" was read
+    as a survival target and contradicted the campaigner's.
+    """
+    assert harness.read_clause(sentence).figures == ()
+    assert not harness.contradicting_survival_claims(sentence, campaigner_rule)

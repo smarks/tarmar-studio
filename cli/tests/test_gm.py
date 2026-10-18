@@ -24,11 +24,11 @@ from gm.engine import (
     DEFAULT_RULES_DIR,
     MODE_AIDE,
     MODE_PLAY,
-    SECTION_DM_AUTHORITY,
     aide_system_prompt,
     dm_play_system_prompt,
     dm_system_prompt,
     normalise_mode,
+    section_dm_authority,
     system_prompt,
 )
 from gm.model_config import GMModelConfig
@@ -134,7 +134,7 @@ class ModelConfigTest(TestCase):
         ):
             sent = cli_gm.build_system_message("ignored")["content"]
         self.assertEqual(sent, aide_system_prompt())
-        self.assertNotIn(SECTION_DM_AUTHORITY, sent)
+        self.assertNotIn(section_dm_authority(), sent)
 
     def test_the_mode_variable_is_named_in_one_place(self):
         self.assertEqual(cli_gm.GM_MODE_ENV, "TARMAR_GM_MODE")

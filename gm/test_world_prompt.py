@@ -25,7 +25,10 @@ from common.test_helpers import (
 )
 from reference import search_index
 from reference.paths import (
+    CANON_CHARACTER_RULES_FILE_NAME,
     CANON_DIR_ENV,
+    CANON_EQUIPMENT_CATALOG_FILE_NAME,
+    CANON_EQUIPMENT_RULES_FILE_NAME,
     CANON_NAME,
     CANON_PROMPT_DIR_NAME,
     CANON_SKILL_RULES_FILE_NAME,
@@ -151,8 +154,9 @@ class WorldSectionFromCanonTest(SimpleTestCase):
     ) -> subprocess.CompletedProcess[str]:
         """Run ``script`` in a fresh process on a canon with no ``gm-prompt/``.
 
-        The canon carries the default canon's ``skill-rules.json``, which every
-        canon must and two prompt sections are built from (issue #70).
+        The canon carries the default canon's character, skill and equipment
+        rules files, which every canon must and the prompt sections are built
+        from (issues #68, #70).
 
         Args:
             script: Python source that imports ``gm.engine``.
@@ -169,10 +173,15 @@ class WorldSectionFromCanonTest(SimpleTestCase):
         )
         if canon_json is not None:
             (canon_directory / "canon.json").write_text(canon_json, encoding="utf-8")
-        shutil.copy(
-            DEFAULT_CANON_DIR / CANON_SKILL_RULES_FILE_NAME,
-            canon_directory / CANON_SKILL_RULES_FILE_NAME,
-        )
+        for rules_file_name in (
+            CANON_CHARACTER_RULES_FILE_NAME,
+            CANON_SKILL_RULES_FILE_NAME,
+            CANON_EQUIPMENT_CATALOG_FILE_NAME,
+            CANON_EQUIPMENT_RULES_FILE_NAME,
+        ):
+            shutil.copy(
+                DEFAULT_CANON_DIR / rules_file_name, canon_directory / rules_file_name
+            )
         environment = {
             name: value
             for name, value in os.environ.items()

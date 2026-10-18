@@ -205,6 +205,28 @@ def track_keys() -> tuple[str, ...]:
     return tuple(skill_rules().tracks.tracks)
 
 
+#: What prose or a plan puts between a track's words: a space, an underscore,
+#: a hyphen, or the slash the canon's labels use ("Hunter/Gatherer", issue #68).
+TRACK_WORD_JOINER = r"[\s_/-]"
+
+
+def track_key_for(said: str) -> str:
+    """The track key a track named in prose or a plan stands for.
+
+    "Hunter/Gatherer", "hunter-gatherer" and "Civil Service" are
+    ``hunter_gatherer`` and ``civil_service``: the one reading the plan
+    reader, the rules lookup and the behaviour check share (issue #68). Whether
+    the key names a track is the caller's question.
+
+    Args:
+        said: The track as written.
+
+    Returns:
+        It case-folded, with each joiner between its words an underscore.
+    """
+    return re.sub(TRACK_WORD_JOINER, "_", said.strip().casefold())
+
+
 def selectable_tracks() -> tuple[str, ...]:
     """Every track a player or a plan may name: the canon's, then random.
 

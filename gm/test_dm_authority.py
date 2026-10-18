@@ -27,8 +27,8 @@ from .character_schema import (
     extraction_prompt,
 )
 from .engine import (
-    SECTION_DM_AUTHORITY,
     dm_system_prompt,
+    section_dm_authority,
     system_prompt,
     system_prompt_for,
 )
@@ -79,7 +79,8 @@ class PromptPerRoleTest(SimpleTestCase):
         authority section's own place in the join.
         """
         self.assertEqual(
-            dm_system_prompt().split(SECTION_DM_AUTHORITY)[0], f"{system_prompt()}\n\n"
+            dm_system_prompt().split(section_dm_authority())[0],
+            f"{system_prompt()}\n\n",
         )
 
     def test_the_dm_prompt_shares_the_players_cacheable_prefix(self):
@@ -87,7 +88,7 @@ class PromptPerRoleTest(SimpleTestCase):
         self.assertTrue(dm_system_prompt().startswith(system_prompt()))
 
     def test_the_player_prompt_does_not_carry_the_addendum(self):
-        self.assertNotIn(SECTION_DM_AUTHORITY, system_prompt())
+        self.assertNotIn(section_dm_authority(), system_prompt())
         self.assertNotIn("Game Master of this campaign", system_prompt())
 
     def test_each_role_gets_the_same_object_every_time(self):
@@ -107,7 +108,7 @@ class PromptPerRoleTest(SimpleTestCase):
             "signed in with",
         ):
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase, SECTION_DM_AUTHORITY)
+                self.assertIn(phrase, section_dm_authority())
 
 
 class SystemMessageDispatchTest(BaseTestCase):
@@ -179,7 +180,7 @@ class StreamPassesTheRequestingUserTest(BaseTestCase):
             ),
         )
         self.assertEqual(sent, system_prompt())
-        self.assertNotIn(SECTION_DM_AUTHORITY, sent)
+        self.assertNotIn(section_dm_authority(), sent)
 
 
 class ExtractionSchemaLatitudeTest(SimpleTestCase):
