@@ -795,8 +795,11 @@ class RuleClaim:
     figures: tuple[tuple[int, str | None], ...] = ()
 
 
+# The lookbehind starts the digits only at the front of a digit run, not again
+# from each digit in it: a run of n digits cost n * n steps (issue #44).
 _DICE_COMPARISON = re.compile(
-    r"(\d+)\s*d\s*6\s*(<=|≤|<|>=|≥|>|=|or\s+(?:less|lower|under|more|higher|over))"
+    r"(?<!\d)(\d+)\s*d\s*6"
+    r"\s*(<=|≤|<|>=|≥|>|=|or\s+(?:less|lower|under|more|higher|over))"
     r"\s*(\d+)?",
     re.IGNORECASE,
 )
@@ -809,12 +812,18 @@ _NOT_A_LONGER_NUMBER = r"(?![\d,.]\d)"
 _NAMED_TARGET = re.compile(
     r"(?:targets?(?:\s+numbers?)?|thresholds?|difficulty|survivability|tn)"
     r"(?:\s+(?:for|by|at|on|in)\s+(?:the\s+|this\s+|a\s+|your\s+|my\s+)?"
-    r"[a-z'-]+(?:\s+[a-z'-]+){0,2}?)?\s*"
+    r"[a-z'-]+(?:\s+[a-z'-]+){0,2}?)?"
+    # Every optional part below carries the whitespace before it and the
+    # last carries the whitespace before the figure, so no two repeated
+    # parts can take the same spaces. The tail used to be "\s*" beside
+    # optional groups that held more "\s*", which divided a run of spaces
+    # three ways: 9.7 s at 2,000 spaces, 150 s at 5,000 (issue #44).
+    r"(?:\s*number)?"
+    # "The track's target, which is 9" (board of 2026-09-29, run 6).
+    r"(?:\s*(?:(?:,\s*)?(?:which|that)\s+is|of|is|:|=))?"
     # "the track's target number (9 for Campaigners)" puts the figure in
     # brackets (board of 2026-09-29, run 5).
-    # "The track's target, which is 9" (board of 2026-09-29, run 6).
-    r"(?:number\s*)?(?:,?\s*(?:which|that)\s+is|of|is|:|=)?\s*\(?\s*(\d{1,2})\b"
-    + _NOT_A_LONGER_NUMBER,
+    r"\s*(?:\(\s*)?(\d{1,2})\b" + _NOT_A_LONGER_NUMBER,
     re.IGNORECASE,
 )
 _LOW_DIRECTION = re.compile(
@@ -1131,7 +1140,7 @@ def _track_name() -> re.Pattern[str]:
 def _figure_for_track() -> re.Pattern[str]:
     """A figure followed by the track it is for: "8 for Underworld"."""
     return re.compile(
-        r"(?<!\d)(?<!\d[,.])(\d{1,2})\s*(?:\+|or\s+(?:more|higher|better|above))?"
+        r"(?<!\d)(?<!\d[,.])(\d{1,2})(?:\s*(?:\+|or\s+(?:more|higher|better|above)))?"
         r"\s+(?:for|on)\s+"
         r"(?:the\s+)?(" + _tracks_alternation() + r")",
         re.IGNORECASE,
@@ -1266,7 +1275,7 @@ def _track_figure() -> re.Pattern[str]:
     return re.compile(
         r"\b("
         + _tracks_alternation()
-        + r")(?:\s+track)?\s*[:|=–-]?\s*\|?\s*(\d{1,2})\b"
+        + r")(?:\s+track)?(?:\s*[:|=–-])?(?:\s*\|)?\s*(\d{1,2})\b"
         + _NOT_A_LONGER_NUMBER
         + _COUNTED_NOUN,
         re.IGNORECASE,
@@ -1708,9 +1717,11 @@ def skill_point_claims(text: str) -> list[tuple[int, str]]:
     return claims
 
 
+# Each optional word carries the whitespace before it, and the figure carries
+# the last of it, so no two "\s*" can take the same spaces (issue #44).
 _ROLLED_FIGURE = re.compile(
-    r"\brolled\b\s*(?:a|an|the)?\s*(?:total\s+of\s*)?(\d{1,3})\b"
-    r"|\b(?:came\s+up|shows|showed|showing)\s*(?:a|an)?\s*(\d{1,3})\b",
+    r"\brolled\b(?:\s*(?:a|an|the))?(?:\s*total\s+of)?\s*(\d{1,3})\b"
+    r"|\b(?:came\s+up|shows|showed|showing)(?:\s*(?:a|an))?\s*(\d{1,3})\b",
     re.IGNORECASE,
 )
 
@@ -1739,7 +1750,7 @@ def rolled_figures(text: str) -> list[tuple[int, str]]:
 
 _ATTRIBUTE_FIGURE = re.compile(
     r"\b(STR|DEX|INT|WIS|CON|CHR|Strength|Dexterity|Intelligence|Wisdom|"
-    r"Constitution|Charisma)\b\s*[:=\-–]?\s*(?:is\s+)?(\d{1,2})\b",
+    r"Constitution|Charisma)\b\s*(?:[:=\-–]\s*)?(?:is\s+)?(\d{1,2})\b",
     re.IGNORECASE,
 )
 
@@ -3048,7 +3059,8 @@ def _tn_candidates(sentence: str, start: int = 0) -> list[int]:
 #: A figure labelled with an armour tier: "None 11", "Light: 14". Two in one
 #: sentence make it a table, whatever else it says.
 _LABELLED_FIGURE = re.compile(
-    r"\b(?:none|light|medium|heavy|unarmou?red)\s*[:=]?\s*\d{1,2}\b", re.IGNORECASE
+    r"\b(?:none|light|medium|heavy|unarmou?red)\s*(?:[:=]\s*)?\d{1,2}\b",
+    re.IGNORECASE,
 )
 
 
