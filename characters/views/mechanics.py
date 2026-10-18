@@ -39,7 +39,7 @@ from ..purse import (
     move_coin_for_reason,
 )
 from ..skill_checks import skill_check
-from ..skills import normalize_skill_name
+from ..skills import normalize_skill_name, skill_name_refusal
 from ..weapon_skill import record_weapon_skill
 from .access import answer_change, may_edit
 from .characters import sheet_repaint
@@ -125,9 +125,13 @@ def character_skill_check(request: HttpRequest, pk: int) -> HttpResponse:
     checks = []
 
     def apply(character: Character, data: dict) -> str:
+        received_name = _required_text(data, "skill")
+        refusal = skill_name_refusal(received_name)
+        if refusal:
+            raise services.CharacterChangeError(refusal)
         check = skill_check(
             character,
-            normalize_skill_name(_required_text(data, "skill")),
+            normalize_skill_name(received_name),
             difficulty=_optional_int(data, "difficulty"),
             attribute=str(data.get("attribute") or "") or None,
             stated_total=_optional_int(data, "total"),
