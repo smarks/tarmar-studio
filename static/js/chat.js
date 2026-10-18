@@ -151,16 +151,33 @@ function setStreaming(active) {
  *   detail, or null when the turn is over.
  */
 function setWorkingStatus(activity) {
+  if (activity === null) {
+    showStatusLine(null);
+    return;
+  }
+  showStatusLine(activity
+    ? `The Game Master is working: ${activity}`
+    : 'The Game Master is working');
+}
+
+/**
+ * Put a whole line on the status line, or take it down.
+ *
+ * A turn waiting behind other tables' turns is told so in the server's own
+ * words (issue #64), which replace "The Game Master is working" rather than
+ * follow it. Written as text, never markup, like every status line.
+ *
+ * @param {string|null} line - the line to show, or null when the turn is over
+ */
+function showStatusLine(line) {
   const status = document.getElementById('gm-status');
   if (!status) return;
-  if (activity === null) {
+  if (line === null) {
     status.textContent = '';
     status.hidden = true;
     return;
   }
-  status.textContent = activity
-    ? `The Game Master is working: ${activity}`
-    : 'The Game Master is working';
+  status.textContent = line;
   status.hidden = false;
 }
 
@@ -1028,8 +1045,12 @@ async function streamMessage(body) {
         // planning, running a step, or writing (issue #590). The words are the
         // server's own and are shown as text, never as markup. A frame
         // carrying `elapsed` says how long the turn has been going, which is
-        // how a slow plan shows it is alive.
-        if (data.status) {
+        // how a slow plan shows it is alive. A frame carrying `busy` is a
+        // turn waiting behind other tables' turns for the one model, and
+        // that whole line, the server's, is shown instead (issue #64).
+        if (data.busy) {
+          showStatusLine(data.busy);
+        } else if (data.status) {
           let working = data.status;
           const seconds = Math.floor(Number(data.elapsed));
           if (Number.isFinite(seconds) && seconds > 0) {

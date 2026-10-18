@@ -556,7 +556,7 @@ class TheFoldRunsInsideTheTurnTest(PlanTurnTestCase):
                 body={"session_id": session.pk, "message": "We walk east"},
             )
 
-        self.assertEqual(sent[-1]["error"], views.GM_STREAM_TOO_SLOW_MESSAGE)
+        self.assertEqual(sent[-1]["error"], settings.GM_STREAM_TOO_SLOW_MESSAGE)
         self.assertEqual(calls, [], "the turn never reached the model")
         session.refresh_from_db()
         self.assertEqual(session.history, before)
@@ -784,7 +784,7 @@ class ARecapTheTurnGaveUpOnStopsTest(PlanTurnTestCase):
                 body={"session_id": session.pk, "message": "We walk east"},
             )
 
-        self.assertEqual(sent[-1]["error"], views.GM_STREAM_TOO_SLOW_MESSAGE)
+        self.assertEqual(sent[-1]["error"], settings.GM_STREAM_TOO_SLOW_MESSAGE)
         self.assertTrue(closed.wait(2), "the recap's stream was left running")
         session.refresh_from_db()
         self.assertEqual(session.summary_covers, 0)

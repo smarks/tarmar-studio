@@ -1272,8 +1272,8 @@ is **narrated, not re-run** — nothing is applied twice.
 `gm:stream` answers a `StreamingHttpResponse` of `text/event-stream` with
 `X-Accel-Buffering: no` and an `X-GM-Turn` header naming the turn. There are no
 SSE `event:` names — every frame is an unnamed `data:` line and `chat.js`
-dispatches on the JSON keys: `token`, `status`, `procedure`, `gm_roll`, `done`,
-`error`. Keepalive is two layers: `KeepAliveTokens` yields a `None` every
+dispatches on the JSON keys: `token`, `status` (with `elapsed`, and `busy` for
+a turn waiting behind others), `procedure`, `gm_roll`, `done`, `error`. Keepalive is two layers: `KeepAliveTokens` yields a `None` every
 `GM_STREAM_KEEPALIVE_SECONDS = 10` of model silence, which becomes a `WAITING`
 event, and a literal `": keep-alive"` comment goes out ahead of it so a proxy
 does not close an idle connection.
@@ -1286,6 +1286,53 @@ hang-up asked for before then runs when they arrive. So during prefill, or
 while the call is queued behind another turn, the model is held until the first
 token or the turn's deadline, whichever comes first; the read timeout is held to
 that deadline.
+
+#### A turn waiting for the model
+
+Ollama on the production host answers one request at a time
+(`OLLAMA_NUM_PARALLEL=1`), so a turn sent while other turns are being answered
+waits, silent, until its turn comes (issue #64). The app cannot see Ollama's
+line; its own view of it is `turns_ahead_of(record_id)` in `gm/turn_record.py`:
+the turns and fights claimed before this one and still running, every player's,
+stale ones left out. The engine is handed a `ModelQueueWait`
+(`gm/turn_engine/model_queue.py`); at each `WAITING` silence before a call's
+first token it asks that count, and while it is above zero the time is counted
+as waiting and the `waiting` frame carries `busy`, the whole line the page shows
+instead of "The Game Master is working": `GM_QUEUE_STATUS_ONE_AHEAD` or
+`GM_QUEUE_STATUS_MANY_AHEAD`. A silence after the first token is the model
+working and is never counted. The count is per turn while Ollama's line is per
+call (a turn whose call is being answered is still counted), so the wording
+says how many turns started earlier are still running, not a place in the
+line. The fold's recap call runs on the turn's clock and is not streamed, so
+it has no first token: the whole call is looked at the same way, and its wait
+counts toward the turn's.
+
+A turn that runs out of budget is told `GM_STREAM_QUEUED_TOO_LONG_MESSAGE`,
+which names the queue and says not to resend straight away, when it was still
+waiting behind other turns as the budget ran out or had spent at least half the
+budget (`QUEUE_BLAMED_SHARE`) waiting; otherwise `GM_STREAM_TOO_SLOW_MESSAGE`.
+`/fight`'s foe call is one blocking request on a 50 s budget with no
+keep-alives to look at the line from, so its cut (`GM_FIGHT_TOO_SLOW_MESSAGE`)
+says the Game Master is often busy with other tables then and asks for a minute
+before trying again, rather than inviting a retry at once.
+
+All five are settings with their defaults in `settings.py`, overridable from the
+environment (`common/message_templates.py`). Each is a `str.format` template
+filled in with whole numbers, even one with no fields, so a literal brace is
+written doubled; a template naming a field it may not use, or one a trial
+fill-in refuses (a bad format spec or conversion), stops startup.
+
+Queue time counts against `GM_STREAM_BUDGET_SECONDS`. Leaving it out was
+weighed and refused. Each call is handed the turn's deadline as `stop_at` when
+it is sent, and the port hangs up there (#904), so a clock that paused while
+queued would need a deadline that moves under a call in flight. From inside the
+call a queued request and a model loading or reading its prompt look the same
+(no headers until the first token), so a budget that skipped the queue would in
+practice have to skip everything before the first token, leaving a model that
+never answers unbounded. And `expire_stale_running_turns` takes a turn running
+longer than the budgets plus a grace to have died, opening its session to a new
+message; a turn allowed unbounded queue time could be declared dead while
+alive.
 
 The calls made outside a turn's clock carry deadlines of their own (issue
 #936). A continued session's catch-up recap, written before the turn starts,

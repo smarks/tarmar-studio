@@ -12,6 +12,7 @@ import time
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.test import override_settings
 from django.utils import timezone
 
@@ -325,7 +326,7 @@ class DisconnectedTurnBudgetTest(BaseTestCase):
         self.assertEqual(GMSession.objects.count(), 0)
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_TOO_SLOW)
-        self.assertEqual(record.error, views.GM_STREAM_TOO_SLOW_MESSAGE)
+        self.assertEqual(record.error, settings.GM_STREAM_TOO_SLOW_MESSAGE)
 
 
 class BlankPageDoesNotAdoptAnotherTabsTurnTest(BaseTestCase):

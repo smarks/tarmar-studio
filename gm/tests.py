@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import skipUnless
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from common.services import ollama_client
@@ -1638,7 +1639,7 @@ class GMStreamBudgetTest(BaseTestCase):
         # The stall comes while the turn is planning, so nothing was written.
         self.assertEqual(frames[0], {"status": "planning"})
         self.assertFalse([frame for frame in frames if "token" in frame])
-        self.assertEqual(frames[-1], {"error": views.GM_STREAM_TOO_SLOW_MESSAGE})
+        self.assertEqual(frames[-1], {"error": settings.GM_STREAM_TOO_SLOW_MESSAGE})
 
     def test_slow_stream_sends_no_done_frame(self):
         content = self._post()

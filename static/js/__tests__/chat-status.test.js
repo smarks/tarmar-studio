@@ -233,3 +233,51 @@ describe('the working line through one turn', () => {
         expect(notice.textContent).toContain('cut short');
     });
 });
+
+describe('a turn waiting behind other tables (issue #64)', () => {
+    // The server's whole line, which this page shows as it is sent.
+    const BUSY = 'The Game Master is busy with other tables: 2 turns started before yours are still running (20s so far)';
+
+    test('the line says the GM is busy, then working again once served', async () => {
+        const chat = loadChat();
+        const stream = controlledStream();
+        fetch.mockResolvedValueOnce(stream.response);
+
+        const turn = chat.streamMessage({ session_id: 7, message: 'I knock' });
+        await settle();
+        stream.send({ status: 'planning', elapsed: 20, busy: BUSY });
+        await settle();
+        expect(statusLine().textContent).toBe(BUSY);
+
+        // Served: the silences after that are the model working.
+        stream.send({ status: 'planning', elapsed: 30 });
+        await settle();
+        expect(statusLine().textContent).toBe('The Game Master is working: planning, 30s');
+
+        stream.send({ token: 'The door opens.' });
+        await settle();
+        expect(statusLine().textContent).toBe('The Game Master is working: writing');
+
+        stream.send({ done: true, full_response: 'The door opens.' });
+        stream.end();
+        await turn;
+        expect(statusLine().hidden).toBe(true);
+    });
+
+    test('the busy line is never rendered as markup', async () => {
+        const chat = loadChat();
+        const stream = controlledStream();
+        fetch.mockResolvedValueOnce(stream.response);
+
+        const turn = chat.streamMessage({ session_id: 7, message: 'I knock' });
+        await settle();
+        stream.send({ status: 'planning', elapsed: 20, busy: '<b>busy</b>' });
+        await settle();
+
+        expect(statusLine().textContent).toBe('<b>busy</b>');
+        expect(statusLine().querySelector('b')).toBeNull();
+
+        stream.end();
+        await turn;
+    });
+});

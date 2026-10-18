@@ -13,6 +13,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import httpx
+from django.conf import settings
 from django.test import SimpleTestCase
 
 from battle import control
@@ -1558,7 +1559,7 @@ class PlayersFoesAreTheGameMastersTest(BaseTestCase):
         response = self._post("wolves")
 
         self.assertEqual(response.status_code, 504)
-        self.assertEqual(response.json()["error"], views.FIGHT_MODEL_TOO_SLOW)
+        self.assertEqual(response.json()["error"], settings.GM_FIGHT_TOO_SLOW_MESSAGE)
         self.assertIsNone(Battle.objects.first())
         record = GMTurnRecord.objects.get(session=self.session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_TOO_SLOW)
