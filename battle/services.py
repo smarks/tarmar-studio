@@ -40,7 +40,14 @@ from characters.skills import glossary_skill_level
 from characters.weapon_skill import resolve_weapon_skill
 
 from . import agreement, control, policy, profiles, turn_menu
-from .access import Actor, claimed_seat_q, commands_foes, decides_for, is_dm
+from .access import (
+    Actor,
+    claimed_seat_q,
+    commands_foes,
+    decides_for,
+    is_dm,
+    seat_is_held,
+)
 from .adaptation import engine_gait_names, snapshot_beast
 from .classic_adaptation import classic_state
 from .engine import hexes
@@ -1467,7 +1474,7 @@ def release_seat(
         if battle.status != Battle.STATUS_LOBBY:
             raise ValueError("This battle is no longer open for joining")
         seat = battle.combatants.filter(pk=seat_id, is_open_seat=True).first()
-        if seat is None or (seat.player_id is None and not seat.guest_key):
+        if seat is None or not seat_is_held(seat):
             raise ValueError("That is not an occupied seat")
         actor = Actor.for_user_or_guest(user, guest_key)
         if not actor.holds_seat(seat) and not actor.is_dm:
@@ -2501,6 +2508,19 @@ WITHDRAWN_SEAT_REFUSAL = (
     "character; the seat is theirs alone"
 )
 
+#: Who may hand a taken seat back (issue #853).
+RETURN_SEAT_OWNER_OR_GAME_MASTER = (
+    "Only the character's owner or the Game Master running this fight hands a seat back"
+)
+
+#: Why a seat nobody else holds has nothing to give back (issue #60).
+NO_SEAT_TO_RETURN = "Nobody has taken {name}'s seat, so there is none to give back"
+
+#: Why a seat nobody holds has no absent player to stand in for (issue #60).
+NO_SEAT_TO_TAKE = (
+    "Nobody sits in {name}'s seat, so there is no absent player to stand in for"
+)
+
 
 def battle_runner_id(battle: Battle) -> int | None:
     """Whose fight this is, for standing in at a seat (issue #853 review).
@@ -2537,6 +2557,23 @@ def withdrawn_from_session(battle: Battle, character: Character) -> bool:
     return (
         session is not None and not session.characters.filter(pk=character.pk).exists()
     )
+
+
+def held_by_another(seat: BattleCombatant) -> bool:
+    """Whether someone other than the character's owner sits in ``seat`` (#60).
+
+    The one test of whether there is a seat to give back. ``player_id !=
+    owner`` alone is wrong in a way that misleads: an unseated character has
+    ``player_id`` ``None``, which differs from every owner, so the owner of a
+    character nobody holds was offered their own seat back.
+
+    Args:
+        seat: A saved character's seat (``seat.character`` is set).
+
+    Returns:
+        True when an account other than the owner, or a guest, holds it.
+    """
+    return seat_is_held(seat) and seat.player_id != seat.character.user_id
 
 
 def _owned_seat(battle: Battle, combatant_id: int) -> BattleCombatant:
@@ -2585,7 +2622,8 @@ def take_seat(
 
     Raises:
         ValueError: Not this fight's Game Master, the battle is over, not a
-            saved character, withdrawn, or the seat is already his.
+            saved character, withdrawn, nobody holds the seat (#60), or the
+            seat is already his.
     """
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
@@ -2594,6 +2632,8 @@ def take_seat(
         seat = _owned_seat(battle, combatant_id)
         if withdrawn_from_session(battle, seat.character):
             raise ValueError(WITHDRAWN_SEAT_REFUSAL.format(name=seat.display_name))
+        if not seat_is_held(seat):
+            raise ValueError(NO_SEAT_TO_TAKE.format(name=seat.display_name))
         if seat.player_id == game_master.pk:
             raise ValueError(f"You already play {seat.display_name}")
         owner = seat.character.user
@@ -2627,20 +2667,19 @@ def return_seat(
 
     Raises:
         ValueError: Neither the owner nor this fight's Game Master, the
-            battle is over, not a saved character, or the owner already
-            holds the seat.
+            battle is over, not a saved character, the owner already holds
+            the seat, or nobody holds it (:func:`held_by_another`, #60).
     """
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         seat = _owned_seat(battle, combatant_id)
         owner = seat.character.user
         if user is None or not (user.pk == owner.pk or runs_the_seats(battle, user)):
-            raise ValueError(
-                "Only the character's owner or the Game Master running this "
-                "fight hands a seat back"
-            )
+            raise ValueError(RETURN_SEAT_OWNER_OR_GAME_MASTER)
         if seat.player_id == owner.pk:
             raise ValueError(f"{owner.username} already plays {seat.display_name}")
+        if not held_by_another(seat):
+            raise ValueError(NO_SEAT_TO_RETURN.format(name=seat.display_name))
         seat.player = owner
         seat.guest_key = ""
         seat.save(update_fields=["player", "guest_key"])

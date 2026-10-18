@@ -51,6 +51,22 @@ def claimed_seat_q(prefix: str = "") -> Q:
     return Q(**{f"{prefix}player__isnull": False}) | ~Q(**{f"{prefix}guest_key": ""})
 
 
+def seat_is_held(seat: BattleCombatant) -> bool:
+    """Whether somebody, an account or a guest, sits in ``seat``.
+
+    :func:`claimed_seat_q` asked of one row already in hand. A seat nobody
+    holds has no absent player to stand in for and none to give back
+    (issue #60), so the seat hand-offs and their offers ask this first.
+
+    Args:
+        seat: The seat (a ``BattleCombatant``) to ask about.
+
+    Returns:
+        True when an account (``player``) or a guest (``guest_key``) holds it.
+    """
+    return seat.player_id is not None or bool(seat.guest_key)
+
+
 def is_dm(user) -> bool:
     """True for a DM/admin. Safe on ``AnonymousUser``, which has no flag."""
     return bool(getattr(user, "can_manage_users", False))
@@ -301,6 +317,6 @@ def decides_for(actor: Actor, battle: Battle, combatant: BattleCombatant) -> boo
     fight whose foes belong to the Game Master that is a Game Master
     account, not the player who made it (:func:`commands_foes`, #762).
     """
-    if combatant.player_id is not None or combatant.guest_key:
+    if seat_is_held(combatant):
         return actor.holds_seat(combatant)
     return commands_foes(actor, battle)
