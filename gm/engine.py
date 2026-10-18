@@ -12,9 +12,8 @@ no rules file holds them yet:
   survival save 3d6 ≤ CON, the injury bands, the casting dice 3d6 ≤ INT or
   WIS, the megahex of 7, hand-to-hand's 4d6 ≤ DEX, the defender dodge's
   ``max(0, floor((DEX−10)/2))`` in the Target Number formula (the engine's
-  ``dodge_modifier``, which ``characters.combat`` re-exports), and the
-  "3d6 ≤ attribute" that saves and spells share with the attribute check in
-  the combat section;
+  ``dodge_modifier``, which ``characters.combat`` re-exports), and the saves'
+  and spells' 3d6 beside the attribute check in the combat section;
 - Movement Speeds' base distances (18, 12, 7, 4), which the canon's
   ``gaits.base_distances`` holds but whose per-gait prose it does not;
 - what the tracks yield (:data:`TRACK_YIELDS_SENTENCE`), prose about the
@@ -191,6 +190,28 @@ def _render_bare_handed_fragment() -> str:
         bands.append(f"{label} {damage.replace('-', '−')}")
         low = top + 1
     return "Bare-handed damage by STR: " + "; ".join(bands) + "."
+
+
+#: The dice the survival save and the casting roll are made on: the engine's
+#: own numbers, not yet a canon's (stages 6 and 7 of rules-as-data).
+_SAVES_AND_SPELLS_DICE = "3d6"
+
+
+def _render_roll_under_fragment() -> str:
+    """The roll-under checks beside the attack roll, in the combat section (#68).
+
+    The attribute check's dice are the canon's ``attribute_check``
+    (``skill-rules.json``); the saves' and spells' are the engine's. When the
+    two agree they are said once: "attribute checks, saves, and spells still
+    roll 3d6 ≤ attribute."
+    """
+    dice = skill_rules().attribute_check.dice
+    if dice == _SAVES_AND_SPELLS_DICE:
+        return f"attribute checks, saves, and spells still roll {dice} ≤ attribute."
+    return (
+        f"attribute checks roll {dice} ≤ attribute; saves and spells "
+        f"{_SAVES_AND_SPELLS_DICE} ≤ attribute."
+    )
 
 
 def _render_checks_fragment() -> str:
@@ -618,8 +639,7 @@ def section_combat() -> str:
         "the target's Target Number (TN). (Only combat attacks use d20 — skill "
         f"checks roll {skill_rules().skill_check.dice} + attribute modifier + "
         "skill level against the GM's "
-        "difficulty; attribute checks, saves, and spells still roll 3d6 ≤ "
-        "attribute.)\n"
+        f"difficulty; {_render_roll_under_fragment()})\n"
         + _render_crit_fragment(CRIT_DAMAGE_ROLLS, SEVERE_CRIT_DAMAGE_ROLLS)
         + "Natural 1 = auto-miss + fumble — roll 1d6: "
         + _render_fumble_fragment(FUMBLE_TABLE)

@@ -10,9 +10,9 @@ from .turn_engine.messages import (
     NOTHING_RAN,
     PLAN_ONLY,
     PLANNING_GUIDANCE,
-    PLANNING_RULES,
     narrate_message,
     plan_message,
+    planning_rules,
     replan_message,
 )
 from .turn_engine.plan import (
@@ -564,7 +564,7 @@ class TurnMessagesTest(SimpleTestCase):
         self.assertNotIn(AIDE_PLANNING_GUIDANCE, content)
         self.assertEqual(
             content,
-            f"STATE\n\n{PLANNING_GUIDANCE}\n{PLANNING_RULES}\n{PLAN_ONLY}\n\n"
+            f"STATE\n\n{PLANNING_GUIDANCE}\n{planning_rules()}\n{PLAN_ONLY}\n\n"
             "Latest message: twins, all 18s",
         )
 

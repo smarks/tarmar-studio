@@ -17,6 +17,7 @@ from django.test import SimpleTestCase
 from characters.equipment_rules import EncumbranceLevel, EncumbranceRules
 from characters.rules import FatigueRollRules
 from characters.skill_rules import SkillRules, SkillTrackRules
+from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN
 from characters.tests.rules_fixtures import (
     DEFAULT_CHARACTER_RULES,
     seated_character_rules,
@@ -36,6 +37,9 @@ from characters.tests.test_skill_rules import (
 )
 
 from . import engine
+from .engine import MODE_PLAY
+from .turn_engine.messages import plan_message, planning_rules
+from .turn_engine.policy import TurnPolicy
 
 #: Each section built from the rules, by its builder, and the SHA-256 of its
 #: text under the default canon's rules. ``section_core`` and
@@ -132,6 +136,15 @@ class DefaultCanonTextTest(SimpleTestCase):
                 built = hashlib.sha256(builder().encode()).hexdigest()
                 self.assertEqual(built, expected)
 
+    def test_the_plan_calls_rules_line_is_the_pinned_text(self) -> None:
+        self.assertEqual(
+            planning_rules(),
+            "Rules: attributes are 3d6 each; Fatigue needs all six attributes and "
+            "the 2d6 Fatigue roll, which is rolled when a character is made; years "
+            "of experience are played 1 to 20 at a time on a track, after the "
+            "attributes are recorded, and each year can kill.",
+        )
+
     def test_the_movement_sentences_read_as_the_pages(self) -> None:
         self.assertIn(
             "Unencumbered: up to STR (no penalty). Light: to STR×1.5 (−1 "
@@ -222,6 +235,8 @@ class InventedRulesTest(SimpleTestCase):
         combat = engine.section_combat()
         for sentence in (
             "skill checks roll 3d4 + attribute modifier + skill level",
+            "difficulty; attribute checks roll 2d8 ≤ attribute; saves and spells "
+            "3d6 ≤ attribute.)\n",
             "+ shield (+2 buckler) + defender dodge",
             "Free: up to STR (no penalty). Laden: to STR×3.5 (−2, no Dash). "
             "Crushed: over STR×3.5 (−1, Amble only, 2 hex max).\n",
@@ -278,6 +293,18 @@ class InventedRulesTest(SimpleTestCase):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, schema)
         self.assertNotIn("campaigner", schema)
+
+    def test_the_plan_calls_rules_line_names_the_dice(self) -> None:
+        line = planning_rules()
+        self.assertTrue(line.startswith("Rules: attributes are 4d4 each; "))
+        self.assertIn("all six attributes and the 1d8+1 Fatigue roll,", line)
+        self.assertIn(f"played 1 to {MAX_EXPERIENCE_YEARS_PER_RUN} at a time", line)
+        self.assertIn(
+            f"\n{line}\n",
+            plan_message(
+                "STATE", "LATEST", TurnPolicy.for_turn(MODE_PLAY, is_game_master=False)
+            )["content"],
+        )
 
     def test_the_game_masters_authority_names_the_point_buy(self) -> None:
         authority = engine.section_dm_authority()

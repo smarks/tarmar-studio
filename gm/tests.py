@@ -330,8 +330,15 @@ class GMServiceTest(TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         misses = dict(line.split() for line in completed.stdout.splitlines())
-        # The URLs reach the prompts and the turn policy's pattern.
-        for name in ("system_prompt", "dm_system_prompt", "_check_words", "help_text"):
+        # The URLs reach the prompts, the plan call's rules line and the turn
+        # policy's pattern.
+        for name in (
+            "system_prompt",
+            "dm_system_prompt",
+            "planning_rules",
+            "_check_words",
+            "help_text",
+        ):
             self.assertIn(name, misses)
         self.assertEqual(
             {name: count for name, count in misses.items() if count != "0"}, {}
