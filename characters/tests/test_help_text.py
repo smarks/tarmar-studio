@@ -2,7 +2,7 @@
 
 from django.test import TestCase
 
-from characters.help_text import HELP_TEXT
+from characters.help_text import help_text
 from characters.models import Character
 from characters.templatetags.character_help import help_for
 from common.test_helpers import BaseTestCase
@@ -17,7 +17,7 @@ class HelpForTagTest(TestCase):
         self.assertIn("<details", html)
         self.assertIn('class="help"', html)
         self.assertIn("<summary", html)
-        self.assertIn(HELP_TEXT["strength"], html)
+        self.assertIn(help_text()["strength"], html)
 
     def test_aria_label_is_humanized(self):
         html = str(help_for("armor_dex_penalty"))
@@ -60,21 +60,21 @@ class CharacterEditHelpIconsTest(BaseTestCase):
             "constitution",
             "charisma",
         ):
-            self.assertIn(HELP_TEXT[key], body, msg=f"missing help body for {key}")
+            self.assertIn(help_text()[key], body, msg=f"missing help body for {key}")
 
     def test_derived_attributes_have_help(self):
         body = self._get_page().content.decode()
-        self.assertIn(HELP_TEXT["fatigue"], body)
-        self.assertIn(HELP_TEXT["body"], body)
+        self.assertIn(help_text()["fatigue"], body)
+        self.assertIn(help_text()["body"], body)
 
     def test_injury_thresholds_have_help(self):
         body = self._get_page().content.decode()
-        self.assertIn(HELP_TEXT["injury_thresholds"], body)
-        self.assertIn(HELP_TEXT["survival_save"], body)
+        self.assertIn(help_text()["injury_thresholds"], body)
+        self.assertIn(help_text()["survival_save"], body)
 
     def test_body_help_matches_the_injury_rules(self):
         """Zero Body is unconscious; dying starts at minus half (issue #130)."""
-        body_help = HELP_TEXT["body"]
+        body_help = help_text()["body"]
         self.assertIn("unconscious", body_help)
         self.assertNotIn("start dying", body_help)
 
@@ -82,14 +82,14 @@ class CharacterEditHelpIconsTest(BaseTestCase):
         """Provenance stores social class/title only — nothing in the app
         wires it to starting equipment, coin, or roll modifiers (issue #145;
         wealth/coin come from the separate Wealth Level roll instead)."""
-        provenance_help = HELP_TEXT["provenance_class"]
+        provenance_help = help_text()["provenance_class"]
         self.assertNotIn("Affects starting equipment", provenance_help)
         self.assertNotIn("social-roll modifiers", provenance_help)
         self.assertIn("no starting equipment", provenance_help)
 
     def test_wealth_level_help_does_not_conflate_provenance(self):
         """Commoner is a Provenance class, not a Wealth level (issue #145)."""
-        wealth_help = HELP_TEXT["wealth_level"]
+        wealth_help = help_text()["wealth_level"]
         self.assertNotIn("Commoner", wealth_help)
         for tier in ("Subsistence", "Moderate", "Merchant", "Rich"):
             self.assertIn(tier, wealth_help)
@@ -97,14 +97,14 @@ class CharacterEditHelpIconsTest(BaseTestCase):
     def test_armor_stops_help_matches_unconditional_shield_stacking(self):
         """Shields always count toward stops; there is no "actively blocking"
         state (issue #145, characters/models.py `_sum_armor_field`)."""
-        armor_stops_help = HELP_TEXT["armor_stops"]
+        armor_stops_help = help_text()["armor_stops"]
         self.assertNotIn("actively blocking", armor_stops_help)
         self.assertIn("shield", armor_stops_help.lower())
 
     def test_armor_dex_penalty_help_mentions_shields(self):
         """Shields contribute to the DEX penalty sum too, not just armor
         (issue #145, characters/models.py `_sum_armor_field`)."""
-        self.assertIn("shield", HELP_TEXT["armor_dex_penalty"].lower())
+        self.assertIn("shield", help_text()["armor_dex_penalty"].lower())
 
     def test_weapon_to_hit_help_names_the_weapon_in_hand(self):
         """The tile reads the weapon in hand (issue #846).
@@ -114,27 +114,27 @@ class CharacterEditHelpIconsTest(BaseTestCase):
         swing gets. It still must not claim an "equipped weapon", a flag the
         sheet does not show under that name.
         """
-        weapon_help = HELP_TEXT["weapon_to_hit"]
+        weapon_help = help_text()["weapon_to_hit"]
         self.assertNotIn("equipped weapon", weapon_help)
         self.assertNotIn("every weapon", weapon_help)
         self.assertIn("weapon in hand", weapon_help)
 
     def test_appearance_has_help(self):
         body = self._get_page().content.decode()
-        self.assertIn(HELP_TEXT["appearance"], body)
+        self.assertIn(help_text()["appearance"], body)
 
     def test_skills_section_has_help(self):
         body = self._get_page().content.decode()
-        self.assertIn(HELP_TEXT["experience_term"], body)
-        self.assertIn(HELP_TEXT["free_skill_points"], body)
-        self.assertIn(HELP_TEXT["total_xp"], body)
+        self.assertIn(help_text()["experience_term"], body)
+        self.assertIn(help_text()["free_skill_points"], body)
+        self.assertIn(help_text()["total_xp"], body)
 
     def test_combat_stats_have_help(self):
         body = self._get_page().content.decode()
-        self.assertIn(HELP_TEXT["armor_stops"], body)
-        self.assertIn(HELP_TEXT["armor_dex_penalty"], body)
-        self.assertIn(HELP_TEXT["weapon_to_hit"], body)
-        self.assertIn(HELP_TEXT["encumbrance"], body)
+        self.assertIn(help_text()["armor_stops"], body)
+        self.assertIn(help_text()["armor_dex_penalty"], body)
+        self.assertIn(help_text()["weapon_to_hit"], body)
+        self.assertIn(help_text()["encumbrance"], body)
 
     def test_help_uses_details_element_for_persistent_disclosure(self):
         body = self._get_page().content.decode()
@@ -182,8 +182,8 @@ class AppearanceRulingTest(BaseTestCase):
         ).read_text()
         self.assertIn("If you roll a 1 or 6, ask the GM to further qualify", page)
 
-        self.assertIn("A 1 or 6 stands", HELP_TEXT["appearance"])
-        self.assertIn("ask the GM to further qualify", HELP_TEXT["appearance"])
+        self.assertIn("A 1 or 6 stands", help_text()["appearance"])
+        self.assertIn("ask the GM to further qualify", help_text()["appearance"])
 
         self.login_as(self.user)
         response = self.client.get(f"/tarmar/characters/{self.character.pk}/")

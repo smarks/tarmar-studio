@@ -30,8 +30,8 @@
 {% endif %}
 
 <section class="creation-option">
-    <h2>Roll 3d6</h2>
-    <p>Roll 3d6 for each of the six core attributes, in order.</p>
+    <h2>Roll {{ attribute_dice }}</h2>
+    <p>Roll {{ attribute_dice }} for each of the six core attributes, in order.</p>
     <form method="post" action="{% url 'characters:create' %}">
         {% csrf_token %}
         <input type="hidden" name="method" value="roll">

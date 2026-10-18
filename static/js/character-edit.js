@@ -237,6 +237,9 @@ const SURVIVAL_DICE = CHARACTER_EDIT_CONFIG.survivalDice;
 // Every age at which the cumulative totals move, up to the horizon.
 const AGING_BY_AGE = SKILLS_CONFIG.agingByAge;
 const AGING_HORIZON_AGE = CHARACTER_EDIT_CONFIG.agingHorizonAge;
+// What the card says past the horizon, the server's words from the loaded
+// canon's aging (issue #68).
+const AGING_ESCALATION_NOTE = CHARACTER_EDIT_CONFIG.agingEscalationNote;
 const DEFAULT_RUN_YEARS = CHARACTER_EDIT_CONFIG.defaultRunYears;
 const MAX_RUN_YEARS = CHARACTER_EDIT_CONFIG.maxRunYears;
 
@@ -686,7 +689,7 @@ function renderWorkbenchPreview(track) {
             // uncapped -- see AgingRules.penalties_for in characters/skill_rules.py), but
             // listing every further stage isn't worth the payload. Say the rate
             // instead of a stale/blank preview (issue #163).
-            agingPreview.textContent = `Continues to escalate past age ${AGING_HORIZON_AGE} (roughly -1 to STR/DEX/CON every four years, plus -1 to INT/WIS every eight).`;
+            agingPreview.textContent = AGING_ESCALATION_NOTE;
         } else {
             agingPreview.textContent = `No further aging before age ${AGING_HORIZON_AGE}`;
         }

@@ -271,7 +271,13 @@ Notes on the edges, each checkable:
   import, so the offline CLI's import chain stays free of Django and a canon
   whose file is refused is reported by the `characters.E001` system check.
   The Games Master's prompt sentences that state these numbers are built from
-  it and cached as the skill values below are (issue #68).
+  it and cached as the skill values below are (issue #68). So are the sheet's:
+  `characters.help_text.help_text()` (cached and registered), the refusals
+  and reasons in `characters/services.py` (built when a refusal is made), the
+  creation page's and the sheet's own sentences (passed in the view's
+  context), the workbench's aging note (`characters.skills.aging_escalation_note`,
+  rendered and handed to the script in the page config), the extraction
+  schema's default coin and the Characters pane's Fatigue note.
 - `characters/skill_rules.py` reads the canon's `skill-rules.json`
   (`reference.paths.SKILL_RULES_FILE`) into `SkillRules`: every number skills,
   prior experience and the checks use (the tracks and their d20 tables, the

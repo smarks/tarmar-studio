@@ -246,23 +246,6 @@ def _render_height_and_weight_fragment() -> str:
     )
 
 
-def _render_fatigue_formula() -> str:
-    """The Fatigue sum written out: "CON + WIS + INT + max(DEX, STR) + 2d6".
-
-    The canon's ``fatigue_roll`` (``character-rules.json``), in the shape
-    :meth:`characters.rules.FatigueRollRules.total` adds it: the attributes,
-    the best of ``best_of``, then the dice (#68).
-    """
-    fatigue_roll = character_rules().fatigue_roll
-    terms = list(fatigue_roll.attributes)
-    if len(fatigue_roll.best_of) > 1:
-        terms.append(f"max({', '.join(fatigue_roll.best_of)})")
-    else:
-        terms.extend(fatigue_roll.best_of)
-    terms.append(fatigue_roll.dice)
-    return " + ".join(terms)
-
-
 # Canonical Tarmar GM system prompt — the single source of truth for both the
 # web GM (gm/services.py) and the offline CLI (cli/gm.py).
 #
@@ -340,6 +323,7 @@ def section_core() -> str:
     imports. Cached, so every prompt holds the same string for the life of
     the process.
     """
+    fatigue_roll = character_rules().fatigue_roll
     return (
         "## Core Resolution Mechanic\n"
         f"{_render_checks_fragment()} Only combat attacks use a d20 (see "
@@ -359,8 +343,8 @@ def section_core() -> str:
         "Secondary: Appearance (1d6: 1=pretty, 6=ugly), "
         f"{_render_height_and_weight_fragment()}\n\n"
         "### Derived Pools\n"
-        f"- Fatigue = {_render_fatigue_formula()}. Normal hits reduce "
-        "Fatigue only. At 0 = unconscious.\n"
+        f"- Fatigue = {fatigue_roll.formula(fatigue_roll.dice)}. Normal hits "
+        "reduce Fatigue only. At 0 = unconscious.\n"
         "- Body = 2/3 × Fatigue (round up). Severe critical hits (a confirmed "
         "natural 20) reduce Fatigue AND Body. At 0 = unconscious.\n"
         "- Mana Pool = the Spell Points earned through the Magic skill track. It "

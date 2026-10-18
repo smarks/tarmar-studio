@@ -271,10 +271,10 @@ class SurvivalSavePenaltyTest(BaseTestCase):
 
     def test_the_help_text_states_the_published_example(self):
         """The prose a player reads must match what the function computes."""
-        from characters.help_text import HELP_TEXT
+        from characters.help_text import help_text
 
-        help_text = HELP_TEXT["survival_save"]
         self.assertIn(
-            "at -35 with a starting 30 you need 3d6 \u2264 CON - 5", help_text
+            "at -35 with a starting 30 you need 3d6 \u2264 CON - 5",
+            help_text()["survival_save"],
         )
         self.assertEqual(survival_save_penalty(30, -35), -5)

@@ -98,12 +98,14 @@ from ..skills import (
     DEFAULT_RUN_YEARS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
     age_for_aging_stage,
+    aging_escalation_note,
     granted_skill_names,
     next_aging_change_after_age,
     skill_rows,
     survival_targets,
     track_labels,
 )
+from ..templatetags.dice_display import natural_total_name
 from ..weapon_skill import UNRECORDED_WEAPON_SKILL, weapon_choices
 from .access import answer_change, edit_denied, locked_character_or_404, may_edit
 
@@ -513,6 +515,8 @@ def _character_create_context(
         ),
         "active_page": "characters",
         "point_buy_total": point_buy.total,
+        # The roll's dice, the canon's (issue #68), for the Roll heading.
+        "attribute_dice": character_rules().attribute_roll.dice,
         "point_buy_min": point_buy.minimum,
         "point_buy_max": point_buy.maximum,
         "point_buy_error": error,
@@ -759,6 +763,26 @@ def aging_preview_horizon_age() -> int:
     return age_for_aging_stage(AGING_PREVIEW_HORIZON_STAGE)
 
 
+def survival_naturals_note() -> str:
+    """The workbench's note on the survival roll's automatic totals (#68).
+
+    "Triple ones always kill; triple sixes always survive.": the canon's
+    ``survival_roll`` totals, named as :data:`NATURAL_ROLL_NAMES` names the
+    dice's ends, or "A natural N" for a total that is not one.
+    """
+    survival_roll = skill_rules().survival_roll
+
+    def always(total: int, end: int, verb: str) -> str:
+        name = natural_total_name(survival_roll.dice, total, end)
+        if name is None:
+            return f"a natural {total} always {verb}s"
+        return f"{name} always {verb}"
+
+    death = always(survival_roll.automatic_death_total, 0, "kill")
+    survival = always(survival_roll.automatic_survival_total, 1, "survive")
+    return f"{death[:1].upper()}{death[1:]}; {survival}."
+
+
 def attack_weapon_choices(character) -> tuple[list[dict], list[str]]:
     """The Attack Resolution panel's weapons, from the character's saved sheet.
 
@@ -937,10 +961,18 @@ class CharacterEditView(
             self.object, is_game_master=is_game_master
         )
         # A player may buy the scores nobody has recorded (#571), held to the
-        # 65-point buy; the sheet says so above those inputs.
+        # canon's point buy; the sheet says so above those inputs.
         context["point_buy_open"] = (
             not is_game_master and not services.attributes_known(self.object)
         )
+        # The numbers the sheet's own sentences state, the loaded canon's
+        # (issue #68): the point buy, each roll's dice and the Fatigue sum.
+        creation_rules = character_rules()
+        context["point_buy"] = creation_rules.attributes.point_buy
+        context["attribute_dice"] = creation_rules.attribute_roll.dice
+        context["fatigue_dice"] = creation_rules.fatigue_roll.dice
+        context["literacy_dice"] = creation_rules.literacy_roll.dice
+        context["fatigue_formula"] = creation_rules.fatigue_roll.formula("roll")
         context["can_grant_skill_points"] = can_grant_skill_points(
             is_game_master=is_game_master
         )
@@ -998,6 +1030,7 @@ class CharacterEditView(
         survival_dice = skill_rules().survival_roll.dice
         labels = track_labels()
         context["survival_dice"] = survival_dice
+        context["survival_naturals_note"] = survival_naturals_note()
         context["next_year_number"] = self.object.experience_years + 1
         context["next_run_age"] = self.object.age + DEFAULT_RUN_YEARS
         context["aging_preview_horizon_age"] = aging_preview_horizon_age()
@@ -1028,6 +1061,11 @@ class CharacterEditView(
             next_aging_change[1] if next_aging_change else {}
         )
         context["past_aging_horizon"] = self.object.age >= aging_preview_horizon_age()
+        # Past the horizon the card says the rate instead, in the canon's
+        # years; the script repaints it from the same words (issue #68).
+        context["aging_escalation_note"] = aging_escalation_note(
+            aging_preview_horizon_age()
+        )
         # Aging change points, keyed by the age they land at, for the live
         # preview: every age at which the cumulative totals move, up to the
         # horizon. Short attribute names, because that is how the card prints
@@ -1064,6 +1102,7 @@ class CharacterEditView(
             "trackLabels": labels,
             "agingByAge": aging_by_age,
             "agingHorizonAge": aging_preview_horizon_age(),
+            "agingEscalationNote": context["aging_escalation_note"],
             # The record keeps the latest runs only; so does the page's
             # Experience History when a run joins it (issue #903).
             "maxExperienceLogEntries": MAX_EXPERIENCE_LOG_ENTRIES,

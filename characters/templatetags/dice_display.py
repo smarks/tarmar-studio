@@ -93,12 +93,25 @@ def _natural_name(expression: str, check: dict, end: int) -> str:
         :data:`NATURAL_ROLL_NAMES`, otherwise "a natural N".
     """
     roll = check.get("roll")
-    names = NATURAL_ROLL_NAMES.get(expression)
     if roll is None:  # an entry stored without its total: name the end
+        names = NATURAL_ROLL_NAMES.get(expression)
         return (names or ("the lowest roll", "the highest roll"))[end]
-    if names is not None and roll == dice_total_range(expression)[end]:
+    return natural_total_name(expression, roll, end) or f"a natural {roll}"
+
+
+def natural_total_name(expression: str, total: int, end: int) -> str | None:
+    """The name of ``total`` when it is that end of dice named in
+    :data:`NATURAL_ROLL_NAMES` ("triple ones"), or ``None``.
+
+    Args:
+        expression: The dice, e.g. ``"3d6"``.
+        total: The total rolled.
+        end: 0 for the dice's lowest total, 1 for the highest.
+    """
+    names = NATURAL_ROLL_NAMES.get(expression)
+    if names is not None and total == dice_total_range(expression)[end]:
         return names[end]
-    return f"a natural {roll}"
+    return None
 
 
 @register.filter

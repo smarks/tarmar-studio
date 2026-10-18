@@ -18,6 +18,7 @@ from .constants import (
     CHARACTER_ATTRIBUTE_FIELDS,
     CHARACTER_NAME_PATTERN,
     CORE_ATTRIBUTE_FIELDS,
+    DEFAULT_WEALTH_LEVEL,
     MAX_CHARACTER_NAME_LENGTH,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_SKILL_NAME_LENGTH,
@@ -744,7 +745,7 @@ class Character(models.Model):
         ("Rich", "Rich"),
     ]
     wealth_level = models.CharField(
-        max_length=20, choices=WEALTH_CHOICES, default="Moderate"
+        max_length=20, choices=WEALTH_CHOICES, default=DEFAULT_WEALTH_LEVEL
     )
     # Null when the wealth table gives no number: Rich is "Consult GM"
     # (wealth.md), so its coin waits for a Game Master to set it rather than

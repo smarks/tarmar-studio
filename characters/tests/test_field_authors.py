@@ -245,7 +245,8 @@ class PlayerFieldUpdateTest(BaseTestCase):
                 response = self.update(field, value)
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(
-                    response.json()["error"], services.PLAYER_CHOSEN_FACE_FIELDS[field]
+                    response.json()["error"],
+                    services.player_chosen_face_reasons()[field],
                 )
         self.character.refresh_from_db()
         self.assertEqual(
@@ -368,7 +369,7 @@ class PointBuyTest(BaseTestCase):
         )
 
         self.assertEqual(refused.status_code, 400)
-        self.assertEqual(refused.json()["error"], services.BOUGHT_NOT_ROLLED_REASON)
+        self.assertEqual(refused.json()["error"], services.bought_not_rolled_reason())
         self.character.refresh_from_db()
         self.assertIsNone(self.character.wisdom)
 

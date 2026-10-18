@@ -23,6 +23,7 @@ from characters.skill_rules import skill_rules
 from characters.skills import (
     DEFAULT_RUN_YEARS,
     MAX_EXPERIENCE_YEARS_PER_RUN,
+    aging_escalation_note,
     next_aging_change_after_age,
     survival_targets,
 )
@@ -70,6 +71,7 @@ EXPECTED_KEYS = {
     "trackLabels",
     "agingByAge",
     "agingHorizonAge",
+    "agingEscalationNote",
     "catalogUrl",
     "equipmentAddUrl",
     "equipmentUpdateUrl",
@@ -180,6 +182,10 @@ class CharacterEditConfigBlockTest(BaseTestCase):
         self.assertEqual(config["survivalTargets"], survival_targets())
         self.assertEqual(config["survivalDice"], skill_rules().survival_roll.dice)
         self.assertEqual(config["agingHorizonAge"], aging_preview_horizon_age())
+        self.assertEqual(
+            config["agingEscalationNote"],
+            aging_escalation_note(aging_preview_horizon_age()),
+        )
         self.assertEqual(config["defaultRunYears"], DEFAULT_RUN_YEARS)
         self.assertEqual(config["maxRunYears"], MAX_EXPERIENCE_YEARS_PER_RUN)
         # Aging change points keyed by the age they land at, 3-letter attrs.

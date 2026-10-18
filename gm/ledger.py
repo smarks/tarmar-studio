@@ -22,8 +22,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from characters.constants import DEFAULT_WEALTH_LEVEL
 from characters.models import Character
-from characters.rules import character_rules
+from characters.rules import CharacterRules, character_rules
 from characters.skills import (
     calculate_attribute_modifier,
     calculate_skill_points_from_xp,
@@ -91,15 +92,35 @@ ATTRIBUTE_FIELDS: tuple[tuple[str, str], ...] = tuple(
 )
 
 
+def _default_starting_coin(rules: CharacterRules) -> int | None:
+    """The coin a draft starts with: the canon's for the default wealth level.
+
+    Its fixed coin when the canon gives one; ``None`` (the Game Master's to
+    set, as for Rich) when the level's coin is rolled, the Game Master's, or
+    the canon has no such level, rather than a number the canon never gave
+    (issue #68).
+
+    Args:
+        rules: The loaded canon's creation rules.
+    """
+    row = rules.wealth.row_labelled(DEFAULT_WEALTH_LEVEL)
+    if row is not None and isinstance(row.coin, int):
+        return row.coin
+    return None
+
+
 def draft_defaults() -> dict[str, Any]:
     """What an empty draft holds before the player has decided anything.
 
     Every value is ``Character``'s own field default; the attributes and the
     Fatigue roll have no default on the model and stay ``None`` until rolled,
     which is what lets the ledger say "not set yet" instead of inventing a
-    number. The age is the loaded canon's starting age (issue #59), read when
-    asked, so this is a function rather than a module constant.
+    number. The age is the loaded canon's starting age (issue #59), and the
+    starting coin the canon's coin for :data:`DEFAULT_WEALTH_LEVEL` (issue
+    #68), both read when asked, so this is a function rather than a module
+    constant.
     """
+    rules = character_rules()
     return {
         "name": "",
         "strength": None,
@@ -119,14 +140,14 @@ def draft_defaults() -> dict[str, Any]:
         "literacy_roll": None,
         "literacy_rolled": False,
         "literacy_ruling": None,
-        "wealth_level": "Moderate",
-        "starting_coin": 100,
+        "wealth_level": DEFAULT_WEALTH_LEVEL,
+        "starting_coin": _default_starting_coin(rules),
         "skills": {},
         "free_skill_points": 0,
         "free_spell_points": 0,
         "equipment": [],
         "total_xp": 0,
-        "age": character_rules().age.starting,
+        "age": rules.age.starting,
         "experience_terms": 0,
         "experience_log": [],
         "money_earned": 0,
@@ -273,8 +294,9 @@ class DraftLedger:
     def pools_pending(self) -> str:
         """What Fatigue and Body are still waiting for, or ``""`` when they are known.
 
-        Fatigue is CON + WIS + INT + max(DEX, STR) + the 2d6 roll, so it needs
-        every attribute *and* the roll. Read by both readers -- the model's
+        Fatigue is the attributes the canon's ``fatigue_roll`` adds plus its
+        dice, so it needs every attribute *and* the roll, named with the
+        canon's dice (issue #68). Read by both readers -- the model's
         block through :func:`_format_pools` and the panel's tooltip -- so
         neither can name a missing piece the other does not (issue #374).
         """
@@ -284,7 +306,7 @@ class DraftLedger:
         if not self.attributes_known:
             missing.append("all six attributes")
         if self.fatigue_roll is None:
-            missing.append("the 2d6 Fatigue roll")
+            missing.append(f"the {character_rules().fatigue_roll.dice} Fatigue roll")
         return " and ".join(missing)
 
     @classmethod
