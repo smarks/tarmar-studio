@@ -237,3 +237,105 @@ test('initPickers wires markup swapped in later, once', async () => {
     expect(calls).toHaveLength(1);
     expect(slot.textContent).toContain('found');
 });
+
+/**
+ * What holds a picker can be fetched again while a page is on its way (the
+ * GM page's Characters tab, issue #14). The page asked for is what a
+ * refetch asks for again, and the old picker's answer is dropped.
+ */
+describe('a page on its way when the picker is replaced (#14)', () => {
+    /** A fetch held until the returned function answers it with ``body``. */
+    function holdingFetch() {
+        let answer;
+        global.fetch = jest.fn(() => new Promise((resolve) => {
+            answer = (body, ok = true) => resolve({ ok, status: ok ? 200 : 500, text: () => Promise.resolve(body) });
+        }));
+        return (body, ok) => answer(body, ok);
+    }
+
+    test('shownPage names the page on its way, then the page shown', async () => {
+        const picker = buildPicker();
+        const answer = holdingFetch();
+        const { shownPage } = loadPicker();
+
+        picker.querySelectorAll('[data-picker-page]')[1].click();
+        expect(shownPage(picker)).toBe('2');
+        answer('<p>page two</p>');
+        await settle();
+
+        expect(shownPage(picker)).toBe('2');
+        expect('pickerAskedPage' in picker.dataset).toBe(false);
+    });
+
+    test('a pending page of an earlier search is not the page of the one typed since', () => {
+        const picker = buildPicker();
+        holdingFetch();
+        const { shownPage } = loadPicker();
+
+        picker.querySelectorAll('[data-picker-page]')[1].click();
+        picker.querySelector('[data-picker-search]').value = 'wren';
+
+        expect(shownPage(picker)).toBe('1');
+    });
+
+    test('the answer to a picker that was replaced writes nothing', async () => {
+        const picker = buildPicker();
+        const answer = holdingFetch();
+        loadPicker();
+
+        picker.querySelectorAll('[data-picker-page]')[1].click();
+        const replaced = picker.querySelector('[data-picker-body]');
+        picker.outerHTML = picker.outerHTML;
+        answer('<p>stale</p>');
+        await settle();
+
+        expect(document.body.textContent).not.toContain('stale');
+        expect(replaced.textContent).not.toContain('stale');
+    });
+
+    test('a failure answering a picker that was replaced is not reported on it', async () => {
+        const picker = buildPicker();
+        const answer = holdingFetch();
+        loadPicker();
+
+        picker.querySelectorAll('[data-picker-page]')[1].click();
+        const status = picker.querySelector('[data-picker-status]');
+        picker.outerHTML = picker.outerHTML;
+        answer('', false);
+        await settle();
+
+        expect(status.textContent).toBe('2 characters, newest first');
+    });
+});
+
+describe('where the focus goes when a page lands', () => {
+    test('a page with no pager to press puts the focus on the search box, not the body', async () => {
+        const picker = buildPicker();
+        answering('<ul><li>Only one</li></ul><p data-picker-status>1 character</p>');
+        loadPicker();
+        const older = picker.querySelectorAll('[data-picker-page]')[1];
+        older.focus();
+
+        older.click();
+        await settle();
+
+        expect(document.activeElement).toBe(picker.querySelector('[data-picker-search]'));
+    });
+
+    test('a reader who moved on keeps the focus where they put it', async () => {
+        const picker = buildPicker();
+        document.body.insertAdjacentHTML('beforeend', '<input id="user-input">');
+        let answer;
+        global.fetch = jest.fn(() => new Promise((resolve) => { answer = resolve; }));
+        loadPicker();
+        picker.querySelectorAll('[data-picker-page]')[1].click();
+        const messageBox = document.getElementById('user-input');
+        messageBox.focus();
+
+        answer({ ok: true, status: 200, text: () => Promise.resolve('<nav><button type="button" data-picker-page="1">Newer</button></nav>') });
+        await settle();
+
+        expect(picker.querySelector('[data-picker-body]').textContent).toContain('Newer');
+        expect(document.activeElement).toBe(messageBox);
+    });
+});

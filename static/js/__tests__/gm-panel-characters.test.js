@@ -340,6 +340,35 @@ describe('attach and detach leave the rest of the page as it is (issue #15)', ()
         expect(document.getElementById('gm-panel-unarmed').textContent)
             .toBe('Aldwin carries no weapon and would fight bare-handed.');
     });
+
+    test('a page turn on its way when the tab is fetched again is the page shown (#14)', async () => {
+        setUpPage({ answer: { ok: true, session_id: 5, characters: [] }, sheets: SHEET });
+        // The reader's turn to page 2 is held; every later ask is answered.
+        const answerPickers = global.fetch.getMockImplementation();
+        let answerTurn;
+        global.fetch.mockImplementationOnce((url) => new Promise((resolve) => {
+            answerTurn = () => resolve(answerPickers(url));
+        }));
+        const older = document.querySelector('[data-picker-page="2"]');
+        older.focus();
+        older.click();
+
+        // A turn's frame fetches the tab again before the page arrives.
+        await panelCharacters.refreshPanel();
+        for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+        expect(older.isConnected).toBe(false);
+        answerTurn();
+        for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+
+        // The new picker was asked for page 2 and shows it, the focus on its pager.
+        const asked = global.fetch.mock.calls
+            .map(([url]) => new URL(url, 'http://localhost/'))
+            .filter((url) => url.pathname === PICKER_URL)
+            .map((url) => url.searchParams.get('page'));
+        expect(asked).toEqual(['2', '2']);
+        expect(document.querySelector('.page-current').textContent).toBe('Page 2');
+        expect(document.activeElement).toBe(document.querySelector('[data-picker-page="3"]'));
+    });
 });
 
 describe('page without the tab markup', () => {
