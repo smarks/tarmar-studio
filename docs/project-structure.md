@@ -135,7 +135,6 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 - `static/js/__tests__/` — Jest unit tests for the above JS.
 - `static/images/` — favicon, Tarmar logo variants, combat diagrams (facing/megahex), world/island maps.
 - Per-app `templates/` — accounts (auth UI), characters (CRUD UI), gm (chat), reference (browser/search).
-- `combat-movement-guide.html` (root) — standalone self-contained combat/movement rules HTML (not a Django template).
 
 ## Rules content — `reference/content/`
 Markdown tree; slugs map 1:1 to `reference/nav.py`.
