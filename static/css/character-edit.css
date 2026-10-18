@@ -17,7 +17,8 @@
     margin-top: 1.5rem;
 }
 .stats-section {
-    background: var(--colour-surface-section);
+    --scroll-cue-ground: var(--colour-surface-section);
+    background-color: var(--scroll-cue-ground);
     border-radius: 8px;
     padding: 1.5rem;
 }
@@ -187,7 +188,8 @@
    are what it shows; base.css's .dice-log padding and radius never won there,
    so they were not carried over (#338 item 10). */
 .dice-log {
-    background: var(--colour-surface-muted);
+    --scroll-cue-ground: var(--colour-surface-muted);
+    background-color: var(--scroll-cue-ground);
 }
 .dice-log pre {
     margin: 0;
@@ -846,9 +848,7 @@ details.help .help-body {
         margin-top: 0.25rem;
     }
     /* Any residual stat-table width scrolls within the table, not the page. */
-    .stats-table,
-    .physical-table,
-    .injury-table {
+    table.scroll-cue {
         display: block;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;

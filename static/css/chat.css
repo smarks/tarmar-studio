@@ -228,11 +228,13 @@ main.chat-main {
     overflow-wrap: break-word;
 }
 .message.user .message-content {
-    background: var(--colour-chat-user-surface);
+    --scroll-cue-ground: var(--colour-chat-user-surface);
+    background-color: var(--scroll-cue-ground);
     border-bottom-right-radius: 2px;
 }
 .message.assistant .message-content {
-    background: var(--colour-surface-muted);
+    --scroll-cue-ground: var(--colour-surface-muted);
+    background-color: var(--scroll-cue-ground);
     border: 1px solid var(--colour-hairline);
     border-bottom-left-radius: 2px;
 }
@@ -349,7 +351,8 @@ main.chat-main {
     font-size: 0.9em;
 }
 .message-content pre {
-    background: var(--colour-surface-tint);
+    --scroll-cue-ground: var(--colour-surface-tint);
+    background-color: var(--scroll-cue-ground);
     padding: 0.75em;
     border-radius: 8px;
     overflow-x: auto;
@@ -551,9 +554,9 @@ a.cmd-btn { display: inline-flex; align-items: center; text-decoration: none; }
 .gm-panel-tabs {
     display: flex;
     border-bottom: 1px solid var(--colour-hairline);
-    background: var(--colour-surface);
+    --scroll-cue-ground: var(--colour-surface);
+    background-color: var(--scroll-cue-ground);
     overflow-x: auto;
-    scrollbar-width: thin;
 }
 /* One tab: its button, and the small control that gives it a pane of its
    own beside whatever is already open (gm-panel-layout.js builds both). */

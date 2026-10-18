@@ -66,8 +66,18 @@ const MARKDOWN_SANITIZE_CONFIG = {
   ],
 };
 
+// The class base.css gives a sideways scroller to draw its edge cue (issue
+// #63). A reply's tables and code blocks scroll sideways when they are wider
+// than the bubble, and nothing but this hook writes their markup.
+const SCROLL_CUE_CLASS = 'scroll-cue';
+const SCROLLING_TAGS = ['TABLE', 'PRE'];
+
 if (typeof DOMPurify !== 'undefined') {
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (SCROLLING_TAGS.includes(node.nodeName)) {
+      node.classList.add(SCROLL_CUE_CLASS);
+    }
+
     // If a link DOMPurify lets through opens in a new tab, don't hand that
     // tab a window.opener reference back into this session.
     if (node.hasAttribute('target')) {

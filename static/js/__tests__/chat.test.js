@@ -98,7 +98,8 @@ describe('renderMarkdown', () => {
 
     test('still renders fenced code blocks', () => {
         const html = renderMarkdown('```\nconst x = 1;\n```');
-        expect(html).toContain('<pre>');
+        // The block now carries the sideways-scroll cue class (issue #63).
+        expect(html).toContain('<pre class="scroll-cue">');
         expect(html).toContain('const x = 1;');
     });
 
@@ -121,6 +122,18 @@ describe('renderMarkdown', () => {
         expect(html).toContain('<th align="right">b</th>');
         expect(html).toContain('<td align="left">1</td>');
         expect(html).toContain('<td align="right">2</td>');
+    });
+
+    // Issue #63: a table or a code block wider than the bubble scrolls
+    // sideways, and base.css draws the edge cue for anything with this class.
+    test('marks a reply\'s tables and code blocks as sideways scrollers', () => {
+        const container = document.createElement('div');
+        container.innerHTML = renderMarkdown(
+            '| a | b |\n|--|--|\n| 1 | 2 |\n\n```\nlong code\n```\n\nplain words'
+        );
+        expect(container.querySelector('table').classList.contains('scroll-cue')).toBe(true);
+        expect(container.querySelector('pre').classList.contains('scroll-cue')).toBe(true);
+        expect(container.querySelector('p').classList.contains('scroll-cue')).toBe(false);
     });
 
     // The task-list allowlist entry is only safe because of the

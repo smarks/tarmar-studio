@@ -569,6 +569,50 @@ class TheGuardCatchesTheBugItWasWrittenForTest(SimpleTestCase):
         self.assertEqual(failures(self.BASE, "", "default"), [])
 
 
+class AScrollbarHoldsNoTextTest(SimpleTestCase):
+    """The scrollbar's parts are measured as graphics, not as text (issue #63).
+
+    The audit pairs the page's ink with any ground a rule paints, which is
+    right for a panel and meaningless for a scrollbar thumb: nothing is
+    printed on one. A thumb colour was chosen to satisfy that invented pairing
+    (#a0a0a0, because #999 read 4.43:1 under the body's #333) when the
+    ratio that applies is the thumb against its track, a graphic under WCAG
+    1.4.11, which needs 3:1.
+    """
+
+    BASE = "body { background: #ffffff; color: #333333; }"
+    SCROLLBAR_PARTS = (
+        "::-webkit-scrollbar",
+        "::-webkit-scrollbar-track",
+        "::-webkit-scrollbar-thumb",
+        "::-webkit-scrollbar-corner",
+    )
+
+    def test_no_part_of_the_scrollbar_is_paired_with_the_pages_ink(self):
+        for part in self.SCROLLBAR_PARTS:
+            with self.subTest(part=part):
+                css = self.BASE + f".scroller{part} {{ background: #999999; }}"
+
+                self.assertEqual(failures(css, "", "tarmar"), [])
+
+    def test_the_same_ground_on_a_box_that_can_hold_text_is_still_caught(self):
+        """So the exemption is the scrollbar's, not every #999999 ground."""
+        css = self.BASE + ".scroller { background: #999999; }"
+
+        self.assertIn(".scroller", [p.selector for p in failures(css, "", "tarmar")])
+
+    def test_the_thumb_stands_out_from_its_track(self):
+        """WCAG 1.4.11: the graphic that tells a reader where they are."""
+        palette = custom_properties(stylesheet("base.css"))
+
+        ratio = contrast_ratio(
+            palette["--colour-scroll-cue-thumb"].split("/*")[0].strip(),
+            palette["--colour-hairline"].split("/*")[0].strip(),
+        )
+
+        self.assertGreaterEqual(ratio, 3.0)
+
+
 class ColourReadingTest(SimpleTestCase):
     """What the audit will and will not draw a conclusion from."""
 

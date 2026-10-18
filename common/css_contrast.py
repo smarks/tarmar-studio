@@ -221,6 +221,14 @@ _THEME_PREFIX = re.compile(r"^(?::root|\[data-theme=[^\]]*\])\s*")
 # (issue #709).
 _INACTIVE = re.compile(r"(?::disabled|\.disabled)\b")
 
+# The scrollbar's parts (`::-webkit-scrollbar`, `-track`, `-thumb` and the
+# rest) are boxes a browser draws around scrolled content. No text is ever set
+# on one, so the pairing this module would invent for it, the page's ink on
+# the part's ground, is not one a reader meets. The ratio that applies to a
+# thumb is its contrast with its track, a graphic under WCAG 1.4.11 (3:1),
+# which the stylesheet's own tests state (issue #63).
+_SCROLLBAR_PART = re.compile(r"::-webkit-scrollbar\b")
+
 
 def _base_form(selector: str) -> str:
     """The component a selector paints, comparable across sheets.
@@ -395,6 +403,7 @@ def _exempt(selector: str) -> bool:
         selector in DECORATIVE_COMPONENTS
         or _base_form(selector) in DECORATIVE_COMPONENTS
         or bool(_INACTIVE.search(selector))
+        or bool(_SCROLLBAR_PART.search(selector))
     )
 
 
