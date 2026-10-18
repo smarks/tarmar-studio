@@ -15,7 +15,12 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from reference.rules_file import RulesFileError, RulesFileReader
+from reference.rules_file import (
+    RulesFileError,
+    RulesFileReader,
+    repeated_values,
+    repeats_problem,
+)
 
 
 class InventedRulesError(RulesFileError):
@@ -314,4 +319,35 @@ class RulesFileReaderTest(SimpleTestCase):
         stages = [{"key": "young", "years": 0}]
         self.assert_refused(
             invented_file(stages=stages), "stages[0]:", "at least a year, got 0"
+        )
+
+
+class RepeatedValuesTest(SimpleTestCase):
+    """The finding step the rules files and the map manifest share (issue #76)."""
+
+    def test_values_given_once_each_have_no_repeats(self) -> None:
+        self.assertEqual(repeated_values(["young", "old"]), [])
+        self.assertEqual(repeated_values([]), [])
+
+    def test_each_repeated_value_is_listed_once_in_sorted_order(self) -> None:
+        # An iterator, read once; "c", given once, is not listed.
+        slugs = iter(["vale", "ash", "vale", "c", "ash", "vale"])
+        self.assertEqual(repeated_values(slugs), ["ash", "vale"])
+
+
+class RepeatsProblemTest(SimpleTestCase):
+    """The one "nothing repeated" check every rules file shares (issue #76)."""
+
+    def test_values_given_once_each_are_no_problem(self) -> None:
+        self.assertIsNone(repeats_problem("key", ["young", "old"]))
+        self.assertIsNone(repeats_problem("key", []))
+
+    def test_each_repeated_value_is_named_once_in_sorted_order(self) -> None:
+        # Read from an iterator, as the object hook passes its keys, so a
+        # helper that walked its values twice would find nothing the second
+        # time; "c", given once, is not named.
+        labels = iter(["Smith", "Archer", "Smith", "c", "Archer", "Smith"])
+        self.assertEqual(
+            repeats_problem("label", labels),
+            "repeats the label ['Archer', 'Smith']",
         )
