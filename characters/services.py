@@ -264,12 +264,7 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "equipment": _player(),
         "pack_dropped": _player(),
         # Rolled or awarded.
-        "strength": _game_master(_attribute_reason),
-        "dexterity": _game_master(_attribute_reason),
-        "intelligence": _game_master(_attribute_reason),
-        "wisdom": _game_master(_attribute_reason),
-        "constitution": _game_master(_attribute_reason),
-        "charisma": _game_master(_attribute_reason),
+        **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS, _game_master(_attribute_reason)),
         "appearance_roll": _game_master(
             "Rolled (1d6); only a Game Master can change it or qualify a 1 or a 6."
         ),

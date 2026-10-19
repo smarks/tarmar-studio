@@ -2345,12 +2345,7 @@ CHARACTER_FIELDS = {
     "people",
     "is_dragonborn",
     "origin_ruling",
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
+    *CHARACTER_ATTRIBUTE_FIELDS,
     "appearance_roll",
     "height_roll",
     "weight_roll",
@@ -2390,12 +2385,7 @@ CHARACTER_FIELDS |= {
 MAX_SMALLINT_FIELD_VALUE = 32767
 MAX_INT_FIELD_VALUE = 2147483647
 CHARACTER_INT_FIELD_MAX = {
-    "strength": MAX_SMALLINT_FIELD_VALUE,
-    "dexterity": MAX_SMALLINT_FIELD_VALUE,
-    "intelligence": MAX_SMALLINT_FIELD_VALUE,
-    "wisdom": MAX_SMALLINT_FIELD_VALUE,
-    "constitution": MAX_SMALLINT_FIELD_VALUE,
-    "charisma": MAX_SMALLINT_FIELD_VALUE,
+    **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS, MAX_SMALLINT_FIELD_VALUE),
     # The column's ceiling; the dice the roll is made of hold it far lower
     # (character_int_field_maximum, #653).
     "fatigue_roll": MAX_SMALLINT_FIELD_VALUE,
@@ -2439,12 +2429,7 @@ CHARACTER_NULLABLE_INT_FIELDS = {"starting_coin"}
 # (#164) even though 0 is the field's default.
 MIN_ATTRIBUTE_VALUE = 1
 CHARACTER_INT_FIELD_MIN = {
-    "strength": MIN_ATTRIBUTE_VALUE,
-    "dexterity": MIN_ATTRIBUTE_VALUE,
-    "intelligence": MIN_ATTRIBUTE_VALUE,
-    "wisdom": MIN_ATTRIBUTE_VALUE,
-    "constitution": MIN_ATTRIBUTE_VALUE,
-    "charisma": MIN_ATTRIBUTE_VALUE,
+    **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS, MIN_ATTRIBUTE_VALUE),
     "starting_coin": 0,
     "total_xp": 0,
     "fatigue_damage": 0,
