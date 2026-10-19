@@ -26,7 +26,14 @@ from tarmar_engine.magic import (
     SpellEffectKind,
 )
 
-from battle.magic_rules import magic_rules
+from battle.magic_rules import load_magic_rules, magic_rules
+from reference.paths import CANON_MAGIC_RULES_FILE_NAME, DEFAULT_CANON_DIR
+
+#: The default canon's magic rules: the numbers its magic-mechanics pages
+#: state, whichever canon is loaded.
+DEFAULT_MAGIC_RULES: MagicRules = load_magic_rules(
+    DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME
+)
 
 #: The kind of magic every spell belongs to under the invented Channel.
 STUDIED_KIND = "studied"
