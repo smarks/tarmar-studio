@@ -27,9 +27,11 @@ the same under any canon, and under the Tarmar canon it also checks the Game
 Master's guides in that canon's ``guides/`` (issue #921). Since #921 the
 checkout holds no canon, so the first mode gates the Tarmar canon only when the
 caller's ``TARMAR_CANON_DIR`` names it. pytest, Jest and Playwright run again
-as "pytest (default canon)" and so on, on a second e2e port. There is no way
-to skip the second mode: a note must not mean less on one machine than on
-another.
+on a second e2e port. Each pass's steps are named for the canon it serves
+("pytest (Tarmar canon)", then "pytest (default canon)"), and the opening line
+says which port serves which canon, both from the one label each step carries
+(issue #10). There is no way to skip the second mode: a note must not mean
+less on one machine than on another.
 
 The note names the canon the first mode ran against and, when that canon is a
 git checkout of its own (the Tarmar canon, cloned from ``smarks/tarmar-canon``),
@@ -73,7 +75,9 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from reference.paths import (  # noqa: E402
     CANON_DIR_ENV,
+    CANON_LABELS,
     DEFAULT_CANON_DIR,
+    DEFAULT_CANON_NAME,
     TARMAR_CANON_NAME,
     resolve_canon,
 )
@@ -112,9 +116,8 @@ FAKE_OLLAMA_PORT_OFFSET = 1000
 # moves upward past any port, or +1000 port, that something is listening on.
 E2E_PORT_SPAN = 200
 
-# The stand-in canon is ``reference.paths.DEFAULT_CANON_DIR``, an absolute path
-# (the suites start servers and child processes in other working directories).
-DEFAULT_CANON_SUFFIX = " (default canon)"
+# The variable that tells the browser suite which port to serve the app on.
+E2E_PORT_ENV = "E2E_PORT"
 
 # ``canon-commit:`` for a canon that is not a git checkout of its own.
 CANON_COMMIT_NONE = "none"
@@ -165,6 +168,18 @@ class GateStep:
     # leave the variable unset. Kept apart from ``environment`` so the base
     # environment stays built in one place, by ``build_step_environment``.
     canon_dir: Path | None = None
+    # The canon this step's pass serves, as ``reference.paths.CANON_LABELS``
+    # words it, or None for a step that does not read the canon. The step's
+    # name and the opening line's port header are both made from it (#10).
+    canon_label: str | None = None
+
+    def __post_init__(self) -> None:
+        if E2E_PORT_ENV in self.environment and self.canon_label is None:
+            raise ValueError(
+                f"step {self.name!r} serves the browser suite on a port but "
+                "names no canon, so the gate could not say which canon that "
+                "port serves (issue #10)"
+            )
 
 
 @dataclass(frozen=True)
@@ -285,7 +300,9 @@ def choose_e2e_ports(
     return first, second
 
 
-def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
+def gate_steps(
+    *, e2e_port: str, default_canon_e2e_port: str, canon_name: str
+) -> list[GateStep]:
     """Every check a deploy depends on, in the order the gate runs them.
 
     The order is the cheapest first: a formatting slip should not cost the
@@ -296,6 +313,8 @@ def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
     Args:
         e2e_port: Port the Playwright suite serves the app on.
         default_canon_e2e_port: Port for the default-canon Playwright run.
+        canon_name: The canon the first mode serves, as
+            ``reference.paths.resolve_canon`` names it.
 
     Returns:
         The steps, in running order.
@@ -341,33 +360,47 @@ def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
     ]
     return [
         *steps_that_run_once,
-        *suite_steps(e2e_port=e2e_port, canon_dir=None),
+        *suite_steps(
+            e2e_port=e2e_port, canon_dir=None, canon_label=CANON_LABELS[canon_name]
+        ),
+        # DEFAULT_CANON_DIR is absolute: the suites start servers and child
+        # processes in other working directories.
         *suite_steps(
             e2e_port=default_canon_e2e_port,
             canon_dir=DEFAULT_CANON_DIR,
-            name_suffix=DEFAULT_CANON_SUFFIX,
+            canon_label=CANON_LABELS[DEFAULT_CANON_NAME],
         ),
     ]
 
 
 def suite_steps(
-    *, e2e_port: str, canon_dir: Path | None, name_suffix: str = ""
+    *, e2e_port: str, canon_dir: Path | None, canon_label: str
 ) -> list[GateStep]:
     """The three suites that read the canon, for one canon.
 
     Args:
         e2e_port: Port the Playwright suite serves the app on.
         canon_dir: The directory ``TARMAR_CANON_DIR`` names, or None for none.
-        name_suffix: Appended to each step name to tell the modes apart.
+        canon_label: The canon this pass serves, as ``CANON_LABELS`` words it:
+            each step carries it and is named for it.
 
     Returns:
         The pytest, Jest and Playwright steps.
     """
+    name_suffix = f" ({canon_label})"
     return [
         GateStep(
-            f"pytest{name_suffix}", ["uv", "run", "pytest", "-q"], canon_dir=canon_dir
+            f"pytest{name_suffix}",
+            ["uv", "run", "pytest", "-q"],
+            canon_dir=canon_dir,
+            canon_label=canon_label,
         ),
-        GateStep(f"jest{name_suffix}", ["npx", "jest"], canon_dir=canon_dir),
+        GateStep(
+            f"jest{name_suffix}",
+            ["npx", "jest"],
+            canon_dir=canon_dir,
+            canon_label=canon_label,
+        ),
         GateStep(
             f"playwright{name_suffix}",
             # --check judges JS coverage against package.json's stored
@@ -379,10 +412,36 @@ def suite_steps(
                 "scripts/update_js_coverage_threshold.py",
                 "--check",
             ],
-            {"E2E_PORT": e2e_port},
+            {E2E_PORT_ENV: e2e_port},
             canon_dir=canon_dir,
+            canon_label=canon_label,
         ),
     ]
+
+
+def e2e_ports_header(steps: Sequence[GateStep]) -> str:
+    """Which port serves which canon, for the line that opens a gate run.
+
+    Read from the browser steps themselves, from the label each one's name
+    is made from, so the line cannot name a different canon from the step it
+    describes (issue #10: it once called the Tarmar pass's port the default
+    canon's).
+
+    Args:
+        steps: The gate's steps, in running order.
+
+    Returns:
+        e.g. ``"e2e ports 8390 for the Tarmar canon, 8391 for the default
+        canon"``, or ``""`` when no step serves the browser suite.
+    """
+    ports = [
+        f"{step.environment[E2E_PORT_ENV]} for the {step.canon_label}"
+        for step in steps
+        if E2E_PORT_ENV in step.environment
+    ]
+    if not ports:
+        return ""
+    return f"e2e ports {', '.join(ports)}"
 
 
 def build_step_environment(
@@ -1011,6 +1070,13 @@ def run_gate(
             print(f"  {line}")
         return 1
 
+    # The first mode's canon, which its steps are named for: whatever the
+    # caller's TARMAR_CANON_DIR names, or the checkout's own.
+    first_mode_environment = build_step_environment()
+    canon_dir, canon_name = resolve_canon(
+        environ=first_mode_environment,
+        content_dir=repository_root / "reference" / "content",
+    )
     try:
         e2e_port, default_canon_e2e_port = choose_e2e_ports(
             repository_root,
@@ -1018,7 +1084,9 @@ def run_gate(
             default_canon_e2e_port=default_canon_e2e_port,
         )
         steps = gate_steps(
-            e2e_port=e2e_port, default_canon_e2e_port=default_canon_e2e_port
+            e2e_port=e2e_port,
+            default_canon_e2e_port=default_canon_e2e_port,
+            canon_name=canon_name,
         )
     except GateError as failure:
         announce(f"refusing to run: {failure}")
@@ -1043,14 +1111,14 @@ def run_gate(
         )
         return 1
     # One environment per canon, each built by build_step_environment.
-    environments = {
-        canon_dir: build_step_environment(canon_dir=canon_dir)
-        for canon_dir in {step.canon_dir for step in steps}
+    environments: dict[Path | None, dict[str, str]] = {
+        step_canon_dir: (
+            first_mode_environment
+            if step_canon_dir is None
+            else build_step_environment(canon_dir=step_canon_dir)
+        )
+        for step_canon_dir in {step.canon_dir for step in steps}
     }
-    canon_dir, canon_name = resolve_canon(
-        environ=environments[None],
-        content_dir=repository_root / "reference" / "content",
-    )
     # The note records the canon's commit, so that commit has to be what ran.
     canon_dirty_before = canon_uncommitted_changes(canon_dir)
     if canon_dirty_before:
@@ -1063,15 +1131,14 @@ def run_gate(
             print(f"  {line}")
         return 1
     canon_commit = canon_commit_sha(canon_dir)
-    announce(
-        f"gating {commit_sha} with {len(steps)} steps (e2e ports {e2e_port}, "
-        f"{default_canon_e2e_port} for the default canon)"
-    )
+    opening = f"gating {commit_sha} with {len(steps)} steps"
+    ports_header = e2e_ports_header(steps)
+    announce(f"{opening} ({ports_header})" if ports_header else opening)
     results: list[StepResult] = []
     for number, step in enumerate(steps, start=1):
         # A browser step starts long after the check above, time enough for
         # another run to take its port; ask again just before it starts.
-        step_port = step.environment.get("E2E_PORT")
+        step_port = step.environment.get(E2E_PORT_ENV)
         busy_refusal = refuse_busy_ports((step_port,)) if step_port else ""
         if busy_refusal:
             announce(f"{step.name}: {busy_refusal}; nothing recorded for {commit_sha}")
