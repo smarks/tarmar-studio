@@ -8,9 +8,15 @@ class BattleAdmin(admin.ModelAdmin):
     list_display = ("name", "seed", "status", "turn_number", "created_by", "created_at")
     list_filter = ("status", "created_at")
     search_fields = ("name", "created_by__username")
-    # The agreement ruling changes only through the Game Master's control,
-    # which logs it (issue #867); the admin shows it and does not edit it.
-    readonly_fields = ("created_at", "updated_at", "hth_agreement_json")
+    # The Game Master's rulings change only through the battle's GM
+    # controls, which log them (issues #867, #37); the admin shows them and
+    # does not edit them.
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "hth_agreement_json",
+        "magic_bounds_lifted_json",
+    )
     raw_id_fields = ("created_by",)
 
 

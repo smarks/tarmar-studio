@@ -244,6 +244,45 @@ class BorrowableSpellTest(SimpleTestCase):
         self.assertEqual(magic["owed"], 2)
 
 
+def assert_stage_agrees_with_menu(test: SimpleTestCase, state: BattleState) -> None:
+    """The cast stage's castable and borrowable rows equal the engine menu's
+    plain and borrowing casts for combatant 1, on the seated rules."""
+    magic = caster_magic(state, 1)
+    assert magic is not None
+    # Keyed by (spell, target) rather than by spell: that pair is what a
+    # candidate names, and what the stage must pair a row with (#263).
+    shown = {
+        (spell["key"], spell["target_id"])
+        for spell in magic["spells"]
+        if spell["castable"]
+    }
+    borrowable = {
+        (spell["key"], spell["target_id"]): spell["shortfall"]
+        for spell in magic["spells"]
+        if spell["borrowable"]
+    }
+    # The menu as the decider builds it, with the magic rules the turn
+    # runs on (issue #960): its Channel withholds casts too. A pushed
+    # variant is the same cast with more mana, not another row; a
+    # borrowing copy of a spell's plain cast is its borrowable row.
+    actor = state.by_id(1)
+    menu = policy.choose_option(
+        state, actor, magic=profiles.tarmar_engine_profile().magic
+    )
+    offered = {
+        (candidate.spell_key, candidate.target_id)
+        for candidate in menu.candidates
+        if candidate.spell_key and not candidate.push_mana and not candidate.borrow
+    }
+    offered_borrowing = {
+        (candidate.spell_key, candidate.target_id): borrowed_mana(actor, candidate)
+        for candidate in menu.candidates
+        if candidate.borrow and not candidate.push_mana
+    }
+    test.assertEqual(shown, offered)
+    test.assertEqual(borrowable, offered_borrowing)
+
+
 class CastableSetAgreesWithPolicyTest(SimpleTestCase):
     """The shown-castable set must equal the choosable set, exactly.
 
@@ -259,40 +298,7 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
         self.enterContext(seated_rules(BORROWING_RULES))
 
     def assert_sets_agree(self, state):
-        magic = caster_magic(state, 1)
-        assert magic is not None
-        # Keyed by (spell, target) rather than by spell: that pair is what a
-        # candidate names, and what the stage must pair a row with (#263).
-        shown = {
-            (spell["key"], spell["target_id"])
-            for spell in magic["spells"]
-            if spell["castable"]
-        }
-        borrowable = {
-            (spell["key"], spell["target_id"]): spell["shortfall"]
-            for spell in magic["spells"]
-            if spell["borrowable"]
-        }
-        # The menu as the decider builds it, with the magic rules the turn
-        # runs on (issue #960): its Channel withholds casts too. A pushed
-        # variant is the same cast with more mana, not another row; a
-        # borrowing copy of a spell's plain cast is its borrowable row.
-        actor = state.by_id(1)
-        menu = policy.choose_option(
-            state, actor, magic=profiles.tarmar_engine_profile().magic
-        )
-        offered = {
-            (candidate.spell_key, candidate.target_id)
-            for candidate in menu.candidates
-            if candidate.spell_key and not candidate.push_mana and not candidate.borrow
-        }
-        offered_borrowing = {
-            (candidate.spell_key, candidate.target_id): borrowed_mana(actor, candidate)
-            for candidate in menu.candidates
-            if candidate.borrow and not candidate.push_mana
-        }
-        self.assertEqual(shown, offered)
-        self.assertEqual(borrowable, offered_borrowing)
+        assert_stage_agrees_with_menu(self, state)
 
     def test_agreement_with_a_full_pool(self):
         self.assert_sets_agree(wizard_state())

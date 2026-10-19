@@ -1,0 +1,61 @@
+{% comment %}
+A Game Master's ruling lifting a figure's magic bounds (issue #37). Spencer,
+2026-10-14: the Game Master records "Channel lifted for <figure>", and
+likewise the push cap and the counter's commitment bounds, each separately or
+together, as a ruling on the battle.
+
+Rendered from the battle's record (``Battle.magic_bounds_lifted_json``), the
+one source of truth, so the reload a post causes is the whole update and
+nothing here appears or vanishes on a timer. Every viewer reads each lifting
+with who lifted it and when; only a Game Master running this fight
+(``runs_the_seats``) gets the forms, which offer only the bounds the loaded
+canon imposes, and the endpoint refuses anyone else. Included by the battle
+page and by the GM chat's Battle tab; each form names the page it came from
+(``next``). The battle payload carries this partial too (``rulings_html``),
+and battle.js puts it in place when ``data-record`` changes. The words are
+configuration (``battle.wording``, config/battle-rulings.toml).
+{% endcomment %}
+<div class="battle-panel battle-magic-bounds-panel" id="{{ magic_bounds.panel_id }}" data-record="{{ magic_bounds.record }}">
+    <h2>{{ magic_bounds.words.heading }}</h2>
+    {% if magic_bounds.liftings %}
+    <ul class="magic-bounds-liftings">
+        {% for lifting in magic_bounds.liftings %}
+        <li class="magic-bounds-lifting">
+            <span class="magic-bounds-lifting-line">{{ lifting.line }}, <time datetime="{{ lifting.at|date:'c' }}">{{ lifting.at|date:"j M Y, H:i" }}</time></span>
+            {% if magic_bounds.can_rule %}
+            <form method="post" action="{% url 'battle:magic-bounds' battle.pk %}" class="magic-bounds-restore-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <input type="hidden" name="{{ magic_bounds.fields.combatant }}" value="{{ lifting.combatant_id }}">
+                <input type="hidden" name="{{ magic_bounds.fields.bounds }}" value="{{ lifting.bound }}">
+                <input type="hidden" name="{{ magic_bounds.fields.lifted }}" value="">
+                <button type="submit" class="battle-button battle-button-quiet">{{ magic_bounds.words.hold_again }}</button>
+            </form>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="magic-bounds-line">{{ magic_bounds.none_lifted_line }}</p>
+    {% endif %}
+    {% if magic_bounds.can_rule %}
+    <form method="post" action="{% url 'battle:magic-bounds' battle.pk %}" class="magic-bounds-lift-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <input type="hidden" name="{{ magic_bounds.fields.lifted }}" value="true">
+        <label>
+            <span class="sr-only">{{ magic_bounds.words.figure_label }}</span>
+            <select name="{{ magic_bounds.fields.combatant }}">
+                {% for combatant in magic_bounds.combatants %}<option value="{{ combatant.id }}">{{ combatant.name }}</option>{% endfor %}
+            </select>
+        </label>
+        {% for bound in magic_bounds.bounds %}
+        <label class="magic-bounds-choice">
+            <input type="checkbox" name="{{ magic_bounds.fields.bounds }}" value="{{ bound.key }}">
+            {{ bound.label }}
+        </label>
+        {% endfor %}
+        <button type="submit" class="battle-button battle-button-outline">{{ magic_bounds.words.lift_button }}</button>
+    </form>
+    {% endif %}
+</div>

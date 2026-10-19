@@ -6,8 +6,11 @@ reloaded page cannot disagree. A candidate prints score_text, the width its
 rationale was written to (#301); decisions logged before that field existed
 fall back to the raw score. A decision that withheld casts past the caster's
 Channel (#960) says so beneath it, in the engine's words, outside the
-collapsed working so it reads without opening it.
+collapsed working so it reads without opening it. A cast or counter that went
+past a bound a Game Master lifted for its figure (#37) says so beneath its
+line, in the configured words (battle.magic_bounds.event_past_by_ruling).
 {% endcomment %}
+{% load battle_rulings %}
 <li id="event-{{ event.sequence }}"
     class="battle-event event-{{ event.event_type }}{% if event.payload.destination_refused %} is-refused{% endif %}">
     {% if event.event_type == "decision" %}
@@ -37,4 +40,7 @@ collapsed working so it reads without opening it.
     {% else %}
     {{ event.message }}
     {% endif %}
+    {% with past=event.payload|past_by_ruling %}{% if past %}
+    <span class="event-past-by-ruling">{{ past|capfirst }}</span>
+    {% endif %}{% endwith %}
 </li>

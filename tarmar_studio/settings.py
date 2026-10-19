@@ -32,6 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from battle.wording import load_rulings_wording  # noqa: E402
 from common.base_url import (  # noqa: E402
     BASE_URL_RULE,
     BASE_URL_WITH_PATH_RULE,
@@ -152,6 +153,16 @@ GATE_HINTS_FILE = BASE_DIR / (
     os.environ.get("GATE_HINTS_FILE") or "config/gate-hints.txt"
 )
 GATE_HINTS = load_gate_hints(GATE_HINTS_FILE)
+
+# The words a Game Master's rulings on a battle are shown in: panel headings
+# and buttons, battle-log lines, refusals (issues #867, #37). Content, not code,
+# so they live in a TOML file Spencer edits with no Python, read once here so a
+# missing key or a stray {name} fails at startup. BATTLE_RULINGS_WORDING_FILE
+# names another file, resolved as GATE_HINTS_FILE is; empty means the default.
+BATTLE_RULINGS_WORDING_FILE = BASE_DIR / (
+    os.environ.get("BATTLE_RULINGS_WORDING_FILE") or "config/battle-rulings.toml"
+)
+BATTLE_RULINGS_WORDING = load_rulings_wording(BATTLE_RULINGS_WORDING_FILE)
 
 # How many wrong guesses in a window before a hint is shown. Three because of
 # the #55 evidence, stated once beside the hints comment in common/gate.py. It

@@ -76,6 +76,7 @@ from tarmar_engine.policy import (
 from tarmar_engine.spells import get_spell
 from tarmar_engine.state import BattleState, CombatantState
 
+from . import magic_bounds
 from .magic_rules import magic_rules
 from .persistence import TARMAR_PROFILE
 
@@ -512,6 +513,12 @@ def _plain_line(
         plain = candidate.name.capitalize()
     if actions.is_yielded(candidate.letter):
         plain += ", moving in Final Movement instead"
+    # A cast or counter past a bound a Game Master lifted for this figure
+    # (#37) says so, as its log line will: the engine's own answer, carried
+    # on the option (``Candidate.lifted_bounds``).
+    past = magic_bounds.past_by_ruling(candidate.lifted_bounds)
+    if past:
+        cost = f"{cost}; {past}" if cost else past
     return plain, cost
 
 
@@ -621,6 +628,7 @@ def _base_fields(candidate: Candidate) -> dict:
         "anchor_target": candidate.anchor_target,
         "counter_mana": candidate.counter_mana,
         "escalate": candidate.escalate,
+        "lifted_bounds": candidate.lifted_bounds,
         "destination": candidate.destination,
     }
 

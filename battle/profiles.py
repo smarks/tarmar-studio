@@ -48,7 +48,7 @@ from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 
 from common.rolling import Roller
 
-from . import agreement, policy, viewmodel
+from . import agreement, magic_bounds, policy, viewmodel
 from .engine.engine import run_turn as run_tarmar_turn
 from .engine.state import BattleState
 from .magic_rules import magic_rules
@@ -213,6 +213,9 @@ class TarmarProfile(BattleProfile):
         # A Game Master's "HTH by agreement" ruling, read from the battle
         # every turn so a change takes effect on the next one (#867).
         agreement.fill(state, agreement.Agreement.of(self.battle))
+        # The bounds a Game Master has lifted for each figure, read from the
+        # battle likewise (#37): the menu, the cast and the counter read them.
+        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
         events: list[dict] = []
         run_tarmar_turn(
             state, roller, events.append, decide, profile=tarmar_engine_profile()
@@ -284,6 +287,8 @@ class TarmarProfile(BattleProfile):
         # builder can only be reached from inside the call.
         from .services import caster_magic
 
+        # The ruling as it stands now, not as the last turn left it (#37).
+        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
         return caster_magic(state, combatant_id)
 
 

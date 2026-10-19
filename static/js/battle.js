@@ -1857,6 +1857,63 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
+     * The ruling panels a payload's ``rulings_html`` changes (#867, #37).
+     *
+     * The server renders each Game Master's ruling panel with its own
+     * partial and keys it by the panel's element id (views.ruling_panels_html);
+     * a panel counts as changed when its ``data-record`` (the stored ruling)
+     * differs from the one on the page, so the CSRF token a fresh render
+     * carries never counts. An empty string means the battle shows no such
+     * panel. Panels are looked up by id within ``scope``, as everything
+     * ``initBattlePage`` wires is; panels it does not carry are left alone.
+     *
+     * @param {Object<string, string>} htmlById
+     * @param {ParentNode} [scope] - defaults to the document
+     * @returns {{current: Element, fresh: Element|null}[]}
+     */
+    function rulingPanelChanges(htmlById, scope) {
+        const container = scope || document;
+        const changes = [];
+        Object.entries(htmlById || {}).forEach(([panelId, html]) => {
+            const current = container.querySelector(`#${panelId}`);
+            if (!current) { return; }
+            const holder = document.createElement('template');
+            holder.innerHTML = (html || '').trim();
+            const fresh = holder.content.firstElementChild;
+            if (fresh && fresh.dataset.record === current.dataset.record) {
+                return;
+            }
+            changes.push({ current, fresh });
+        });
+        return changes;
+    }
+
+    /**
+     * Put the server's ruling panels in place of the changed ones (#867, #37).
+     * Each form's ``next`` is pointed at ``backTo`` (this page), since the
+     * server rendered it under the endpoint that answered.
+     *
+     * @param {Object<string, string>} htmlById
+     * @param {string} backTo
+     * @param {ParentNode} [scope] - defaults to the document
+     * @returns {number} How many panels were repainted.
+     */
+    function repaintRulings(htmlById, backTo, scope) {
+        const changes = rulingPanelChanges(htmlById, scope);
+        changes.forEach(({ current, fresh }) => {
+            if (!fresh) {
+                current.remove();
+                return;
+            }
+            fresh.querySelectorAll('input[name="next"]').forEach((input) => {
+                input.value = backTo;
+            });
+            current.replaceWith(fresh);
+        });
+        return changes.length;
+    }
+
+    /**
      * Wire a started battle's arena: the map, roster, log, turn panel, the
      * Advance and Restart buttons, and the poll.
      *
@@ -2102,6 +2159,12 @@ if (typeof module !== 'undefined' && module.exports) {
             if (Object.prototype.hasOwnProperty.call(data, 'stale_html')) {
                 renderStale(data.stale_html);
             }
+            // The Game Master's rulings, repainted from the records (#867, #37).
+            repaintRulings(
+                data.rulings_html,
+                `${window.location.pathname}${window.location.search}`,
+                root
+            );
             if (button) {
                 // The label and the disabled state are the server's
                 // (views.advance_control): in a mixed battle the button
@@ -2197,7 +2260,8 @@ if (typeof module !== 'undefined' && module.exports) {
                 || nextSequence !== lastSequence
                 || (data.events || []).length > 0
                 || (typeof data.stale_html === 'string'
-                    && data.stale_html.trim() !== lastStaleHtml);
+                    && data.stale_html.trim() !== lastStaleHtml)
+                || rulingPanelChanges(data.rulings_html, root).length > 0;
             if (changed) { applyBattleResponse(data); }
         }
 
@@ -2391,6 +2455,8 @@ if (typeof module !== 'undefined' && module.exports) {
             renderTurnPanel,
             appendTurns,
             resetLog,
+            rulingPanelChanges,
+            repaintRulings,
             lobbyEditing,
             initDiceToggle,
             initBattlePage,
