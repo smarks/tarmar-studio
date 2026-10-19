@@ -44,6 +44,7 @@ import itertools
 import re
 from dataclasses import dataclass, replace
 
+from hexarena.hex import Hex
 from tarmar_engine import actions, combat_math, movement
 from tarmar_engine.classic import ai as classic_ai
 from tarmar_engine.classic import policy as classic_policy
@@ -103,10 +104,11 @@ def _legal_targets(
 ) -> list[CombatantState]:
     """Every enemy ``option`` may be aimed at, by the rules the engine applies.
 
-    ATTACK and ONE LAST SHOT reach an adjacent enemy; CHARGE an enemy within
-    its reach (a Jog and the last hex, the reach the policy prices it by); a
-    MISSILE any enemy on the field (the engine takes the range penalty); a
-    hand-to-hand strike or grapple an enemy an entry condition admits.
+    ATTACK and ONE LAST SHOT reach an adjacent enemy; CHARGE an enemy its
+    jog ends beside (:func:`_charge_reaches`, the reach the policy prices it
+    by); a MISSILE any enemy on the field (the engine takes the range
+    penalty); a hand-to-hand strike or grapple an enemy an entry condition
+    admits.
     """
     enemies = state.enemies_of(actor)
     if option in ("j", "l"):
@@ -114,13 +116,14 @@ def _legal_targets(
             enemy for enemy in enemies if combat_math.figures_adjacent(actor, enemy)
         ]
     if option == "b":
-        # The reach the policy prices a charge by, through the engine's one
-        # jog rule (a barred jog charges at the walk, tarmar-engine #17).
-        reach = movement.gait_allowance(actor, "jog") + 1
+        # A charge the engine's jog cannot bring beside its target falls
+        # short and the AI scores it 0, so it is not aimed there; the
+        # engine's own CHARGE row says so when every enemy is out of reach
+        # (issue #56).
         return [
             enemy
             for enemy in enemies
-            if combat_math.figure_distance(actor, enemy) <= reach
+            if _charge_reaches(_approach(state, actor, option, enemy))
         ]
     if option == "f":
         return list(enemies)
@@ -330,6 +333,29 @@ def _stands(
     return not _approach(state, actor, option, target).route
 
 
+def _charge_reaches(approach: movement.Approach) -> bool:
+    """Whether a Tarmar CHARGE whose jog is ``approach`` reaches its target.
+
+    The policy's own reach test (``tarmar_engine.policy.choose_option``, the
+    ``b`` branch): already adjacent, or the engine's jog along a clear path
+    (:func:`_approach`) ends adjacent. The engine strikes only an adjacent
+    target after the jog and logs "charge fell short" otherwise (issue #56).
+    """
+    return approach.distance <= 1
+
+
+def _ends_from(move: str, distance: int, aimed: str) -> str:
+    """ "a clear jog of up to 7 hexes ends 2 hexes from Foe": where a move
+    that falls short stops, in either profile."""
+    return f"a {move} ends {combat_math.hexes_text(distance)} from {aimed}"
+
+
+def _no_attack_charge_line(aimed: str, reason: str) -> str:
+    """The sentence for a charge that strikes nobody, in either profile
+    (issue #56)."""
+    return f"Charge {aimed}: no attack, since {reason}"
+
+
 def _clear_gait(option: str) -> str:
     """ "clear jog": the move a Tarmar option makes, as :func:`_no_nearer`
     names it."""
@@ -533,6 +559,14 @@ def _plain_line(
         and target is not None
         and _stands(state, actor, candidate.letter, target)
     )
+    # A charge the engine's jog cannot bring beside its target says so
+    # (issue #56): the engine's own row when every enemy is out of reach.
+    charge = (
+        _approach(state, actor, candidate.letter, target)
+        if option == "b" and target is not None
+        else None
+    )
+    falls_short = charge is not None and not _charge_reaches(charge)
     if option == "a":
         plain, cost = _mover_line(
             candidate.letter,
@@ -548,6 +582,15 @@ def _plain_line(
             actor.move_sprint,
             SPRINT_FATIGUE_COST,
             stands=stands,
+        )
+    elif option == "b" and charge is not None and falls_short:
+        jog = movement.gait_allowance(actor, movement.MOVEMENT_GAITS[option])
+        gait = _clear_gait(candidate.letter)
+        plain = _no_attack_charge_line(
+            aimed,
+            _ends_from(f"{gait} of up to {jog} hexes", charge.distance, aimed)
+            if charge.route
+            else _no_nearer(gait, aimed),
         )
     elif option == "b":
         plain = _with_odds(
@@ -673,7 +716,7 @@ def _plain_line(
         plain = f"Let {aimed} go"
     else:
         plain = candidate.name.capitalize()
-    if actions.is_yielded(candidate.letter) and stands:
+    if actions.is_yielded(candidate.letter) and (stands or falls_short):
         # The engine walks a yielded mover's route from the board as it is
         # in Final Movement, so a way opened by then is taken.
         plain += ", unless a way opens by Final Movement"
@@ -850,6 +893,80 @@ _CLASSIC_STANDING_MOVERS = frozenset(
 )
 
 
+#: What a classic grapple does, in the HTH ATTACK row's words and a
+#: bare-handed CHARGE's (Melee p.17).
+_CLASSIC_GRAPPLE_WORDS = "move into their hex and fight hand to hand"
+
+
+@dataclass(frozen=True)
+class _ClassicChargeBlow:
+    """A classic charge as the engine would make it (issue #56).
+
+    Attributes:
+        path: The hexes the charge walks.
+        struck: The foe it attacks, from the live game, or None when no foe
+            is in reach where it ends.
+        grapples: Whether that attack is a grapple (bare hands,
+            ``GameState.hth_attack``, settled by the defender's roll) rather
+            than a weapon's blow.
+    """
+
+    path: list[Hex]
+    struck: Figure | None
+    grapples: bool
+
+
+def _classic_charge_blow(
+    game: GameState, figure: Figure, candidate: Candidate
+) -> _ClassicChargeBlow:
+    """The classic engine's charge, rehearsed: where it moves, whom it strikes.
+
+    The engine's own rule, played on a copy of the game (its snapshot
+    contract, ``to_dict``/``from_dict``) so the live one is untouched: the
+    plan the engine enacts for this charge (``classic.policy.plan_for``),
+    applied through its own verbs (``classic.ai.apply``); then the foes the
+    combat phase may strike from where it ends
+    (``GameState.attack_candidates``: a weapon's front hexes and a pole's
+    jab, any hex of a multi-hex foe), and the one the engine's attack
+    declaration picks among them (``classic.ai.queue_attack_for``, which
+    strikes a melee foe with a weapon and grapples with bare hands). A
+    charge may strike a foe other than the one it closes on, or nobody
+    (issue #56).
+
+    Args:
+        game: The live game the menu was built from.
+        figure: The figure choosing.
+        candidate: Its CHARGE ATTACK option.
+
+    Returns:
+        The charge's path, the foe it attacks, and whether it grapples.
+
+    Raises:
+        LookupError: if the copy of the game has lost the figure, which the
+            snapshot contract rules out.
+    """
+    rehearsal = GameState.from_dict(game.to_dict())
+    charger = _classic_figure(rehearsal, figure.uid)
+    if charger is None:
+        raise LookupError(f"{figure.name} is missing from a copy of the game")
+    plan = classic_policy.plan_for(rehearsal, charger, candidate)
+    classic_ai.apply(rehearsal, charger, plan)
+    reach = rehearsal.attack_candidates(charger)
+    grapples = charger.ready_weapon is None
+    foes = reach.hth if grapples else reach.melee
+    if not foes:
+        return _ClassicChargeBlow(list(plan.path), None, grapples)
+    # ``queue_attack_for`` takes a melee foe by ``_best_target`` (lowest ST,
+    # then nearest) and a grapple's by lowest ST alone; the two agree here,
+    # since a grapple is begun only from one hex off
+    # (``GameState._can_initiate_hth``), and ``min`` keeps the first of a tie
+    # in both (smarks/tarmar-engine#54 asks for the engine's own call).
+    blow = classic_ai._best_target(rehearsal, charger, foes)
+    return _ClassicChargeBlow(
+        list(plan.path), _classic_figure(game, blow.uid), grapples
+    )
+
+
 def _classic_dice(damage: DamageDice) -> str:
     """ "2d6", "1d6+2", "1d6-1": a classic damage expression in the page's words."""
     modifier = f"{damage.modifier:+d}" if damage.modifier else ""
@@ -964,13 +1081,52 @@ def _classic_plain_line(
     # A move the engine would not make is read as standing (issue #57): the
     # classic engine enacts exactly the plan ``plan_for`` derives, and an
     # empty path is no move ("boxed in", ``classic.ai._closing_move``).
-    stands = (
-        option in _CLASSIC_STANDING_MOVERS
-        and target is not None
-        and not classic_policy.plan_for(game, figure, candidate).path
+    plan = (
+        classic_policy.plan_for(game, figure, candidate)
+        if option in _CLASSIC_STANDING_MOVERS and target is not None
+        else None
     )
-    no_nearer = _no_nearer(f"move of up to {budget} hexes", aimed)
-    if option in _CLASSIC_STRIKES and target is not None:
+    stands = plan is not None and not plan.path
+    move = f"move of up to {budget} hexes"
+    no_nearer = _no_nearer(move, aimed)
+    # A charge says whom the engine's own charge strikes, or that it strikes
+    # nobody (issue #56).
+    charge_path: list[Hex] = []
+    struck: Figure | None = target
+    grapples = False
+    if option == ClassicOption.CHARGE_ATTACK and target is not None:
+        blow = _classic_charge_blow(game, figure, candidate)
+        charge_path, struck, grapples = blow.path, blow.struck, blow.grapples
+    if struck is None and target is not None and target.position is not None:
+        reach = f"with no foe in reach of {wielding}"
+        reason = (
+            _ends_from(
+                move,
+                game.arena.layout.distance(charge_path[-1], target.position),
+                aimed,
+            )
+            + f", {reach}"
+            if charge_path
+            else f"{no_nearer}, {reach}"
+        )
+        plain = _no_attack_charge_line(aimed, reason)
+    elif struck is not None and grapples:
+        # A grapple is settled by the defender's roll, not a to-hit roll, so
+        # it carries no odds (Melee p.17).
+        whom = "them" if struck is target else struck.name
+        lead = f"Charge {aimed}" if struck is target else f"Charge toward {aimed}"
+        plain = (
+            f"{lead}: move up to {budget} hexes and grapple {whom}: "
+            f"{_CLASSIC_GRAPPLE_WORDS}"
+        )
+    elif struck is not None and target is not None and struck is not target:
+        odds = _classic_strike(game, figure, option, struck)
+        sentence = (
+            f"Charge toward {aimed}: move up to {budget} hexes and attack "
+            f"{struck.name} with {wielding}"
+        )
+        plain = f"{sentence}: {odds}" if odds else sentence
+    elif option in _CLASSIC_STRIKES and target is not None:
         verbs = {
             ClassicOption.ATTACK: f"Attack {aimed} with {wielding}",
             ClassicOption.SHIFT_ATTACK: (
@@ -1032,7 +1188,7 @@ def _classic_plain_line(
     elif option == ClassicOption.DISENGAGE:
         plain = "Step away from the enemies engaging you"
     elif option == ClassicOption.HTH_ATTACK:
-        plain = f"Grapple {aimed}: move into their hex and fight hand to hand"
+        plain = f"Grapple {aimed}: {_CLASSIC_GRAPPLE_WORDS}"
     elif option == ClassicOption.CAST and candidate.spell_key:
         offers = {
             (spell.id, subject.uid): invested

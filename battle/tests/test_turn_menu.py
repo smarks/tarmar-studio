@@ -751,6 +751,108 @@ class MoversSayTheMoveTheEngineMakesTest(BaseTestCase):
             ("Sprint up to 14 hexes toward Bowman", "6 Fatigue"),
         )
 
+    def test_a_boxed_in_charge_says_it_cannot_reach(self):
+        """A charge no clear jog brings nearer stands and strikes nothing (#56)."""
+        entries = self.menu(*self.boxed_in())
+        # The engine's own working: out of reach, scored 0.
+        self.assertIn("out of charge reach", entries["b"]["rationale"])
+        self.assertEqual(entries["b"]["score"], 0.0)
+        self.assertEqual(
+            entries["b"]["plain"],
+            "Charge Bowman: no attack, since no clear jog gets nearer to Bowman",
+        )
+        self.assertEqual(
+            entries["b_yield"]["plain"],
+            "Charge Bowman: no attack, since no clear jog gets nearer to Bowman, "
+            "unless a way opens by Final Movement",
+        )
+
+
+class ChargeRowsReadTheEngineReachTest(BaseTestCase):
+    """A CHARGE row is offered only at a target the engine's charge reaches (#56).
+
+    The menu used to aim a charge at every enemy within a jog and a hex as
+    the crow flies, so an enemy walled off by Aldwin's own side drew a
+    positive forecast the engine would never act on: its jog along a clear
+    path ends short, it scores the charge 0, and since tarmar-engine 0.9.16
+    (#37) it charges a farther enemy it can reach instead.
+    """
+
+    def board(self, *, with_far: bool = True) -> tuple[BattleState, CombatantState]:
+        """Aldwin, Near three hexes off ringed by Aldwin's side, and Far five
+        hexes the other way in the open."""
+        aldwin = figure(1, "Aldwin", (0, 0), team="Red")
+        near = figure(2, "Near", (3, 0), team="Blue")
+        wall = [
+            figure(10 + index, f"Guard {index}", cell, team="Red")
+            for index, cell in enumerate(hexes.neighbors((3, 0)))
+        ]
+        far = figure(3, "Far", (-5, 0), team="Blue")
+        combatants = [aldwin, near, *wall, *([far] if with_far else [])]
+        return BattleState(arena_radius=7, combatants=combatants), aldwin
+
+    def engine_charge(self, state: BattleState, actor: CombatantState) -> Candidate:
+        return next(
+            candidate
+            for candidate in choose_option(state, actor).candidates
+            if candidate.letter == "b"
+        )
+
+    def menu(self, state: BattleState, actor: CombatantState) -> list[dict]:
+        advice = choose_option(state, actor)
+        return [
+            entry.to_payload()
+            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        ]
+
+    def test_only_the_reachable_enemy_is_offered_a_charge(self):
+        state, aldwin = self.board()
+        # The engine charges Far, past Near, which is the nearer.
+        engine = self.engine_charge(state, aldwin)
+        self.assertEqual(engine.target_id, 3)
+        self.assertIn("Near is nearer but out of charge reach", engine.rationale)
+        entries = self.menu(state, aldwin)
+        for letter in ("b", "b_yield"):
+            with self.subTest(letter=letter):
+                rows = [entry for entry in entries if entry["letter"] == letter]
+                self.assertEqual([row["target_id"] for row in rows], [3])
+                self.assertEqual(rows[0]["score"], engine.score)
+
+    def test_each_row_matches_the_engine_s_scoring_of_that_target_alone(self):
+        state, aldwin = self.board()
+        offered = {
+            entry["target_id"]
+            for entry in self.menu(state, aldwin)
+            if entry["letter"] == "b"
+        }
+        for enemy in state.enemies_of(aldwin):
+            with self.subTest(enemy=enemy.name):
+                alone = replace(
+                    state,
+                    combatants=[
+                        combatant
+                        for combatant in state.combatants
+                        if combatant.team == aldwin.team or combatant is enemy
+                    ],
+                )
+                engine = self.engine_charge(alone, aldwin)
+                # The engine reaches only what the menu offers a charge at.
+                self.assertEqual(
+                    "out of charge reach" not in engine.rationale,
+                    enemy.combatant_id in offered,
+                )
+
+    def test_a_charge_that_ends_short_says_where_it_stops(self):
+        state, aldwin = self.board(with_far=False)
+        engine = self.engine_charge(state, aldwin)
+        self.assertEqual((engine.target_id, engine.score), (2, 0.0))
+        rows = {entry["letter"]: entry for entry in self.menu(state, aldwin)}
+        self.assertEqual(
+            rows["b"]["plain"],
+            "Charge Near: no attack, since a clear jog of up to 7 hexes ends "
+            "2 hexes from Near",
+        )
+
 
 class DefendAndDodgeDriftTest(SimpleTestCase):
     """DODGE and DEFEND say what the rules page says they guard against.
