@@ -280,13 +280,13 @@ class ListModelsTest(TestCase):
         resp = MagicMock()
         resp.raise_for_status.return_value = None
         resp.json.return_value = {
-            "models": [{"model": "qwen3:32b"}, {"model": "nomic-embed-text:latest"}]
+            "models": [{"model": "llama3:8b"}, {"model": "nomic-embed-text:latest"}]
         }
         mock_get.return_value = resp
 
         names = ollama_client.list_models(base_url="http://box:11434")
 
-        self.assertEqual(names, ["qwen3:32b", "nomic-embed-text:latest"])
+        self.assertEqual(names, ["llama3:8b", "nomic-embed-text:latest"])
         self.assertEqual(mock_get.call_args.args[0], "http://box:11434/api/tags")
 
     @patch("common.services.ollama_client.httpx.get")
