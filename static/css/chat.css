@@ -91,8 +91,17 @@ main.chat-main {
     list-style: none;
     overflow-y: auto;
     flex: 1;
+    /* A scroller is the containing block of what is placed inside it, or what
+       is placed inside it (a .sr-only span is absolute) hangs off the page
+       and makes the window scroll when the list is long (issue #62). */
+    position: relative;
 }
 .session-item {
+    /* The row's visually hidden words (.sr-only is absolutely positioned) belong
+       to the row, so the rail's own scroll clips them. Without a positioned
+       row they hung off the page itself, and a long rail made the window
+       scroll (issue #62). */
+    position: relative;
     display: flex;
     align-items: stretch;
     border-bottom: 1px solid var(--colour-hairline);
@@ -163,6 +172,8 @@ main.chat-main {
     flex: 1;
     overflow-y: auto;
     padding: 1rem 1.5rem;
+    /* As .session-list: what is placed inside the transcript stays inside it. */
+    position: relative;
 }
 
 /* Mode indicator and control (issues #353, #372): a quiet strip above the
