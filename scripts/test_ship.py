@@ -335,6 +335,7 @@ def test_run_step_reports_a_failing_or_missing_program(tmp_path: Path) -> None:
 
 # What gh printed for the failed request in issue #33.
 BAD_GATEWAY = "failed to get jobs: HTTP 502: Server Error"
+RUN_ADDRESS = "https://github.com/smarks/tarmar-studio/actions/runs/9"
 
 
 def fake_gh(
@@ -344,13 +345,15 @@ def fake_gh(
     watch_exits: Sequence[int],
     states: Sequence[str] = (),
     log: str = "",
+    failed_log: str = "",
 ) -> list[float]:
     """Put a gh on PATH that answers ``run watch``, the run's state and its log.
 
     Each ``gh run watch`` exits with the next of ``watch_exits``, printing
     BAD_GATEWAY when that is non-zero; each state query prints the next of
     ``states``, where "502" fails the request as GitHub did. ``--log`` prints
-    ``log``. Waits are recorded rather than slept.
+    ``log``; ``--log-failed`` prints ``failed_log``; the run's address is
+    RUN_ADDRESS. Waits are recorded rather than slept.
 
     Returns:
         The seconds follow_deploy asked to wait, in order.
@@ -359,6 +362,7 @@ def fake_gh(
     bin_dir.mkdir()
     (tmp_path / "watch_exits").write_text("".join(f"{code}\n" for code in watch_exits))
     (tmp_path / "states").write_text("".join(f"{state}\n" for state in states))
+    (tmp_path / "failed_log").write_text(failed_log)
     write_script(
         bin_dir,
         "gh",
@@ -372,6 +376,8 @@ if [ "$2" = watch ]; then
   if [ "$code" != 0 ]; then echo "{BAD_GATEWAY}" >&2; fi
   exit "$code"
 fi
+if [ "$4" = --log-failed ]; then cat "{tmp_path}/failed_log"; exit 0; fi
+if [ "$5" = url ]; then echo "{RUN_ADDRESS}"; exit 0; fi
 if [ "$4" = --json ]; then
   state=$(take states)
   if [ "$state" = 502 ]; then echo "HTTP 502: Server Error" >&2; exit 1; fi
@@ -421,6 +427,133 @@ def test_follow_deploy_says_what_the_run_did(
             ship.follow_deploy("9", tmp_path)
 
 
+# What gh run view --log-failed prints: job, step and timestamp in front of every
+# line, and deploy.sh's coloured tags.
+FAILED_LOG_PREFIX = "Deploy\tRun deploy.sh\t2026-10-18T12:00:00.1234567Z "
+RED = "\x1b[0;31m"
+GREEN = "\x1b[0;32m"
+NO_COLOUR = "\x1b[0m"
+
+
+def failed_log_of(*lines: str) -> str:
+    return "\n".join(FAILED_LOG_PREFIX + line for line in lines)
+
+
+def test_follow_deploy_shows_the_error_lines_of_a_failed_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_gh(
+        tmp_path,
+        monkeypatch,
+        watch_exits=[1],
+        states=["completed failure"],
+        failed_log=failed_log_of(
+            f"{GREEN}[DEPLOY]{NO_COLOUR} Verifying the green release",
+            f"{RED}[ERROR]{NO_COLOUR} green is live and failing verification:",
+            "the migration gap: 0042_example",
+            "Traffic stays on green. Fix forward and deploy again.",
+            f"{RED}[ERROR]{NO_COLOUR} second thing went wrong",
+            "##[error]Process completed with exit code 1.",
+        ),
+    )
+
+    with pytest.raises(ship.ShipError) as failure:
+        ship.follow_deploy("9", tmp_path)
+
+    message = str(failure.value)
+    assert "did not finish green" in message
+    assert (
+        "  [ERROR] green is live and failing verification:\n"
+        "  the migration gap: 0042_example\n"
+        "  Traffic stays on green. Fix forward and deploy again.\n"
+        "  [ERROR] second thing went wrong"
+    ) in message
+    assert "Verifying the green release" not in message
+    assert "Process completed" not in message
+    assert "\x1b" not in message
+    assert "2026-10-18" not in message
+
+
+def test_follow_deploy_points_at_the_run_when_its_log_holds_no_error_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_gh(
+        tmp_path,
+        monkeypatch,
+        watch_exits=[1],
+        states=["completed failure"],
+        failed_log=failed_log_of(
+            f"{GREEN}[DEPLOY]{NO_COLOUR} Starting",
+            "##[error]Process completed with exit code 137.",
+        ),
+    )
+
+    with pytest.raises(ship.ShipError) as failure:
+        ship.follow_deploy("9", tmp_path)
+
+    message = str(failure.value)
+    assert f"its failed log held no {ship.ERROR_TAG} lines" in message
+    assert RUN_ADDRESS in message
+
+
+def test_follow_deploy_waits_for_a_failed_log_that_lags_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    counter = tmp_path / "asked"
+    error_line = f"{RED}[ERROR]{NO_COLOUR} the canon is not gated"
+    write_script(
+        bin_dir,
+        "gh",
+        'if [ "$2" = watch ]; then exit 1; fi\n'
+        'if [ "$5" = url ]; then echo "' + RUN_ADDRESS + '"; exit 0; fi\n'
+        'if [ "$4" = --json ]; then echo "completed failure"; exit 0; fi\n'
+        f'echo x >> "{counter}"\n'
+        # The first request fails, the second finds nothing, the third has it.
+        f'asked=$(wc -l < "{counter}")\n'
+        'if [ "$asked" -lt 2 ]; then echo "HTTP 404" >&2; exit 1; fi\n'
+        'if [ "$asked" -lt 3 ]; then exit 0; fi\n'
+        f"printf '%s\\n' '{FAILED_LOG_PREFIX}{error_line}'",
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    waits: list[float] = []
+    monkeypatch.setattr(ship.time, "sleep", waits.append)
+
+    with pytest.raises(ship.ShipError) as failure:
+        ship.follow_deploy("9", tmp_path)
+
+    assert "  [ERROR] the canon is not gated" in str(failure.value)
+    assert len(counter.read_text().splitlines()) == 3
+    assert waits == [ship.LOG_RETRY_SECONDS] * 2
+
+
+def test_a_failed_log_that_cannot_be_fetched_is_said_not_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_script(
+        bin_dir,
+        "gh",
+        'if [ "$2" = watch ]; then exit 1; fi\n'
+        'if [ "$5" = url ]; then echo "' + RUN_ADDRESS + '"; exit 0; fi\n'
+        'if [ "$4" = --json ]; then echo "completed failure"; exit 0; fi\n'
+        'echo "HTTP 502: Server Error" >&2\nexit 1',
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(ship.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(ship.ShipError) as failure:
+        ship.follow_deploy("9", tmp_path)
+
+    message = str(failure.value)
+    assert "did not finish green" in message
+    assert "could not be fetched" in message
+    assert "HTTP 502" in message
+    assert RUN_ADDRESS in message
+
+
 def test_ship_takes_only_rehearse_and_needs_a_canon_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -468,7 +601,12 @@ def test_an_interrupted_gate_is_stopped_with_everything_it_started(
 def test_the_outcomes_ship_reads_are_what_deploy_sh_prints() -> None:
     # Copies of deploy.sh's own words; a rewording there must fail here.
     deploy_script = (ship.REPOSITORY_ROOT / "deploy.sh").read_text()
-    for outcome in (ship.DEPLOYED, ship.ALREADY_LIVE, ship.STOOD_DOWN):
+    for outcome in (
+        ship.DEPLOYED,
+        ship.ALREADY_LIVE,
+        ship.STOOD_DOWN,
+        *ship.DEPLOY_SCRIPT_TAGS,
+    ):
         assert outcome in deploy_script, outcome
 
 

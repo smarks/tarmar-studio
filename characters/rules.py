@@ -91,7 +91,11 @@ from typing import Any
 
 from common.rolling import dice_total_range, standard_dice_specification
 from reference.paths import CHARACTER_RULES_FILE
-from reference.rules_file import RulesFileError, RulesFileReader
+from reference.rules_file import (
+    RulesFileError,
+    RulesFileReader,
+    repeats_problem,
+)
 
 from .constants import CORE_ATTRIBUTE_FIELDS
 
@@ -513,10 +517,8 @@ class PercentileTable[Row: TableRow]:
                 f"the last row's up_to must be {PERCENTILE_TOP}, "
                 f"got {self.rows[-1].up_to}"
             )
-        labels = [row.label for row in self.rows]
-        repeated = sorted({label for label in labels if labels.count(label) > 1})
-        if repeated:
-            raise ValueError(f"repeats the label {repeated}")
+        if problem := repeats_problem("label", self.labels):
+            raise ValueError(problem)
 
     @property
     def labels(self) -> tuple[str, ...]:

@@ -23,7 +23,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
   ollama_client.py`, httpx) and the offline CLI (`cli/`), which speak to Ollama
   through that same client.
   Both send the prompt `gm.engine.system_prompt_for` chooses as the system
-  message to the model named by `GM_MODEL` (default `qwen3:32b`), with
+  message to the model named by `GM_MODEL` (default `qwen3.6:27b-mlx`), with
   `GM_NUM_CTX`/`GM_TEMPERATURE` as options and `think: false` — see
   `gm/model_config.py`. There is no custom model or Modelfile.
 - **Rules content lives in two places:** `reference/content/` (markdown served
@@ -135,7 +135,6 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
 - `static/js/__tests__/` — Jest unit tests for the above JS.
 - `static/images/` — favicon, Tarmar logo variants, combat diagrams (facing/megahex), world/island maps.
 - Per-app `templates/` — accounts (auth UI), characters (CRUD UI), gm (chat), reference (browser/search).
-- `combat-movement-guide.html` (root) — standalone self-contained combat/movement rules HTML (not a Django template).
 
 ## Rules content — `reference/content/`
 Markdown tree; slugs map 1:1 to `reference/nav.py`.

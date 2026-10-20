@@ -32,11 +32,27 @@ GM_MODEL_ENV = "GM_MODEL"
 GM_NUM_CTX_ENV = "GM_NUM_CTX"
 GM_TEMPERATURE_ENV = "GM_TEMPERATURE"
 
-DEFAULT_GM_MODEL = "qwen3:32b"
+# The model production runs (datahorde's .env sets the same name). It is the
+# default so that a development server, which has no .env, asks the shared
+# Ollama host for the model already loaded there: any other name makes Ollama
+# load a second GM-sized model and evict the one live turns depend on (issue
+# #65; an eviction on 2026-09-16 failed a live turn). Every other copy of this
+# name (README, CLAUDE.md, .env.example, docs) is pinned to this constant by
+# ``GMModelDefaultSingleSourceTest`` in gm/tests.py.
+DEFAULT_GM_MODEL = "qwen3.6:27b-mlx"
+# The GM model that was the default before issue #65 and is still on the Mac
+# Studio's disk. It is a fallback: select it by setting GM_MODEL on purpose,
+# never by default, and mention it in prose only as the fallback.
+FALLBACK_GM_MODEL = "qwen3:32b"
 # Production's window (issue #907). The default was 32768 while the prompt was
 # under 7k tokens; at about 12k tokens for the longest of the four prompts, a
 # 32k window would give the prompt over a third of the context, and a quarter
 # of it (SYSTEM_PROMPT_CONTEXT_SHARE) is less than either canon's prompt.
+# It must equal production's window for the same reason DEFAULT_GM_MODEL must
+# equal production's model: every request carries ``options.num_ctx``, and
+# Ollama reloads a resident model when a request asks for a different context
+# size, which forces a reload of production's model, about a minute, before
+# its next turn can run (issue #65).
 DEFAULT_GM_NUM_CTX = 65536
 DEFAULT_GM_TEMPERATURE = 0.8
 

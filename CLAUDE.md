@@ -137,7 +137,7 @@ uv sync --group prod  # Install psycopg
 | `DATABASE_URL` | SQLite | PostgreSQL connection string |
 | `ALLOWED_HOSTS` | localhost | Comma-separated host list |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
-| `GM_MODEL` | `qwen3:32b` | Ollama model the GM (web and CLI) talks to |
+| `GM_MODEL` | `qwen3.6:27b-mlx` | Ollama model the GM (web and CLI) talks to |
 | `GM_NUM_CTX` | `65536` | GM context window sent as `options.num_ctx`; the system prompt may take a quarter of it (`SYSTEM_PROMPT_CONTEXT_SHARE`, issue #907) |
 | `GM_TEMPERATURE` | `0.8` | GM sampling temperature sent as `options.temperature` |
 | `GM_STREAM_BUDGET_SECONDS` | `300` | Wall-clock budget for one streamed GM turn; past it the player gets a readable "took too long" message instead of a connection that never ends, and the turn keeps whatever the server already ran (issue #553) |

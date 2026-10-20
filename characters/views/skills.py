@@ -30,6 +30,7 @@ from ..skills import (
     get_skill_level,
     normalize_skill_name,
     selectable_tracks,
+    skill_name_refusal,
 )
 from ..templatetags.dice_display import survival_roll
 from ..weapon_skill import needs_weapon_tie, weapon_choices
@@ -238,7 +239,11 @@ def character_allocate_skill_point(request, pk):
     if err:
         return err
 
-    # Normalize skill name before transaction
+    # Refuse an overlong name as received, then normalize it before the
+    # transaction.
+    refusal = skill_name_refusal(str(skill_name))
+    if refusal:
+        return _json_error(refusal)
     skill = normalize_skill_name(str(skill_name))
 
     def run() -> JsonResponse:
@@ -315,6 +320,12 @@ def character_rename_skill(request, pk):
     if err:
         return err
 
+    # Refuse an overlong new name as received. The old name is only matched
+    # against the skills held, so a record holding one from before #928 can
+    # still be renamed out of it.
+    refusal = skill_name_refusal(str(new_name))
+    if refusal:
+        return _json_error(refusal)
     # Normalize names before the transaction (mirrors the skill-allocation write)
     old_skill = normalize_skill_name(str(old_name))
     new_skill = normalize_skill_name(str(new_name))
