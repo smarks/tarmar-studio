@@ -28,6 +28,8 @@ from .rules import character_rules
 # Re-exported: callers import it from here, as they did before it moved
 # (issue #70).
 from .skill_names import normalize_skill_name as normalize_skill_name
+from .skill_names import skill_name_refusal as skill_name_refusal
+from .skill_names import top_level_parentheses
 from .skill_rules import (
     AGING_ATTRIBUTES,
     MENTAL_AGING_ATTRIBUTES,
@@ -458,8 +460,6 @@ def aging_escalation_note(horizon_age: int) -> str:
 #: Maker Skill's cost and governed by its attribute.
 SPECIALISED_SKILLS: tuple[str, ...] = ("maker skill", "knowledge")
 
-_SPECIALISED_NAME = re.compile(r"^(?P<skill>.+?) \((?P<detail>[^()]+)\)$")
-
 
 def split_specialised_skill(skill_name: str) -> tuple[str, str]:
     """``(glossary skill, chosen part)`` for a Maker Skill or Knowledge name.
@@ -472,9 +472,17 @@ def split_specialised_skill(skill_name: str) -> tuple[str, str]:
     Args:
         skill_name: A stored (normalised) skill name.
     """
-    match = _SPECIALISED_NAME.match(skill_name)
-    if match and match.group("skill") in SPECIALISED_SKILLS:
-        return match.group("skill"), match.group("detail").strip()
+    groups = top_level_parentheses(skill_name)
+    if not groups:
+        return skill_name, ""
+    opening, closing = groups[-1]
+    # The last group closes the name, after a space, and holds something. It
+    # may hold parentheses of its own: "knowledge (history (old))".
+    ends_the_name = closing == len(skill_name) - 1
+    if ends_the_name and closing > opening + 1 and skill_name[:opening].endswith(" "):
+        skill = skill_name[: opening - 1]
+        if skill in SPECIALISED_SKILLS:
+            return skill, skill_name[opening + 1 : closing].strip()
     return skill_name, ""
 
 

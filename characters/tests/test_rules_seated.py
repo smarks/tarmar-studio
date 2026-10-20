@@ -345,12 +345,46 @@ class OriginSkillTest(SimpleTestCase):
         recorded, points = apply_skill_rename(
             character, "sailing", "swimming", is_game_master=False
         )
-        # The history's note on the new name is the rename rule's, as it is
-        # for the public Village choice; the point is the origin's two.
-        self.assertTrue(recorded.startswith("swimming"), recorded)
+        # The choice is the player's by the row (#67): the history records
+        # the new name with no Game Master's call; the point is the origin's two.
+        self.assertEqual(recorded, "swimming")
         self.assertEqual(points, 2)
         self.assertEqual(character.skills, {"swimming": 2})
         self.assertEqual(character.origin_skill, "swimming")
+
+    def test_a_game_master_making_the_rows_choice_is_not_a_call(self) -> None:
+        character = Character(
+            location="Port", origin_skill="sailing", skills={"sailing": 2}
+        )
+        recorded, _points = apply_skill_rename(
+            character, "sailing", "swimming", is_game_master=True
+        )
+        self.assertEqual(recorded, "swimming")
+
+    def test_a_skill_the_row_does_not_list_stays_the_game_masters(self) -> None:
+        for location, origin_skill, new_skill in (
+            ("Port", "sailing", "hunting"),
+            ("Inland", "hunting", "sailing"),
+        ):
+            with self.subTest(location):
+                character = Character(
+                    location=location,
+                    origin_skill=origin_skill,
+                    skills={origin_skill: 2},
+                )
+                with self.assertRaises(CharacterChangeError):
+                    apply_skill_rename(
+                        character, origin_skill, new_skill, is_game_master=False
+                    )
+                recorded, points = apply_skill_rename(
+                    character, origin_skill, new_skill, is_game_master=True
+                )
+                self.assertEqual(
+                    recorded,
+                    f"{new_skill} (points moved from another skill: the Game "
+                    "Master's call)",
+                )
+                self.assertEqual((points, character.skills), (2, {new_skill: 2}))
 
     def test_a_one_skill_origin_offers_no_choice(self) -> None:
         character = Character(

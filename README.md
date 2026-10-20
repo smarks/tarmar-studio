@@ -58,13 +58,39 @@ DEPLOY.md.
 
 The dev server uses SQLite and sets `DEBUG=true` automatically.
 
+#### A development server shares production's Ollama
+
+A fresh checkout or worktree has no `.env`, so `OLLAMA_BASE_URL` is
+`http://localhost:11434`, `GM_MODEL` defaults to `qwen3.6:27b-mlx` and
+`GM_NUM_CTX` to `65536`. Those are the model and context window production runs;
+the model's name is written in code in one place, `DEFAULT_GM_MODEL` in
+`gm/model_config.py`.
+
+On the Mac Studio, which is both a development machine and production's Ollama
+host, those defaults make a Games Master turn from your dev server use the model
+production already has loaded. Anything else is a second load on a host that
+holds two models at once (`OLLAMA_MAX_LOADED_MODELS=2`: the GM model and the
+embedder), so a third forces one of the two resident models out; on 2026-09-16
+it was the GM model, and a live turn failed. A different `GM_NUM_CTX` does the
+same by another route: every request carries `options.num_ctx`, and Ollama
+reloads a resident model when a request asks for a different context size. A
+turn, `manage.py warm_gm` or `scripts/gm_behaviour_check.py` can each cause it.
+The model loads when one of them is sent, not when the server starts.
+
+So on that machine, leave `GM_MODEL` and `GM_NUM_CTX` unset, and never point a
+dev `OLLAMA_BASE_URL` at the shared host with different values. The earlier
+default, `qwen3:32b`, is still on disk as a fallback; use it only on purpose,
+never by default. The test suite uses a fake Ollama and is always safe.
+`GMModelDefaultSingleSourceTest` in `gm/tests.py` fails if the default and the
+documented copies of it drift apart.
+
 ### CLI Game Master
 
 The CLI GM runs entirely offline using Ollama — no Django server or database needed.
 
 ```bash
 uv sync --group cli
-ollama pull qwen3:32b   # The default GM model (one-time; override with GM_MODEL)
+ollama pull qwen3.6:27b-mlx   # The default GM model, the one production runs (one-time; override with GM_MODEL)
 tarmar play             # Launch the AI Game Master
 ```
 
@@ -75,7 +101,7 @@ The GM prompt lives in code (`gm/engine.py`), so there is no custom model to bui
 `./run test` mocks Ollama, on purpose — CI must never depend on a model. That leaves the model itself unchecked, which is where every GM bug in #342, #352, #353, #356, #363 and #370 lived. `scripts/gm_behaviour_check.py` is the acceptance harness for it (issue #373): real conversations through the real `/tarmar/gm/stream/` view, asserted against the rules engine and against what the server filed.
 
 ```bash
-DEBUG=true GM_MODEL=qwen3.6:27b-mlx uv run python scripts/gm_behaviour_check.py
+DEBUG=true uv run python scripts/gm_behaviour_check.py
 ```
 
 It runs each scenario three times and reports a flake rate rather than a pass. `--list` shows the scenarios, `--only <key>` runs some of them, `--runs N` changes the repeat count, and `--echo` prints every conversation instead of only the failing ones. With Ollama unreachable it prints SKIPPED and exits 0.
@@ -172,7 +198,7 @@ The web GM chatbot (`/tarmar/gm/`) connects to Ollama at `http://localhost:11434
 ### 3. CLI Game Master
 
 ```bash
-tarmar play      # GM session — needs the GM model pulled in Ollama (default qwen3:32b)
+tarmar play      # GM session — needs the GM model pulled in Ollama (default qwen3.6:27b-mlx)
 ```
 
 ## Environment Variables
@@ -184,7 +210,7 @@ tarmar play      # GM session — needs the GM model pulled in Ollama (default q
 | `DATABASE_URL` | SQLite | PostgreSQL connection string |
 | `ALLOWED_HOSTS` | localhost | Comma-separated host list |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
-| `GM_MODEL` | `qwen3:32b` | Ollama model the GM (web and CLI) talks to |
+| `GM_MODEL` | `qwen3.6:27b-mlx` | Ollama model the GM (web and CLI) talks to |
 | `GM_NUM_CTX` | `65536` | GM context window sent as `options.num_ctx`; the system prompt may take a quarter of it (`SYSTEM_PROMPT_CONTEXT_SHARE`, issue #907) |
 | `GM_TEMPERATURE` | `0.8` | GM sampling temperature sent as `options.temperature` |
 | `RULES_DIR` | `<BASE_DIR>/reference/content/public-rules` | Rules markdown the GM loads into its prompt |

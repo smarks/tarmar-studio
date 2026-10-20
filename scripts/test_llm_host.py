@@ -237,6 +237,25 @@ SILENT_CURL = """#!/bin/bash
 exit 7
 """
 
+# Ollama answering, with the model the test names resident in /api/ps.
+ANSWERING_CURL = """#!/bin/bash
+echo '{"models":[{"model":"'"$STAND_IN_RESIDENT_MODEL"'"}]}'
+"""
+
+# The deploy host answering the one question the script asks of the app: which
+# model settings.GM_MODEL names. Everything else is recorded, as RECORDING_SSH
+# does, and succeeds.
+MODEL_ANSWERING_SSH = """#!/bin/bash
+echo "ssh $*" >> "$STAND_IN_LOG"
+case "$*" in
+    *settings.GM_MODEL*)
+        printf '%s\\n' "${STAND_IN_MODEL_BANNER:-}" "${STAND_IN_APP_MODEL:-}"
+        [ -n "${STAND_IN_MODEL_STDERR:-}" ] && echo "$STAND_IN_MODEL_STDERR" >&2
+        exit "${STAND_IN_MODEL_EXIT:-0}" ;;
+esac
+exit 0
+"""
+
 
 def stand_in(path: Path, body: str) -> None:
     """Write an executable stand-in for a command."""
@@ -245,13 +264,19 @@ def stand_in(path: Path, body: str) -> None:
 
 
 def run_readiness_script(
-    tmp_path: Path, address: str = "192.168.4.158", **overrides: str
+    tmp_path: Path,
+    address: str = "192.168.4.158",
+    ssh_body: str = RECORDING_SSH,
+    curl_body: str = SILENT_CURL,
+    **overrides: str,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the real readiness script with stand-in commands.
 
     Args:
         tmp_path: A throwaway directory for the stand-ins and their log.
         address: What ipconfig reports for the interface; "" for none.
+        ssh_body: The stand-in for ssh.
+        curl_body: The stand-in for curl.
         **overrides: Extra environment for this run.
 
     Returns:
@@ -259,8 +284,8 @@ def run_readiness_script(
     """
     stand_in_bin = tmp_path / "bin"
     stand_in_bin.mkdir(exist_ok=True)
-    stand_in(stand_in_bin / "ssh", RECORDING_SSH)
-    stand_in(stand_in_bin / "curl", SILENT_CURL)
+    stand_in(stand_in_bin / "ssh", ssh_body)
+    stand_in(stand_in_bin / "curl", curl_body)
     stand_in(stand_in_bin / "launchctl", "#!/bin/bash\nexit 1\n")
     stand_in(stand_in_bin / "ipconfig", f'#!/bin/bash\nprintf "%s" "{address}"\n')
     log = tmp_path / "stand-ins.log"
@@ -316,6 +341,73 @@ def test_a_failed_remote_write_is_reported_too(tmp_path: Path) -> None:
     result, _ = run_readiness_script(tmp_path, STAND_IN_SSH_EXIT="1")
 
     assert "WARNING: could not publish" in result.stdout
+
+
+def test_the_model_to_warm_is_the_one_the_app_reports(tmp_path: Path) -> None:
+    """Issue #65: the deploy host's .env need not carry a GM_MODEL line.
+
+    The app's default is the production model, so the line may be dropped; the
+    script asks the app (settings.GM_MODEL, which applies the .env and the
+    default alike) instead of reading the line, and a banner ahead of the
+    answer is not mistaken for it.
+    """
+    result, recorded = run_readiness_script(
+        tmp_path,
+        ssh_body=MODEL_ANSWERING_SSH,
+        curl_body=ANSWERING_CURL,
+        STAND_IN_APP_MODEL="the-default-model",
+        STAND_IN_MODEL_BANNER="a warning printed first",
+        STAND_IN_RESIDENT_MODEL="the-default-model",
+    )
+
+    assert "the-default-model already resident; nothing to warm" in result.stdout
+    assert result.returncode == 0
+    assert not any("warm_gm" in line for line in recorded)
+
+
+def test_a_model_that_is_not_resident_is_warmed(tmp_path: Path) -> None:
+    result, recorded = run_readiness_script(
+        tmp_path,
+        ssh_body=MODEL_ANSWERING_SSH,
+        curl_body=ANSWERING_CURL,
+        STAND_IN_APP_MODEL="the-default-model",
+        STAND_IN_RESIDENT_MODEL="some-other-model",
+    )
+
+    assert "the-default-model not resident; warming" in result.stdout
+    assert any("warm_gm" in line for line in recorded)
+
+
+def test_an_unreadable_model_name_stops_the_run_and_says_so(tmp_path: Path) -> None:
+    result, _ = run_readiness_script(
+        tmp_path,
+        ssh_body=MODEL_ANSWERING_SSH,
+        curl_body=ANSWERING_CURL,
+        STAND_IN_APP_MODEL="",
+        STAND_IN_RESIDENT_MODEL="anything",
+    )
+
+    assert "could not read the Games Master model" in result.stdout
+    assert result.returncode == 1
+
+
+def test_a_failing_lookup_is_never_read_as_a_model_name(tmp_path: Path) -> None:
+    """A line printed before a non-zero exit is not the model's name."""
+    result, recorded = run_readiness_script(
+        tmp_path,
+        ssh_body=MODEL_ANSWERING_SSH,
+        curl_body=ANSWERING_CURL,
+        STAND_IN_APP_MODEL="looks-like-a-model",
+        STAND_IN_MODEL_EXIT="1",
+        STAND_IN_MODEL_STDERR="Connection refused",
+        STAND_IN_RESIDENT_MODEL="looks-like-a-model",
+    )
+
+    assert "could not read the Games Master model" in result.stdout
+    assert "already resident" not in result.stdout
+    assert "(exit 1): Connection refused" in result.stderr
+    assert result.returncode == 1
+    assert not any("warm_gm" in line for line in recorded)
 
 
 # ---------- Running the reviewer (issues #677, #678, #679, #683) ----------
