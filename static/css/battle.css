@@ -525,8 +525,13 @@
     font-weight: bold;
 }
 
+/* A block, not an inline-block (issue #61). The log's number is an outside
+   list marker, which sits on the baseline of the item's first line box, and
+   an inline-block's baseline is its own last line: a forecast that wrapped
+   put "7." beside its closing "= 2.837", and an opened one beside its last
+   candidate. As a block, the summary's first line is the item's first line. */
 .event-decision details {
-    display: inline-block;
+    display: block;
 }
 
 .event-decision summary {
