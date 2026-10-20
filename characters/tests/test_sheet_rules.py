@@ -123,6 +123,35 @@ class RenameTest(BaseTestCase):
         self.character.refresh_from_db()
         self.assertEqual(self.character.skills["survival"], 1)
         self.assertEqual(self.character.origin_skill, "survival")
+        # location.md gives the player the choice: no Game Master's call (#67).
+        self.assertEqual(self.character.history[-1]["new"], "survival")
+
+    def test_a_game_master_making_the_village_choice_is_not_a_call(self):
+        self.login_as(self.create_dm("village-gm"))
+        response = self.rename("street smarts", "survival")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.history[-1]["new"], "survival")
+
+    def test_moving_more_than_the_origin_point_stays_the_game_masters(self):
+        # The row's choice moves the origin's point and nothing else; a Game
+        # Master moving a track's points with it is still a call (#67).
+        Character.objects.filter(pk=self.character.pk).update(
+            skills={"street smarts": 4}
+        )
+        self.login_as(self.create_dm("village-gm-points"))
+        response = self.rename("street smarts", "survival")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.skills, {"survival": 4})
+        self.assertIn("the Game Master's call", self.character.history[-1]["new"])
+
+    def test_a_skill_village_does_not_list_stays_the_game_masters(self):
+        self.login_as(self.create_dm("village-gm-stealth"))
+        response = self.rename("street smarts", "stealth")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.character.refresh_from_db()
+        self.assertIn("the Game Master's call", self.character.history[-1]["new"])
 
     def test_the_village_choice_moves_the_origin_point_and_nothing_else(self):
         Character.objects.filter(pk=self.character.pk).update(

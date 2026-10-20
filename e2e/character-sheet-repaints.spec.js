@@ -499,4 +499,21 @@ print('CHARACTER', character.pk)
         await expect(page.locator('.skill-row[data-skill="perception"]')).toHaveCount(1);
         await expect(page.locator('#free-points')).toHaveText('0');
     });
+
+    test('a Village player\'s choice of Survival is recorded as theirs, not a Game Master\'s call (#67)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Villager', testInfo),
+            "location='Village', origin_skill='street smarts', skills={'street smarts': 1}");
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        const name = page.locator('.skill-row[data-skill="street smarts"] .skill-name');
+        await name.fill('Survival');
+        await name.blur();
+        await expect(page.locator('.skill-row[data-skill="survival"]')).toHaveCount(1);
+
+        const latest = page.locator('#recent-changes-rows tr').first();
+        await expect(latest).toContainText('street smarts');
+        await expect(latest).toContainText('survival');
+        await expect(latest).not.toContainText("Game Master's call");
+    });
 });

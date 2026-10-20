@@ -131,7 +131,11 @@ from reference.paths import (
     EQUIPMENT_CATALOG_FILE,
     EQUIPMENT_RULES_FILE,
 )
-from reference.rules_file import RulesFileError, RulesFileReader
+from reference.rules_file import (
+    RulesFileError,
+    RulesFileReader,
+    repeats_problem,
+)
 
 from .rules import require_at_least, require_at_most
 
@@ -512,10 +516,8 @@ class EncumbranceRules:
     def __post_init__(self) -> None:
         if not self.levels:
             raise ValueError("has no levels")
-        keys = self.keys
-        repeated = sorted({key for key in keys if keys.count(key) > 1})
-        if repeated:
-            raise ValueError(f"repeats the key {repeated}")
+        if problem := repeats_problem("key", self.keys):
+            raise ValueError(problem)
         for level in self.levels[:-1]:
             if level.max_multiplier is None:
                 raise ValueError(
