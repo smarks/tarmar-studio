@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import models, transaction
+from django.template.defaultfilters import pluralize
 from django.utils import timezone
 
 from .engine import GM_MODES, MODE_AIDE, MODE_PLAY, TIMES_OF_DAY
@@ -181,6 +182,16 @@ class GMSession(models.Model):
             for m in self.history
             if m.get("role") != "system" and not is_hidden_message(m)
         )
+
+    @property
+    def message_count_label(self) -> str:
+        """The count as the page says it: "1 msg", "2 msgs" (issue #62).
+
+        The rail's row and the done frame both say it from here, so the page
+        never words a count of its own.
+        """
+        count = self.message_count
+        return f"{count} msg{pluralize(count)}"
 
     def switch_mode(self, mode: str) -> bool:
         """Change this session's mode, keeping everything said in it so far.

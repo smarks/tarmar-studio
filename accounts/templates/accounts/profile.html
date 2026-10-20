@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static account_tags %}
+{% load static account_tags local_time %}
 
 {% block title %}Profile{% if profile_user != user %} - {{ profile_user.username }}{% endif %}{% endblock %}
 
@@ -38,9 +38,9 @@
         <p class="account-note" id="email-status">{% if not profile_user.email %}No address on file.{% elif profile_user.email_verified %}Confirmed.{% else %}Not confirmed yet, so a password-reset link will not be sent to it.{% endif %}</p>
         {% if profile_user.pending_email %}
         {% if profile_user.pending_email == profile_user.email %}
-        <p class="account-note" id="email-pending">A confirmation link was sent to it on {{ profile_user.pending_email_sent_at|date:"j F Y, H:i" }}. It is confirmed when that link is opened.</p>
+        <p class="account-note" id="email-pending">A confirmation link was sent to it on {% local_time profile_user.pending_email_sent_at "j F Y, H:i" %}. It is confirmed when that link is opened.</p>
         {% else %}
-        <p class="account-note" id="email-pending">A confirmation link was sent to <strong>{{ profile_user.pending_email }}</strong> on {{ profile_user.pending_email_sent_at|date:"j F Y, H:i" }}. The address changes when that link is opened.</p>
+        <p class="account-note" id="email-pending">A confirmation link was sent to <strong>{{ profile_user.pending_email }}</strong> on {% local_time profile_user.pending_email_sent_at "j F Y, H:i" %}. The address changes when that link is opened.</p>
         {% endif %}
         {% endif %}
         {% if profile_user.pk == user.pk %}

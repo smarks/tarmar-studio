@@ -517,8 +517,10 @@ async function failureReason(resp) {
  * Take on the session id the server named, and keep it in the address bar.
  *
  * @param {number} id - the session this page's turns now belong to
- * @param {{name?: string, started?: string}} [details] - what the server
- *   calls it and when it started, so the rail can show it at once (#704)
+ * @param {{name?: string, rowHtml?: string, optionHtml?: string}} [details] -
+ *   what the server calls it and its row in the rail and option in the
+ *   small-screen menu, written by their own templates, so both can show it at
+ *   once (#704)
  */
 function adoptSessionId(id, details) {
   if (!id || id === sessionId) return;
@@ -570,50 +572,38 @@ function pinSessionInPickers(id) {
  * describing something that had already happened. Nothing here is transient
  * -- the entry is the session, and it stays.
  *
+ * The row is the server's, as it writes every other row of the rail
+ * (gm/_session_rail_row.html): its ids, its labels, its message count and its
+ * date are not rebuilt here, so they cannot drift from the page's own (#62).
+ *
  * @param {number} id - The new session's id.
- * @param {{name?: string, started?: string}} [details] - The server's name
- *   for it and its creation instant, ISO-8601.
+ * @param {{name?: string, rowHtml?: string, optionHtml?: string}} [details] -
+ *   The server's name for it, its row and its small-screen menu option.
  */
 function showNewSessionInRail(id, details) {
   const list = document.getElementById(SESSION_LIST_ID);
   if (!list || list.querySelector(`[data-id="${id}"]`)) return;
   const name = (details && details.name) || 'New Session';
-  const started = (details && details.started) || new Date().toISOString();
 
-  const item = document.createElement('li');
-  item.className = `${SESSION_ITEM_CLASS} active`;
-  item.dataset.id = String(id);
-
-  const link = document.createElement('a');
-  link.href = `?session=${encodeURIComponent(id)}`;
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'session-name';
-  nameSpan.textContent = name;
-  const meta = document.createElement('span');
-  meta.className = 'session-meta';
-  const when = document.createElement('time');
-  when.className = 'local-time';
-  when.setAttribute('datetime', started);
-  when.setAttribute('data-local-time-style', 'date');
-  when.textContent = started.slice(0, 10);
-  const counted = document.createElement('span');
-  counted.className = 'session-count';
-  counted.textContent = '1 msg';
-  meta.append(when, document.createTextNode(' \u00b7 '), counted);
-  link.append(nameSpan, meta);
-
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.className = 'session-delete-btn';
-  remove.title = 'Delete session';
-  remove.setAttribute('aria-label', `Delete session ${name}`);
-  remove.addEventListener('click', () => deleteSession(id, name, when.textContent));
-
-  item.append(link, remove);
-  list.prepend(item);
-  // local-time.js reformats a timestamp into the viewer's zone; this one
-  // arrived after load, so it is asked for explicitly.
-  if (typeof window.applyLocalTimes === 'function') window.applyLocalTimes(item);
+  if (details && details.rowHtml) {
+    list.insertAdjacentHTML('afterbegin', details.rowHtml);
+    // local-time.js writes a timestamp in the viewer's zone; this one arrived
+    // after load, so it is asked for explicitly.
+    if (typeof window.applyLocalTimes === 'function') {
+      window.applyLocalTimes(list.firstElementChild);
+    }
+  }
+  // The small screen's menu has its own entry, which nothing else adds: the
+  // session was missing from it until a reload. It goes after the menu's
+  // "Sessions…" prompt, where the open session is listed.
+  const menu = document.getElementById(SESSION_MENU_ID);
+  if (menu && details && details.optionHtml
+      && !menu.querySelector(`option[value="${id}"]`)) {
+    const prompt = menu.querySelector('option[value=""]');
+    if (prompt) prompt.insertAdjacentHTML('afterend', details.optionHtml);
+    else menu.insertAdjacentHTML('afterbegin', details.optionHtml);
+    localiseSessionOptions(menu);
+  }
 
   const placeholder = document.querySelector('.session-name-none');
   if (placeholder) {
@@ -1071,7 +1061,8 @@ async function streamMessage(body) {
         if (data.session_id) {
           adoptSessionId(data.session_id, {
             name: data.session_name,
-            started: data.session_started,
+            rowHtml: data.session_row_html,
+            optionHtml: data.session_menu_option_html,
           });
         }
 
@@ -1183,7 +1174,9 @@ async function streamMessage(body) {
           scrollToBottom();
 
           if (data.session_id) {
-            refreshSessionAfterTurn(data.session_id, data.session_name, data.message_count);
+            refreshSessionAfterTurn(
+              data.session_id, data.session_name, data.message_count, data.message_count_label,
+            );
           }
 
           // The side panel's tabs react to the finished reply — the Map tab
@@ -1481,6 +1474,39 @@ function mobileOptionLabel(option) {
 }
 
 /**
+ * Write each mobile-picker option's date in the viewer's zone (issue #62).
+ *
+ * An <option> cannot hold a <time> element, so the server writes the UTC date
+ * in its label and the instant in data-started-at, and this puts the words
+ * local-time.js would have written back through the same label.
+ * @param {ParentNode} [scope] - Defaults to the whole document.
+ */
+function localiseSessionOptions(scope) {
+  if (typeof window.formatLocalTime !== 'function') return;
+  (scope || document).querySelectorAll('#mobile-session-select option[data-started-at]')
+    .forEach((option) => {
+      const local = window.formatLocalTime(option.dataset.startedAt, 'date');
+      if (!local) return;
+      option.dataset.started = local;
+      option.textContent = mobileOptionLabel(option);
+    });
+}
+
+// chat.html loads this script before base.html's local-time.js, so on a page
+// still loading the renderer does not exist yet: wait for the document.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => localiseSessionOptions(document));
+} else {
+  localiseSessionOptions(document);
+}
+if (window.picker) {
+  // A search or a page turn replaces the options with the server's own.
+  document.addEventListener(window.picker.PAINTED_EVENT, (event) => {
+    localiseSessionOptions(event.target);
+  });
+}
+
+/**
  * After a turn, show the session as the server now holds it (issue #829):
  * the name its first reply gave it and how many messages it has. A session
  * made before its first message -- by attaching a character -- was left
@@ -1489,8 +1515,10 @@ function mobileOptionLabel(option) {
  * @param {number|string} id - the session's id
  * @param {string} [name] - its stored name, from the done frame
  * @param {number} [count] - its visible messages, from the done frame
+ * @param {string} [countLabel] - the count as the server words it ("2 msgs"),
+ *   so the page words none of its own (#62)
  */
-function refreshSessionAfterTurn(id, name, count) {
+function refreshSessionAfterTurn(id, name, count, countLabel) {
   const key = String(id);
   if (name) {
     const field = document.getElementById('session-name');
@@ -1502,7 +1530,7 @@ function refreshSessionAfterTurn(id, name, count) {
   const counted = document.querySelector(
     `.${SESSION_ITEM_CLASS}[data-id="${key}"] .session-count`,
   );
-  if (counted) counted.textContent = `${count} msg${count === 1 ? '' : 's'}`;
+  if (counted && countLabel) counted.textContent = countLabel;
   const option = document.querySelector(
     `#${SESSION_MENU_ID} option[value="${key}"]`,
   );
@@ -1602,7 +1630,7 @@ function newSession() {
  */
 async function deleteSession(id, name, started) {
   const named = name ? `"${name}"` : 'this session';
-  const label = started ? `${named}, started ${started},` : named;
+  const label = started ? `${named}, started ${started}` : named;
   const confirmed = await uiConfirm(`Delete ${label}? This can't be undone.`, {
     danger: true,
     confirmLabel: 'Delete',
@@ -1731,6 +1759,8 @@ if (typeof module !== 'undefined' && module.exports) {
     renderMarkdown,
     MARKDOWN_SANITIZE_CONFIG,
     deleteSession,
+    localiseSessionOptions,
+    showNewSessionInRail,
     streamMessage,
     stopWaitingForTurns,
     parseChoicePrompt,

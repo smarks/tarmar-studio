@@ -248,6 +248,25 @@ class ReviewPageTest(BaseTestCase):
         self.admin = self.create_admin()
         self.login_as(self.admin)
 
+    def test_when_it_was_sent_is_written_in_the_readers_zone(self):
+        """The sent times are <time> elements the page rewrites (issue #62)."""
+        review = _review(self.admin)
+        other = GMReviewRequest.objects.create(
+            session=review.session,
+            requested_by=self.admin,
+            note="again",
+            snapshot={"history": review.session.history},
+        )
+
+        response = self.client.get(f"/tarmar/gm/reviews/{review.pk}/")
+
+        for sent in (review, other):
+            self.assertContains(
+                response,
+                f'<time class="local-time" datetime="{sent.created_at.isoformat()}" '
+                'data-local-time-style="datetime">',
+            )
+
     def test_a_waiting_review_says_so(self):
         review = _review(self.admin)
 

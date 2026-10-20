@@ -12,6 +12,9 @@ text it replaced.
 """
 
 import datetime
+import re
+import subprocess
+from pathlib import Path
 
 from django.template import Context, Template
 from django.test import SimpleTestCase
@@ -36,7 +39,7 @@ class LocalTimeTagTest(SimpleTestCase):
         self.assertIn('<time class="local-time"', rendered)
         self.assertIn('datetime="2026-02-03T14:05:00+00:00"', rendered)
         self.assertIn('data-local-time-style="datetime"', rendered)
-        self.assertIn(">Feb 03, 2026 14:05<", rendered)
+        self.assertIn(">Feb 03, 2026 14:05 UTC<", rendered)
 
     def test_a_naive_datetime_is_treated_as_utc(self):
         """USE_TZ is on everywhere in this app, so this is a defensive path,
@@ -47,6 +50,27 @@ class LocalTimeTagTest(SimpleTestCase):
         rendered = local_time(naive_value, "M d, Y H:i")
         self.assertIn('datetime="2026-02-03T14:05:00+00:00"', rendered)
 
+    def test_the_fallback_names_its_zone_so_it_is_not_read_as_local(self):
+        """Issue #62: "Created 2026-10-15 02:50" was taken for a local clock.
+
+        The text a reader sees when the script never runs is the UTC wall
+        clock, so it says UTC, for a time and for a date alike.
+        """
+        value = datetime.datetime(2026, 10, 15, 2, 50, tzinfo=datetime.UTC)
+
+        self.assertIn(">2026-10-15 02:50 UTC<", local_time(value, "Y-m-d H:i"))
+        self.assertIn(">Oct 15, 2026 UTC<", local_time(value, "M d, Y", style="date"))
+
+    def test_the_fallback_is_utc_whatever_zone_the_value_arrives_in(self):
+        """A value in another zone is written as the UTC clock the label names."""
+        new_york = datetime.timezone(datetime.timedelta(hours=-4))
+        value = datetime.datetime(2026, 10, 14, 22, 50, tzinfo=new_york)
+
+        rendered = local_time(value, "Y-m-d H:i")
+
+        self.assertIn('datetime="2026-10-15T02:50:00+00:00"', rendered)
+        self.assertIn(">2026-10-15 02:50 UTC<", rendered)
+
     def test_style_defaults_to_datetime(self):
         value = datetime.datetime(2026, 2, 3, 14, 5, tzinfo=datetime.UTC)
         self.assertIn('data-local-time-style="datetime"', local_time(value))
@@ -55,7 +79,7 @@ class LocalTimeTagTest(SimpleTestCase):
         value = datetime.datetime(2026, 2, 3, 14, 5, tzinfo=datetime.UTC)
         rendered = local_time(value, "M d, Y", style="date")
         self.assertIn('data-local-time-style="date"', rendered)
-        self.assertIn(">Feb 03, 2026<", rendered)
+        self.assertIn(">Feb 03, 2026 UTC<", rendered)
 
     def test_format_string_drives_only_the_fallback_text(self):
         """The ISO datetime attribute is format-independent; only the human
@@ -63,7 +87,7 @@ class LocalTimeTagTest(SimpleTestCase):
         value = datetime.datetime(2026, 2, 3, 14, 5, tzinfo=datetime.UTC)
         rendered = local_time(value, "Y-m-d H:i")
         self.assertIn('datetime="2026-02-03T14:05:00+00:00"', rendered)
-        self.assertIn(">2026-02-03 14:05<", rendered)
+        self.assertIn(">2026-02-03 14:05 UTC<", rendered)
 
     def test_output_is_marked_safe_for_direct_template_use(self):
         value = datetime.datetime(2026, 2, 3, 14, 5, tzinfo=datetime.UTC)
@@ -134,6 +158,58 @@ class RenderedSurfacesTest(BaseTestCase):
         self.login_as(admin)
         response = self.client.get("/tarmar/accounts/users/")
         self.assertContains(response, "—")
+
+
+class NoTimestampIsLeftInUtcTest(SimpleTestCase):
+    """No template writes a time of its own with the date or time filter (issue #62).
+
+    ``{{ value|date:... }}`` prints the server's UTC wall clock and nothing
+    rewrites it, so a reader west or east of UTC sees a different time from
+    the one the header shows. A time goes through ``{% local_time %}``. The
+    one exception is named with its reason: an ``<option>``'s label cannot
+    hold an element, so chat.js writes it from the instant the option also
+    carries.
+    """
+
+    #: ``|date`` or ``|time``, with an argument or without one.
+    FILTER = re.compile(r"\|\s*(?:date|time)\b")
+
+    EXEMPT = {
+        "gm/templates/gm/_session_menu_option.html": (
+            "an <option> label cannot hold a <time>; chat.js rewrites it from "
+            "data-started-at"
+        ),
+    }
+
+    def test_only_the_named_exceptions_use_the_date_filter(self):
+        root = Path(__file__).resolve().parents[2]
+        # The templates the repository holds, not whatever a coverage run or a
+        # collectstatic left beside them.
+        tracked = subprocess.run(
+            ["git", "ls-files", "*.html"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        users = {
+            name for name in tracked if self.FILTER.search((root / name).read_text())
+        }
+
+        self.assertEqual(users, set(self.EXEMPT))
+
+    def test_the_pattern_sees_the_forms_a_template_could_use(self):
+        for written in (
+            '{{ when|date:"Y-m-d" }}',
+            "{{ when|date }}",
+            "{{ when | date:'H:i' }}",
+            '{{ when|time:"H:i" }}',
+            "{{ when|time }}",
+        ):
+            with self.subTest(written=written):
+                self.assertTrue(self.FILTER.search(written))
+        self.assertFalse(self.FILTER.search("{{ mandate|updated }}"))
+        self.assertFalse(self.FILTER.search("{% local_time when %}"))
 
 
 class RenderedSurfacesUseCharacterModel(BaseTestCase):

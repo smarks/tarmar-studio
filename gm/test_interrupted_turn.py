@@ -122,6 +122,48 @@ class InterruptedTurnTest(BaseTestCase):
         self.assertEqual(record.history_end, len(session.history))
 
     @patch("gm.turn_engine.model.ollama_client.stream_chat")
+    def test_a_procedure_that_makes_the_session_brings_its_rail_entries(self, stream):
+        """A turn that breaks after the first frame has still made the session (#62).
+
+        The procedure's frame is the first to name it, so the rail's row and
+        the menu's option ride it: the page needs no later frame to show the
+        session the turn made.
+        """
+        stream.side_effect = gm_replies(RuntimeError("model went away"), plans=[PLAN])
+
+        _response, chunks = self._open({"message": "Roll Fatigue."})
+        frames = list(_data_frames(chunks))
+
+        # The failure comes after the procedure's frame, and names no session
+        # of its own: the page already holds the entries from the one before.
+        naming = [frame for frame in frames if "session_id" in frame]
+        self.assertEqual([next(iter(frame)) for frame in naming], ["procedure"])
+        self.assertEqual(frames[-1]["error"], GM_SERVER_ERROR_MESSAGE)
+        session = GMSession.objects.get()
+        for frame in naming:
+            self.assertIn(f'data-id="{session.pk}"', frame["session_row_html"])
+            self.assertIn(f'value="{session.pk}"', frame["session_menu_option_html"])
+
+    @patch("gm.turn_engine.model.ollama_client.stream_chat")
+    def test_a_retry_into_the_session_sends_no_entries(self, stream):
+        stream.side_effect = gm_replies(
+            RuntimeError("model went away"), "You came through the year.", plans=[PLAN]
+        )
+        _response, chunks = self._open({"message": "Roll Fatigue."})
+        session_id = self._read_until(chunks, "procedure")["session_id"]
+        list(chunks)
+
+        _retry, retry_chunks = self._open(
+            {"session_id": session_id, "message": "Roll Fatigue.", "retry": True}
+        )
+        frames = list(_data_frames(retry_chunks))
+
+        self.assertTrue(frames[-1]["done"])
+        for frame in frames:
+            self.assertNotIn("session_row_html", frame)
+            self.assertNotIn("session_menu_option_html", frame)
+
+    @patch("gm.turn_engine.model.ollama_client.stream_chat")
     def test_a_retry_carries_on_from_what_already_ran(self, stream):
         stream.side_effect = gm_replies(
             RuntimeError("model went away"), "You came through the year.", plans=[PLAN]

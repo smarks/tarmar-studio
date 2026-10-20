@@ -25,6 +25,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import ListView, TemplateView
@@ -1033,25 +1034,71 @@ CATCH_UP_GRACE_SECONDS = 1.0
 FOLDING_STATUS = "reading back over the story so far"
 
 
-def _with_session_id(frame: dict, session: GMSession | None) -> dict:
+#: The templates that write one session's entry in the rail and in the
+#: small-screen menu: for the page load, for every search, and for a session a
+#: turn creates.
+SESSION_RAIL_ROW_TEMPLATE = "gm/_session_rail_row.html"
+SESSION_MENU_OPTION_TEMPLATE = "gm/_session_menu_option.html"
+
+
+def session_entry_html(template: str, session: GMSession) -> str:
+    """One session's entry, written by the template that writes all of them.
+
+    The page puts it into the rail (or the menu) when a turn creates the
+    session, so the entry (its ids, its labels, its message count, its date)
+    is the one the server writes for every other and nothing in the page
+    copies it (issue #62).
+
+    Args:
+        template: :data:`SESSION_RAIL_ROW_TEMPLATE` or
+            :data:`SESSION_MENU_OPTION_TEMPLATE`.
+        session: The session the page is showing, so its entry is the active one.
+
+    Returns:
+        The ``<li>`` or ``<option>`` as HTML.
+    """
+    return render_to_string(template, {"s": session, "active_session": session})
+
+
+def _with_session_id(
+    frame: dict, session: GMSession | None, *, creating: bool = False
+) -> dict:
     """``frame`` carrying the session's id once there is one (issue #410).
 
     A turn's first procedure or roll can create the session, and the id used
     to arrive only on the done frame. A page whose connection broke after that
     retried into a brand-new session and played the years again.
+
+    Args:
+        frame: The frame to add to.
+        session: The session, or ``None`` before the turn has made one.
+        creating: Whether this turn is the one that makes the session, so the
+            page has no entry for it yet. Only then does the frame carry the
+            session's rail row and menu option; a later turn's frames would
+            only repeat what the page already holds.
     """
     if session is not None:
         frame["session_id"] = session.pk
-        # And what it is called, and when it started (issue #704). Sending the
-        # first message on a blank page creates a session, and the rail on the
-        # left went on showing only "+ New" until the next full page load -- a
-        # player who then pressed "+ New" could not see that the first session
-        # had been kept, and the panel still read "A new session takes its
-        # name from your first message" about something that had happened.
-        # The name is the server's, derived in gm.models.name_from_history, so
-        # the page never re-derives it.
+        # And what it is called (issue #704). Sending the first message on a
+        # blank page creates a session, and the rail on the left went on
+        # showing only "+ New" until the next full page load -- a player who
+        # then pressed "+ New" could not see that the first session had been
+        # kept, and the panel still read "A new session takes its name from
+        # your first message" about something that had happened. The name is
+        # the server's, derived in gm.models.name_from_history, so the page
+        # never re-derives it.
         frame["session_name"] = session.name
-        frame["session_started"] = session.created_at.isoformat()
+        if creating:
+            # The entries are the rail's and the menu's own templates', so the
+            # page never builds one (issue #62). They ride every frame of the
+            # creating turn because the first to name the session may be a
+            # procedure's, and a turn that then breaks has already made it.
+            frame["session_row_html"] = session_entry_html(
+                SESSION_RAIL_ROW_TEMPLATE, session
+            )
+            frame["session_menu_option_html"] = session_entry_html(
+                SESSION_MENU_OPTION_TEMPLATE, session
+            )
     return frame
 
 
@@ -1289,6 +1336,9 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
     # How many stored entries the fold took out of what the model reads; the
     # turn record counts entries of the stored history, which keeps them all.
     folded_away = 0
+    # Whether this turn is the one that makes the session: the page has no
+    # rail row or menu option for it until this turn's frames bring them.
+    creating_session = session is None
 
     def ground() -> None:
         """File the canon and battle log, and read what the turn answers."""
@@ -1637,12 +1687,20 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                     history.append(
                         turn_history.procedure_entry(event.payload["result"], frame)
                     )
-                    yield _sse(_with_session_id({"procedure": frame}, session))
+                    yield _sse(
+                        _with_session_id(
+                            {"procedure": frame}, session, creating=creating_session
+                        )
+                    )
                 elif event.kind == turn_events.ROLL:
                     frame = dict(event.payload)
                     ran_rolls.append(frame)
                     history.append(turn_history.roll_entry(frame))
-                    yield _sse(_with_session_id({"gm_roll": frame}, session))
+                    yield _sse(
+                        _with_session_id(
+                            {"gm_roll": frame}, session, creating=creating_session
+                        )
+                    )
         except TurnBudgetExceeded:
             logger.warning(
                 "GM plan turn passed its %gs budget after %.1fs; told the player",
@@ -1661,7 +1719,7 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             too_slow: dict = {"error": too_slow_error}
             if kept:
                 too_slow["notices"] = kept
-            yield _sse(_with_session_id(too_slow, session))
+            yield _sse(_with_session_id(too_slow, session, creating=creating_session))
             return
         except Exception:
             logger.exception("GM plan turn failed")
@@ -1692,12 +1750,12 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         if outcome.session_id:
             named = GMSession.objects.filter(pk=outcome.session_id).first()
             if named is not None:
-                done_data["session_name"] = named.name
-                done_data["session_started"] = named.created_at.isoformat()
+                _with_session_id(done_data, named, creating=creating_session)
                 # And for one that already existed: the rail's count and the
                 # name the first reply gave it, which the page otherwise kept
                 # at "New Session · 0 msgs" until a reload (issue #829).
                 done_data["message_count"] = named.message_count
+                done_data["message_count_label"] = named.message_count_label
         if turn_notices:
             done_data["notices"] = turn_notices
         if ran_rolls:

@@ -621,12 +621,44 @@ class GMViewTest(BaseTestCase):
         session = GMSession.objects.create(name="Test", user=self.user)
         response = self.client.get("/tarmar/gm/")
         # The date is the third argument since #705: two sessions named after
-        # the same first message are one question otherwise.
-        started = session.created_at.strftime("%b %d, %Y")
+        # the same first message are one question otherwise. Since #62 it is
+        # read from the row's own <time>, which the page writes in the
+        # reader's zone, not baked in as the server's UTC date.
         self.assertContains(
-            response, f"deleteSession({session.pk}, 'Test', '{started}')"
+            response,
+            f"deleteSession({session.pk}, 'Test', "
+            f"document.getElementById('session-date-{session.pk}').textContent)",
         )
+        self.assertNotContains(response, session.created_at.strftime("'%b %d, %Y'"))
         self.assertEqual(self._chat_config(response)["deleteUrl"], "/tarmar/gm/delete/")
+
+    def test_the_session_rail_dates_are_the_readers_not_the_servers(self):
+        """The rail, its delete control and the small-screen menu name the instant (#62).
+
+        The date in each is the server's UTC one until the page writes it in
+        the reader's zone, so each carries the instant for the page to read:
+        a <time> in the rail, the delete control labelled by it, and the
+        menu's option holding it for chat.js.
+        """
+        session = GMSession.objects.create(name="Dated", user=self.user)
+        response = self.client.get("/tarmar/gm/")
+        instant = session.created_at.isoformat()
+
+        self.assertContains(
+            response,
+            f'<time class="local-time" datetime="{instant}" '
+            'data-local-time-style="date">',
+        )
+        self.assertContains(
+            response,
+            f'aria-labelledby="session-delete-{session.pk} '
+            f"session-name-{session.pk} session-started-{session.pk} "
+            f'session-date-{session.pk}"',
+        )
+        self.assertContains(
+            response, f'<span class="sr-only" id="session-started-{session.pk}">started'
+        )
+        self.assertContains(response, f'data-started-at="{instant}"')
 
     def test_chat_sessions_list_escapes_session_name_for_inline_js(self):
         """A session name with a quote must not break out of the onclick string."""

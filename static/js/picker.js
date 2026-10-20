@@ -26,6 +26,11 @@
 (function (root) {
     /** How long typing must pause before the server is asked. */
     const SEARCH_DELAY_MS = 200;
+    /**
+     * Fired on a picker's body each time an answer is painted into it, for a
+     * page that has to finish what the server's markup cannot (issue #62).
+     */
+    const PAINTED_EVENT = 'picker:painted';
 
     /** A picker's search box, its body, and its pager's buttons. */
     const SEARCH_BOX = '[data-picker-search]';
@@ -85,6 +90,10 @@
             || body.contains(focused)
             || focused.contains(picker));
         body.innerHTML = html;
+        // Rows arrive as <time> in UTC; local-time.js writes them in the
+        // viewer's zone, as it did the rows the page loaded with (issue #62).
+        if (typeof root.applyLocalTimes === 'function') root.applyLocalTimes(body);
+        body.dispatchEvent(new root.CustomEvent(PAINTED_EVENT, { bubbles: true }));
         // The page shown and the search it is a page of, so a refetch of
         // what holds the picker can ask for it again instead of falling back
         // to the first (issue #16). Not data-picker-page: that names the
@@ -197,7 +206,7 @@
     }
 
     const api = {
-        initPickers, initPicker, loadPage, shownPage, SEARCH_DELAY_MS,
+        initPickers, initPicker, loadPage, shownPage, SEARCH_DELAY_MS, PAINTED_EVENT,
     };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;

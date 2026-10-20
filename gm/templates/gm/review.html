@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load local_time %}
 {% block title %}GM review {{ review.pk }} — Tarmar Studio{% endblock %}
 
 {% comment %}
@@ -15,7 +16,7 @@ they reach the template.
         <p class="gm-review-all"><a href="{% url 'gm:reviews' %}" id="gm-review-all-link">All reviews</a></p>
         <h1>GM review {{ review.pk }}</h1>
         <p class="gm-review-meta">
-            Sent {{ review.created_at|date:"Y-m-d H:i" }}
+            Sent {% local_time review.created_at "Y-m-d H:i" %}
             {% if review.session_id %}
             about <a href="{% url 'gm:chat' %}?session={{ review.session_id }}">session {{ review.session_id }}</a>
             {% endif %}
@@ -49,7 +50,7 @@ they reach the template.
         <h2>Other reviews of this session</h2>
         <ul class="gm-review-others">
             {% for other in other_reviews %}
-            <li><a href="{% url 'gm:review' other.pk %}">Review {{ other.pk }}</a> — {{ other.get_status_display }}, sent {{ other.created_at|date:"Y-m-d H:i" }}</li>
+            <li><a href="{% url 'gm:review' other.pk %}">Review {{ other.pk }}</a> — {{ other.get_status_display }}, sent {% local_time other.created_at "Y-m-d H:i" %}</li>
             {% endfor %}
         </ul>
     </section>
