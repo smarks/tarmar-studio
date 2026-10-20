@@ -2,9 +2,9 @@
 
 character_edit.html had ``{% if can_edit %}<div class="editable-field"
 data-field="...">`` twelve times over, and the three that offer a choice
-listed their options by hand -- a second copy of ``Character.LOCATION_CHOICES``
-and its two siblings, which a change to the model would leave behind without
-saying so (issue #338 item 5).
+listed their options by hand -- a second copy of the location table and its
+two siblings, which a change to the model would leave behind without saying
+so (issue #338 item 5).
 
 The tags here render the shapes that repeat: a bounded attribute number, a
 whole number bounded like the field-update endpoint (starting coin, total XP),
@@ -27,6 +27,7 @@ from django.db.models import Model
 from characters import services
 from characters.models import (
     Character,
+    character_field_options,
     character_int_field_maximum,
     character_int_field_minimum,
 )
@@ -162,9 +163,10 @@ def editable_number(context, character, field, can_edit, label="", empty="—"):
 def editable_choice(context, character, field, can_edit, label="", disabled=False):
     """One choice cell: an autosaving select, or the chosen label alone.
 
-    The options come from the model field's own ``choices``, so a choice added
-    to ``Character`` appears here the same day rather than whenever somebody
-    remembers this template.
+    The options are ``characters.models.character_field_options``'s: the
+    loaded canon's rows for a table field (issue #66), the model's own for
+    the rest, so a row the canon adds appears here the same day rather than
+    whenever somebody remembers this template.
 
     :param character: The character being shown.
     :param field: The field name, e.g. ``"wealth_level"``.
@@ -175,13 +177,13 @@ def editable_choice(context, character, field, can_edit, label="", disabled=Fals
         this editor may not change right now and may again later (the Origin
         once literacy is rolled, issue #741). The page can unlock it in place.
     """
-    choices = list(character._meta.get_field(field).choices or [])
+    options = character_field_options(field) or {}
     value = getattr(character, field)
     return {
         "field": field,
-        "choices": choices,
+        "choices": list(options.items()),
         "value": value,
-        "display": dict(choices).get(value, value),
+        "display": options.get(value, value),
         **cell_state(context, character, field, can_edit),
         "disabled": disabled,
         "label": accessible_name(character, field, label),

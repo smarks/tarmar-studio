@@ -82,6 +82,12 @@
     { "up_to": 95, "label": "Merchant", "coin": { "base": 100, "dice": "1d100" } },
     { "up_to": 100, "label": "Rich", "coin": null }
   ],
+  "defaults": {
+    "social_class": "commoner",
+    "provenance_detail": "Laborer",
+    "location": "Village",
+    "wealth": "Moderate"
+  },
   "rulings": [
     {
       "key": "height_chain_counts_every_one_and_six",

@@ -297,7 +297,7 @@ runs.
             left out elsewhere, since changing the Origin brings it back.
             Rendered only where the model carries the field (migration 0022).{% endcomment %}
             {% if sheet_fields.origin_ruling %}
-            <tr id="origin-ruling-row"{% if character.location != "Consult GM" %} hidden{% endif %}>
+            <tr id="origin-ruling-row"{% if not character.origin_defers_to_game_master %} hidden{% endif %}>
                 <th>Game Master's ruling</th>
                 <td>{% editable_text character "origin_ruling" can_edit "Game Master's ruling on the origin" %}</td>
             </tr>

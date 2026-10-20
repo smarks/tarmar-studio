@@ -58,7 +58,7 @@ from characters.equipment_rules import (
     equipment_catalog,
     equipment_rules,
 )
-from characters.rules import character_rules
+from characters.rules import CharacterRules, character_rules, social_class_display
 from characters.skill_rules import skill_rules
 from characters.skills import (
     calculate_attribute_modifier,
@@ -406,6 +406,15 @@ def section_core() -> str:
     )
 
 
+def _render_origin_choices(rules: CharacterRules) -> str:
+    """The origins the model may state, "City/Village/Rural": the canon's
+    location rows that have a literacy check, the row the rules leave to the
+    Game Master left out, as the prompt has always left it out (issue #66)."""
+    return "/".join(
+        row.label for row in rules.location.rows if row.literacy_modifier is not None
+    )
+
+
 def _render_provenance_fragment() -> str:
     """The provenance bands: "Nobility 1-10%, Merchant 11-30%, ..." (#68).
 
@@ -416,7 +425,7 @@ def _render_provenance_fragment() -> str:
     low = 1
     for row in character_rules().social_class.rows:
         span = _span_text(low, row.up_to)
-        bands.append(f"{row.label.title()} {span}%")
+        bands.append(f"{social_class_display(row.label)} {span}%")
         low = row.up_to + 1
     return ", ".join(bands)
 
@@ -512,8 +521,8 @@ def section_character_creation() -> str:
         f"2. The {rules.fatigue_roll.dice} Fatigue roll is made as the character "
         "is made; Fatigue and Body follow the attributes. Mana Pool starts at 0\n"
         f"3. Background: Provenance ({_render_provenance_fragment()}), Location "
-        "(City/Village/Rural), Wealth (Subsistence/Moderate/"
-        "Merchant/Rich), rolled for the player when the character is made, "
+        f"({_render_origin_choices(rules)}), Wealth ({'/'.join(rules.wealth.labels)}), "
+        "rolled for the player when the character is made, "
         "with the skill the Location grants. A Location the message states (he "
         "grew up in a village) is chosen, not rolled: the rules let the Origin "
         "be rolled or chosen, so record it with set_background in the same "

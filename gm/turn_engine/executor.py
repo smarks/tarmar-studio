@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from battle.access import is_dm
 from characters import services
-from characters.models import Character
+from characters.models import Character, character_field_options
 from characters.purse import PurseError, format_purse, move_coin_for_reason
 from characters.skill_checks import (
     attribute_check,
@@ -122,14 +122,15 @@ class _Refused(Exception):
 
 
 def _choice(field_name: str, value: str) -> str:
-    """``value`` spelled as the field's choice it names, ignoring case.
+    """``value`` spelled as the field's option it names, ignoring case.
 
-    Anything that names no choice is returned as given, for the character's
-    own validation to refuse.
+    The options are the loaded canon's rows for a table field
+    (``character_field_options``, issue #66). Anything that names no option
+    is returned as given, for the character's own validation to refuse.
     """
-    for choice, _label in Character._meta.get_field(field_name).choices or ():
-        if str(choice).casefold() == value.casefold():
-            return str(choice)
+    for choice in character_field_options(field_name) or ():
+        if choice.casefold() == value.casefold():
+            return choice
     return value
 
 
@@ -191,7 +192,7 @@ class RecordsExecutor:
         for a player. A ``set_background`` the plan reader already refused
         states nothing: it will not run.
         """
-        origins = dict(Character._meta.get_field("location").choices or ())
+        origins = character_field_options("location") or {}
         self._stated_origins = {}
         for action in actions:
             if (

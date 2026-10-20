@@ -1054,7 +1054,7 @@ class CharacterViewsTest(BaseTestCase):
         self.assertEqual(character.location, "Village")
 
     def test_character_update_provenance_class_bogus_value_rejected(self):
-        """A provenance_class outside the model's choices is rejected."""
+        """A provenance_class outside the canon's social_class table is rejected."""
         self.login_as(self.user)
         character = Character.objects.create(
             user=self.user,

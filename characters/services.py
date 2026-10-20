@@ -948,7 +948,7 @@ def can_roll_literacy(character: Character, *, is_game_master: bool) -> bool:
     against an Origin somebody rolled or chose (#754), and a Game Master may
     roll again (issues #590, #636).
     """
-    if character.location_literacy_modifier is None:
+    if character.origin_defers_to_game_master:
         return False
     if is_game_master:
         return True
@@ -997,7 +997,7 @@ def can_rule_literacy(character: Character, *, is_game_master: bool) -> bool:
     publish no check for, so the one where there is nothing to roll and the
     table decides. Everywhere else literacy is rolled.
     """
-    return is_game_master and character.location_literacy_modifier is None
+    return is_game_master and character.origin_defers_to_game_master
 
 
 def apply_literacy_ruling(
@@ -1060,10 +1060,11 @@ def apply_literacy_roll(character: Character, *, is_game_master: bool = False) -
             (:data:`LITERACY_BEFORE_ORIGIN_REASON`); or a player asking for
             dice already rolled.
     """
-    if character.location_literacy_modifier is None:
+    if character.origin_defers_to_game_master:
         raise CharacterChangeError(
-            "The rules publish no literacy check for an origin of Consult GM; "
-            "the Game Master decides whether this character can read"
+            f"The rules publish no literacy check for an origin of "
+            f"{character.location}; the Game Master decides whether this "
+            "character can read"
         )
     if not is_game_master and not character.location_recorded:
         raise CharacterChangeError(LITERACY_BEFORE_ORIGIN_REASON)
@@ -2464,7 +2465,7 @@ def withdraw_origin_ruling(character: Character) -> list[tuple[str, object, str]
         The history line, as ``(field, old value, line)``, or nothing.
     """
     ruling = character.origin_ruling
-    if not ruling or character.location == "Consult GM":
+    if not ruling or character.origin_defers_to_game_master:
         return []
     character.origin_ruling = ""
     return [
@@ -2512,10 +2513,14 @@ def change_field(
         character, is_game_master=is_game_master
     ):
         raise CharacterChangeError(ORIGIN_FIXED_REASON)
-    if field_name == "origin_ruling" and value and character.location != "Consult GM":
+    if (
+        field_name == "origin_ruling"
+        and value
+        and not character.origin_defers_to_game_master
+    ):
         raise CharacterChangeError(
             f"The {character.location} origin is a row of the table; a Game "
-            "Master's origin ruling is for an origin of Consult GM"
+            "Master's origin ruling is for the origin the rules leave to him"
         )
     if field_name == "total_xp":
         old_xp = character.total_xp

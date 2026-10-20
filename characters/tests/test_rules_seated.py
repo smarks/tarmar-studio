@@ -13,10 +13,15 @@ import math
 from dataclasses import replace
 from unittest.mock import patch
 
+from django.core.checks import Error
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
 from bestiary.translation import derive_pools, fixed_fatigue_roll
+from characters.checks import (
+    CHARACTER_LABEL_COLUMNS_CHECK_ID,
+    check_character_labels_fit_their_columns,
+)
 from characters.constants import point_buy_budget_note
 from characters.dice import (
     calculate_final_weight_lbs,
@@ -35,6 +40,7 @@ from characters.dice import (
 )
 from characters.models import (
     Character,
+    character_field_options,
     character_int_field_maximum,
     character_int_field_minimum,
     starting_age,
@@ -54,6 +60,7 @@ from characters.services import (
     apply_skill_rename,
     check_attribute,
     check_point_buy,
+    withdraw_origin_ruling,
 )
 from characters.skills import (
     _effective_attributes_at_age,
@@ -70,6 +77,7 @@ from characters.views.characters import (
 from common.rolling import Roller
 from gm.character_schema import character_json_schema, extraction_prompt
 from gm.engine import MODE_AIDE
+from gm.ledger import draft_defaults
 from gm.rules_lookup import look_up
 from gm.turn_engine.plan import read_plan
 from gm.turn_engine.policy import TurnPolicy
@@ -231,6 +239,134 @@ class TablesTest(SeatedRulesTestCase):
         self.assertEqual(detail, f"50 + 2d6({bonus}) = {50 + bonus}")
         level, _coin, _log = roll_wealth_logged(Roller(seed=59))
         self.assertIn(level, INVENTED_CHARACTER_RULES.wealth.labels)
+
+
+class BackgroundDefaultsTest(SeatedRulesTestCase):
+    """The background fields hold the canon's rows and start at the rows its
+    ``defaults`` block names (issue #66)."""
+
+    def test_a_new_character_holds_the_canons_default_rows(self) -> None:
+        character = Character()
+        self.assertEqual(
+            (
+                character.provenance_class,
+                character.provenance_detail,
+                character.location,
+                character.wealth_level,
+                character.starting_coin,
+            ),
+            ("commoner", "Farmer", "Port", "Poor", 5),
+        )
+
+    def test_the_draft_defaults_are_the_canons_rows(self) -> None:
+        defaults = draft_defaults()
+        self.assertEqual(
+            {
+                field: defaults[field]
+                for field in (
+                    "provenance_class",
+                    "provenance_detail",
+                    "location",
+                    "wealth_level",
+                    "starting_coin",
+                )
+            },
+            {
+                "provenance_class": "commoner",
+                "provenance_detail": "Farmer",
+                "location": "Port",
+                "wealth_level": "Poor",
+                "starting_coin": 5,
+            },
+        )
+
+    def test_the_field_options_are_the_canons_rows(self) -> None:
+        self.assertEqual(
+            character_field_options("provenance_class"),
+            {"nobility": "Nobility", "merchant": "Merchant", "commoner": "Commoner"},
+        )
+        self.assertEqual(
+            character_field_options("location"),
+            {"Port": "Port", "Ask the GM": "Ask the GM"},
+        )
+        self.assertEqual(
+            character_field_options("wealth_level"),
+            {"Poor": "Poor", "Comfortable": "Comfortable", "Wealthy": "Wealthy"},
+        )
+        # The model's own options, which no canon changes; a free field has none.
+        self.assertEqual(character_field_options("people"), dict(Character.PEOPLES))
+        self.assertIsNone(character_field_options("provenance_detail"))
+
+    def test_a_background_field_is_held_to_the_canons_rows(self) -> None:
+        self.assertEqual(Character.clean_field_value("location", "Port"), "Port")
+        self.assertEqual(
+            Character.clean_field_value("wealth_level", "Wealthy"), "Wealthy"
+        )
+        cases = (
+            ("location", "Village", "location must be one of: Port, Ask the GM"),
+            (
+                "wealth_level",
+                "Moderate",
+                "wealth_level must be one of: Poor, Comfortable, Wealthy",
+            ),
+            (
+                "provenance_class",
+                "gentry",
+                "provenance_class must be one of: nobility, merchant, commoner",
+            ),
+        )
+        for field, value, refusal in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesMessage(ValidationError, refusal):
+                    Character.clean_field_value(field, value)
+
+    def test_the_origin_left_to_the_game_master_is_read_off_its_row(self) -> None:
+        """The row with no literacy check is his, whatever it is called: the
+        ruling stays there and is withdrawn anywhere else."""
+        deferred = Character(location="Ask the GM", origin_ruling="a hermitage")
+        self.assertTrue(deferred.origin_defers_to_game_master)
+        self.assertEqual(withdraw_origin_ruling(deferred), [])
+        self.assertEqual(deferred.origin_ruling, "a hermitage")
+        rowed = Character(location="Port", origin_ruling="a hermitage")
+        self.assertFalse(rowed.origin_defers_to_game_master)
+        self.assertEqual(
+            [field for field, _old, _line in withdraw_origin_ruling(rowed)],
+            ["origin_ruling"],
+        )
+        self.assertEqual(rowed.origin_ruling, "")
+
+    def test_the_game_masters_coin_figure_is_read_off_the_wealth_row(self) -> None:
+        """A level the table gives no coin has only his figure (#801), whatever
+        the level is called."""
+        his = Character(wealth_level="Wealthy", starting_coin=300)
+        self.assertIn(
+            "300 starting coin (Game Master's figure)", his.background_summary
+        )
+        rolled = Character(wealth_level="Poor", starting_coin=5)
+        self.assertNotIn("Game Master's figure", rolled.background_summary)
+
+    def test_a_label_too_long_for_its_column_is_a_check_error(self) -> None:
+        self.assertEqual(check_character_labels_fit_their_columns(), [])
+        long_label = "A" * 21
+        rows = INVENTED_CHARACTER_RULES.location.rows
+        too_long = replace(
+            INVENTED_CHARACTER_RULES,
+            location=replace(
+                INVENTED_CHARACTER_RULES.location,
+                rows=(replace(rows[0], label=long_label), *rows[1:]),
+            ),
+            defaults=replace(INVENTED_CHARACTER_RULES.defaults, location=long_label),
+        )
+        with seated_character_rules(too_long):
+            messages = check_character_labels_fit_their_columns()
+        self.assertEqual(len(messages), 1)
+        self.assertIsInstance(messages[0], Error)
+        self.assertEqual(messages[0].id, CHARACTER_LABEL_COLUMNS_CHECK_ID)
+        self.assertIn(
+            f"location label {long_label!r} is 21 characters, but "
+            "Character.location holds at most 20",
+            messages[0].msg,
+        )
 
 
 class GamesMasterTest(SeatedRulesTestCase):

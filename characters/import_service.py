@@ -53,7 +53,12 @@ from .constants import (
 from .dice import location_effects, location_literacy_modifier
 from .equipment import get_item, settle_worn_armour
 from .equipment_service import custom_equipment_item
-from .models import CHARACTER_INT_FIELDS, DIE_ROLL_FIELDS, Character
+from .models import (
+    CHARACTER_INT_FIELDS,
+    CHARACTER_TABLE_FIELDS,
+    DIE_ROLL_FIELDS,
+    Character,
+)
 from .skills import MAX_SKILL_POINTS, normalize_skill_name, skill_name_refusal
 
 #: The numbers an item stores as whole numbers and its readers add up with no
@@ -73,10 +78,12 @@ _FLAG_ITEM_FIELDS: tuple[str, ...] = ("equipped", "in_pack")
 
 #: The fields the sheet's single-field editor rules on that the import runs
 #: through the same rule (``Character.clean_field_value``): the integers
-#: (#136) and the height and weight die rolls (#805, #939). The rest of the
-#: sheet's fields are held by the model's own checks in ``full_clean``.
+#: (#136), the height and weight die rolls (#805, #939) and the background
+#: fields held to the loaded canon's table rows (#66), which the model has no
+#: ``choices`` for. The rest of the sheet's fields are held by the model's
+#: own checks in ``full_clean``.
 _SHEET_RULED_FIELDS: frozenset[str] = frozenset(
-    {*CHARACTER_INT_FIELDS, *DIE_ROLL_FIELDS}
+    {*CHARACTER_INT_FIELDS, *DIE_ROLL_FIELDS, *CHARACTER_TABLE_FIELDS}
 )
 
 # The JSON collections a saved character carries. ``full_clean`` skips their
@@ -388,7 +395,9 @@ def validate_import_payload(payload: object) -> ImportedCharacter:
     # A ruling belongs to "Consult GM", the one origin with no check (#743);
     # at any other origin the check is rolled, so a ruling there is dropped,
     # whoever imports it.
-    location = fields.get("location", Character._meta.get_field("location").default)
+    location = fields.get(
+        "location", Character._meta.get_field("location").get_default()
+    )
     if location_literacy_modifier(location) is not None:
         fields.pop("literacy_ruling", None)
 
@@ -417,9 +426,13 @@ def validate_import_payload(payload: object) -> ImportedCharacter:
             )
         except ValidationError as validation_error:
             # A number's rule does not say which number it is (#940); the
-            # die rolls' and the name's do.
+            # die rolls' and the name's do. A table field's names the field,
+            # and keeps the import's own prefix as full_clean's refusal had.
             refusal = validation_error.messages[0]
-            if ruled_field in CHARACTER_INT_FIELDS:
+            if (
+                ruled_field in CHARACTER_INT_FIELDS
+                or ruled_field in CHARACTER_TABLE_FIELDS
+            ):
                 refusal = f"Import failed: {ruled_field}: {refusal}"
             raise CharacterImportError(refusal) from None
 
@@ -493,7 +506,9 @@ def fresh_player_fields(fields: dict) -> dict:
         for name in EXPORTABLE_FIELDS
         if name not in PLAYER_KEPT_FIELDS
     }
-    location = fields.get("location", Character._meta.get_field("location").default)
+    location = fields.get(
+        "location", Character._meta.get_field("location").get_default()
+    )
     values["skills"], _grant_log = location_effects(location)
     # Which skill holds that grant, so an Origin change moves it (#754).
     values["origin_skill"] = next(iter(values["skills"]), "")
