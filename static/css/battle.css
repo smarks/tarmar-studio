@@ -256,6 +256,16 @@
     font-size: 0.85rem;
 }
 
+/* A seat hand-off (#853) is a sentence, not a one-word verb: ``nowrap`` from
+   .battle-button pushed "Give the seat back to its owner" 13.5 px past a
+   239.5 px card at 1280 and 1440 px, under the next card (#60). It wraps
+   inside the card instead. */
+.combatant-card .seat-hand-off {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+}
+
 /* A figure out of the fight -- dead or unconscious, which its status line
    says in words. It used to fade the whole card (opacity 0.55), and with it
    every word on it: the name, the status line and any rename note fell
