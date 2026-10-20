@@ -5,8 +5,10 @@ only the pure, single-source-of-truth bits: the system prompt, the dice roller,
 and the rules-file loader.
 
 Every prompt sentence that states a number a canon rules file holds is built
-from the loaded rules (issue #68). Left as code, for stages 6 and 7 or because
-no rules file holds them yet:
+from the loaded rules (issue #68). The magic section is the canon's own
+``gm-prompt/magic.md`` (issue #922) but for its Special Casting Results and
+Borrowing, which are built from the canon's ``magic-rules.json`` (issue #48).
+Left as code, for stages 6 and 7 or because no rules file holds them yet:
 
 - the engine's own numbers: initiative 1d6, crits and fumbles, the matrix, the
   survival save 3d6 ≤ CON, the injury bands, the casting dice 3d6 ≤ INT or
@@ -27,11 +29,18 @@ no rules file holds them yet:
 
 import functools
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
+from tarmar_engine.magic import (
+    CastingFailureRules,
+    CastingSuccessTier,
+    MagicRules,
+)
+
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
+from battle.magic_rules import CASTING_DICE, magic_rules, totals_in_words
 from characters.combat import (
     ARMOUR_TIERS,
     CRIT_DAMAGE_ROLLS,
@@ -58,8 +67,9 @@ from characters.skills import (
     track_keys,
 )
 from characters.weapon_skill import WEAPON_PARRY_SKILL, is_weapon_skill
-from common.rolling import RollRecord
+from common.rolling import RollRecord, dice_total_range
 from reference.paths import (
+    CANON_MAGIC_RULES_FILE_NAME,
     CANON_NAME,
     DEFAULT_MAGIC_PROMPT_FILE,
     MAGIC_PROMPT_FILE,
@@ -136,6 +146,16 @@ def _render_fumble_fragment(table: tuple[tuple[int, str, str, str], ...]) -> str
     return "; ".join(bands)
 
 
+def _span_text(low: int, high: int) -> str:
+    """A band of numbers as the prompt writes it: "7" alone, or "7-9".
+
+    Args:
+        low: The band's lowest number.
+        high: Its highest.
+    """
+    return str(low) if low == high else f"{low}-{high}"
+
+
 def _render_modifier_fragment() -> str:
     """The attribute modifier table, from the function the code uses (#807).
 
@@ -154,7 +174,7 @@ def _render_modifier_fragment() -> str:
         high = low
         while high < highest and calculate_attribute_modifier(high + 1) == modifier:
             high += 1
-        label = str(low) if low == high else f"{low}-{high}"
+        label = _span_text(low, high)
         bands.append(f"{label}={rules_lookup.signed(modifier)}")
         low = high + 1
     fragment = "Modifiers: " + ", ".join(bands) + "."
@@ -192,25 +212,22 @@ def _render_bare_handed_fragment() -> str:
     return "Bare-handed damage by STR: " + "; ".join(bands) + "."
 
 
-#: The dice the survival save and the casting roll are made on: the engine's
-#: own numbers, not yet a canon's (stages 6 and 7 of rules-as-data).
-_SAVES_AND_SPELLS_DICE = "3d6"
-
-
 def _render_roll_under_fragment() -> str:
     """The roll-under checks beside the attack roll, in the combat section (#68).
 
     The attribute check's dice are the canon's ``attribute_check``
-    (``skill-rules.json``); the saves' and spells' are the engine's. When the
-    two agree they are said once: "attribute checks, saves, and spells still
-    roll 3d6 ≤ attribute."
+    (``skill-rules.json``); the saves' and spells' are the engine's
+    (:data:`battle.magic_rules.CASTING_DICE`, on which the engine rolls the
+    survival save too), not yet a canon's (stages 6 and 7 of rules-as-data).
+    When the two agree they are said once: "attribute checks, saves, and
+    spells still roll 3d6 ≤ attribute."
     """
     dice = skill_rules().attribute_check.dice
-    if dice == _SAVES_AND_SPELLS_DICE:
+    if dice == CASTING_DICE:
         return f"attribute checks, saves, and spells still roll {dice} ≤ attribute."
     return (
         f"attribute checks roll {dice} ≤ attribute; saves and spells "
-        f"{_SAVES_AND_SPELLS_DICE} ≤ attribute."
+        f"{CASTING_DICE} ≤ attribute."
     )
 
 
@@ -398,7 +415,7 @@ def _render_provenance_fragment() -> str:
     bands: list[str] = []
     low = 1
     for row in character_rules().social_class.rows:
-        span = str(low) if low == row.up_to else f"{low}-{row.up_to}"
+        span = _span_text(low, row.up_to)
         bands.append(f"{row.label.title()} {span}%")
         low = row.up_to + 1
     return ", ".join(bands)
@@ -753,11 +770,14 @@ def _refuse_a_tarmar_canon_without(
 
 
 # The magic section is canon too (issue #922): the Tarmar canon's carries the
-# GM-side numbers (special casting rolls, Control Roll bands, Channel, the Debt
-# Roll, Counterspell odds) that the public magic pages leave out, so it lives
-# in the canon directory as ``gm-prompt/magic.md``. A canon without one gets
-# the default canon's, which says only what the public rules say; the Tarmar
-# canon without one is an error.
+# GM-side prose (Control Roll bands, Channel, Runaway, Counterspell odds) that
+# the public magic pages leave out, so it lives in the canon directory as
+# ``gm-prompt/magic.md``. A canon without one gets the default canon's, which
+# says only what the public rules say; the Tarmar canon without one is an
+# error. Its Special Casting Results and Borrowing are not the file's: they
+# state numbers the canon's ``magic-rules.json`` holds and the battle board
+# plays, so the engine builds them from that file (issue #48) and the file
+# leaves them empty.
 def load_magic_section(
     path: Path = MAGIC_PROMPT_FILE,
     fallback: Path = DEFAULT_MAGIC_PROMPT_FILE,
@@ -797,7 +817,301 @@ def load_magic_section(
     return _read_canon_prompt_file(path, "magic section")
 
 
-SECTION_MAGIC = load_magic_section()
+#: The word the prompt names a Runaway by, wherever a casting or a Debt Roll
+#: can start one.
+_RUNAWAY = "Runaway"
+
+#: A failing casting total that spends the spell's mana, in the casting table.
+_SPELL_FAILS_MANA_LOST = "(spell fails, mana lost)"
+
+#: The casting table's failures when the canon has no ``casting_failure``
+#: block: the loader's and ``MagicRules``' own words for the null block.
+NO_CASTING_FAILURE_SENTENCE = (
+    "The attribute alone judges a casting roll: no natural total fails on its "
+    f"own, a failed cast keeps its mana, and no cast starts a {_RUNAWAY}."
+)
+
+#: Borrowing when the canon has no ``borrowing`` block: the engine refuses a
+#: borrow with no Borrowing rules.
+NO_BORROWING_SENTENCE = (
+    "A caster without the mana for a spell cannot cast it; there is no Borrowing."
+)
+
+
+#: The letters that take "an" before a word rather than "a".
+_VOWELS = frozenset("aeiou")
+
+
+def _with_article(noun: str) -> str:
+    """A noun with its indefinite article: "a Backlash", "an Arcane surge".
+
+    Chosen from the noun's first letter, which suits the canons' labels; a
+    label opening on a silent consonant or a "you" sound would be misread.
+
+    Args:
+        noun: The noun, as the canon spells it.
+    """
+    article = "an" if noun[:1].casefold() in _VOWELS else "a"
+    return f"{article} {noun}"
+
+
+class MagicSectionError(ValueError):
+    """The canon's magic section cannot take the subsections the engine builds.
+
+    A subsection the engine builds from ``magic-rules.json`` (issue #48) has a
+    body in the file, or its heading is missing. Prose under such a heading
+    would be a second statement of numbers the rules file holds, which is the
+    defect #48 removes, so it is refused rather than silently replaced.
+    """
+
+
+def _render_casting_success_fragment(tiers: tuple[CastingSuccessTier, ...]) -> str:
+    """The casting roll's special successes, from the canon's tiers (#48).
+
+    The canon's ``casting_success_tiers`` (``magic-rules.json``), lowest
+    natural total first: "3: Critical success (+2 to the spell's rolled damage
+    or healing, 1 mana handed back)". "" when the canon has no tiers.
+    """
+    items: list[str] = []
+    for tier in sorted(tiers, key=lambda tier: min(tier.natural_totals)):
+        effects: list[str] = []
+        if tier.effect_bonus:
+            effects.append(
+                f"{rules_lookup.signed(tier.effect_bonus)} to the spell's rolled "
+                "damage or healing"
+            )
+        if tier.mana_refund:
+            effects.append(f"{tier.mana_refund} mana handed back")
+        items.append(
+            f"{totals_in_words(tier.natural_totals)}: {tier.label} "
+            f"({', '.join(effects) or 'no bonus'})"
+        )
+    return "; ".join(items) + "." if items else ""
+
+
+def _render_casting_failure_fragment(
+    casting_failure: CastingFailureRules | None,
+) -> str:
+    """The casting roll's failing naturals, from the canon's block (#48).
+
+    The canon's ``casting_failure`` (``magic-rules.json``): every natural
+    total from its floor to the casting dice's highest, the Runaway total
+    "catastrophic", the other mana-spending totals "bad fumble", and the rest
+    "fumble", a run of them said once ("15-18"). Those three words are the
+    engine's for the three kinds of failing total.
+    """
+    if casting_failure is None:
+        return NO_CASTING_FAILURE_SENTENCE
+    items: list[str] = []
+    plain_totals: list[int] = []
+
+    def close_the_plain_run() -> None:
+        if plain_totals:
+            span = _span_text(plain_totals[0], plain_totals[-1])
+            items.append(f"{span}: fumble (spell fails, mana kept)")
+            plain_totals.clear()
+
+    floor = casting_failure.fumble_floor
+    _, highest = dice_total_range(CASTING_DICE)
+    for total in range(floor, highest + 1):
+        if total == casting_failure.runaway_total:
+            item = (
+                f"{total}: catastrophic {_SPELL_FAILS_MANA_LOST} — triggers {_RUNAWAY}"
+            )
+        elif total in casting_failure.mana_lost_totals:
+            item = f"{total}: bad fumble {_SPELL_FAILS_MANA_LOST}"
+        else:
+            plain_totals.append(total)
+            continue
+        close_the_plain_run()
+        items.append(item)
+    close_the_plain_run()
+    return (
+        f"A natural {floor} or more fails whatever the attribute: {'; '.join(items)}."
+    )
+
+
+def render_special_casting_results(rules: MagicRules) -> str:
+    """The body of ``### Special Casting Results``, from the canon (#48).
+
+    The successes from ``casting_success_tiers``, then the failures from
+    ``casting_failure`` (``magic-rules.json``), the rules the battle board
+    plays a casting roll by.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    sentences = (
+        _render_casting_success_fragment(rules.casting_success_tiers),
+        _render_casting_failure_fragment(rules.casting_failure),
+    )
+    return " ".join(sentence for sentence in sentences if sentence)
+
+
+def render_borrowing(rules: MagicRules) -> str:
+    """The body of ``### Borrowing``, from the canon's ``borrowing`` block (#48).
+
+    The debt cap, the Debt Roll's dice, attributes and penalty, its automatic
+    failures, what a failure is, and where mana handed back goes
+    (``magic-rules.json``), as the battle board settles a borrowed cast.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    borrowing = rules.borrowing
+    if borrowing is None:
+        return NO_BORROWING_SENTENCE
+    spend = "Spend all remaining mana, borrow the rest as Debt"
+    sentences = [
+        f"{spend}."
+        if borrowing.max_debt is None
+        else f"{spend}, up to {borrowing.max_debt} owed in all."
+    ]
+    target = " + ".join(borrowing.debt_attributes)
+    if borrowing.penalty_per_debt == 1:
+        target += " − Debt"
+    elif borrowing.penalty_per_debt:
+        target += f" − {borrowing.penalty_per_debt} × Debt"
+    sentences.append(f"Debt Roll after the spell: {borrowing.debt_dice} ≤ ({target}).")
+    if borrowing.automatic_failure_totals:
+        sentences.append(
+            f"A natural {totals_in_words(borrowing.automatic_failure_totals)} "
+            "always fails."
+        )
+    failure = borrowing.failure
+    named = _with_article(failure.label)
+    if failure.is_runaway and failure.label.casefold() != _RUNAWAY.casefold():
+        named += f", {_with_article(_RUNAWAY)}"
+    sentences.append(f"A failed Debt Roll is {named}; the spell has already resolved.")
+    sentences.append(
+        "Mana handed back pays the Debt before it refills the pool."
+        if borrowing.refunds_pay_debt_first
+        else "Mana handed back refills the pool; the Debt stays owed."
+    )
+    return " ".join(sentences)
+
+
+#: The magic section's subsections the engine builds from the canon's
+#: ``magic-rules.json`` (issue #48), each heading with its builder: the one
+#: place that says which subsections are the engine's. The canon's
+#: ``gm-prompt/magic.md`` carries each heading with no body.
+GENERATED_MAGIC_SUBSECTIONS: tuple[tuple[str, Callable[[MagicRules], str]], ...] = (
+    ("### Special Casting Results", render_special_casting_results),
+    ("### Borrowing", render_borrowing),
+)
+
+#: The headings of :data:`GENERATED_MAGIC_SUBSECTIONS`.
+GENERATED_MAGIC_HEADINGS = tuple(heading for heading, _ in GENERATED_MAGIC_SUBSECTIONS)
+
+#: The line openings that start a heading in a prompt file: a section's or a
+#: subsection's.
+_HEADING_OPENINGS = ("## ", "### ")
+
+
+def _next_heading_index(lines: list[str], start: int) -> int:
+    """The index of the first heading line at or after ``start``, or the end.
+
+    Args:
+        lines: A prompt file's lines.
+        start: Where to look from.
+    """
+    for index in range(start, len(lines)):
+        if lines[index].startswith(_HEADING_OPENINGS):
+            return index
+    return len(lines)
+
+
+def checked_magic_section(text: str) -> str:
+    """A canon's magic section, held to the subsections the engine builds (#48).
+
+    Needs no rules, so it runs as the module imports: a canon whose
+    ``gm-prompt/magic.md`` writes a body under a generated heading, or lacks
+    one, stops the process from starting rather than failing the first turn.
+
+    Args:
+        text: The canon's ``gm-prompt/magic.md``, as
+            :func:`load_magic_section` reads it.
+
+    Returns:
+        ``text``, unchanged.
+
+    Raises:
+        MagicSectionError: A generated heading is missing, appears more than
+            once, or has anything but blank lines between it and the next
+            heading.
+    """
+    lines = text.split("\n")
+    for heading in GENERATED_MAGIC_HEADINGS:
+        occurrences = lines.count(heading)
+        if occurrences == 0:
+            raise MagicSectionError(
+                f"The magic section has no {heading!r}; the engine builds its body "
+                f"from {CANON_MAGIC_RULES_FILE_NAME} under that heading"
+            )
+        if occurrences > 1:
+            raise MagicSectionError(
+                f"The magic section has {heading!r} {occurrences} times; the "
+                f"engine builds its one body from {CANON_MAGIC_RULES_FILE_NAME}"
+            )
+        start = lines.index(heading) + 1
+        if any(
+            line.strip() for line in lines[start : _next_heading_index(lines, start)]
+        ):
+            raise MagicSectionError(
+                f"The magic section's {heading!r} has a body; it is built from "
+                f"{CANON_MAGIC_RULES_FILE_NAME}, so the file must leave it empty"
+            )
+    return text
+
+
+def assemble_magic_section(text: str, rules: MagicRules) -> str:
+    """A canon's magic section with the engine's subsections built in (#48).
+
+    A pure function of the file's text and the rules, so a test can assemble
+    any file with any rules whichever canon is loaded. The text is checked
+    again (:func:`checked_magic_section`), so no text it was not meant for
+    is assembled.
+
+    Args:
+        text: The canon's ``gm-prompt/magic.md``, as
+            :func:`load_magic_section` reads it.
+        rules: The canon's magic rules.
+
+    Returns:
+        ``text`` with the built body under each of
+        :data:`GENERATED_MAGIC_HEADINGS` and one blank line before the next
+        heading; every other line byte for byte.
+
+    Raises:
+        MagicSectionError: As :func:`checked_magic_section`.
+    """
+    lines = checked_magic_section(text).split("\n")
+    for heading, build in GENERATED_MAGIC_SUBSECTIONS:
+        start = lines.index(heading) + 1
+        end = _next_heading_index(lines, start)
+        lines[start:end] = [build(rules), ""] if end < len(lines) else [build(rules)]
+    return "\n".join(lines)
+
+
+#: The loaded canon's magic section as its file has it, read and checked as
+#: the module imports, as ``SECTION_MAGIC`` was before #48: a Tarmar canon
+#: without the file, or a file that writes a generated body, does not start.
+_MAGIC_SECTION_FILE = checked_magic_section(load_magic_section())
+
+
+@derived_from_rules
+@functools.cache
+def section_magic() -> str:
+    """The magic section, built the first time a prompt needs it (#48).
+
+    The loaded canon's ``gm-prompt/magic.md``, read and checked at import
+    (:data:`_MAGIC_SECTION_FILE`), with its Special Casting Results and
+    Borrowing built from the canon's ``magic-rules.json``
+    (:func:`battle.magic_rules.magic_rules`), which no module may read while
+    it imports. Cached, so every prompt holds the same string for the life of
+    the process.
+    """
+    return assemble_magic_section(_MAGIC_SECTION_FILE, magic_rules())
 
 
 def _render_weapon(weapon: Weapon) -> str:
@@ -1492,7 +1806,7 @@ def system_prompt_sections() -> tuple[str, ...]:
         section_character_creation(),
         SECTION_RECORDS,
         section_combat(),
-        SECTION_MAGIC,
+        section_magic(),
         section_equipment(),
         SECTION_WORLD,
         SECTION_GUIDELINES,

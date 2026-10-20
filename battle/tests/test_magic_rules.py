@@ -30,7 +30,12 @@ from tarmar_engine.magic import (
     SpellEffectKind,
 )
 
-from battle.magic_rules import MagicRulesError, load_magic_rules, magic_rules
+from battle.magic_rules import (
+    CASTING_DICE,
+    MagicRulesError,
+    load_magic_rules,
+    magic_rules,
+)
 from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
@@ -662,6 +667,69 @@ class MalformedMagicRulesTest(MagicRulesFileTestCase):
             UNKNOWN_BLOCK_EXPLANATION.replace(BLOCK_PLACEHOLDER, "shieldwall"),
             str(refusal),
         )
+
+
+#: Natural totals no roll can make, a success tier the board never plays, and
+#: a debt cap that leaves nothing to borrow (issue #48), each with the field
+#: and the words its refusal names.
+UNPLAYABLE_TOTALS: list[tuple[str, str, Callable[[dict[str, Any]], None]]] = [
+    (
+        "casting_success_tiers[1].natural_totals",
+        f"has [2], which {CASTING_DICE} cannot roll",
+        lambda rules: rules["casting_success_tiers"][1].update(natural_totals=[2]),
+    ),
+    (
+        "casting_success_tiers[1].natural_totals",
+        "has [14], at or above casting_failure.fumble_floor 14",
+        lambda rules: rules["casting_success_tiers"][1].update(natural_totals=[14]),
+    ),
+    (
+        "casting_failure.fumble_floor",
+        f"has [19], which {CASTING_DICE} cannot roll",
+        lambda rules: rules["casting_failure"].update(
+            fumble_floor=19, mana_lost_totals=[], runaway_total=None
+        ),
+    ),
+    (
+        "casting_failure.runaway_total",
+        f"has [19], which {CASTING_DICE} cannot roll",
+        lambda rules: rules["casting_failure"].update(
+            mana_lost_totals=[14, 19], runaway_total=19
+        ),
+    ),
+    (
+        "casting_failure.mana_lost_totals",
+        f"has [19], which {CASTING_DICE} cannot roll",
+        lambda rules: rules["casting_failure"].update(mana_lost_totals=[14, 15, 19]),
+    ),
+    (
+        "borrowing.automatic_failure_totals",
+        "has [1], which 2d8 cannot roll (it rolls 2 to 16)",
+        lambda rules: rules["borrowing"].update(automatic_failure_totals=[1, 16]),
+    ),
+    (
+        "push.automatic_runaway_totals",
+        "has [13], which 2d6 cannot roll (it rolls 2 to 12)",
+        lambda rules: rules["push"].update(automatic_runaway_totals=[2, 13]),
+    ),
+    (
+        "borrowing.max_debt",
+        "must be at least 1 or null; 0 leaves nothing to borrow",
+        lambda rules: rules["borrowing"].update(max_debt=0),
+    ),
+]
+
+
+class UnplayableTotalsTest(MagicRulesFileTestCase):
+    """The loader refuses numbers the board could never play (issue #48)."""
+
+    def test_each_unplayable_number_names_the_file_and_the_field(self) -> None:
+        for field_path, words, make_unplayable in UNPLAYABLE_TOTALS:
+            with self.subTest(field_path=field_path, words=words):
+                rules = invented_rules()
+                make_unplayable(rules)
+                refusal = self.assert_refused(rules, field_path)
+                self.assertIn(f"{field_path} {words}", str(refusal))
 
 
 class EngineValidationTest(MagicRulesFileTestCase):

@@ -29,12 +29,14 @@ from reference.paths import (
     CANON_DIR_ENV,
     CANON_EQUIPMENT_CATALOG_FILE_NAME,
     CANON_EQUIPMENT_RULES_FILE_NAME,
+    CANON_MAGIC_RULES_FILE_NAME,
     CANON_NAME,
     CANON_PROMPT_DIR_NAME,
     CANON_SKILL_RULES_FILE_NAME,
     CONTENT_DIR,
     DEFAULT_CANON_DIR,
     DEFAULT_CANON_NAME,
+    DEFAULT_MAGIC_PROMPT_FILE,
     DM_RULES_DIR,
     REPO_ROOT,
     TARMAR_CANON_NAME,
@@ -102,6 +104,67 @@ class TarmarWorldSectionUnchangedTest(SimpleTestCase):
         self.assertEqual(prompt_hash(SECTION_WORLD), WORLD_SECTION_HASH_BEFORE_THE_MOVE)
 
 
+def import_the_engine_on_a_test_canon(
+    directory: Path,
+    script: str,
+    canon_json: str | None,
+    prompt_files: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``script`` in a fresh process on a canon made in ``directory``.
+
+    The canon carries the default canon's character, skill, equipment and
+    magic rules files, which every canon must and the prompt sections are
+    built from (issues #68, #70, #48), and under ``gm-prompt/`` only the
+    files ``prompt_files`` names.
+
+    Args:
+        directory: An empty directory the canon is made in.
+        script: Python source that imports ``gm.engine``.
+        canon_json: The canon's ``canon.json``, or None for none (which makes
+            an outside canon the Tarmar canon).
+        prompt_files: Each ``gm-prompt/`` file's name and text; none when
+            ``None``.
+
+    Returns:
+        The finished process.
+    """
+    canon_directory = directory / "canon"
+    canon_directory.mkdir()
+    (canon_directory / "scenario-seeds.md").write_text(
+        "# Scenario Seeds\n", encoding="utf-8"
+    )
+    if canon_json is not None:
+        (canon_directory / "canon.json").write_text(canon_json, encoding="utf-8")
+    for rules_file_name in (
+        CANON_CHARACTER_RULES_FILE_NAME,
+        CANON_SKILL_RULES_FILE_NAME,
+        CANON_EQUIPMENT_CATALOG_FILE_NAME,
+        CANON_EQUIPMENT_RULES_FILE_NAME,
+        CANON_MAGIC_RULES_FILE_NAME,
+    ):
+        shutil.copy(
+            DEFAULT_CANON_DIR / rules_file_name, canon_directory / rules_file_name
+        )
+    prompt_directory = canon_directory / CANON_PROMPT_DIR_NAME
+    for file_name, file_text in (prompt_files or {}).items():
+        prompt_directory.mkdir(exist_ok=True)
+        (prompt_directory / file_name).write_text(file_text, encoding="utf-8")
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name != "PYTEST_CURRENT_TEST"
+    }
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        env={**environment, CANON_DIR_ENV: str(canon_directory.resolve())},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
 class WorldSectionFromCanonTest(SimpleTestCase):
     """Where the world section comes from, and what a canon without one gets."""
 
@@ -149,58 +212,11 @@ class WorldSectionFromCanonTest(SimpleTestCase):
         with self.assertRaisesMessage(IsADirectoryError, "is not a file"):
             load_world_section(directory)
 
-    def import_the_engine_on_a_canon_without_prompt_files(
-        self, script: str, canon_json: str | None
-    ) -> subprocess.CompletedProcess[str]:
-        """Run ``script`` in a fresh process on a canon with no ``gm-prompt/``.
-
-        The canon carries the default canon's character, skill and equipment
-        rules files, which every canon must and the prompt sections are built
-        from (issues #68, #70).
-
-        Args:
-            script: Python source that imports ``gm.engine``.
-            canon_json: The canon's ``canon.json``, or None for none (which
-                makes an outside canon the Tarmar canon).
-
-        Returns:
-            The finished process.
-        """
-        canon_directory = self.temporary_directory / "canon"
-        canon_directory.mkdir()
-        (canon_directory / "scenario-seeds.md").write_text(
-            "# Scenario Seeds\n", encoding="utf-8"
-        )
-        if canon_json is not None:
-            (canon_directory / "canon.json").write_text(canon_json, encoding="utf-8")
-        for rules_file_name in (
-            CANON_CHARACTER_RULES_FILE_NAME,
-            CANON_SKILL_RULES_FILE_NAME,
-            CANON_EQUIPMENT_CATALOG_FILE_NAME,
-            CANON_EQUIPMENT_RULES_FILE_NAME,
-        ):
-            shutil.copy(
-                DEFAULT_CANON_DIR / rules_file_name, canon_directory / rules_file_name
-            )
-        environment = {
-            name: value
-            for name, value in os.environ.items()
-            if name != "PYTEST_CURRENT_TEST"
-        }
-        return subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=REPO_ROOT,
-            env={**environment, CANON_DIR_ENV: str(canon_directory.resolve())},
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-
     def test_a_process_on_a_canon_without_the_file_starts_with_the_fallback(
         self,
     ) -> None:
-        completed = self.import_the_engine_on_a_canon_without_prompt_files(
+        completed = import_the_engine_on_a_test_canon(
+            self.temporary_directory,
             "from gm import engine\n"
             "assert engine.SECTION_WORLD == engine.FALLBACK_WORLD_SECTION\n"
             "assert engine.FALLBACK_WORLD_SECTION in engine.system_prompt()\n",
@@ -211,11 +227,21 @@ class WorldSectionFromCanonTest(SimpleTestCase):
     def test_a_process_on_a_tarmar_canon_without_the_file_does_not_start(
         self,
     ) -> None:
-        completed = self.import_the_engine_on_a_canon_without_prompt_files(
-            "from gm import engine\n", canon_json=None
+        # The magic section is read first (#48), so the canon has one.
+        completed = import_the_engine_on_a_test_canon(
+            self.temporary_directory,
+            "from gm import engine\n",
+            canon_json=None,
+            prompt_files={
+                DEFAULT_MAGIC_PROMPT_FILE.name: DEFAULT_MAGIC_PROMPT_FILE.read_text(
+                    encoding="utf-8"
+                )
+            },
         )
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("FileNotFoundError: The Tarmar canon has no", completed.stderr)
+        self.assertIn(
+            "FileNotFoundError: The Tarmar canon has no world digest", completed.stderr
+        )
 
 
 class DefaultCanonWorldDigestTest(SimpleTestCase):

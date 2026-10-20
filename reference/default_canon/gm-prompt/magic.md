@@ -2,7 +2,6 @@
 Spells cost mana equal to spell level. Casting roll: 3d6 ≤ INT or WIS depending on the spell. Spells that must hit a target also need a DEX roll. Continuing spells are renewed with mana in Phase 2 each combat turn or end immediately.
 
 ### Special Casting Results
-Very low and very high casting rolls have special effects, some fortunate and some catastrophic. Decide what happens; the public rules fix no table for it.
 
 ### Schools of Magic
 Common (0-70%): Elemental (water/fire/lightning/earth/wind), Passage, Protection, Mending. Less Common (71-100%): Weather, Counter, Arcane/True Magic, Control.
@@ -18,7 +17,6 @@ Invest extra mana for greater effect. Pushing needs a Control Roll: 3d6 ≤ INT,
 The more mana a caster channels into one casting, the harder it is to keep control; that is what the Control Roll measures. This canon sets no separate limit on Channel.
 
 ### Borrowing
-A caster without enough mana may Borrow, drawing on reserves they may not have. Borrowing creates Debt, and Debt must be paid; the deeper the Debt, the more likely something goes wrong. Decide how it is paid.
 
 ### Runaway
 The spell feeds on the caster: first mana, then, once the pool is empty and the caster has fallen unconscious, Body. When the Body fails, the caster dies. Anchor: the caster rolls 3d6 ≤ WIS each round to regain control. Another mage may try to help; if the intervention fails, both are caught in the Runaway. Survivors often bear marks: white streaks in the hair, strange scars, a haunted look.

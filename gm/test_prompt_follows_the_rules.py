@@ -13,7 +13,18 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from django.test import SimpleTestCase
+from tarmar_engine.magic import (
+    BorrowingFailure,
+    BorrowingRules,
+    CastingFailureRules,
+    CastingSuccessTier,
+)
 
+from battle.tests.magic_fixtures import (
+    DEFAULT_MAGIC_RULES,
+    INVENTED_RULES,
+    seated_rules,
+)
 from characters.equipment_rules import EncumbranceLevel, EncumbranceRules
 from characters.rules import FatigueRollRules
 from characters.skill_rules import SkillRules, SkillTrackRules
@@ -47,6 +58,9 @@ from .turn_engine.policy import TurnPolicy
 #: other four changed where the data could not reproduce the old prose (each
 #: track's XP a year and the label "Hunter/Gatherer", the weapon, armour and
 #: shield lists, Heavy encumbrance's "or slow", the plan examples' track).
+#: ``section_magic`` is not here: it is the loaded canon's ``magic.md`` around
+#: the two subsections built from the rules (#48), so its text depends on which
+#: canon is loaded. Its two built bodies are pinned as text instead, below.
 DEFAULT_SECTION_HASHES: dict[Callable[[], str], str] = {
     engine.section_core: (
         "da9031c648b4d17c88cd8a9cc964febf405f610c7162879660ea90f09033d464"
@@ -67,6 +81,76 @@ DEFAULT_SECTION_HASHES: dict[Callable[[], str], str] = {
         "a5db0207d8e5a666d5c34d9b82aaff6993d29539f3a467fefc8f6e6f54d2ce0b"
     ),
 }
+
+
+#: The magic section's built bodies under the default canon's magic rules
+#: (#48), by heading, whichever canon is loaded.
+DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
+    zip(
+        engine.GENERATED_MAGIC_HEADINGS,
+        (
+            "3: Lucky cast (+1 to the spell's rolled damage or healing). A natural "
+            "13 or more fails whatever the attribute: 13: bad fumble (spell fails, "
+            "mana lost); 14: catastrophic (spell fails, mana lost) — triggers "
+            "Runaway; 15-18: fumble (spell fails, mana kept).",
+            "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
+            "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). A natural 12 always "
+            "fails. A failed Debt Roll is a Backlash; the spell has already "
+            "resolved. Mana handed back pays the Debt before it refills the pool.",
+        ),
+        strict=True,
+    )
+)
+
+#: Magic rules whose every number is unlike both canons' (#48): tiers out of
+#: order, one of two naturals, one that only hands mana back and one that
+#: takes from the effect and hands mana back; a casting
+#: floor of 10 with a lone plain total, a run of them between the specials
+#: and a run up to the dice's highest; and a Debt Roll on two attributes at 3
+#: a point, with two automatic failures, a failure that is a Runaway under
+#: another name opening on a vowel, and refunds that leave the Debt owed.
+UNLIKE_EITHER_CANONS_MAGIC_RULES = replace(
+    INVENTED_RULES,
+    casting_success_tiers=(
+        CastingSuccessTier(
+            key="spark", label="Spark", natural_totals=frozenset({8}), mana_refund=2
+        ),
+        CastingSuccessTier(key="steady", label="Steady", natural_totals=frozenset({9})),
+        CastingSuccessTier(
+            key="glint", label="Glint", natural_totals=frozenset({6, 7}), effect_bonus=3
+        ),
+        CastingSuccessTier(
+            key="flare",
+            label="Flare",
+            natural_totals=frozenset({5}),
+            effect_bonus=-2,
+            mana_refund=3,
+        ),
+    ),
+    casting_failure=CastingFailureRules(
+        fumble_floor=10, mana_lost_totals=frozenset({11, 15}), runaway_total=15
+    ),
+    borrowing=BorrowingRules(
+        debt_dice="2d8",
+        debt_attributes=("WIS", "INT"),
+        penalty_per_debt=3,
+        failure=BorrowingFailure(key="surge", label="Arcane surge", is_runaway=True),
+        automatic_failure_totals=frozenset({16, 2}),
+        max_debt=5,
+        refunds_pay_debt_first=False,
+    ),
+)
+
+
+def magic_body(heading: str) -> str:
+    """The body the magic section carries under ``heading``, as built now.
+
+    Args:
+        heading: One of :data:`gm.engine.GENERATED_MAGIC_HEADINGS`.
+    """
+    section = engine.section_magic()
+    start = section.index(f"{heading}\n") + len(heading) + 1
+    return section[start : section.index("\n", start)]
 
 
 def with_track_skills(sailor: list[str], smith: list[str]) -> SkillRules:
@@ -129,12 +213,18 @@ class DefaultCanonTextTest(SimpleTestCase):
         self.enterContext(seated_skill_rules())
         self.enterContext(seated_equipment_catalog())
         self.enterContext(seated_equipment_rules())
+        self.enterContext(seated_rules(DEFAULT_MAGIC_RULES))
 
     def test_each_section_is_the_pinned_text(self) -> None:
         for builder, expected in DEFAULT_SECTION_HASHES.items():
             with self.subTest(section=builder.__name__):
                 built = hashlib.sha256(builder().encode()).hexdigest()
                 self.assertEqual(built, expected)
+
+    def test_the_magic_sections_built_bodies_are_the_pinned_text(self) -> None:
+        for heading, body in DEFAULT_MAGIC_BODIES.items():
+            with self.subTest(heading=heading):
+                self.assertEqual(magic_body(heading), body)
 
     def test_the_plan_calls_rules_line_is_the_pinned_text(self) -> None:
         self.assertEqual(
@@ -317,3 +407,84 @@ class InventedRulesTest(SimpleTestCase):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, authority)
         self.assertNotIn("65", authority)
+
+    def test_the_magic_section_states_the_casting_table(self) -> None:
+        special, _ = engine.GENERATED_MAGIC_HEADINGS
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(special)
+        self.assertEqual(
+            body,
+            "5: Flare (−2 to the spell's rolled damage or healing, 3 mana handed "
+            "back); 6 or 7: Glint (+3 to the spell's rolled damage or healing); 8: "
+            "Spark "
+            "(2 mana handed back); 9: Steady (no bonus). A natural 10 or more fails "
+            "whatever the attribute: 10: fumble (spell fails, mana kept); 11: bad "
+            "fumble (spell fails, mana lost); 12-14: fumble (spell fails, mana "
+            "kept); 15: catastrophic (spell fails, mana lost) — triggers Runaway; "
+            "16-18: fumble (spell fails, mana kept).",
+        )
+
+    def test_the_magic_section_states_the_borrowing(self) -> None:
+        _, borrowing = engine.GENERATED_MAGIC_HEADINGS
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(borrowing)
+        self.assertEqual(
+            body,
+            "Spend all remaining mana, borrow the rest as Debt, up to 5 owed in all. "
+            "Debt Roll after the spell: 2d8 ≤ (WIS + INT − 3 × Debt). A natural 2 "
+            "or 16 always fails. A failed Debt Roll is an Arcane surge, a Runaway; the "
+            "spell has already resolved. Mana handed back refills the pool; the "
+            "Debt stays owed.",
+        )
+
+    def test_a_runaway_named_runaway_is_named_once(self) -> None:
+        _, borrowing = engine.GENERATED_MAGIC_HEADINGS
+        rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
+        assert rules.borrowing is not None
+        named_runaway = replace(
+            rules,
+            borrowing=replace(
+                rules.borrowing,
+                failure=BorrowingFailure(
+                    key="runaway", label="runaway", is_runaway=True
+                ),
+                automatic_failure_totals=frozenset(),
+                max_debt=None,
+                penalty_per_debt=1,
+            ),
+        )
+        with seated_rules(named_runaway):
+            body = magic_body(borrowing)
+        self.assertEqual(
+            body,
+            "Spend all remaining mana, borrow the rest as Debt. Debt Roll after the "
+            "spell: 2d8 ≤ (WIS + INT − Debt). A failed Debt Roll is a runaway; the "
+            "spell has already resolved. Mana handed back refills the pool; the "
+            "Debt stays owed.",
+        )
+
+    def test_a_debt_roll_with_no_penalty_names_the_attributes_alone(self) -> None:
+        _, borrowing = engine.GENERATED_MAGIC_HEADINGS
+        rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
+        assert rules.borrowing is not None
+        no_penalty = replace(
+            rules, borrowing=replace(rules.borrowing, penalty_per_debt=0)
+        )
+        with seated_rules(no_penalty):
+            body = magic_body(borrowing)
+        self.assertIn(" Debt Roll after the spell: 2d8 ≤ (WIS + INT). ", body)
+
+    def test_no_tiers_no_failing_totals_and_no_borrowing(self) -> None:
+        with seated_rules(INVENTED_RULES):
+            bodies = [
+                magic_body(heading) for heading in engine.GENERATED_MAGIC_HEADINGS
+            ]
+        self.assertEqual(
+            bodies,
+            [
+                "The attribute alone judges a casting roll: no natural total fails on "
+                "its own, a failed cast keeps its mana, and no cast starts a Runaway.",
+                "A caster without the mana for a spell cannot cast it; there is no "
+                "Borrowing.",
+            ],
+        )

@@ -302,9 +302,10 @@ class GMServiceTest(TestCase):
         its rules files, which nothing may read while modules import: a canon
         missing one must fail ``manage.py check`` (``characters.E001``,
         ``E002``), not crash the URL import. Every cache registered with
-        ``reference.rules_file.derived_from_rules``, and all four rules files'
-        own, must show no miss once the URLs, and the sheet's help tag that
-        no URL imports (issue #68), have loaded. Run out of process: this
+        ``reference.rules_file.derived_from_rules``, and all five rules files'
+        own (the magic rules' since the magic section is built from them,
+        issue #48), must show no miss once the URLs, and the sheet's help tag
+        that no URL imports (issue #68), have loaded. Run out of process: this
         runner has built them already.
         """
         script = (
@@ -318,9 +319,10 @@ class GMServiceTest(TestCase):
             "from characters.skill_rules import skill_rules\n"
             "from characters.equipment_rules import equipment_catalog, "
             "equipment_rules\n"
+            "from battle.magic_rules import magic_rules\n"
             "from reference.rules_file import caches_derived_from_rules\n"
             "for cached in (character_rules, skill_rules, equipment_catalog, "
-            "equipment_rules, *caches_derived_from_rules()):\n"
+            "equipment_rules, magic_rules, *caches_derived_from_rules()):\n"
             "    print(cached.__name__, cached.cache_info().misses)\n"
         )
         completed = subprocess.run(
@@ -338,6 +340,8 @@ class GMServiceTest(TestCase):
         for name in (
             "system_prompt",
             "dm_system_prompt",
+            "section_magic",
+            "magic_rules",
             "planning_rules",
             "_check_words",
             "help_text",

@@ -1185,9 +1185,9 @@ turn asks and the same string for the life of the process, never per request:
 `system_prompt()`, `aide_system_prompt()`, `dm_play_system_prompt()`,
 `dm_system_prompt()`, selected by
 `system_prompts_by_authority_and_mode()[(is_game_master, mode)]`. They are
-built on first use rather than at import because five of the sections and
+built on first use rather than at import because six of the sections and
 the authority addendum state numbers from the loaded canon's rules files
-(issues #68, #70), which no module may read while it imports. The schema
+(issues #68, #70, #48), which no module may read while it imports. The schema
 section is last on purpose so the growing prefix stays cacheable on the Ollama
 side.
 
@@ -1200,6 +1200,7 @@ rules object that holds it, by a cached builder registered with
 | `section_core()` | `skill_rules()`: the attribute and skill checks' dice and naturals, the modifier table. `character_rules()`: the attribute dice and point buy, the height and weight bands, the Fatigue sum (`FatigueRollRules.formula`, the one rendering the sheet uses too) |
 | `section_character_creation()` | `character_rules()`: the attribute, Fatigue and literacy dice, the point buy, the provenance bands, the starting age. `skill_rules()`: each track's label and XP a year, whether weapon skills lead most tracks, the experience ladder |
 | `section_combat()` | `skill_rules()`: the skill and attribute checks' dice. `equipment_catalog()`: each shield's Target Number bonus. `equipment_rules()`: every encumbrance level, its band of STR, its penalty and the gaits it forbids or caps |
+| `section_magic()` | The loaded canon's `gm-prompt/magic.md`, with two subsections built from `magic_rules()` (issue #48): Special Casting Results from `casting_success_tiers` (each tier's naturals, effect bonus and refund) and `casting_failure` (the floor, the totals that spend the mana, the Runaway total); Borrowing from `borrowing` (the debt cap, the Debt Roll's dice, attributes and penalty, its automatic failures, what a failure is, whether refunds pay the Debt first). The file leaves both headings empty; a body under either is refused (`MagicSectionError`) |
 | `section_equipment()` | `equipment_catalog()`: every weapon (damage, STR, class, notes), armour (stops, DEX, tier) and shield; `equipment_rules()`: the gaits each armour's restriction code forbids |
 | `section_plan_schema()` | `skill_rules()`: the tracks it lists and the first one, named in two examples, and the attribute check's dice. `character_rules()`: the attribute, Fatigue and literacy dice |
 | `section_dm_authority()` | `character_rules()`: the attribute dice and the point buy's total and top |
@@ -1917,7 +1918,7 @@ player can read.
 | Who may control a seat | `battle/access.py::decides_for` / `can_control`, `battle/control.py` |
 | A new rules profile | `battle/profiles.py` (`BattleProfile` subclass), `battle/persistence.py::PROFILE_CHOICES`, `battle/viewmodel.py` |
 | What the arena draws | `battle/viewmodel.py` for the payload, `static/js/battle.js` for the drawing, `battle/templates/battle/_arena.html` |
-| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, the `section_*()` builders that state the canon's rules numbers (`section_core()`, `section_character_creation()`, `section_combat()`, `section_equipment()`, `section_plan_schema()`, `section_dm_authority()`; issue #68) and `system_prompt_sections()` |
+| The GM's system prompt | `gm/engine.py` — the `SECTION_*` constants, the `section_*()` builders that state the canon's rules numbers (`section_core()`, `section_character_creation()`, `section_combat()`, `section_magic()`, `section_equipment()`, `section_plan_schema()`, `section_dm_authority()`; issues #68, #48) and `system_prompt_sections()` |
 | Adding a GM action | `gm/turn_engine/policy.py::ACTION_NAMES`, `plan.py::_read_action`, `executor.py::RecordsExecutor.run`, `gm/engine.py::section_plan_schema` |
 | What the model is told about the session | `gm/turn_engine/state.py::state_block` |
 | The two model calls' wording | `gm/turn_engine/messages.py` |

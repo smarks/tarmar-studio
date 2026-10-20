@@ -39,7 +39,7 @@ from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 from tarmar_rules import dex_modifier
 
 from battle.engine import combat_math, engine, hexes
-from battle.magic_rules import magic_rules
+from battle.magic_rules import CASTING_DICE, magic_rules
 from battle.spells import SPELLS
 from reference.markdown_tables import split_table_row
 from reference.paths import PUBLIC_RULES_DIR
@@ -193,7 +193,7 @@ class EngineRollSpecTest(SimpleTestCase):
                 runner.roller = ScriptedRoller([[6, 6, 6]])  # fails; one roll
                 runner.cast_spell(caster)
                 cast = roll_events(events)[0]
-                self.assertEqual(cast["payload"]["specification"], "3d6")
+                self.assertEqual(cast["payload"]["specification"], CASTING_DICE)
                 self.assertEqual(cast["payload"]["purpose"], "casting")
                 self.assertEqual(cast["payload"]["modifier"], 0)
                 self.assertEqual(
