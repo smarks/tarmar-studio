@@ -31,8 +31,11 @@ it.
    The deploy host's `OLLAMA_BASE_URL` names that host rather than an address,
    so a new DHCP lease needs no `.env` edit and no unit restart.
 3. Runs `manage.py warm_gm` on the deploy host over ssh when the GM model is not
-   in `/api/ps`. The warm-up logic stays in the management command; this script
-   only decides when to call it.
+   in `/api/ps`. The model's name is whatever the app's `settings.GM_MODEL`
+   says on the deploy host, so a `.env` with no `GM_MODEL` line (the app's
+   default is the production model) still warms the right one. The warm-up
+   logic stays in the management command; this script only decides when to
+   call it.
 
 It is a no-op when the address is unchanged and the model is resident.
 

@@ -23,7 +23,7 @@ character pipeline, the battle lifecycle and the GM's turn engine, with diagrams
   ollama_client.py`, httpx) and the offline CLI (`cli/`), which speak to Ollama
   through that same client.
   Both send the prompt `gm.engine.system_prompt_for` chooses as the system
-  message to the model named by `GM_MODEL` (default `qwen3:32b`), with
+  message to the model named by `GM_MODEL` (default `qwen3.6:27b-mlx`), with
   `GM_NUM_CTX`/`GM_TEMPERATURE` as options and `think: false` — see
   `gm/model_config.py`. There is no custom model or Modelfile.
 - **Rules content lives in two places:** `reference/content/` (markdown served

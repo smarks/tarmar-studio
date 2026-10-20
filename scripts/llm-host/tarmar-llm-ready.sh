@@ -123,10 +123,35 @@ echo "hosts entry set ${NAME} -> ${ADDRESS} (was '${current:-unset}')"
 REMOTE
 }
 
-games_master_model_name() {
+# Run "manage.py <arguments>" in the deploy host's checkout over ssh, with the
+# same PATH and database as the app. The one place that command prefix is
+# written; the arguments arrive as a single string for the remote shell.
+run_manage_py_on_deploy_host() {
     ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST_SSH" \
-        "awk -F= '/^GM_MODEL=/ { print \$2 }' ${DEPLOY_HOST_CHECKOUT}/.env" 2>/dev/null \
-        | tr -d '"'"'"' \r\n'
+        "export PATH=${DEPLOY_HOST_UV_PATH}:\$PATH; cd ${DEPLOY_HOST_CHECKOUT} && DATABASE_URL='${DEPLOY_HOST_DATABASE_URL}' uv run python manage.py $1"
+}
+
+# Ask the app which model it will use, rather than reading GM_MODEL out of the
+# deploy host's .env: that line is optional now that the app's default is the
+# model production runs (issue #65), and a script that required it would skip
+# the warm-up for good the day someone deleted it. settings.GM_MODEL is what
+# warm_gm and every Games Master turn use, with the .env loaded and the default
+# applied when it is silent, so there is one answer. A banner or warning ahead
+# of it on stdout cannot matter: only the last line is the name. A failing
+# command (host unreachable, a traceback) is never read as a name, however much
+# it printed first; the reason goes to stderr, which main's caller does not
+# capture, so the log says why and not only that.
+games_master_model_name() {
+    local stderr_file output status=0
+    stderr_file="$(mktemp)"
+    output="$(run_manage_py_on_deploy_host "shell -c 'from django.conf import settings; print(settings.GM_MODEL)'" 2>"$stderr_file")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        log "reading the Games Master model failed (exit ${status}): $(tail -n 1 "$stderr_file")" >&2
+        rm -f "$stderr_file"
+        return 1
+    fi
+    rm -f "$stderr_file"
+    printf '%s' "$output" | tail -n 1 | tr -d '\r\n'
 }
 
 model_is_resident() {
@@ -136,8 +161,7 @@ model_is_resident() {
 }
 
 warm_games_master() {
-    ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST_SSH" \
-        "export PATH=${DEPLOY_HOST_UV_PATH}:\$PATH; cd ${DEPLOY_HOST_CHECKOUT} && DATABASE_URL='${DEPLOY_HOST_DATABASE_URL}' uv run python manage.py warm_gm" 2>&1
+    run_manage_py_on_deploy_host warm_gm 2>&1
 }
 
 main() {
@@ -160,9 +184,9 @@ main() {
     fi
 
     local model_name
-    model_name="$(games_master_model_name)"
+    model_name="$(games_master_model_name)" || model_name=""
     if [ -z "$model_name" ]; then
-        log "could not read GM_MODEL from the deploy host; skipping warm-up"
+        log "could not read the Games Master model from the deploy host; skipping warm-up"
         exit 1
     fi
 
