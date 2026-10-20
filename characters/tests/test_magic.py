@@ -22,6 +22,7 @@ from characters.magic import (
     learn_spell,
 )
 from characters.models import Character, validate_spells
+from characters.rules import character_rules
 from characters.services import CharacterChangeError
 from common.test_helpers import CHARACTER_DEFAULTS, BaseTestCase, create_character
 
@@ -308,8 +309,13 @@ class ImportHoldsCoinAndGearTest(BaseTestCase):
                 imported = held_to_player(
                     validate_import_payload(file), is_game_master=False
                 )
-                self.assertEqual(imported.fields["wealth_level"], "Moderate")
-                self.assertEqual(imported.fields["starting_coin"], 100)
+                self.assertEqual(
+                    imported.fields["wealth_level"], character_rules().defaults.wealth
+                )
+                self.assertEqual(
+                    imported.fields["starting_coin"],
+                    character_rules().default_starting_coin,
+                )
                 self.assertFalse(imported.fields["wealth_recorded"])
                 self.assertEqual(imported.fields["dice_log"], "")
 

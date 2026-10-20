@@ -88,7 +88,7 @@ partial and kept as they were, since the specs find those lines by them.
 
     <dl class="gm-sheet-facts">
         {# What nobody rolled is marked (issue #754), read off the record's flags. #}
-        <div><dt>Background</dt><dd class="gm-draft-background">{{ sheet.provenance_class|title }} &mdash; {{ sheet.provenance_detail }}{% if not sheet.provenance_recorded %} (not rolled){% endif %}, {{ sheet.location }}{% if not sheet.location_recorded %} (not rolled){% endif %}</dd></div>
+        <div><dt>Background</dt><dd class="gm-draft-background">{{ sheet.provenance_class }} &mdash; {{ sheet.provenance_detail }}{% if not sheet.provenance_recorded %} (not rolled){% endif %}, {{ sheet.location }}{% if not sheet.location_recorded %} (not rolled){% endif %}</dd></div>
         {# Right after Background, as on the sheet (review of #848). #}
         <div><dt>Literacy</dt><dd{% if ledger and first %} id="gm-draft-literacy"{% endif %}>{{ sheet.literacy }}</dd></div>
         <div><dt>Wealth</dt><dd class="gm-draft-wealth">{{ sheet.wealth_level }}, {{ sheet.starting_coin|default_if_none:"Consult GM for" }} coin{% if not sheet.wealth_recorded %} (not rolled){% endif %}{% if sheet.money_earned %} + {{ sheet.money_earned }} earned{% endif %}</dd></div>

@@ -8,6 +8,7 @@ public character pages state is the drift tests' business
 values are its own ``tests/expectations.json``'s.
 """
 
+import dataclasses
 import json
 import os
 import shutil
@@ -37,6 +38,7 @@ from characters.rules import (
     LocationTable,
     PointBuyRules,
     RollTable,
+    TableDefaults,
     TableRow,
     WealthRow,
     WealthTable,
@@ -106,6 +108,12 @@ INVENTED_RULES: dict[str, Any] = {
         {"up_to": 90, "label": "Comfortable", "coin": {"base": 50, "dice": "2d6"}},
         {"up_to": 100, "label": "Wealthy", "coin": None},
     ],
+    "defaults": {
+        "social_class": "commoner",
+        "provenance_detail": "Farmer",
+        "location": "Port",
+        "wealth": "Poor",
+    },
     "rulings": [{"key": "invented", "reading": "Invented for the test."}],
 }
 
@@ -149,6 +157,12 @@ INVENTED_CHARACTER_RULES = CharacterRules(
             WealthRow(90, "Comfortable", CoinRoll(base=50, dice="2d6")),
             WealthRow(100, "Wealthy", None),
         )
+    ),
+    defaults=TableDefaults(
+        social_class="commoner",
+        provenance_detail="Farmer",
+        location="Port",
+        wealth="Poor",
     ),
 )
 
@@ -213,6 +227,7 @@ def rules_summary(rules: CharacterRules) -> dict[str, Any]:
             for row in rules.location.rows
         },
         "wealth_coin": {row.label: coin(row.coin) for row in rules.wealth.rows},
+        "defaults": dataclasses.asdict(rules.defaults),
     }
 
 
@@ -286,6 +301,12 @@ class CharacterRulesFileTest(SimpleTestCase):
         )
         self.assert_changed_refused(
             lambda rules: rules.pop("wealth"), "wealth is missing"
+        )
+        self.assert_changed_refused(
+            lambda rules: rules.pop("defaults"), "defaults is missing"
+        )
+        self.assert_changed_refused(
+            lambda rules: rules["defaults"].pop("wealth"), "defaults.wealth is missing"
         )
 
     def test_an_unknown_key_is_refused(self) -> None:
@@ -503,7 +524,7 @@ class CharacterRulesFileTest(SimpleTestCase):
             ),
             (
                 lambda rules: rules["social_class"][0].update(label="gentry"),
-                "social_class:",
+                "social_class labels",
                 "must be the detail tables",
             ),
         )
@@ -511,9 +532,47 @@ class CharacterRulesFileTest(SimpleTestCase):
             with self.subTest(field_path=field_path, problem=problem):
                 self.assert_changed_refused(change, field_path, problem)
 
+    def test_a_default_naming_no_row_is_refused(self) -> None:
+        """Each default names a row of its table; the detail default a row of
+        the table the social-class default names (issue #66)."""
+        cases: tuple[tuple[str, str, str], ...] = (
+            ("social_class", "gentry", "['nobility', 'merchant', 'commoner']"),
+            ("provenance_detail", "Lord", "names no row of commoner; its rows are"),
+            ("location", "Village", "['Port', 'Ask the GM']"),
+            ("wealth", "Moderate", "['Poor', 'Comfortable', 'Wealthy']"),
+        )
+        for name, label, rows in cases:
+            with self.subTest(name=name):
+                self.assert_changed_refused(
+                    lambda rules: rules["defaults"].update({name: label}),
+                    f"defaults.{name} {label!r} names no row",
+                    rows,
+                )
+        # A detail default is read against the table the class default names.
+        rules = invented_rules()
+        rules["defaults"].update(social_class="nobility", provenance_detail="Lord")
+        self.assertEqual(self.load(rules).defaults.provenance_detail, "Lord")
+
 
 class CharacterRulesValuesTest(SimpleTestCase):
     """What the loaded rules derive and look up."""
+
+    def test_the_default_starting_coin_is_the_default_wealth_rows_fixed_coin(
+        self,
+    ) -> None:
+        """A fixed coin is the draft's; rolled or the Game Master's is None
+        (issues #68, #66)."""
+        self.assertEqual(INVENTED_CHARACTER_RULES.default_wealth_row.label, "Poor")
+        self.assertEqual(INVENTED_CHARACTER_RULES.default_starting_coin, 5)
+        for level in ("Comfortable", "Wealthy"):
+            with self.subTest(level=level):
+                rules = dataclasses.replace(
+                    INVENTED_CHARACTER_RULES,
+                    defaults=dataclasses.replace(
+                        INVENTED_CHARACTER_RULES.defaults, wealth=level
+                    ),
+                )
+                self.assertIsNone(rules.default_starting_coin)
 
     def test_a_roll_s_range_comes_from_its_dice(self) -> None:
         fatigue_roll = INVENTED_CHARACTER_RULES.fatigue_roll

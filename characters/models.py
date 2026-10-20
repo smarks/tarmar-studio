@@ -18,7 +18,6 @@ from .constants import (
     CHARACTER_ATTRIBUTE_FIELDS,
     CHARACTER_NAME_PATTERN,
     CORE_ATTRIBUTE_FIELDS,
-    DEFAULT_WEALTH_LEVEL,
     MAX_CHARACTER_NAME_LENGTH,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_SKILL_NAME_LENGTH,
@@ -33,6 +32,7 @@ from .dice import (
     format_height,
     location_literacy_modifier,
     parse_dice_expression,
+    wealth_gives_coin,
 )
 from .equipment import (
     combine_movement_restrictions,
@@ -47,7 +47,7 @@ from .equipment import (
 from .equipment_rules import equipment_rules
 from .movement import compute_gaits
 from .movement import movement_modifier as _movement_modifier
-from .rules import character_rules, scores_by_short_name
+from .rules import character_rules, scores_by_short_name, social_class_display
 from .skill_rules import skill_rules
 from .skills import skill_name_refusal, specialised_skill_for_granted
 from .weapon_skill import weapon_skill_for_granted
@@ -185,6 +185,37 @@ def validate_starting_age(value: int) -> None:
             f"Every character starts at {starting}, so the age must be at least "
             f"{starting}; {value} was given"
         )
+
+
+def default_social_class() -> str:
+    """The social class a character holds until provenance is rolled or set:
+    the canon's ``defaults.social_class`` (issue #66)."""
+    return character_rules().defaults.social_class
+
+
+def default_provenance_detail() -> str:
+    """The provenance detail a character holds until it is rolled or set: the
+    canon's ``defaults.provenance_detail`` (issue #66)."""
+    return character_rules().defaults.provenance_detail
+
+
+def default_location() -> str:
+    """The Origin a character holds until it is rolled or chosen: the canon's
+    ``defaults.location`` (issue #66)."""
+    return character_rules().defaults.location
+
+
+def default_wealth_level() -> str:
+    """The wealth level a character holds until it is rolled or set: the
+    canon's ``defaults.wealth`` (issue #66)."""
+    return character_rules().defaults.wealth
+
+
+def default_starting_coin() -> int | None:
+    """The coin a character starts with until wealth is rolled or set: the
+    default wealth row's fixed coin, or ``None`` where that row's coin is
+    rolled or the Game Master's (issues #68, #66)."""
+    return character_rules().default_starting_coin
 
 
 # Validators for character attributes: at least 1, at most the canon's
@@ -628,18 +659,16 @@ class Character(models.Model):
         null=True, validators=[validate_fatigue_roll]
     )
 
-    # Provenance (social class)
-    PROVENANCE_CLASSES = [
-        ("nobility", "Nobility"),
-        ("merchant", "Merchant"),
-        ("commoner", "Commoner"),
-    ]
-    provenance_class = models.CharField(
-        max_length=20, choices=PROVENANCE_CLASSES, default="commoner"
-    )
+    # Provenance (social class): a label of the canon's social_class table,
+    # held to it by clean_field_value (character_field_options); the default
+    # is the canon's defaults.social_class (issue #66). No field here carries
+    # choices: a choices list would write the canon's labels into the schema.
+    provenance_class = models.CharField(max_length=20, default=default_social_class)
     # Free text on the sheet, so a player may clear it: blank=True for the
     # same reason as the roll fields above (issue #637).
-    provenance_detail = models.CharField(max_length=50, blank=True, default="Laborer")
+    provenance_detail = models.CharField(
+        max_length=50, blank=True, default=default_provenance_detail
+    )
     # Whether the provenance is on the record: rolled on the table, or set by a
     # Game Master (issue #749). A player rolls it once and may not choose it
     # (Spencer's ruling, 2026-09-28); the roll control and the field-update
@@ -648,21 +677,13 @@ class Character(models.Model):
     # started in a Games Master session) is created with it False.
     provenance_recorded = models.BooleanField(default=True, db_default=True)
 
-    # Location
-    LOCATION_CHOICES = [
-        ("City", "City"),
-        ("Village", "Village"),
-        ("Rural", "Rural"),
-        ("Consult GM", "Consult GM"),
-    ]
-    location = models.CharField(
-        max_length=20, choices=LOCATION_CHOICES, default="Village"
-    )
+    # Location: a label of the canon's location table (issue #66), as above.
+    location = models.CharField(max_length=20, default=default_location)
     # Whether the Origin is on the record: rolled on the table, or chosen
     # (location.md: "Roll percentile dice or choose") (issue #754). A character
-    # nobody rolled or chose an Origin for holds the model's Village, with no
-    # skill granted for it; the chat's roll_background rolls it. Same default
-    # as provenance_recorded, for the same reason.
+    # nobody rolled or chose an Origin for holds the canon's default origin,
+    # with no skill granted for it; the chat's roll_background rolls it. Same
+    # default as provenance_recorded, for the same reason.
     location_recorded = models.BooleanField(default=True, db_default=True)
     # The skill holding the one point the Origin grants (location.md: "City:
     # Street smarts ... Village: Street smarts OR survival ... Rural:
@@ -737,20 +758,14 @@ class Character(models.Model):
     # exported: it is about this copy's arrival, not about the character.
     import_notice = models.TextField(blank=True, default="", db_default="")
 
-    # Wealth
-    WEALTH_CHOICES = [
-        ("Subsistence", "Subsistence"),
-        ("Moderate", "Moderate"),
-        ("Merchant", "Merchant"),
-        ("Rich", "Rich"),
-    ]
-    wealth_level = models.CharField(
-        max_length=20, choices=WEALTH_CHOICES, default=DEFAULT_WEALTH_LEVEL
-    )
+    # Wealth: a label of the canon's wealth table (issue #66), as above.
+    wealth_level = models.CharField(max_length=20, default=default_wealth_level)
     # Null when the wealth table gives no number: Rich is "Consult GM"
     # (wealth.md), so its coin waits for a Game Master to set it rather than
-    # reading as 0 (issue #749).
-    starting_coin = models.PositiveIntegerField(null=True, blank=True, default=100)
+    # reading as 0 (issue #749). The default is the default wealth row's coin.
+    starting_coin = models.PositiveIntegerField(
+        null=True, blank=True, default=default_starting_coin
+    )
     # Whether the wealth level is on the record, rolled or set by a Game
     # Master (issue #749). The coin is rolled once, when the level is first
     # recorded; re-selecting a level never rolls it again. Same default as
@@ -1132,8 +1147,8 @@ class Character(models.Model):
             if refusal:
                 raise ValidationError(refusal)
 
-        if field in CHARACTER_CHOICE_FIELDS:
-            valid_values = CHARACTER_CHOICE_FIELDS[field]
+        valid_values = character_field_options(field)
+        if valid_values is not None:
             # A list is unhashable, so ``in`` a dict raised TypeError (#767).
             if not isinstance(value, str) or value not in valid_values:
                 options = ", ".join(valid_values)
@@ -1614,6 +1629,17 @@ class Character(models.Model):
         return location_literacy_modifier(self.location)
 
     @property
+    def origin_defers_to_game_master(self) -> bool:
+        """Whether the rules leave this origin to the Game Master: the row with
+        no literacy check (``literacy_modifier`` null; "Consult GM" on the
+        public pages), where he rules on literacy (#743) and may say what the
+        origin is (#801). The one reading of that row, so no code names it by
+        its label (issue #66); an origin the table does not have reads the
+        same way, since the rules publish nothing for it either.
+        """
+        return self.location_literacy_modifier is None
+
+    @property
     def location_literacy_check(self):
         """The literacy check as the sheet prints it, e.g. "3d6 ≤ INT − 2".
 
@@ -1677,7 +1703,7 @@ class Character(models.Model):
             None until the roll is made, and while the threshold is unknown;
             at "Consult GM", None until the Game Master rules.
         """
-        if self.location_literacy_modifier is None:
+        if self.origin_defers_to_game_master:
             return self.literacy_ruling
         threshold = self.literacy_threshold
         if self.literacy_roll is None or threshold is None:
@@ -1698,14 +1724,14 @@ class Character(models.Model):
         Master's ruling)" (#743). The one rendering: the editor's repaint sets
         this text as the server sends it.
         """
-        if self.location_literacy_modifier is None and self.literacy_ruling is not None:
+        if self.origin_defers_to_game_master and self.literacy_ruling is not None:
             outcome = "Literate" if self.literacy_ruling else "Illiterate"
             return f"{outcome} (Game Master's ruling)"
         if self.literacy_roll is None:
             # Rolled once, then cleared by a Game Master's move to "Consult
             # GM", which publishes no check (#741). Anywhere else a missing
             # roll reads as not rolled, though the flag still holds the lock.
-            if self.literacy_rolled and self.location_literacy_modifier is None:
+            if self.literacy_rolled and self.origin_defers_to_game_master:
                 return "Roll cleared; the Game Master decides"
             return "Not rolled"
         modifier = self.location_literacy_modifier
@@ -1739,9 +1765,10 @@ class Character(models.Model):
             if self.starting_coin is None
             else f"{self.starting_coin} starting coin"
         )
-        # wealth.md's Rich row is "Consult GM", and only a Game Master sets
-        # the coin (FIELD_RULES), so a Rich character's figure is his (#801).
-        if self.wealth_level == "Rich" and self.starting_coin is not None:
+        # A level the table gives no coin (wealth.md's Rich row is "Consult
+        # GM") has only a Game Master to set it (FIELD_RULES), so its figure
+        # is his (#801).
+        if not wealth_gives_coin(self.wealth_level) and self.starting_coin is not None:
             coin = f"{coin} (Game Master's figure)"
         origin = f"origin {self.location}"
         if self.origin_ruling:
@@ -1749,7 +1776,7 @@ class Character(models.Model):
         parts = (
             (origin, self.location_recorded),
             (
-                f"provenance {self.get_provenance_class_display()} "
+                f"provenance {social_class_display(self.provenance_class)} "
                 f"({self.provenance_detail})",
                 self.provenance_recorded,
             ),
@@ -2494,15 +2521,48 @@ CHARACTER_STRING_MAX_LENGTHS: dict[str, int] = {
         "people",
     )
 }
-# Fields restricted to the model's declared choices. Values pulled from the
-# model itself (rather than duplicated here) so the two can't drift.
-CHARACTER_CHOICE_FIELDS = {
-    "provenance_class": dict(Character.PROVENANCE_CLASSES),
-    "location": dict(Character.LOCATION_CHOICES),
-    "wealth_level": dict(Character.WEALTH_CHOICES),
+# The fields that hold a row of a canon table, by the table in
+# ``CharacterRules`` whose labels they may hold (issue #66). provenance_detail
+# holds a row of whichever detail table the social class names, so it is not
+# here; the system check that the labels fit the columns reads all four.
+CHARACTER_TABLE_FIELDS: dict[str, str] = {
+    "provenance_class": "social_class",
+    "location": "location",
+    "wealth_level": "wealth",
+}
+# Fields restricted to options of the model's own, which no canon changes.
+CHARACTER_CHOICE_FIELDS: dict[str, dict[str, str]] = {
     "people": dict(Character.PEOPLES),
     "is_dragonborn": {"False": "No", "True": "Yes"},
 }
+
+
+def character_field_options(field: str) -> dict[str, str] | None:
+    """The values ``field`` may hold, each with the label the sheet shows.
+
+    The one statement of a restricted field's options: ``clean_field_value``
+    refuses anything else, the sheet's select lists them, and the Games
+    Master's executor spells a stated value as one of them. The table fields
+    (:data:`CHARACTER_TABLE_FIELDS`) take the loaded canon's rows, so a canon
+    that renames a row renames the option everywhere (issue #66); the
+    model's own fields take :data:`CHARACTER_CHOICE_FIELDS`.
+
+    Args:
+        field: A ``Character`` field name.
+
+    Returns:
+        Stored value to shown label, or ``None`` for a field not restricted
+        to a set of values.
+    """
+    table_name = CHARACTER_TABLE_FIELDS.get(field)
+    if table_name is None:
+        return CHARACTER_CHOICE_FIELDS.get(field)
+    labels = getattr(character_rules(), table_name).labels
+    if field == "provenance_class":
+        return {label: social_class_display(label) for label in labels}
+    return {label: label for label in labels}
+
+
 # Yes-or-no fields, coerced from the strings and booleans a request or an
 # import carries (#810).
 CHARACTER_BOOLEAN_FIELDS = {"is_dragonborn"}

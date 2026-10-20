@@ -10,6 +10,7 @@ from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, CHARACTER_EXPORT_FO
 from characters.equipment import format_pounds
 from characters.magic import known_spells
 from characters.purse import format_purse
+from characters.rules import social_class_display
 from characters.skills import track_label
 from characters.templatetags.dice_display import survival_roll
 
@@ -303,7 +304,9 @@ def generate_character_markdown(character) -> str:
     # Background
     lines.append("## Background")
     lines.append("")
-    lines.append(f"- **Provenance Class:** {character.provenance_class.title()}")
+    lines.append(
+        f"- **Provenance Class:** {social_class_display(character.provenance_class)}"
+    )
     lines.append(f"- **Provenance Detail:** {character.provenance_detail}")
     lines.append(f"- **Location:** {character.location}")
     lines.append(f"- **Literacy:** {character.literacy_summary}")

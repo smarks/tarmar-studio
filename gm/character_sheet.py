@@ -18,6 +18,7 @@ from characters.constants import CORE_ATTRIBUTE_FIELDS
 from characters.magic import known_spells
 from characters.models import Character, mana_owed_text
 from characters.purse import format_purse
+from characters.rules import social_class_display
 from characters.skills import calculate_attribute_modifier, format_skill_level
 
 #: Each core attribute as (label, base field, effective score property), in
@@ -105,6 +106,7 @@ class CharacterSheet:
     # The background, and whether each part of it was rolled or set (issues
     # #754, #848): the chat-built character's pane has always marked what
     # nobody rolled, and one sheet now shows it for every character.
+    #: As the panel prints it (``characters.rules.social_class_display``).
     provenance_class: str
     provenance_detail: str
     location: str
@@ -213,7 +215,7 @@ class CharacterSheet:
             # Whether the character can read, which the Games Master should
             # know (issue #741): the origin's check and the stored roll.
             literacy=character.literacy_summary,
-            provenance_class=character.provenance_class,
+            provenance_class=social_class_display(character.provenance_class),
             provenance_detail=character.provenance_detail,
             location=character.location,
             provenance_recorded=character.provenance_recorded,

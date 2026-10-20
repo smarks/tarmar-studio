@@ -22,9 +22,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, DEFAULT_WEALTH_LEVEL
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import Character
-from characters.rules import CharacterRules, character_rules
+from characters.rules import character_rules
 from characters.skills import (
     calculate_attribute_modifier,
     calculate_skill_points_from_xp,
@@ -87,23 +87,6 @@ ATTRIBUTE_FIELDS: tuple[tuple[str, str], ...] = tuple(
 )
 
 
-def _default_starting_coin(rules: CharacterRules) -> int | None:
-    """The coin a draft starts with: the canon's for the default wealth level.
-
-    Its fixed coin when the canon gives one; ``None`` (the Game Master's to
-    set, as for Rich) when the level's coin is rolled, the Game Master's, or
-    the canon has no such level, rather than a number the canon never gave
-    (issue #68).
-
-    Args:
-        rules: The loaded canon's creation rules.
-    """
-    row = rules.wealth.row_labelled(DEFAULT_WEALTH_LEVEL)
-    if row is not None and isinstance(row.coin, int):
-        return row.coin
-    return None
-
-
 def draft_defaults() -> dict[str, Any]:
     """What an empty draft holds before the player has decided anything.
 
@@ -111,18 +94,19 @@ def draft_defaults() -> dict[str, Any]:
     Fatigue roll have no default on the model and stay ``None`` until rolled,
     which is what lets the ledger say "not set yet" instead of inventing a
     number. The age is the loaded canon's starting age (issue #59), and the
-    starting coin the canon's coin for :data:`DEFAULT_WEALTH_LEVEL` (issue
-    #68), both read when asked, so this is a function rather than a module
-    constant.
+    background and starting coin the rows the canon's ``defaults`` block
+    names and the default wealth row's coin (issues #68, #66), all read when
+    asked, so this is a function rather than a module constant.
     """
     rules = character_rules()
+    defaults = rules.defaults
     return {
         "name": "",
         **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS),
         "fatigue_roll": None,
-        "provenance_class": "commoner",
-        "provenance_detail": "Laborer",
-        "location": "Village",
+        "provenance_class": defaults.social_class,
+        "provenance_detail": defaults.provenance_detail,
+        "location": defaults.location,
         "provenance_recorded": True,
         "location_recorded": True,
         "wealth_recorded": True,
@@ -130,8 +114,8 @@ def draft_defaults() -> dict[str, Any]:
         "literacy_roll": None,
         "literacy_rolled": False,
         "literacy_ruling": None,
-        "wealth_level": DEFAULT_WEALTH_LEVEL,
-        "starting_coin": _default_starting_coin(rules),
+        "wealth_level": defaults.wealth,
+        "starting_coin": rules.default_starting_coin,
         "skills": {},
         "free_skill_points": 0,
         "free_spell_points": 0,

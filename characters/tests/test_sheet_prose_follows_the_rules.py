@@ -15,7 +15,7 @@ from django.test import SimpleTestCase
 
 from characters import services
 from characters.help_text import help_text
-from characters.rules import CoinRoll, character_rules
+from characters.rules import character_rules
 from characters.skill_rules import SkillCostRules
 from characters.skills import aging_escalation_note
 from characters.tests.rules_fixtures import (
@@ -164,7 +164,9 @@ class DefaultCanonTextTest(SimpleTestCase):
             survival_naturals_note(),
             "Triple ones always kill; triple sixes always survive.",
         )
-        self.assertEqual(draft_defaults()["starting_coin"], 100)
+        self.assertEqual(
+            draft_defaults()["starting_coin"], character_rules().default_starting_coin
+        )
 
     def test_a_survival_total_off_the_dices_ends_is_said_as_its_number(self) -> None:
         off_end = replace(
@@ -288,23 +290,21 @@ class InventedRulesTest(SimpleTestCase):
             "five years, plus -1 to INT/WIS every 15).",
         )
 
-    def test_the_schema_names_no_default_coin_the_canon_lacks(self) -> None:
-        """The invented wealth table has no Moderate level to default to."""
-        self.assertEqual(starting_coin_description(), "Coin the character starts with")
-        with_moderate = replace(
-            INVENTED_CHARACTER_RULES,
-            wealth=replace(
-                INVENTED_CHARACTER_RULES.wealth,
-                rows=(
-                    replace(INVENTED_CHARACTER_RULES.wealth.rows[0], label="Moderate"),
-                    *INVENTED_CHARACTER_RULES.wealth.rows[1:],
-                ),
-            ),
+    def test_the_schema_names_the_canons_default_wealth_row(self) -> None:
+        """The coin the schema names is the default wealth row's, by its own
+        label (issues #68, #66)."""
+        self.assertEqual(
+            starting_coin_description(),
+            "Coin the character starts with (5 for Poor if unrolled)",
         )
-        with seated_character_rules(with_moderate):
+        with_rolled_default = replace(
+            INVENTED_CHARACTER_RULES,
+            defaults=replace(INVENTED_CHARACTER_RULES.defaults, wealth="Comfortable"),
+        )
+        with seated_character_rules(with_rolled_default):
             self.assertEqual(
                 starting_coin_description(),
-                "Coin the character starts with (5 for Moderate if unrolled)",
+                "Coin the character starts with (50 + 2d6 for Comfortable if unrolled)",
             )
 
     def test_the_ledger_names_the_fatigue_dice(self) -> None:
@@ -319,18 +319,16 @@ class InventedRulesTest(SimpleTestCase):
         )
 
     def test_a_drafts_coin_is_the_default_levels_fixed_coin(self) -> None:
-        # The invented wealth table has no Moderate level: no coin to assume.
-        self.assertIsNone(draft_defaults()["starting_coin"])
-        rows = INVENTED_CHARACTER_RULES.wealth.rows
-        for coin, expected in ((7, 7), (CoinRoll(base=50, dice="2d6"), None)):
-            moderate = replace(
+        """The default wealth row's fixed coin; none when its coin is rolled or
+        the Game Master's (issues #68, #66)."""
+        self.assertEqual(draft_defaults()["starting_coin"], 5)
+        for level, expected in (("Comfortable", None), ("Wealthy", None)):
+            rules = replace(
                 INVENTED_CHARACTER_RULES,
-                wealth=replace(
-                    INVENTED_CHARACTER_RULES.wealth,
-                    rows=(replace(rows[0], label="Moderate", coin=coin), *rows[1:]),
-                ),
+                defaults=replace(INVENTED_CHARACTER_RULES.defaults, wealth=level),
             )
-            with self.subTest(coin=coin), seated_character_rules(moderate):
+            with self.subTest(level=level), seated_character_rules(rules):
+                self.assertEqual(draft_defaults()["wealth_level"], level)
                 self.assertEqual(draft_defaults()["starting_coin"], expected)
 
 
@@ -342,6 +340,19 @@ class SheetPagesTest(BaseTestCase):
         self.enterContext(seated_character_rules(INVENTED_CHARACTER_RULES))
         self.player = self.create_user("prose-player")
         self.login_as(self.player)
+
+    def test_the_sheets_origin_select_lists_the_canons_rows(self) -> None:
+        """The Origin select offers the loaded canon's rows, the character's
+        default origin selected (issue #66)."""
+        character = create_character(self.player)
+        self.assertEqual(character.location, "Port")
+        body = self.client.get(f"/tarmar/characters/{character.pk}/").content.decode()
+        self.assertIn(
+            '<option value="Port" selected>Port</option>'
+            '<option value="Ask the GM">Ask the GM</option>',
+            body,
+        )
+        self.assertNotIn('<option value="Village"', body)
 
     def test_the_creation_page_rolls_the_canons_dice(self) -> None:
         body = self.client.get("/tarmar/characters/create/").content.decode()

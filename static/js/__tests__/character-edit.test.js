@@ -142,6 +142,7 @@ function pageHtml(config) {
             </select>
         </div>
         <span class="formula" id="origin-fixed-note" hidden>The Origin is fixed once literacy is rolled; only a Game Master can change it.</span>
+        <table><tbody><tr id="origin-ruling-row" hidden><td><div class="editable-field" data-field="origin_ruling"><input type="text" value="" class="autosave"></div></td></tr></tbody></table>
         <span id="literacy-check">3d6 ≤ INT − 2</span>
         <span id="literacy-result">Not rolled</span>
         <button type="button" id="roll-literacy-btn">Roll literacy (3d6)</button>
@@ -2838,6 +2839,27 @@ describe('the literacy row (#740, #741)', () => {
 
         await chooseOrigin('Rural');
         expect(document.getElementById('roll-literacy-btn').hidden).toBe(false);
+    });
+
+    test('the ruling row follows the server\'s word on which origin has no check (#801, #66)', async () => {
+        // The page never names the origin: the response's null modifier says
+        // the rules leave this one to the Game Master. So an origin of another
+        // canon's name shows the row when the server says it has no check, and
+        // "Consult GM" hides it when the server gives it one.
+        await loadPage();
+        document.querySelector('[data-field="location"] select').add(new Option('Ask the GM'));
+        routeFetch([
+            jsonResponse({ success: true, ...consultGm() }),
+            jsonResponse({ success: true, ...literacy() }),
+        ]);
+        const rulingRow = document.getElementById('origin-ruling-row');
+        expect(rulingRow.hidden).toBe(true);
+
+        await chooseOrigin('Ask the GM');
+        expect(rulingRow.hidden).toBe(false);
+
+        await chooseOrigin('Consult GM');
+        expect(rulingRow.hidden).toBe(true);
     });
 
     test('a refused Origin says why beside the select and puts it back', async () => {

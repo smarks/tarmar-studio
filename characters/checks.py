@@ -13,17 +13,19 @@ error in the middle of whichever of those came first. Checked here, it fails
 checks) before anyone builds a character.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 from django.apps import AppConfig
 from django.core.checks import CheckMessage, Error, register
 
+from common.helpers import column_length
 from reference.paths import (
     CANON_CHARACTER_RULES_FILE_NAME,
     CANON_EQUIPMENT_CATALOG_FILE_NAME,
     CANON_EQUIPMENT_RULES_FILE_NAME,
     CANON_SKILL_RULES_FILE_NAME,
+    CHARACTER_RULES_FILE,
     EQUIPMENT_CATALOG_FILE,
     EQUIPMENT_RULES_FILE,
     SKILL_RULES_FILE,
@@ -39,7 +41,13 @@ from .equipment_rules import (
     validate_armour_restriction_codes,
     validate_missile_classes,
 )
-from .rules import CharacterRulesError, character_rules
+from .models import CHARACTER_TABLE_FIELDS, Character
+from .rules import (
+    SOCIAL_CLASS_DETAIL_TABLES,
+    CharacterRules,
+    CharacterRulesError,
+    character_rules,
+)
 from .skill_rules import SkillRulesError, skill_rules
 from .skills import validate_skill_names
 
@@ -51,6 +59,9 @@ SKILL_RULES_CHECK_ID = "characters.E002"
 EQUIPMENT_CATALOG_CHECK_ID = "characters.E003"
 #: The check id a refused ``equipment-rules.json`` reports under.
 EQUIPMENT_RULES_CHECK_ID = "characters.E004"
+#: The check id a canon table label too long for its ``Character`` column
+#: reports under (issue #66).
+CHARACTER_LABEL_COLUMNS_CHECK_ID = "characters.E005"
 
 
 def _rules_file_refusals(
@@ -256,3 +267,54 @@ def check_equipment_rules(
         "characters/equipment_rules.py",
         EQUIPMENT_RULES_CHECK_ID,
     )
+
+
+def _storable_labels(rules: CharacterRules) -> Iterator[tuple[str, str, str]]:
+    """Each label a ``Character`` column may have to hold, with its field and
+    table: the table fields' rows and, for ``provenance_detail``, every detail
+    table's rows."""
+    for field_name, table_name in CHARACTER_TABLE_FIELDS.items():
+        for label in getattr(rules, table_name).labels:
+            yield field_name, table_name, label
+    for table_name in SOCIAL_CLASS_DETAIL_TABLES:
+        for label in rules.detail_table(table_name).labels:
+            yield "provenance_detail", table_name, label
+
+
+@register()
+def check_character_labels_fit_their_columns(
+    app_configs: Sequence[AppConfig] | None = None, **kwargs: Any
+) -> list[CheckMessage]:
+    """Every canon table label a character may hold fits its column (issue #66).
+
+    The background fields hold the canon's row labels with no ``choices``
+    of their own, so a label longer than the column would be refused only on
+    the first save that reached it. A canon whose rules do not load is
+    ``characters.E001``'s to report.
+
+    Args:
+        app_configs: The apps being checked, or ``None`` for all; the canon
+            belongs to no one app, so it is checked whichever are named.
+        **kwargs: Django's other check arguments, unused.
+
+    Returns:
+        One :class:`Error` per label too long for its column.
+    """
+    try:
+        rules = character_rules()
+    except CharacterRulesError:
+        return []
+    messages: list[CheckMessage] = []
+    for field_name, table_name, label in _storable_labels(rules):
+        limit = column_length(Character, field_name)
+        if len(label) > limit:
+            messages.append(
+                Error(
+                    f"{CHARACTER_RULES_FILE}: {table_name} label {label!r} is "
+                    f"{len(label)} characters, but Character.{field_name} holds "
+                    f"at most {limit}",
+                    hint="Shorten the label; the column widths are the model's.",
+                    id=CHARACTER_LABEL_COLUMNS_CHECK_ID,
+                )
+            )
+    return messages
