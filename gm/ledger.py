@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from characters.constants import DEFAULT_WEALTH_LEVEL
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, DEFAULT_WEALTH_LEVEL
 from characters.models import Character
 from characters.rules import CharacterRules, character_rules
 from characters.skills import (
@@ -41,12 +41,7 @@ logger = logging.getLogger(__name__)
 # the model applies unchanged.
 DRAFT_FIELDS: tuple[str, ...] = (
     "name",
-    "strength",
-    "dexterity",
-    "intelligence",
-    "wisdom",
-    "constitution",
-    "charisma",
+    *CHARACTER_ATTRIBUTE_FIELDS,
     "fatigue_roll",
     "provenance_class",
     "provenance_detail",
@@ -123,12 +118,7 @@ def draft_defaults() -> dict[str, Any]:
     rules = character_rules()
     return {
         "name": "",
-        "strength": None,
-        "dexterity": None,
-        "intelligence": None,
-        "wisdom": None,
-        "constitution": None,
-        "charisma": None,
+        **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS),
         "fatigue_roll": None,
         "provenance_class": "commoner",
         "provenance_detail": "Laborer",

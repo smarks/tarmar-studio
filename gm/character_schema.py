@@ -22,7 +22,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from characters.constants import CHARACTER_EXPORT_FORMAT, DEFAULT_WEALTH_LEVEL
+from characters.constants import (
+    CHARACTER_EXPORT_FORMAT,
+    CORE_ATTRIBUTE_FIELDS,
+    DEFAULT_WEALTH_LEVEL,
+)
 from characters.equipment_rules import equipment_catalog
 from characters.rules import CharacterRules, DiceRollRules, character_rules
 from characters.skills import normalize_skill_name
@@ -196,12 +200,10 @@ def _character_fields(
     """
     return (
         SchemaField("name", "string", "The character's name"),
-        _attribute_field("strength", "STR", attribute_minimum, attribute_maximum),
-        _attribute_field("dexterity", "DEX", attribute_minimum, attribute_maximum),
-        _attribute_field("intelligence", "INT", attribute_minimum, attribute_maximum),
-        _attribute_field("wisdom", "WIS", attribute_minimum, attribute_maximum),
-        _attribute_field("constitution", "CON", attribute_minimum, attribute_maximum),
-        _attribute_field("charisma", "CHR", attribute_minimum, attribute_maximum),
+        *(
+            _attribute_field(field_name, label, attribute_minimum, attribute_maximum)
+            for field_name, label in CORE_ATTRIBUTE_FIELDS
+        ),
         SchemaField(
             "appearance_roll",
             "string",

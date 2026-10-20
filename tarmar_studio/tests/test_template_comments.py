@@ -13,8 +13,9 @@ from pathlib import Path
 from django.conf import settings
 from django.test import SimpleTestCase
 
+from tarmar_studio.tests.repository_scan import SKIPPED_DIRECTORY_NAMES
+
 PROJECT_ROOT = Path(settings.BASE_DIR)
-SKIPPED_PARTS = {"node_modules", ".venv", "staticfiles", "build", "test-results"}
 
 
 def project_templates() -> list[Path]:
@@ -22,7 +23,9 @@ def project_templates() -> list[Path]:
     return sorted(
         path
         for path in PROJECT_ROOT.rglob("*.html")
-        if not SKIPPED_PARTS.intersection(path.relative_to(PROJECT_ROOT).parts)
+        if not SKIPPED_DIRECTORY_NAMES.intersection(
+            path.relative_to(PROJECT_ROOT).parts
+        )
     )
 
 
