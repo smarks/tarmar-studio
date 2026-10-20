@@ -12,7 +12,7 @@
  * a reload; and the strike the player picks is the one the engine swings.
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 
 /**
@@ -71,7 +71,7 @@ test.describe('Choosing a turn by hand', () => {
             const aimed = attacks.filter({ hasText: `Attack ${foe} with the` });
             await expect(aimed).toHaveCount(1);
             await expect(aimed.locator('.turn-option-plain'))
-                .toHaveText(new RegExp(`^Attack ${foe} with the .+: \\d+ in 20 to hit, .+ a hit\\)$`));
+                .toHaveText(new RegExp(`^Attack ${escaped(foe)} with the .+: \\d+ in 20 to hit, .+ a hit\\)$`));
             await expect(aimed.locator('.turn-option-cost')).toHaveText('Costs nothing.');
         }
         // One AI pick on the whole menu, and no scoring until asked for.

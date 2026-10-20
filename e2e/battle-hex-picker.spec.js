@@ -7,7 +7,7 @@
  * sent with the choice, and the engine moves the figure there.
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 
 /**
  * Start a two-duelist battle played by hand and stop at the first figure.
@@ -37,7 +37,7 @@ async function firstManualTurn(page, label) {
  */
 function option(page, name) {
     return page.locator('#turn-panel .turn-option').filter({
-        has: page.locator('.turn-option-name', { hasText: new RegExp(`^${name}$`) }),
+        has: page.locator('.turn-option-name', { hasText: new RegExp(`^${escaped(name)}$`) }),
     });
 }
 
