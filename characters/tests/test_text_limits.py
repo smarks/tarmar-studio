@@ -63,6 +63,59 @@ class SheetTextLimitsTest(BaseTestCase):
         self.character.refresh_from_db()
         self.assertEqual(self.character.skills, {})
 
+    def test_a_skill_is_refused_by_its_received_length_not_its_stored_one(self):
+        # Issue #52: the name is held to the limit before it is normalized, as
+        # the Games Master chat holds it, so a long crafted name is refused at
+        # the limit rather than read in full. This one would store as
+        # "sword to hit", which fits, so only the received length refuses it.
+        padded = "Sword (+1 to hit" + " " * MAX_SKILL_NAME_LENGTH + ")"
+        self.assertGreater(len(padded), MAX_SKILL_NAME_LENGTH)
+        self.character.skills = {"riding": 1}
+        self.character.save()
+
+        requests = {
+            "allocate_skill": {"skill": padded},
+            "rename_skill": {"old_name": "riding", "new_name": padded},
+            "skill_check": {"skill": padded},
+        }
+        for name, body in requests.items():
+            with self.subTest(name):
+                self.assert_refused(
+                    self.post(name, body),
+                    f"Skill name must be {MAX_SKILL_NAME_LENGTH} characters",
+                )
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.skills, {"riding": 1})
+
+    def test_edge_whitespace_does_not_count_toward_the_limit(self):
+        spaced = "q" * (MAX_SKILL_NAME_LENGTH - 2) + "   "
+        self.character.skills = {"riding": 1}
+        self.character.save()
+
+        for name, body in {
+            "allocate_skill": {"skill": spaced},
+            "skill_check": {"skill": spaced},
+            "rename_skill": {"old_name": "riding", "new_name": spaced},
+        }.items():
+            with self.subTest(name):
+                response = self.post(name, body)
+                self.assertNotIn(
+                    "characters or fewer", response.content.decode(), response.content
+                )
+
+    def test_a_held_name_past_the_limit_can_still_be_renamed(self):
+        # A record from before #928 may hold one; renaming it is the repair.
+        long_name = "q" * (MAX_SKILL_NAME_LENGTH + 10)
+        Character.objects.filter(pk=self.character.pk).update(skills={long_name: 2})
+
+        response = self.post(
+            "rename_skill", {"old_name": long_name, "new_name": "riding"}
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.skills, {"riding": 2})
+
     def test_a_skill_renamed_past_the_limit_is_refused(self):
         self.character.skills = {"riding": 1}
         self.character.save()
@@ -163,6 +216,16 @@ class ImportTextLimitsTest(BaseTestCase):
             f"Skill name must be {MAX_SKILL_NAME_LENGTH} characters or fewer",
         ):
             self.import_as_game_master(document)
+
+    def test_a_skill_is_refused_by_its_received_length_not_its_stored_one(self):
+        # Issue #52: this would store as "sword to hit", which fits.
+        padded = "Sword (+1 to hit" + " " * MAX_SKILL_NAME_LENGTH + ")"
+
+        with self.assertRaisesMessage(
+            CharacterImportError,
+            f"Skill name must be {MAX_SKILL_NAME_LENGTH} characters or fewer",
+        ):
+            self.import_as_game_master(self.payload(skills={padded: 3}))
 
     def test_the_origin_skill_holds_any_skill_name(self):
         skill = "q" * MAX_SKILL_NAME_LENGTH

@@ -8,7 +8,7 @@
  * numbers (adjDX on 3d6, the weapon's dice less the armour).
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 
 /**
@@ -71,7 +71,7 @@ test.describe('Choosing a classic turn by hand', () => {
         });
         await expect(attack).toHaveCount(1);
         await expect(attack.locator('.turn-option-plain')).toHaveText(
-            new RegExp(`^Attack (${names.join('|')}) with .+: \\d+ or less on [34]d6 to hit \\(about \\d+%\\)`)
+            new RegExp(`^Attack (${names.map(escaped).join('|')}) with .+: \\d+ or less on [34]d6 to hit \\(about \\d+%\\)`)
         );
         await expect(attack.locator('.turn-option-cost')).toHaveText('Costs nothing.');
         await expect(panel.locator('.turn-option-ai-pick')).toHaveCount(1);

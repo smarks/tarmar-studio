@@ -15,6 +15,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.test import SimpleTestCase
+from tarmar_engine import movement
 
 from battle import control, turn_menu
 from battle.engine import hexes
@@ -510,8 +511,10 @@ class PlainLineTest(BaseTestCase):
 
     def test_each_option_reads_as_what_it_does_and_costs(self):
         expected = {
+            # Foe is already beside Aldwin, so no jog gets nearer (#57).
             "c": (
-                "Dodge: +4 to your Target Number against missiles and thrown weapons only, jogging toward Foe",
+                "Dodge: +4 to your Target Number against missiles and thrown weapons only, "
+                "standing, since no clear jog gets nearer to Foe",
                 "",
             ),
             # A DROP may jog first to a picked hex (#866).
@@ -543,13 +546,62 @@ class PlainLineTest(BaseTestCase):
             "release": ("Let Foe go", ""),
             "c_yield": (
                 "Dodge: +4 to your Target Number against missiles and thrown weapons only, "
-                "jogging toward Foe, moving in Final Movement instead",
+                "standing, since no clear jog gets nearer to Foe, unless a way "
+                "opens by Final Movement",
                 "",
             ),
         }
         for letter, wanted in expected.items():
             with self.subTest(letter=letter):
                 self.assertEqual(self.line(letter), wanted)
+
+    def block_the_step_away(self) -> list[CombatantState]:
+        """Stand Aldwin's own side in every hex the engine would step him
+        to, away from Foe, found through the engine's own
+        ``movement.step_away_hex``: straight back, then either flank."""
+        blockers: list[CombatantState] = []
+        while (
+            cell := movement.step_away_hex(self.state, self.actor, self.foe)
+        ) is not None:
+            blocker = figure(10 + len(blockers), f"Shield {len(blockers)}", cell)
+            blocker.team = self.actor.team = "Red"
+            self.state.combatants.append(blocker)
+            blockers.append(blocker)
+        return blockers
+
+    def test_a_step_away_with_its_three_hexes_blocked_stays_put(self):
+        """The engine steps n and v straight back or to either flank only,
+        and logs "nowhere to step to" when all three are blocked (#57)."""
+        self.assertEqual(len(self.block_the_step_away()), 3)
+        stuck = (
+            "with no hex picked you stay where you are, since no hex straight "
+            "back from Foe or to either flank is clear"
+        )
+        # Another hex beside Aldwin is still clear for a player to pick.
+        self.assertTrue(movement.legal_destinations(self.state, self.actor, "n"))
+        self.assertEqual(
+            self.line("n"),
+            (f"Step one hex away instead of attacking: {stuck}", ""),
+        )
+        self.actor.hth_with = [self.foe.combatant_id]
+        self.foe.hth_with = [self.actor.combatant_id]
+        self.assertTrue(movement.legal_destinations(self.state, self.actor, "v"))
+        self.assertEqual(
+            self.line("v"),
+            (f"Break away from hand-to-hand: 4d6 at or under your DEX; {stuck}", ""),
+        )
+
+    def test_a_step_away_with_a_clear_hex_steps(self):
+        self.actor.hth_with = [self.foe.combatant_id]
+        self.foe.hth_with = [self.actor.combatant_id]
+        self.assertEqual(
+            self.line("v"),
+            (
+                "Break away from hand-to-hand: 4d6 at or under your DEX, then "
+                "stand in a hex next to you",
+                "",
+            ),
+        )
 
     def test_a_dodge_with_no_missile_threat_names_nobody(self):
         self.assertEqual(
@@ -600,6 +652,103 @@ class PlainLineTest(BaseTestCase):
         unarmoured = rationale.replace("less 5 armour", "less 0 armour")
         self.assertEqual(
             turn_menu._odds(unarmoured), "5 in 20 to hit, 1d6-1 (under 1 a hit)"
+        )
+
+
+class MoversSayTheMoveTheEngineMakesTest(BaseTestCase):
+    """A DODGE, MOVE or SPRINT reads as the move the engine will make (#57).
+
+    Since tarmar-engine 0.9.16 (#37) a figure no clear path brings nearer
+    stands still, and the engine's DODGE working says "standing"; the menu
+    still promised a jog toward the archer. Aldwin is boxed in by his own
+    side here, three hexes from an archer, and in the open on the other
+    board.
+    """
+
+    def menu(self, state: BattleState, actor: CombatantState) -> dict[str, dict]:
+        advice = choose_option(state, actor)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        return {entry.letter: entry.to_payload() for entry in menu}
+
+    def boxed_in(self) -> tuple[BattleState, CombatantState]:
+        aldwin = figure(1, "Aldwin", (0, 0), team="Red", move_run=10, move_sprint=14)
+        shields = [
+            figure(10 + index, f"Shield {index}", cell, team="Red")
+            for index, cell in enumerate(hexes.neighbors((0, 0)))
+        ]
+        bowman = figure(
+            2, "Bowman", (3, 0), team="Blue", weapon=_catalog_weapon("longbow")
+        )
+        return (
+            BattleState(arena_radius=5, combatants=[aldwin, *shields, bowman]),
+            aldwin,
+        )
+
+    def in_the_open(self) -> tuple[BattleState, CombatantState]:
+        aldwin = figure(1, "Aldwin", (0, 0), team="Red", move_run=10, move_sprint=14)
+        bowman = figure(
+            2, "Bowman", (4, 0), team="Blue", weapon=_catalog_weapon("longbow")
+        )
+        return BattleState(arena_radius=5, combatants=[aldwin, bowman]), aldwin
+
+    def test_a_boxed_in_dodge_reads_standing_as_the_engine_does(self):
+        entries = self.menu(*self.boxed_in())
+        # The engine's own working says it will dodge standing.
+        self.assertIn(
+            "standing, since no clear jog gets nearer to Bowman",
+            entries["c"]["rationale"],
+        )
+        self.assertEqual(
+            entries["c"]["plain"],
+            "Dodge: +4 to your Target Number against missiles and thrown weapons "
+            "only, standing, since no clear jog gets nearer to Bowman",
+        )
+        self.assertEqual(
+            entries["c_yield"]["plain"],
+            "Dodge: +4 to your Target Number against missiles and thrown weapons "
+            "only, standing, since no clear jog gets nearer to Bowman, unless a "
+            "way opens by Final Movement",
+        )
+
+    def test_a_boxed_in_run_or_sprint_stands_and_costs_nothing_unless_it_moves(self):
+        entries = self.menu(*self.boxed_in())
+        # The engine's own working says a run gains nothing.
+        self.assertIn("so moving gains nothing", entries["a"]["rationale"])
+        self.assertEqual(
+            (entries["a"]["plain"], entries["a"]["cost"]),
+            (
+                "Stand where you are, since no clear run gets nearer to Bowman",
+                "1 Fatigue, only if you move",
+            ),
+        )
+        self.assertEqual(
+            (entries["sprint"]["plain"], entries["sprint"]["cost"]),
+            (
+                "Stand where you are, since no clear sprint gets nearer to Bowman",
+                "6 Fatigue, only if you move",
+            ),
+        )
+        self.assertEqual(
+            entries["a_yield"]["plain"],
+            "Stand where you are, since no clear run gets nearer to Bowman, "
+            "unless a way opens by Final Movement",
+        )
+
+    def test_in_the_open_the_dodge_jogs_toward_the_archer(self):
+        entries = self.menu(*self.in_the_open())
+        self.assertIn("jogging toward Bowman", entries["c"]["rationale"])
+        self.assertEqual(
+            entries["c"]["plain"],
+            "Dodge: +4 to your Target Number against missiles and thrown weapons "
+            "only, jogging toward Bowman",
+        )
+        self.assertEqual(
+            (entries["a"]["plain"], entries["a"]["cost"]),
+            ("Run up to 10 hexes toward Bowman", "1 Fatigue"),
+        )
+        self.assertEqual(
+            (entries["sprint"]["plain"], entries["sprint"]["cost"]),
+            ("Sprint up to 14 hexes toward Bowman", "6 Fatigue"),
         )
 
 

@@ -105,6 +105,19 @@ class GameMasterChatTextTest(_ChatTextCase):
         self.gorn.refresh_from_db()
         self.assertEqual(self.gorn.skills, {})
 
+    def test_a_skill_is_refused_by_its_received_length_in_the_ledger(self):
+        # Issue #52: this would store as "sword to hit", which fits.
+        result, event = self.run_action(
+            action="spend_skill_points",
+            character_id=self.gorn.pk,
+            skill="Sword (+1 to hit" + " " * MAX_SKILL_NAME_LENGTH + ")",
+            points=1,
+        )
+
+        self.assert_refused_in_the_ledger(
+            result, event, f"Skill name must be {MAX_SKILL_NAME_LENGTH} characters"
+        )
+
     def test_a_name_at_the_limit_round_trips(self):
         name = "N" * MAX_CHARACTER_NAME_LENGTH
         result, _event = self.run_action(

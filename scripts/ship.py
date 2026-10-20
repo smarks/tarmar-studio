@@ -32,6 +32,7 @@ followed, so whether it deployed is not known; 130 when interrupted.
 pass is recorded, and production is not touched.
 """
 
+import contextlib
 import dataclasses
 import fcntl
 import os
@@ -41,6 +42,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -91,6 +93,17 @@ DEPLOY_STARTED_PATTERN = re.compile(
 DEPLOYED = "Deployment complete!"
 ALREADY_LIVE = "Already up to date."
 STOOD_DOWN = "Nothing to do."
+# How deploy.sh tags the lines it prints (log, warn and error there), and the
+# prefix Actions gives its own lines. An error's message can run on over
+# several lines; the next tagged line ends it.
+ERROR_TAG = "[ERROR]"
+DEPLOY_SCRIPT_TAGS = ("[DEPLOY]", "[WARN]", ERROR_TAG)
+ACTIONS_TAG = "##["
+LOG_LINE_TAGS = (*DEPLOY_SCRIPT_TAGS, ACTIONS_TAG)
+# gh run view --log-failed prefixes each line with its job and step names,
+# tab-separated, and a timestamp; deploy.sh colours its tags.
+LOG_LINE_PREFIX = re.compile(r"^(?:[^\t]*\t[^\t]*\t)?(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?")
+TERMINAL_COLOUR = re.compile(r"\x1b\[[0-9;]*m")
 
 EXIT_LIVE = 0
 EXIT_NOT_DEPLOYED = 1
@@ -650,6 +663,80 @@ def deploy_run_state(run_id: str, app: Path) -> tuple[str, str]:
     return status, conclusion
 
 
+def error_messages_in(failed_log: str) -> list[str]:
+    """Pick deploy.sh's error messages out of a failed job's log.
+
+    Each message is its ``[ERROR]`` line and the lines after it up to the next
+    tagged line, since deploy.sh's recovery instructions run on after the
+    first line. The job and step prefixes, timestamps and colour codes that
+    the log adds are dropped.
+
+    Returns:
+        One entry per ``[ERROR]`` line, in log order; empty when there is none.
+    """
+    messages: list[str] = []
+    in_error = False
+    for raw_line in failed_log.splitlines():
+        line = TERMINAL_COLOUR.sub("", raw_line)
+        line = LOG_LINE_PREFIX.sub("", line, count=1).rstrip()
+        if line.startswith(ERROR_TAG):
+            messages.append(line)
+            in_error = True
+        elif line.startswith(LOG_LINE_TAGS):
+            in_error = False
+        elif in_error:
+            messages[-1] += "\n" + line
+    return [message.rstrip() for message in messages]
+
+
+def fetch_failed_log(run_id: str, app: Path) -> str:
+    """Fetch the log of the job that failed, waiting for it if it lags the run.
+
+    Like the green run's log, it can be missing for a while after the run
+    ends: asked for up to LOG_ATTEMPTS times, LOG_RETRY_SECONDS apart, until a
+    request succeeds and returns something.
+
+    Returns:
+        The log; empty when every request succeeded but found nothing.
+
+    Raises:
+        ShipError: the last request failed.
+    """
+    failed_command = ["gh", "run", "view", run_id, "--log-failed"]
+    for _ in range(LOG_ATTEMPTS - 1):
+        # A request that fails is asked again; the last attempt, below, raises.
+        with contextlib.suppress(ShipError):
+            failed_log = run_quietly(failed_command, cwd=app)
+            if failed_log:
+                return failed_log
+        time.sleep(LOG_RETRY_SECONDS)
+    return run_quietly(failed_command, cwd=app)
+
+
+def failed_run_report(run_id: str, app: Path) -> str:
+    """Say why a Deploy run failed, from the log of the job that failed.
+
+    Returns:
+        deploy.sh's error messages, or where to read the run when its failed
+        log held none or could not be fetched.
+    """
+    try:
+        run_address = run_quietly(
+            ["gh", "run", "view", run_id, "--json", "url", "--jq", ".url"], cwd=app
+        )
+    except ShipError:
+        run_address = f"gh run view {run_id} --log-failed"
+    try:
+        messages = error_messages_in(fetch_failed_log(run_id, app))
+    except ShipError as failure:
+        return f"its failed log could not be fetched ({failure}); see {run_address}"
+    if not messages:
+        return f"its failed log held no {ERROR_TAG} lines; see {run_address}"
+    return "deploy.sh reported:\n" + "\n".join(
+        textwrap.indent(message, "  ") for message in messages
+    )
+
+
 def watch_deploy_to_its_end(run_id: str, app: Path) -> None:
     """Watch the Deploy run until it ends green, riding out failed requests.
 
@@ -685,7 +772,8 @@ def watch_deploy_to_its_end(run_id: str, app: Path) -> None:
                     return
                 raise ShipError(
                     f"Deploy run {run_id} did not finish green (it concluded "
-                    f"{conclusion or 'without a conclusion'})"
+                    f"{conclusion or 'without a conclusion'}); "
+                    f"{failed_run_report(run_id, app)}"
                 )
             poll_failure = (
                 f"gh run watch exited {watched.returncode} with the run still {status}"

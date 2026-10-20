@@ -64,6 +64,7 @@ from tarmar_engine.policy import (
     Candidate,
     Decision,
     _beast_caution,
+    _hth_partners,
     _hth_strike_forecast,
     _hth_targets,
     _hurt_fraction,
@@ -86,6 +87,11 @@ from .persistence import TARMAR_PROFILE
 #: drift test holds these to the page.
 DODGE_DEFENDS_AGAINST = "missiles and thrown weapons only"
 DEFEND_DEFENDS_AGAINST = "melee and non-missile attacks only"
+
+#: The options that walk the engine's own route toward their target and say
+#: where it takes them, so a route that goes nowhere is read as standing
+#: (issue #57). A CHARGE says its reach instead.
+STANDING_MOVERS: frozenset[str] = frozenset({"a", "sprint", "c"})
 
 #: The attack options a player aims (#775). A yielded CHARGE (``b_yield``)
 #: is aimed as its CHARGE is.
@@ -279,6 +285,141 @@ def _with_odds(sentence: str, rationale: str) -> str:
     return f"{sentence}: {odds}" if odds else sentence
 
 
+def _approach(
+    state: BattleState,
+    actor: CombatantState,
+    option: str,
+    target: CombatantState,
+) -> movement.Approach:
+    """Where the engine's own move for ``option`` toward ``target`` would end.
+
+    The engine walks :func:`tarmar_engine.movement.approach_route` at the
+    option's gait (``TurnRunner.move_towards_target``), and its policy prices
+    a CHARGE's reach and words a DODGE's move by that same route
+    (tarmar-engine #37), so the menu reads the route there too rather than
+    judging the board on its own.
+
+    Args:
+        state: The live state the menu was built from.
+        actor: The figure choosing.
+        option: A moving option's key (MOVE, SPRINT, CHARGE, DODGE, or a
+            yielded one).
+        target: The figure it closes on.
+
+    Returns:
+        The engine's approach: the route it would walk and the distance it
+        would end at.
+    """
+    gait = movement.MOVEMENT_GAITS[actions.base_option(option)]
+    allowance = movement.gait_allowance(actor, gait)
+    return movement.approach_route(state, actor, target, allowance)
+
+
+def _stands(
+    state: BattleState,
+    actor: CombatantState,
+    option: str,
+    target: CombatantState,
+) -> bool:
+    """Whether the engine's move for ``option`` toward ``target`` stays put.
+
+    The engine walks nothing when its route is empty: no clear path at the
+    option's gait gets nearer (tarmar-engine #37), or the figure is already
+    beside the target or held where it stands.
+    """
+    return not _approach(state, actor, option, target).route
+
+
+def _clear_gait(option: str) -> str:
+    """ "clear jog": the move a Tarmar option makes, as :func:`_no_nearer`
+    names it."""
+    return f"clear {movement.MOVEMENT_GAITS[actions.base_option(option)]}"
+
+
+def _no_nearer(move: str, aimed: str) -> str:
+    """ "no clear jog gets nearer to Foe": why a figure's move stays put."""
+    return f"no {move} gets nearer to {aimed}"
+
+
+def _standing(reason: str) -> str:
+    """ "standing, since ...": a DODGE that does not move, in either profile."""
+    return f"standing, since {reason}"
+
+
+def _stand_line(reason: str) -> str:
+    """The sentence for a move the engine would not make, in either profile."""
+    return f"Stand where you are, since {reason}"
+
+
+def _no_step_away(
+    state: BattleState, actor: CombatantState, threats: list[CombatantState]
+) -> str:
+    """Why a step away the engine would not take stays put, or "".
+
+    With no hex picked, a DISENGAGE (n) or a break away from hand-to-hand
+    (v) steps straight back from the first of ``threats``, else to either
+    flank, the engine's own choice
+    (:func:`tarmar_engine.movement.step_away_hex`), and the engine logs
+    "nowhere to disengage to" (n) or "nowhere to step to" (v) when none of
+    the three is clear. A hex the player picks is stepped to as picked.
+
+    Args:
+        state: The live state the menu was built from.
+        actor: The figure choosing.
+        threats: The figures it would step away from, the engine's first.
+
+    Returns:
+        The reason, e.g. "with no hex picked you stay where you are, since no
+        hex straight back from Foe or to either flank is clear", or "" when
+        the engine has a hex to step to (or nothing to step away from).
+    """
+    if not threats or movement.step_away_hex(state, actor, threats[0]) is not None:
+        return ""
+    return (
+        "with no hex picked you stay where you are, since no hex straight "
+        f"back from {threats[0].name} or to either flank is clear"
+    )
+
+
+def _mover_line(
+    letter: str,
+    target: CombatantState | None,
+    allowance: int,
+    fatigue: int,
+    *,
+    stands: bool,
+) -> tuple[str, str]:
+    """A MOVE or SPRINT's sentence and cost (issue #57).
+
+    The move the engine would make: toward the target along its own route,
+    or no move at all when that route is empty (:func:`_stands`), and then no
+    Fatigue either, since the engine charges a gait's Fatigue only for hexes
+    walked. A hex the player picks is walked, and charged, as picked.
+
+    Args:
+        letter: The option's key ("a", "sprint", or a yielded one).
+        target: The figure it closes on, or None when none remains.
+        allowance: The hexes the gait covers.
+        fatigue: The Fatigue the gait costs.
+        stands: Whether the engine's route toward ``target`` is empty.
+
+    Returns:
+        ``(plain, cost)``, as :func:`_plain_line` gives them.
+    """
+    gait = movement.MOVEMENT_GAITS[actions.base_option(letter)]
+    fatigue_text = f"{fatigue} Fatigue"
+    if target is not None and stands:
+        return (
+            _stand_line(_no_nearer(_clear_gait(letter), target.name)),
+            f"{fatigue_text}, only if you move",
+        )
+    aimed = target.name if target is not None else "the nearest enemy"
+    return (
+        f"{gait.capitalize()} up to {allowance} hexes toward {aimed}",
+        fatigue_text,
+    )
+
+
 def _anchor_line(
     actor: CombatantState, target: CombatantState | None
 ) -> tuple[str, str]:
@@ -386,14 +527,28 @@ def _plain_line(
     weapon = _weapon_phrase(actor)
     rationale = candidate.rationale
     plain, cost = "", ""
+    # A mover the engine would walk nowhere says so (issue #57).
+    stands = (
+        option in STANDING_MOVERS
+        and target is not None
+        and _stands(state, actor, candidate.letter, target)
+    )
     if option == "a":
-        plain = (
-            f"Run up to {actor.move_run} hexes toward {aimed or 'the nearest enemy'}"
+        plain, cost = _mover_line(
+            candidate.letter,
+            target,
+            actor.move_run,
+            RUN_FATIGUE_COST,
+            stands=stands,
         )
-        cost = f"{RUN_FATIGUE_COST} Fatigue"
     elif option == "sprint":
-        plain = f"Sprint up to {actor.move_sprint} hexes toward {aimed}"
-        cost = f"{SPRINT_FATIGUE_COST} Fatigue"
+        plain, cost = _mover_line(
+            candidate.letter,
+            target,
+            actor.move_sprint,
+            SPRINT_FATIGUE_COST,
+            stands=stands,
+        )
     elif option == "b":
         plain = _with_odds(
             f"Charge {aimed}: jog up to {movement.gait_allowance(actor, 'jog')} "
@@ -403,7 +558,9 @@ def _plain_line(
         )
     elif option == "c":
         plain = f"Dodge: +4 to your Target Number against {DODGE_DEFENDS_AGAINST}"
-        if aimed:
+        if stands:
+            plain += f", {_standing(_no_nearer(_clear_gait(candidate.letter), aimed))}"
+        elif target is not None:
             plain += f", jogging toward {aimed}"
     elif option == "d":
         plain = (
@@ -480,6 +637,11 @@ def _plain_line(
             cost = f"the {actor.weapon.name} is dropped"
     elif option == "n":
         plain = "Step one hex away instead of attacking"
+        # The engine steps away from the first adjacent enemy, the first of
+        # the enemies an ATTACK reaches (``TurnRunner.disengage_step``).
+        stuck = _no_step_away(state, actor, _legal_targets(state, actor, "j"))
+        if stuck:
+            plain += f": {stuck}"
     elif option == "o":
         plain = f"Try to grapple {aimed}: a hold pins them rather than hurting them"
     elif option == "q":
@@ -494,10 +656,11 @@ def _plain_line(
     elif option == "u":
         plain = "Try to draw your dagger: 3d6 at or under your DEX"
     elif option == "v" and actor.grappled_by is None:
-        plain = (
-            "Break away from hand-to-hand: 4d6 at or under your DEX, then stand "
-            "in a hex next to you"
-        )
+        plain = "Break away from hand-to-hand: 4d6 at or under your DEX"
+        # The engine steps away from the first partner it is in
+        # hand-to-hand with (``TurnRunner.hth_disengage``).
+        stuck = _no_step_away(state, actor, _hth_partners(state, actor))
+        plain += f"; {stuck}" if stuck else ", then stand in a hex next to you"
     elif option == "v":
         plain = f"Struggle free of {aimed}: 4d6 at or under your DEX"
     elif option == "hold_still":
@@ -510,7 +673,11 @@ def _plain_line(
         plain = f"Let {aimed} go"
     else:
         plain = candidate.name.capitalize()
-    if actions.is_yielded(candidate.letter):
+    if actions.is_yielded(candidate.letter) and stands:
+        # The engine walks a yielded mover's route from the board as it is
+        # in Final Movement, so a way opened by then is taken.
+        plain += ", unless a way opens by Final Movement"
+    elif actions.is_yielded(candidate.letter):
         plain += ", moving in Final Movement instead"
     return plain, cost
 
@@ -676,6 +843,13 @@ _CLASSIC_STRIKES = frozenset(
 )
 
 
+#: The classic options that move toward their target and say so, read as
+#: standing when the engine's plan for them walks nowhere (issue #57).
+_CLASSIC_STANDING_MOVERS = frozenset(
+    {ClassicOption.MOVE, ClassicOption.HALF_MOVE, ClassicOption.DODGE}
+)
+
+
 def _classic_dice(damage: DamageDice) -> str:
     """ "2d6", "1d6+2", "1d6-1": a classic damage expression in the page's words."""
     modifier = f"{damage.modifier:+d}" if damage.modifier else ""
@@ -787,6 +961,15 @@ def _classic_plain_line(
         figure.movement_allowance, classic_spec(option).movement_cap
     )
     cost = ""
+    # A move the engine would not make is read as standing (issue #57): the
+    # classic engine enacts exactly the plan ``plan_for`` derives, and an
+    # empty path is no move ("boxed in", ``classic.ai._closing_move``).
+    stands = (
+        option in _CLASSIC_STANDING_MOVERS
+        and target is not None
+        and not classic_policy.plan_for(game, figure, candidate).path
+    )
+    no_nearer = _no_nearer(f"move of up to {budget} hexes", aimed)
     if option in _CLASSIC_STRIKES and target is not None:
         verbs = {
             ClassicOption.ATTACK: f"Attack {aimed} with {wielding}",
@@ -801,6 +984,8 @@ def _classic_plain_line(
         }
         odds = _classic_strike(game, figure, option, target)
         plain = f"{verbs[option]}: {odds}" if odds else verbs[option]
+    elif option in (ClassicOption.MOVE, ClassicOption.HALF_MOVE) and stands:
+        plain = _stand_line(no_nearer)
     elif option == ClassicOption.MOVE:
         plain = f"Move up to {budget} hexes{toward}"
     elif option == ClassicOption.HALF_MOVE:
@@ -809,9 +994,14 @@ def _classic_plain_line(
         dice = game.rules.resolution.attack_dice_count(
             dodging=True, defending=False, ranged=True
         )
+        how = (
+            _standing(no_nearer)
+            if stands
+            else f"while moving up to {budget} hexes{toward}"
+        )
         plain = (
-            f"Dodge while moving up to {budget} hexes{toward}: missiles and "
-            f"thrown weapons roll {dice}d{CLASSIC_DIE_FACES} to hit you, not "
+            f"Dodge {how}: missiles and thrown weapons roll "
+            f"{dice}d{CLASSIC_DIE_FACES} to hit you, not "
             f"{CLASSIC_PLAIN_DICE}d{CLASSIC_DIE_FACES}"
         )
     elif option == ClassicOption.SHIFT_DEFEND:

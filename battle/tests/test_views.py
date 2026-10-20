@@ -4,11 +4,17 @@ from unittest import mock
 
 from django.urls import reverse
 
-from battle import profiles, views
+from battle import control, profiles, views
 from battle.access import Actor, detail_visible_ids
 from battle.models import Battle, BattleEvent
-from battle.services import create_battle
-from common.test_helpers import BaseTestCase, logged_exception
+from battle.services import (
+    NO_SEAT_TO_RETURN,
+    NO_SEAT_TO_TAKE,
+    RETURN_SEAT_OWNER_OR_GAME_MASTER,
+    create_battle,
+    take_seat,
+)
+from common.test_helpers import BaseTestCase, create_character, logged_exception
 
 
 class BattleAccessTest(BaseTestCase):
@@ -496,3 +502,127 @@ class BattleDetailChromeTest(BaseTestCase):
         Battle.objects.filter(pk=self.battle.pk).update(initial_state_json={})
         response = self.client.get(reverse("battle:detail", args=[self.battle.pk]))
         self.assertContains(response, "no starting snapshot")
+
+
+class SeatReturnOfferTest(BaseTestCase):
+    """Offer "Give the seat back to its owner" only when another holds it (#60).
+
+    The newcomer's walkthrough: a player who set up a battle with their own
+    saved character, which nobody sits in, was offered their own seat back,
+    because ``None`` differs from every owner's id.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.owner = self.create_player(username="newcomer")
+        self.character = create_character(self.owner, name="Wren")
+
+    def seat_offer(self, battle: Battle, user) -> dict:
+        """The roster summary of the character's seat, as ``user`` sees it."""
+        self.login_as(user)
+        state = self.client.get(reverse("battle:state", args=[battle.pk])).json()
+        seat = battle.combatants.get(character=self.character)
+        return next(
+            summary for summary in state["seats"] if summary["combatant_id"] == seat.pk
+        )
+
+    def test_the_owner_of_a_seat_nobody_holds_is_offered_nothing_back(self):
+        battle = create_battle(
+            self.owner,
+            name="First Fight",
+            count=1,
+            seed=1,
+            character_ids=(self.character.pk,),
+            auto_start=True,
+        )
+        seat = battle.combatants.get(character=self.character)
+        self.assertIsNone(seat.player_id)
+        self.assertEqual(self.seat_offer(battle, self.owner)["return_seat_url"], "")
+
+        # Nor does the endpoint accept what the card no longer offers.
+        refused = self.client.post(
+            reverse("battle:seat-return", args=[battle.pk, seat.pk])
+        )
+        self.assertEqual(refused.status_code, 403)
+        self.assertEqual(
+            refused.json()["error"],
+            NO_SEAT_TO_RETURN.format(name=seat.display_name),
+        )
+        seat.refresh_from_db()
+        self.assertIsNone(seat.player_id)
+
+    def game_masters_battle(self, game_master, **options) -> Battle:
+        """A battle the Game Master runs with the newcomer's character on it."""
+        return create_battle(
+            game_master,
+            name="Stand In",
+            count=1,
+            seed=1,
+            character_ids=(self.character.pk,),
+            auto_start=True,
+            **options,
+        )
+
+    def test_a_seat_nobody_holds_cannot_be_taken(self):
+        game_master = self.create_dm(username="warden")
+        battle = self.game_masters_battle(game_master)
+        seat = battle.combatants.get(character=self.character)
+        offer = self.seat_offer(battle, game_master)
+        self.assertEqual((offer["take_seat_url"], offer["return_seat_url"]), ("", ""))
+
+        self.login_as(game_master)
+        refused = self.client.post(
+            reverse("battle:seat-take", args=[battle.pk, seat.pk])
+        )
+        self.assertEqual(refused.status_code, 403)
+        self.assertEqual(
+            refused.json()["error"], NO_SEAT_TO_TAKE.format(name=seat.display_name)
+        )
+        seat.refresh_from_db()
+        self.assertIsNone(seat.player_id)
+
+    def test_a_seat_the_game_master_holds_is_offered_back_to_owner_and_runner(
+        self,
+    ):
+        game_master = self.create_dm(username="warden")
+        battle = self.game_masters_battle(game_master)
+        # Seated to its owner, as a session's fight seats it (gm/fight.py),
+        # before the Game Master stands in for an absent owner.
+        battle.combatants.filter(character=self.character).update(
+            player_id=self.owner.pk, control_mode=control.MANUAL
+        )
+        seat = battle.combatants.get(character=self.character)
+        self.assertEqual(self.seat_offer(battle, self.owner)["return_seat_url"], "")
+
+        take_seat(battle.pk, seat.pk, game_master=game_master)
+        return_url = reverse("battle:seat-return", args=[battle.pk, seat.pk])
+        self.assertEqual(
+            self.seat_offer(battle, self.owner)["return_seat_url"], return_url
+        )
+        self.assertEqual(
+            self.seat_offer(battle, game_master)["return_seat_url"], return_url
+        )
+
+        self.login_as(self.owner)
+        returned = self.client.post(return_url)
+        self.assertEqual(returned.status_code, 200, returned.content)
+        seat.refresh_from_db()
+        self.assertEqual(seat.player_id, self.owner.pk)
+        self.assertEqual(self.seat_offer(battle, self.owner)["return_seat_url"], "")
+
+    def test_a_guest_posting_a_return_is_told_why_in_the_returns_words(self):
+        # A public character and no saved foes, so a visitor without an
+        # account may open the battle at all; the take-seat refusal used to
+        # answer the return.
+        self.character.is_public = True
+        self.character.save(update_fields=["is_public"])
+        battle = self.game_masters_battle(
+            self.create_dm(username="warden"), keep_generated=False
+        )
+        seat = battle.combatants.get(character=self.character)
+        self.logout()
+        refused = self.client.post(
+            reverse("battle:seat-return", args=[battle.pk, seat.pk])
+        )
+        self.assertEqual(refused.status_code, 403)
+        self.assertEqual(refused.json()["error"], RETURN_SEAT_OWNER_OR_GAME_MASTER)
