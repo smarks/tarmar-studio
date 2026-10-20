@@ -135,6 +135,12 @@ from typing import NoReturn
 # reference/paths.py -> reference/ -> repo root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Wording someone may change with no Python, one text file each, read by
+# ``common.config_text.config_lines``: the passphrase gate's hints (settings'
+# GATE_HINTS_FILE) and what a canon rules file's refusal of an unknown block
+# adds (``reference.rules_file``, issue #36).
+CONFIG_DIR = REPO_ROOT / "config"
+
 # The canon corpus: every markdown page the site serves and the GM reads.
 CONTENT_DIR = REPO_ROOT / "reference" / "content"
 

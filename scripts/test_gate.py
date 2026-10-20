@@ -11,7 +11,12 @@ directory, so they exercise the git plumbing the gate actually runs rather than
 a stand-in for it.
 """
 
+import os
+import signal
 import subprocess
+import sys
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +25,8 @@ import pytest
 import yaml
 
 PORTS = {"e2e_port": "8399", "default_canon_e2e_port": "8398"}
+# What gate_steps takes: the ports and the canon the first mode serves.
+STEP_CHOICES = {**PORTS, "canon_name": gate.TARMAR_CANON_NAME}
 
 
 @pytest.fixture(autouse=True)
@@ -93,31 +100,87 @@ def note_on(repository: Path, commit_sha: str) -> str | None:
 
 
 def test_the_steps_run_cheapest_first_then_the_suites_twice() -> None:
-    steps = gate.gate_steps(**PORTS)
+    steps = gate.gate_steps(**STEP_CHOICES)
     assert [step.name for step in steps] == [
         "ruff",
         "ruff format",
         "pyright",
         "makemigrations",
         "build_guides",
-        "pytest",
-        "jest",
-        "playwright",
+        "pytest (Tarmar canon)",
+        "jest (Tarmar canon)",
+        "playwright (Tarmar canon)",
         "pytest (default canon)",
         "jest (default canon)",
         "playwright (default canon)",
     ]
     commands = {step.name: step.command for step in steps}
-    assert commands["pytest"] == ["uv", "run", "pytest", "-q"]
-    assert commands["jest"] == ["npx", "jest"]
-    assert "scripts/update_js_coverage_threshold.py" in commands["playwright"]
-    assert "--check" in commands["playwright"]
+    assert commands["pytest (Tarmar canon)"] == ["uv", "run", "pytest", "-q"]
+    assert commands["jest (Tarmar canon)"] == ["npx", "jest"]
+    playwright = commands["playwright (Tarmar canon)"]
+    assert "scripts/update_js_coverage_threshold.py" in playwright
+    assert "--check" in playwright
     for name in ("pytest", "jest", "playwright"):
-        assert commands[f"{name} (default canon)"] == commands[name]
+        assert commands[f"{name} (default canon)"] == commands[f"{name} (Tarmar canon)"]
 
 
-def test_only_the_suite_steps_of_the_second_mode_name_a_canon() -> None:
-    canon_by_step = {step.name: step.canon_dir for step in gate.gate_steps(**PORTS)}
+def test_each_pass_names_the_canon_it_serves_in_its_steps_and_its_port() -> None:
+    # Issue #10: the opening line called the Tarmar pass's port the default
+    # canon's, while the steps on it carried no canon at all. Both now come
+    # from the label each step of a pass carries.
+    steps = gate.gate_steps(**STEP_CHOICES)
+    browser_steps = [step for step in steps if gate.E2E_PORT_ENV in step.environment]
+    assert [(step.name, step.environment) for step in browser_steps] == [
+        ("playwright (Tarmar canon)", {"E2E_PORT": "8399"}),
+        ("playwright (default canon)", {"E2E_PORT": "8398"}),
+    ]
+    assert gate.e2e_ports_header(steps) == (
+        "e2e ports 8399 for the Tarmar canon, 8398 for the default canon"
+    )
+    for step in steps:
+        if step.canon_label is not None:
+            assert step.name.endswith(f" ({step.canon_label})")
+
+
+def test_a_first_mode_on_the_default_canon_is_named_for_it_too() -> None:
+    # Without TARMAR_CANON_DIR both modes serve the default canon (#921), and
+    # the gate says so rather than calling the first one anything else.
+    steps = gate.gate_steps(**PORTS, canon_name=gate.DEFAULT_CANON_NAME)
+    assert gate.e2e_ports_header(steps) == (
+        "e2e ports 8399 for the default canon, 8398 for the default canon"
+    )
+    assert [step.name for step in steps].count("playwright (default canon)") == 2
+
+
+def test_a_browser_step_that_names_no_canon_is_refused() -> None:
+    # The opening line says which canon each port serves; a port with no
+    # canon would bring back "for the None" (issue #10).
+    with pytest.raises(ValueError, match="names no canon"):
+        gate.GateStep("playwright", ["true"], {gate.E2E_PORT_ENV: "8399"})
+
+
+def test_a_run_with_no_browser_step_names_no_ports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert gate.e2e_ports_header([passing_step()]) == ""
+    checkout, _ = make_repository_with_remote(tmp_path)
+    monkeypatch.setattr(gate, "gate_steps", steps_stub(passing_step()))
+
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
+
+    assert status == 0
+    commit_sha = gate.head_commit_sha(checkout)
+    assert f"[gate] gating {commit_sha} with 1 steps\n" in capsys.readouterr().out
+
+
+def test_only_the_suite_steps_of_the_second_mode_set_a_canon_directory() -> None:
+    canon_by_step = {
+        step.name: step.canon_dir for step in gate.gate_steps(**STEP_CHOICES)
+    }
     default_canon_steps = {
         name for name, canon_dir in canon_by_step.items() if canon_dir is not None
     }
@@ -135,8 +198,8 @@ def test_the_default_canon_path_is_absolute() -> None:
 
 
 def test_each_mode_gets_its_own_browser_port_and_never_the_default() -> None:
-    steps = {step.name: step for step in gate.gate_steps(**PORTS)}
-    assert steps["playwright"].environment == {"E2E_PORT": "8399"}
+    steps = {step.name: step for step in gate.gate_steps(**STEP_CHOICES)}
+    assert steps["playwright (Tarmar canon)"].environment == {"E2E_PORT": "8399"}
     assert steps["playwright (default canon)"].environment == {"E2E_PORT": "8398"}
     assert gate.DEFAULT_E2E_PORT != "8000"  # 8000 is the dev server's
     assert gate.DEFAULT_CANON_E2E_PORT != gate.DEFAULT_E2E_PORT
@@ -150,11 +213,15 @@ def test_ports_that_collide_with_each_other_or_a_fake_ollama_are_refused(
     first_port: str, second_port: str
 ) -> None:
     with pytest.raises(gate.GateError, match="collide"):
-        gate.gate_steps(e2e_port=first_port, default_canon_e2e_port=second_port)
+        gate.gate_steps(
+            e2e_port=first_port,
+            default_canon_e2e_port=second_port,
+            canon_name=gate.TARMAR_CANON_NAME,
+        )
 
 
 def test_the_migration_check_runs_with_debug_so_it_needs_no_production_env() -> None:
-    steps = {step.name: step for step in gate.gate_steps(**PORTS)}
+    steps = {step.name: step for step in gate.gate_steps(**STEP_CHOICES)}
     assert steps["makemigrations"].environment == {"DEBUG": "true"}
 
 
@@ -298,6 +365,12 @@ def passing_step(name: str = "stub") -> gate.GateStep:
     return gate.GateStep(name, ["bash", "-c", "true"])
 
 
+def steps_stub(*steps: gate.GateStep) -> Callable[..., list[gate.GateStep]]:
+    """Stand in for gate.gate_steps: ``steps``, whatever ports or canon it is
+    asked for."""
+    return lambda **_choices: list(steps)
+
+
 def test_a_dirty_tree_is_refused_before_a_single_step_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -311,7 +384,9 @@ def test_a_dirty_tree_is_refused_before_a_single_step_runs(
         return gate.StepResult(step=step, returncode=0, seconds=0.0)
 
     monkeypatch.setattr(
-        gate, "gate_steps", lambda *, e2e_port, default_canon_e2e_port: [passing_step()]
+        gate,
+        "gate_steps",
+        steps_stub(passing_step()),
     )
     monkeypatch.setattr(gate, "run_step", record_that_it_ran)
 
@@ -333,10 +408,7 @@ def test_every_step_passing_records_the_commit(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
-            passing_step("one"),
-            passing_step("two"),
-        ],
+        steps_stub(passing_step("one"), passing_step("two")),
     )
 
     status = gate.run_gate(
@@ -357,10 +429,10 @@ def test_the_first_failing_step_stops_the_run_and_records_nothing(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             gate.GateStep("failing", ["bash", "-c", "exit 3"]),
             gate.GateStep("later", ["bash", "-c", "touch ran-later"]),
-        ],
+        ),
     )
 
     status = gate.run_gate(
@@ -372,6 +444,160 @@ def test_the_first_failing_step_stops_the_run_and_records_nothing(
     assert note_on(checkout, gate.head_commit_sha(checkout)) is None
 
 
+def test_a_failing_step_s_report_repeats_the_end_of_its_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #36: the report names what failed, not only the exit code.
+
+    The stub fails as makemigrations did on an unknown canon block: more
+    output than the report keeps, and the refusal itself last, on stderr.
+    """
+    checkout, _ = make_repository_with_remote(tmp_path)
+    commit_sha = gate.head_commit_sha(checkout)
+    early_lines = gate.FAILED_STEP_TAIL_LINES
+    refusal = "magic-rules.json: shieldwall is not a field this file takes"
+    script = (
+        f'for number in $(seq 1 {early_lines}); do echo "progress $number"; done; '
+        f'echo "{refusal}" >&2; exit 1'
+    )
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        steps_stub(gate.GateStep("makemigrations", ["bash", "-c", script])),
+    )
+
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
+
+    assert status == 1
+    printed = capsys.readouterr().out
+    # The whole output still goes to the log as the step runs ...
+    assert "progress 1\n" in printed
+    # ... and the report after the exit code repeats its end: the refusal and
+    # the lines before it, as many as the report keeps, and no more.
+    assert "[gate] makemigrations failed (exit 1) after " in printed
+    summary_end = f"; nothing recorded for {commit_sha}. The end of its output:\n"
+    assert summary_end in printed
+    report = printed.split(summary_end, 1)[1].splitlines()
+    assert report == [
+        *(f"  progress {number}" for number in range(2, early_lines + 1)),
+        f"  {refusal}",
+    ]
+    assert note_on(checkout, commit_sha) is None
+
+
+def test_a_failing_step_that_printed_nothing_says_so(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checkout, _ = make_repository_with_remote(tmp_path)
+    monkeypatch.setattr(
+        gate,
+        "gate_steps",
+        steps_stub(gate.GateStep("silent", ["bash", "-c", "exit 2"])),
+    )
+
+    status = gate.run_gate(
+        repository_root=checkout, e2e_port="8399", push=False, deploy=False
+    )
+
+    assert status == 2
+    assert capsys.readouterr().out.rstrip().endswith("; it printed nothing")
+
+
+def test_a_python_step_s_output_arrives_in_the_order_it_was_written(
+    tmp_path: Path,
+) -> None:
+    # Through a pipe Python block-buffers stdout but not stderr, so without
+    # the gate's PYTHONUNBUFFERED the stderr line would come out first.
+    environment = {
+        name: value for name, value in os.environ.items() if name != "PYTHONUNBUFFERED"
+    }
+    script = "import sys; print('first'); print('second', file=sys.stderr)"
+    step = gate.GateStep("python", [sys.executable, "-c", script])
+
+    result = gate.run_step(step, repository_root=tmp_path, environment=environment)
+
+    assert result.output_tail == ("first", "second")
+
+
+def test_an_interrupted_step_s_remaining_output_is_still_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Ctrl-C reaches the step too; what it prints while it stops must still be
+    # read and shown, not left in a pipe nobody reads.
+    echoed: list[str] = []
+
+    def interrupted_at_the_first_line(line: str, **kwargs: object) -> None:
+        """Stand in for print; Ctrl-C arrives as the first line is shown."""
+        echoed.append(line)
+        if len(echoed) == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(gate, "print", interrupted_at_the_first_line, raising=False)
+    step = gate.GateStep(
+        "interrupted", ["bash", "-c", "echo running; echo stopping; echo stopped"]
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        gate.run_step(step, repository_root=tmp_path, environment=dict(os.environ))
+
+    assert echoed == ["running", "stopping", "stopped"]
+
+
+def test_a_background_process_holding_the_output_does_not_hold_the_gate(
+    tmp_path: Path,
+) -> None:
+    # The step exits, but a process it left running shares its output and
+    # would keep the pipe open for thirty seconds.
+    step = gate.GateStep(
+        "leaves a sleeper",
+        ["bash", "-c", "echo started; sleep 30 & echo $!; exit 0"],
+    )
+    started = time.monotonic()
+
+    result = gate.run_step(step, repository_root=tmp_path, environment=dict(os.environ))
+
+    elapsed = time.monotonic() - started
+    started_line, sleeper = result.output_tail
+    os.kill(int(sleeper), signal.SIGTERM)
+    assert started_line == "started"
+    assert result.passed
+    # Well short of the sleeper's thirty seconds: the grace, a check
+    # interval, and room for a loaded machine.
+    assert elapsed < gate.STRAY_OUTPUT_GRACE_SECONDS + gate.STEP_EXIT_CHECK_SECONDS + 5
+
+
+def test_a_background_process_that_keeps_printing_is_cut_off_at_the_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A leftover that prints more often than the grace never lets the pipe go
+    # quiet; the cap, counted from the step's exit, stops the reading anyway.
+    monkeypatch.setattr(gate, "STRAY_OUTPUT_CAP_SECONDS", 1.0)
+    pid_file = tmp_path / "leftover.pid"
+    script = (
+        "echo started; (while true; do echo tick; sleep 0.2; done) & "
+        f"echo $! > {pid_file}; exit 0"
+    )
+    step = gate.GateStep("leaves a chatty loop", ["bash", "-c", script])
+    started = time.monotonic()
+
+    result = gate.run_step(step, repository_root=tmp_path, environment=dict(os.environ))
+
+    elapsed = time.monotonic() - started
+    os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGTERM)
+    assert result.passed
+    assert result.output_tail[0] == "started"
+    assert "tick" in result.output_tail
+    # The loop would print until killed; the cap, a check interval and room
+    # for a loaded machine bound the wait instead.
+    assert elapsed < 1.0 + gate.STEP_EXIT_CHECK_SECONDS + 5
+
+
 def test_a_tree_changed_by_the_suites_is_not_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -380,11 +606,11 @@ def test_a_tree_changed_by_the_suites_is_not_recorded(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             gate.GateStep(
                 "rewrites the tree", ["bash", "-c", "echo edited > tracked.txt"]
             )
-        ],
+        ),
     )
 
     status = gate.run_gate(
@@ -404,7 +630,7 @@ def test_a_commit_made_while_the_suites_ran_is_not_recorded(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             gate.GateStep(
                 "commits underneath",
                 [
@@ -413,7 +639,7 @@ def test_a_commit_made_while_the_suites_ran_is_not_recorded(
                     "echo second > tracked.txt && git commit --all -m second",
                 ],
             )
-        ],
+        ),
     )
 
     status = gate.run_gate(
@@ -488,7 +714,7 @@ def test_the_note_records_the_external_canons_commit(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+        steps_stub(passing_step()),
     )
 
     status = gate.run_gate(
@@ -513,7 +739,7 @@ def test_a_canon_checkout_with_changes_is_refused(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+        steps_stub(passing_step()),
     )
 
     status = gate.run_gate(
@@ -604,10 +830,10 @@ def test_each_step_runs_with_its_own_modes_canon_variable(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             passing_step("own canon"),
             gate.GateStep("default canon", ["bash", "-c", "true"], canon_dir=canon_dir),
-        ],
+        ),
     )
     seen: dict[str, str | None] = {}
 
@@ -636,12 +862,12 @@ def test_a_failing_default_canon_step_records_nothing(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             passing_step("pytest"),
             gate.GateStep(
                 "pytest (default canon)", ["bash", "-c", "exit 5"], canon_dir=canon_dir
             ),
-        ],
+        ),
     )
 
     status = gate.run_gate(
@@ -663,12 +889,12 @@ def test_the_note_lists_both_modes_and_both_ports(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             passing_step("pytest"),
             gate.GateStep(
                 "pytest (default canon)", ["bash", "-c", "true"], canon_dir=canon_dir
             ),
-        ],
+        ),
     )
 
     status = gate.run_gate(
@@ -696,10 +922,10 @@ def test_a_missing_default_canon_is_refused_before_any_step_runs(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             gate.GateStep("touches", ["bash", "-c", "touch ran"]),
             gate.GateStep("default canon", ["bash", "-c", "true"], canon_dir=absent),
-        ],
+        ),
     )
 
     status = gate.run_gate(
@@ -744,7 +970,7 @@ def test_a_checkout_records_its_own_canon_not_the_gate_script_s(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+        steps_stub(passing_step()),
     )
 
     status = gate.run_gate(
@@ -784,7 +1010,11 @@ def test_free_ports_are_picked_past_any_port_or_fake_ollama_port_in_use(
     )
 
     assert (int(first), int(second)) == (candidate(tmp_path, 2), candidate(tmp_path, 3))
-    gate.gate_steps(e2e_port=first, default_canon_e2e_port=second)  # no collision
+    gate.gate_steps(  # no collision
+        e2e_port=first,
+        default_canon_e2e_port=second,
+        canon_name=gate.TARMAR_CANON_NAME,
+    )
 
 
 def test_the_search_starts_where_the_checkout_says_and_stays_in_the_span(
@@ -833,9 +1063,7 @@ def test_a_named_port_in_use_is_refused_before_any_step_runs(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
-            gate.GateStep("touches", ["bash", "-c", "touch ran"])
-        ],
+        steps_stub(gate.GateStep("touches", ["bash", "-c", "touch ran"])),
     )
 
     status = gate.run_gate(
@@ -872,10 +1100,15 @@ def test_a_port_taken_before_its_browser_step_records_nothing(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [
+        steps_stub(
             passing_step("pytest"),
-            gate.GateStep("playwright", ["bash", "-c", "true"], {"E2E_PORT": e2e_port}),
-        ],
+            gate.GateStep(
+                "playwright (Tarmar canon)",
+                ["bash", "-c", "true"],
+                {"E2E_PORT": "8399"},
+                canon_label="Tarmar canon",
+            ),
+        ),
     )
     monkeypatch.setattr(gate, "run_step", run_and_take)
 
@@ -884,7 +1117,10 @@ def test_a_port_taken_before_its_browser_step_records_nothing(
     )
 
     assert status == 1
-    assert "playwright: port 8399 is already listening" in capsys.readouterr().out
+    assert (
+        "playwright (Tarmar canon): port 8399 is already listening"
+        in capsys.readouterr().out
+    )
     assert note_on(checkout, gate.head_commit_sha(checkout)) is None
 
 
@@ -895,11 +1131,13 @@ def test_the_note_records_the_ports_the_gate_picked(
     expected = gate.choose_e2e_ports(
         checkout, e2e_port=None, default_canon_e2e_port=None
     )
-    ports_given: list[tuple[str, str]] = []
+    choices_given: list[tuple[str, str, str]] = []
 
-    def steps_for(*, e2e_port: str, default_canon_e2e_port: str) -> list[gate.GateStep]:
-        """Stand in for gate_steps, noting the ports the gate chose."""
-        ports_given.append((e2e_port, default_canon_e2e_port))
+    def steps_for(
+        *, e2e_port: str, default_canon_e2e_port: str, canon_name: str
+    ) -> list[gate.GateStep]:
+        """Stand in for gate_steps, noting the ports and canon the gate chose."""
+        choices_given.append((e2e_port, default_canon_e2e_port, canon_name))
         return [passing_step()]
 
     monkeypatch.setattr(gate, "gate_steps", steps_for)
@@ -907,11 +1145,14 @@ def test_the_note_records_the_ports_the_gate_picked(
     status = gate.run_gate(repository_root=checkout, push=False, deploy=False)
 
     assert status == 0
-    assert ports_given == [expected]
+    [(first_port, second_port, canon_name)] = choices_given
+    assert (first_port, second_port) == expected
     record = note_on(checkout, gate.head_commit_sha(checkout))
     assert record is not None
     assert f"e2e-port: {expected[0]}" in record.splitlines()
     assert f"default-canon-e2e-port: {expected[1]}" in record.splitlines()
+    # The first mode's steps are named for the canon the note records (#10).
+    assert f"canon: {canon_name}" in record.splitlines()
 
 
 # Spencer, 2026-10-10: Deploy started on every push to main and refused each
@@ -978,7 +1219,7 @@ def run_passing_gate(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+        steps_stub(passing_step()),
     )
     started: list[str] = []
     monkeypatch.setattr(
@@ -1046,7 +1287,7 @@ def test_a_deploy_that_will_not_start_fails_the_run_but_keeps_the_record(
     monkeypatch.setattr(
         gate,
         "gate_steps",
-        lambda *, e2e_port, default_canon_e2e_port: [passing_step()],
+        steps_stub(passing_step()),
     )
 
     def gh_refuses(root: Path, sha: str) -> str:

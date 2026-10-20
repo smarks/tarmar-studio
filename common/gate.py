@@ -32,6 +32,8 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+from common.config_text import config_lines
+
 
 def normalize_passphrase(value: str) -> str:
     """Normalize a passphrase the way speak_friend normalizes login attempts."""
@@ -85,17 +87,12 @@ def load_gate_hints(path: Path) -> tuple[str, ...]:
             hints.
     """
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        hints = config_lines(path)
     except OSError as error:
         raise ImproperlyConfigured(
             f"GATE_HINTS_FILE {path} cannot be read ({error}); the passphrase "
             "gate needs its hints (issues #55, #77)."
         ) from error
-    hints = tuple(
-        stripped
-        for stripped in (line.strip() for line in lines)
-        if stripped and not stripped.startswith("#")
-    )
     if not hints:
         raise ImproperlyConfigured(
             f"GATE_HINTS_FILE {path} holds no hints: every line is blank or a "

@@ -1,0 +1,18 @@
+# What a canon rules file's loader adds to its refusal when the file carries
+# a top-level block this studio does not read (issue #36): the refusal names
+# the file and the block and says it is not a field the file takes, then goes
+# on with this text.
+#
+# The usual cause is order, not a typo: a canon commit adding a block was
+# merged before the studio commit that reads it, and the gate or a deploy
+# then ran the older studio against the newer canon.
+#
+# This file is configuration, not code: it can be reworded with no Python.
+# {block} is replaced by the block's name. The lines below are joined with
+# single spaces, so the text may be wrapped. Blank lines and lines starting
+# with # are ignored. It is read once, when reference/rules_file.py loads, and
+# a missing or empty file stops that import rather than a refusal.
+
+this canon carries a block (`{block}`) this studio does not read yet; deploy
+the studio that does, or check out the canon commit the studio was gated
+against (the gate note's canon-commit)

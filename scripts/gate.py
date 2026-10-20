@@ -27,9 +27,11 @@ the same under any canon, and under the Tarmar canon it also checks the Game
 Master's guides in that canon's ``guides/`` (issue #921). Since #921 the
 checkout holds no canon, so the first mode gates the Tarmar canon only when the
 caller's ``TARMAR_CANON_DIR`` names it. pytest, Jest and Playwright run again
-as "pytest (default canon)" and so on, on a second e2e port. There is no way
-to skip the second mode: a note must not mean less on one machine than on
-another.
+on a second e2e port. Each pass's steps are named for the canon it serves
+("pytest (Tarmar canon)", then "pytest (default canon)"), and the opening line
+says which port serves which canon, both from the one label each step carries
+(issue #10). There is no way to skip the second mode: a note must not mean
+less on one machine than on another.
 
 The note names the canon the first mode ran against and, when that canon is a
 git checkout of its own (the Tarmar canon, cloned from ``smarks/tarmar-canon``),
@@ -49,13 +51,17 @@ needs on macOS); running this file directly builds the same environment.
 """
 
 import argparse
+import codecs
 import hashlib
 import importlib.machinery
 import importlib.util
+import os
+import select
 import socket
 import subprocess
 import sys
 import time
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -69,7 +75,9 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from reference.paths import (  # noqa: E402
     CANON_DIR_ENV,
+    CANON_LABELS,
     DEFAULT_CANON_DIR,
+    DEFAULT_CANON_NAME,
     TARMAR_CANON_NAME,
     resolve_canon,
 )
@@ -108,12 +116,41 @@ FAKE_OLLAMA_PORT_OFFSET = 1000
 # moves upward past any port, or +1000 port, that something is listening on.
 E2E_PORT_SPAN = 200
 
-# The stand-in canon is ``reference.paths.DEFAULT_CANON_DIR``, an absolute path
-# (the suites start servers and child processes in other working directories).
-DEFAULT_CANON_SUFFIX = " (default canon)"
+# The variable that tells the browser suite which port to serve the app on.
+E2E_PORT_ENV = "E2E_PORT"
 
 # ``canon-commit:`` for a canon that is not a git checkout of its own.
 CANON_COMMIT_NONE = "none"
+
+# How much of a failing step's output its failure report repeats (issue #36).
+# A step's whole output still goes to the terminal or log as it runs; the
+# report repeats the end of it beside the exit code, because that is where a
+# check says what failed. A canon loader's refusal under makemigrations is
+# five lines (SystemCheckError, a blank, ERRORS:, the error naming the file
+# and the key, its HINT); forty leaves room for pytest's short summary or
+# Playwright's list of failures below a traceback.
+FAILED_STEP_TAIL_LINES = 40
+
+# Every step writes into the gate's pipe (issue #36), and Python block-buffers
+# stdout to a pipe while stderr stays line-buffered, so a Python step's output
+# would arrive late and out of order. Unbuffered, it arrives as written.
+UNBUFFERED_PYTHON = {"PYTHONUNBUFFERED": "1"}
+
+# A step's output is read until every process holding the pipe has closed it,
+# so that what its children print while they shut down (after Ctrl-C, say)
+# still comes through. A process the step left running in the background
+# holds the pipe too, and would keep the gate waiting for as long as it runs.
+# So once the step itself has exited, the gate stops reading when the pipe has
+# been quiet this long, whoever still holds it.
+STRAY_OUTPUT_GRACE_SECONDS = 2.0
+# A leftover process that keeps printing never lets the pipe go quiet, so
+# reading also stops this long after the step exited, whatever still arrives.
+STRAY_OUTPUT_CAP_SECONDS = 30.0
+# While the step runs and prints nothing, how often the gate looks up from
+# the pipe to see whether it has exited. It waits in select() between looks.
+STEP_EXIT_CHECK_SECONDS = 0.5
+# The most one read takes from the pipe.
+OUTPUT_READ_BYTES = 65536
 
 
 class GateError(Exception):
@@ -131,6 +168,18 @@ class GateStep:
     # leave the variable unset. Kept apart from ``environment`` so the base
     # environment stays built in one place, by ``build_step_environment``.
     canon_dir: Path | None = None
+    # The canon this step's pass serves, as ``reference.paths.CANON_LABELS``
+    # words it, or None for a step that does not read the canon. The step's
+    # name and the opening line's port header are both made from it (#10).
+    canon_label: str | None = None
+
+    def __post_init__(self) -> None:
+        if E2E_PORT_ENV in self.environment and self.canon_label is None:
+            raise ValueError(
+                f"step {self.name!r} serves the browser suite on a port but "
+                "names no canon, so the gate could not say which canon that "
+                "port serves (issue #10)"
+            )
 
 
 @dataclass(frozen=True)
@@ -140,6 +189,9 @@ class StepResult:
     step: GateStep
     returncode: int
     seconds: float
+    # The last FAILED_STEP_TAIL_LINES lines the step printed, stdout and
+    # stderr together, without their line endings.
+    output_tail: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -248,7 +300,9 @@ def choose_e2e_ports(
     return first, second
 
 
-def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
+def gate_steps(
+    *, e2e_port: str, default_canon_e2e_port: str, canon_name: str
+) -> list[GateStep]:
     """Every check a deploy depends on, in the order the gate runs them.
 
     The order is the cheapest first: a formatting slip should not cost the
@@ -259,6 +313,8 @@ def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
     Args:
         e2e_port: Port the Playwright suite serves the app on.
         default_canon_e2e_port: Port for the default-canon Playwright run.
+        canon_name: The canon the first mode serves, as
+            ``reference.paths.resolve_canon`` names it.
 
     Returns:
         The steps, in running order.
@@ -304,33 +360,47 @@ def gate_steps(*, e2e_port: str, default_canon_e2e_port: str) -> list[GateStep]:
     ]
     return [
         *steps_that_run_once,
-        *suite_steps(e2e_port=e2e_port, canon_dir=None),
+        *suite_steps(
+            e2e_port=e2e_port, canon_dir=None, canon_label=CANON_LABELS[canon_name]
+        ),
+        # DEFAULT_CANON_DIR is absolute: the suites start servers and child
+        # processes in other working directories.
         *suite_steps(
             e2e_port=default_canon_e2e_port,
             canon_dir=DEFAULT_CANON_DIR,
-            name_suffix=DEFAULT_CANON_SUFFIX,
+            canon_label=CANON_LABELS[DEFAULT_CANON_NAME],
         ),
     ]
 
 
 def suite_steps(
-    *, e2e_port: str, canon_dir: Path | None, name_suffix: str = ""
+    *, e2e_port: str, canon_dir: Path | None, canon_label: str
 ) -> list[GateStep]:
     """The three suites that read the canon, for one canon.
 
     Args:
         e2e_port: Port the Playwright suite serves the app on.
         canon_dir: The directory ``TARMAR_CANON_DIR`` names, or None for none.
-        name_suffix: Appended to each step name to tell the modes apart.
+        canon_label: The canon this pass serves, as ``CANON_LABELS`` words it:
+            each step carries it and is named for it.
 
     Returns:
         The pytest, Jest and Playwright steps.
     """
+    name_suffix = f" ({canon_label})"
     return [
         GateStep(
-            f"pytest{name_suffix}", ["uv", "run", "pytest", "-q"], canon_dir=canon_dir
+            f"pytest{name_suffix}",
+            ["uv", "run", "pytest", "-q"],
+            canon_dir=canon_dir,
+            canon_label=canon_label,
         ),
-        GateStep(f"jest{name_suffix}", ["npx", "jest"], canon_dir=canon_dir),
+        GateStep(
+            f"jest{name_suffix}",
+            ["npx", "jest"],
+            canon_dir=canon_dir,
+            canon_label=canon_label,
+        ),
         GateStep(
             f"playwright{name_suffix}",
             # --check judges JS coverage against package.json's stored
@@ -342,10 +412,36 @@ def suite_steps(
                 "scripts/update_js_coverage_threshold.py",
                 "--check",
             ],
-            {"E2E_PORT": e2e_port},
+            {E2E_PORT_ENV: e2e_port},
             canon_dir=canon_dir,
+            canon_label=canon_label,
         ),
     ]
+
+
+def e2e_ports_header(steps: Sequence[GateStep]) -> str:
+    """Which port serves which canon, for the line that opens a gate run.
+
+    Read from the browser steps themselves, from the label each one's name
+    is made from, so the line cannot name a different canon from the step it
+    describes (issue #10: it once called the Tarmar pass's port the default
+    canon's).
+
+    Args:
+        steps: The gate's steps, in running order.
+
+    Returns:
+        e.g. ``"e2e ports 8390 for the Tarmar canon, 8391 for the default
+        canon"``, or ``""`` when no step serves the browser suite.
+    """
+    ports = [
+        f"{step.environment[E2E_PORT_ENV]} for the {step.canon_label}"
+        for step in steps
+        if E2E_PORT_ENV in step.environment
+    ]
+    if not ports:
+        return ""
+    return f"e2e ports {', '.join(ports)}"
 
 
 def build_step_environment(
@@ -753,10 +849,117 @@ def announce(message: str) -> None:
     print(f"[gate] {message}", flush=True)
 
 
+@dataclass
+class StepOutput:
+    """A step's output as read so far, echoed a line at a time.
+
+    The state lives here rather than in :func:`echo_output`'s locals so a
+    second call, after Ctrl-C interrupted the first, carries on where it
+    stopped: a line half read, or lines read but not yet printed.
+    """
+
+    # The last FAILED_STEP_TAIL_LINES lines, without their endings.
+    tail: deque[str] = field(
+        default_factory=lambda: deque(maxlen=FAILED_STEP_TAIL_LINES)
+    )
+    # Whole lines read but not yet printed.
+    waiting: deque[str] = field(default_factory=deque)
+    # The start of a line whose end has not arrived yet.
+    unfinished: str = ""
+    decoder: codecs.IncrementalDecoder = field(
+        default_factory=lambda: codecs.getincrementaldecoder("utf-8")(errors="replace")
+    )
+
+    def take(self, chunk: bytes) -> None:
+        """Add what one read returned, printing each line it completes."""
+        lines = (self.unfinished + self.decoder.decode(chunk)).split("\n")
+        self.unfinished = lines.pop()
+        self.waiting.extend(lines)
+        self.print_waiting()
+
+    def finish(self) -> None:
+        """The pipe is done with: print whatever is left, ended or not."""
+        last = self.unfinished + self.decoder.decode(b"", final=True)
+        self.unfinished = ""
+        if last:
+            self.waiting.append(last)
+        self.print_waiting()
+
+    def print_waiting(self) -> None:
+        """Print each line read and not yet printed, keeping it for the tail."""
+        while self.waiting:
+            line = self.waiting.popleft()
+            self.tail.append(line.rstrip("\r"))
+            print(line, flush=True)
+
+
+def echo_output(process: subprocess.Popen[bytes], output: StepOutput) -> None:
+    """Echo a step's output until the pipe closes, or the step is long gone.
+
+    The trade-off, stated plainly: once the step itself has exited, what a
+    process it left behind writes is read only while it keeps coming within
+    :data:`STRAY_OUTPUT_GRACE_SECONDS` of the last output, and never past
+    :data:`STRAY_OUTPUT_CAP_SECONDS` after the exit. Later output from such a
+    process is not read or shown, and a process that keeps printing is cut
+    off at the cap; in exchange, nothing the step leaves running can keep the
+    gate waiting.
+
+    Args:
+        process: The step, with its stdout and stderr on one pipe.
+        output: Where the output read so far is kept.
+    """
+    output.print_waiting()
+    # stdout=PIPE always opens one; the assert narrows the type, as in
+    # ship.run_gate.
+    assert process.stdout is not None
+    descriptor = process.stdout.fileno()
+    exited_at: float | None = None
+    while True:
+        if exited_at is None and process.poll() is not None:
+            exited_at = time.monotonic()
+        if exited_at is None:
+            timeout = STEP_EXIT_CHECK_SECONDS
+        else:
+            cap_left = STRAY_OUTPUT_CAP_SECONDS - (time.monotonic() - exited_at)
+            if cap_left <= 0:
+                # Something the step left running is still printing.
+                break
+            timeout = min(STRAY_OUTPUT_GRACE_SECONDS, cap_left)
+        readable, _writable, _failed = select.select([descriptor], [], [], timeout)
+        if not readable:
+            if exited_at is not None:
+                # Something the step left running still holds the pipe.
+                break
+            continue
+        chunk = os.read(descriptor, OUTPUT_READ_BYTES)
+        if not chunk:
+            break
+        output.take(chunk)
+    output.finish()
+
+
 def run_step(
     step: GateStep, *, repository_root: Path, environment: dict[str, str]
 ) -> StepResult:
-    """Run one step to completion, with its output going to this terminal.
+    """Run one step to completion, echoing its output as it arrives.
+
+    The step's stdout and stderr are read together, a line at a time, and
+    every line is printed here, so the terminal or log still holds the whole
+    of it; the last :data:`FAILED_STEP_TAIL_LINES` are kept as well, for the
+    failure report to repeat (issue #36).
+
+    Ctrl-C reaches the step's process group as well as the gate, so on an
+    interruption the gate goes on reading until the step and everything
+    sharing its output have closed it: their shutdown messages still reach
+    the terminal, and none of them writes into a pipe nobody reads. A second
+    interruption, or any other failure here, kills the step.
+
+    The cost of not waiting on processes the step leaves running: after the
+    step exits, their output is read only within
+    :data:`STRAY_OUTPUT_GRACE_SECONDS` of quiet and at most
+    :data:`STRAY_OUTPUT_CAP_SECONDS` in all (see :func:`echo_output`), so a
+    leftover that prints later is not shown and one that keeps printing is
+    cut off.
 
     Args:
         step: The step to run.
@@ -764,19 +967,55 @@ def run_step(
         environment: The base environment; the step's own entries win.
 
     Returns:
-        How it ended.
+        How it ended, with the end of its output.
     """
     started = time.monotonic()
-    completed = subprocess.run(
+    output = StepOutput()
+    with subprocess.Popen(
         step.command,
         cwd=repository_root,
-        env={**environment, **step.environment},
-    )
+        env={**environment, **UNBUFFERED_PYTHON, **step.environment},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as process:
+        try:
+            try:
+                echo_output(process, output)
+            except KeyboardInterrupt:
+                echo_output(process, output)
+                raise
+            process.wait()
+        except BaseException:
+            process.kill()
+            raise
     return StepResult(
         step=step,
-        returncode=completed.returncode,
+        returncode=process.returncode,
         seconds=time.monotonic() - started,
+        output_tail=tuple(output.tail),
     )
+
+
+def failure_report(result: StepResult, commit_sha: str) -> list[str]:
+    """What the gate says about a failed step: the exit and the output's end.
+
+    Args:
+        result: The failed step's result.
+        commit_sha: The commit the gate was running on.
+
+    Returns:
+        The announced line, then the step's last output lines, indented.
+    """
+    summary = (
+        f"{result.step.name} failed (exit {result.returncode}) after "
+        f"{result.seconds:.0f}s; nothing recorded for {commit_sha}"
+    )
+    if not result.output_tail:
+        return [f"{summary}; it printed nothing"]
+    return [
+        f"{summary}. The end of its output:",
+        *(f"  {line}" for line in result.output_tail),
+    ]
 
 
 def refuse_busy_ports(e2e_ports: Sequence[str]) -> str:
@@ -831,6 +1070,13 @@ def run_gate(
             print(f"  {line}")
         return 1
 
+    # The first mode's canon, which its steps are named for: whatever the
+    # caller's TARMAR_CANON_DIR names, or the checkout's own.
+    first_mode_environment = build_step_environment()
+    canon_dir, canon_name = resolve_canon(
+        environ=first_mode_environment,
+        content_dir=repository_root / "reference" / "content",
+    )
     try:
         e2e_port, default_canon_e2e_port = choose_e2e_ports(
             repository_root,
@@ -838,7 +1084,9 @@ def run_gate(
             default_canon_e2e_port=default_canon_e2e_port,
         )
         steps = gate_steps(
-            e2e_port=e2e_port, default_canon_e2e_port=default_canon_e2e_port
+            e2e_port=e2e_port,
+            default_canon_e2e_port=default_canon_e2e_port,
+            canon_name=canon_name,
         )
     except GateError as failure:
         announce(f"refusing to run: {failure}")
@@ -863,14 +1111,14 @@ def run_gate(
         )
         return 1
     # One environment per canon, each built by build_step_environment.
-    environments = {
-        canon_dir: build_step_environment(canon_dir=canon_dir)
-        for canon_dir in {step.canon_dir for step in steps}
+    environments: dict[Path | None, dict[str, str]] = {
+        step_canon_dir: (
+            first_mode_environment
+            if step_canon_dir is None
+            else build_step_environment(canon_dir=step_canon_dir)
+        )
+        for step_canon_dir in {step.canon_dir for step in steps}
     }
-    canon_dir, canon_name = resolve_canon(
-        environ=environments[None],
-        content_dir=repository_root / "reference" / "content",
-    )
     # The note records the canon's commit, so that commit has to be what ran.
     canon_dirty_before = canon_uncommitted_changes(canon_dir)
     if canon_dirty_before:
@@ -883,15 +1131,14 @@ def run_gate(
             print(f"  {line}")
         return 1
     canon_commit = canon_commit_sha(canon_dir)
-    announce(
-        f"gating {commit_sha} with {len(steps)} steps (e2e ports {e2e_port}, "
-        f"{default_canon_e2e_port} for the default canon)"
-    )
+    opening = f"gating {commit_sha} with {len(steps)} steps"
+    ports_header = e2e_ports_header(steps)
+    announce(f"{opening} ({ports_header})" if ports_header else opening)
     results: list[StepResult] = []
     for number, step in enumerate(steps, start=1):
         # A browser step starts long after the check above, time enough for
         # another run to take its port; ask again just before it starts.
-        step_port = step.environment.get("E2E_PORT")
+        step_port = step.environment.get(E2E_PORT_ENV)
         busy_refusal = refuse_busy_ports((step_port,)) if step_port else ""
         if busy_refusal:
             announce(f"{step.name}: {busy_refusal}; nothing recorded for {commit_sha}")
@@ -904,10 +1151,10 @@ def run_gate(
         )
         results.append(result)
         if not result.passed:
-            announce(
-                f"{step.name} failed (exit {result.returncode}) after "
-                f"{result.seconds:.0f}s; nothing recorded for {commit_sha}"
-            )
+            summary, *output_tail = failure_report(result, commit_sha)
+            announce(summary)
+            for line in output_tail:
+                print(line, flush=True)
             return result.returncode
 
     for result in results:

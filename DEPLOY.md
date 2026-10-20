@@ -273,12 +273,16 @@ It runs, in order: `ruff check`, `ruff format --check`, `pyright`,
 `npx jest`, and Playwright through `scripts/update_js_coverage_threshold.py
 --check` on its own `E2E_PORT` (so a dev server on 8000 neither answers
 the suite's requests nor loses its own). It then runs pytest, Jest and
-Playwright a second time, named `pytest (default canon)` and so on, with
-`TARMAR_CANON_DIR` set to the absolute path of `reference/default_canon` and
-Playwright on a second `E2E_PORT`. Each port, and the fake Ollama's port 1000
-above it, is picked free from 8390 upward (starting at an offset derived from
-the checkout's path, so two worktrees' gates seldom reach for the same pair),
-and the note records both as `e2e-port` and `default-canon-e2e-port`.
+Playwright a second time, with `TARMAR_CANON_DIR` set to the absolute path of
+`reference/default_canon` and Playwright on a second `E2E_PORT`. Each pass's
+three steps are named for the canon it serves, `pytest (Tarmar canon)` and so
+on for the first (or `(default canon)` when it ran that one), and
+`pytest (default canon)` and so on for the second; the run's opening line
+names the canon each port serves from the same label (issue #10). Each port,
+and the fake Ollama's port 1000 above it, is picked free from 8390 upward
+(starting at an offset derived from the checkout's path, so two worktrees'
+gates seldom reach for the same pair), and the note records both as
+`e2e-port` and `default-canon-e2e-port`.
 `--e2e-port` and `--default-canon-e2e-port` name them instead; a named port
 something is already listening on is refused, as is a picked one taken
 before its browser step starts, since Playwright would test that server's
@@ -318,7 +322,7 @@ canon-dir: <absolute path of the canon the first pass ran against>
 canon-commit: <the canon checkout's commit, or none>
 e2e-port: 8390
 default-canon-e2e-port: 8391
-steps: ruff, ruff format, pyright, makemigrations, build_guides, pytest, jest, playwright, pytest (default canon), jest (default canon), playwright (default canon)
+steps: ruff, ruff format, pyright, makemigrations, build_guides, pytest (Tarmar canon), jest (Tarmar canon), playwright (Tarmar canon), pytest (default canon), jest (default canon), playwright (default canon)
 ```
 
 A note means every step passed **on that exact tree**, so the gate refuses to
