@@ -348,8 +348,20 @@ async function loadedCanon(page) {
     return line.replace('World:', '').trim();
 }
 
+/**
+ * Text made safe to put inside a regular expression: every character that
+ * means something to a pattern is escaped, so a name with a parenthesis or
+ * a dot matches itself and nothing else.
+ * @param {string} text
+ * @returns {string}
+ */
+function escaped(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 module.exports = {
     DEFAULT_CANON,
+    escaped,
     loadedCanon,
     ARENA_ORIGIN,
     battleRowOnList,

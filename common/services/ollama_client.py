@@ -524,7 +524,7 @@ def list_models(*, base_url: str | None = None) -> list[str]:
         base_url: See :func:`_base_url`.
 
     Returns:
-        The model names, e.g. ``["qwen3:32b", "nomic-embed-text:latest"]``.
+        The model names, e.g. ``["llama3:8b", "nomic-embed-text:latest"]``.
 
     Raises:
         httpx.HTTPError: On a transport failure or non-2xx response.

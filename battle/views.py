@@ -80,6 +80,7 @@ from .access import (
     listable_battles,
     own_drafts,
     readable_battles,
+    seat_is_held,
 )
 from .adaptation import NO_MODELLED_ATTACK_NOTE, beast_attack
 from .generation import ARCHETYPES
@@ -97,7 +98,6 @@ from .services import (
     MAX_TEAM_NAME,
     MIN_COMBATANTS,
     STALE_POOLS_REFUSAL,
-    TAKE_SEAT_GAME_MASTER_ONLY,
     BattleInLobby,
     StalePools,
     add_draft_entry,
@@ -106,6 +106,7 @@ from .services import (
     bare_handed_line,
     claim_seat,
     dead_seats,
+    held_by_another,
     import_party_into_draft,
     record_player_action,
     release_seat,
@@ -1128,7 +1129,7 @@ def seat_summaries(battle, actor: Actor) -> list[dict]:
     # a Games Master session's fight by a Game Master only (#762).
     controller = commands_foes(actor, battle)
     for combatant in battle.combatants.select_related("player", "character"):
-        claimed = combatant.player_id is not None or bool(combatant.guest_key)
+        claimed = seat_is_held(combatant)
         if combatant.beast_id:
             kind = "beast"
         elif combatant.is_open_seat and not claimed:
@@ -1207,13 +1208,14 @@ def seat_hand_offs(battle, combatant, actor: Actor) -> dict[str, str]:
     runner = runs_the_seats(battle, actor.user)
     if (
         runner
-        and combatant.player_id not in (None, actor.user.pk)
+        and seat_is_held(combatant)
+        and combatant.player_id != actor.user.pk
         and not withdrawn_from_session(battle, character)
     ):
         offered["take_seat_url"] = reverse(
             "battle:seat-take", args=[battle.pk, combatant.pk]
         )
-    if combatant.player_id != owner_id and (runner or actor.user.pk == owner_id):
+    if held_by_another(combatant) and (runner or actor.user.pk == owner_id):
         offered["return_seat_url"] = reverse(
             "battle:seat-return", args=[battle.pk, combatant.pk]
         )
@@ -2105,8 +2107,7 @@ def _seat_hand_off(
     says who plays the figure now, and the log's line comes with it.
     """
     actor, battle = _actor_and_readable_battle(request, pk)
-    if actor.user is None:
-        return _json_error(TAKE_SEAT_GAME_MASTER_ONLY, status=403)
+    # A guest is refused by the service itself, in that service's words.
     try:
         _seat, event = hand_off(battle.pk, combatant_id, actor.user)
     except ValueError as refusal:

@@ -1929,6 +1929,19 @@ if (typeof module !== 'undefined' && module.exports) {
         let actionBusy = false;
         // Battle-global sequence high-water mark, for incremental polling.
         let lastSequence = (view.next_sequence || 1) - 1;
+        // Who is awaited and who sits where, as last drawn. A pause that
+        // moves from one seated figure to the next writes no event and
+        // keeps the turn and the status (the partial turn rolls back), so
+        // this is the only thing a poll can see change (#9).
+        const seatsAndPause = (seatList, pause) => JSON.stringify(
+            { seats: seatList, pending: pause }
+        );
+        let lastSeatsAndPause = seatsAndPause(seats, pending);
+        // Counts every response the page applies. A poll asked before an
+        // act or an advance was answered may describe the battle before
+        // it: applied after it, that would redraw the earlier pause, or
+        // read a turn that went backwards as a restart and reload (#9).
+        let appliedCount = 0;
         // Which combatants' attribute panels the reader has open (#302).
         // The poll repaints the roster every couple of seconds; this is
         // what keeps an opened panel open across those repaints.
@@ -2072,8 +2085,10 @@ if (typeof module !== 'undefined' && module.exports) {
             currentStatus = data.status;
             currentTurn = data.turn;
             lastSequence = (view.next_sequence || 1) - 1;
+            appliedCount += 1;
             const wasPendingFor = pending && pending.combatant_id;
             pending = data.pending || null;
+            lastSeatsAndPause = seatsAndPause(seats, pending);
             if (!pending || pending.combatant_id !== wasPendingFor) {
                 selectedIndex = null;
                 castOpen = false;
@@ -2177,6 +2192,7 @@ if (typeof module !== 'undefined' && module.exports) {
             const shouldPoll = !TERMINAL_STATUSES.includes(currentStatus)
                 && (!isDm || currentStatus === 'awaiting');
             if (!panel || !shouldPoll) { return; }
+            const appliedWhenAsked = appliedCount;
             let response;
             try {
                 response = await fetch(
@@ -2187,6 +2203,9 @@ if (typeof module !== 'undefined' && module.exports) {
             }
             if (!response.ok) { return; }
             const data = await response.json();
+            // Something newer was applied while this was in flight: drop
+            // it, and let the next tick ask again.
+            if (appliedCount !== appliedWhenAsked) { return; }
             const nextSequence = (data.view.next_sequence || 1) - 1;
             if (data.turn < currentTurn || nextSequence < lastSequence) {
                 pageNavigation.reload();
@@ -2196,6 +2215,8 @@ if (typeof module !== 'undefined' && module.exports) {
                 || data.turn !== currentTurn
                 || nextSequence !== lastSequence
                 || (data.events || []).length > 0
+                || seatsAndPause(data.seats || seats, data.pending || null)
+                    !== lastSeatsAndPause
                 || (typeof data.stale_html === 'string'
                     && data.stale_html.trim() !== lastStaleHtml);
             if (changed) { applyBattleResponse(data); }

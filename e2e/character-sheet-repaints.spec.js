@@ -11,7 +11,9 @@
  * character-edit.js writes it. A reload used to be the only way to see it.
  */
 
-const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const {
+    test, expect, loginAs, TEST_USER, TEST_ADMIN, escaped,
+} = require('./fixtures');
 const { readDjangoShell } = require('./django');
 const { pinDice } = require('./dice');
 const {
@@ -472,7 +474,7 @@ print('CHARACTER', character.pk)
         await expect(page).toHaveTitle(newName);
         await expect(page.locator('.breadcrumb [aria-current="page"]')).toHaveText(newName);
         await expect(page.locator('#roll-survival-save-btn')).toHaveAttribute(
-            'data-confirm', new RegExp(`^Roll ${newName}'s survival save\\?`));
+            'data-confirm', new RegExp(`^Roll ${escaped(newName)}'s survival save\\?`));
         await expect(page.locator('#sessions-holding [data-name-chrome]').first()).toHaveText(newName);
         // The slot's own label; the session picker's search box carries a
         // second, screen-reader label beside it (#973).
@@ -498,5 +500,22 @@ print('CHARACTER', character.pk)
         await page.locator('#add-skill-btn').click();
         await expect(page.locator('.skill-row[data-skill="perception"]')).toHaveCount(1);
         await expect(page.locator('#free-points')).toHaveText('0');
+    });
+
+    test('a Village player\'s choice of Survival is recorded as theirs, not a Game Master\'s call (#67)', async ({ page }, testInfo) => {
+        const characterId = seedCharacter(uniqueName('Villager', testInfo),
+            "location='Village', origin_skill='street smarts', skills={'street smarts': 1}");
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/characters/${characterId}/`);
+
+        const name = page.locator('.skill-row[data-skill="street smarts"] .skill-name');
+        await name.fill('Survival');
+        await name.blur();
+        await expect(page.locator('.skill-row[data-skill="survival"]')).toHaveCount(1);
+
+        const latest = page.locator('#recent-changes-rows tr').first();
+        await expect(latest).toContainText('street smarts');
+        await expect(latest).toContainText('survival');
+        await expect(latest).not.toContainText("Game Master's call");
     });
 });
