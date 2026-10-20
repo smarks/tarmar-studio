@@ -1,3 +1,4 @@
+{% load local_time %}
 {% comment %}
 A Game Master's ruling lifting a figure's magic bounds (issue #37). Spencer,
 2026-10-14: the Game Master records "Channel lifted for <figure>", and
@@ -21,7 +22,7 @@ configuration (``battle.wording``, config/battle-rulings.toml).
     <ul class="magic-bounds-liftings">
         {% for lifting in magic_bounds.liftings %}
         <li class="magic-bounds-lifting">
-            <span class="magic-bounds-lifting-line">{{ lifting.line }}, <time datetime="{{ lifting.at|date:'c' }}">{{ lifting.at|date:"j M Y, H:i" }}</time></span>
+            <span class="magic-bounds-lifting-line">{{ lifting.line }}, {% local_time lifting.at "j M Y, H:i" %}</span>
             {% if magic_bounds.can_rule %}
             <form method="post" action="{% url 'battle:magic-bounds' battle.pk %}" class="magic-bounds-restore-form">
                 {% csrf_token %}
