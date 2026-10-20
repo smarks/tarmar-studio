@@ -174,3 +174,190 @@ test('the control works from the keyboard: a click on the button, delegated', as
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
 });
+
+/**
+ * The Campaign tab is fetched again while a turn runs, carrying the earliest
+ * page loaded (issue #982). When that refetch lands while "Show earlier
+ * threads" is still on its way, the control pressed has been replaced by the
+ * server's copy of it; the page must go in place of that copy, not into the
+ * control that left the page (issue #14).
+ */
+describe('a refetch of the Campaign tab lands while an earlier page is on its way (#14)', () => {
+    const EARLIER_URL = '/tarmar/gm/sessions/12/threads/resolved/?before=31';
+    const CAMPAIGN_URL = '/tarmar/gm/sessions/12/campaign/?resolved_from=31';
+    /** The resolved threads as the server renders them from thread 31 on. */
+    const RESOLVED = `
+        <p id="gm-panel-campaign-error" role="alert" hidden></p>
+        <details class="gm-campaign-resolved" open>
+            <summary>4 resolved</summary>
+            <ul>
+                <li class="gm-history-earlier" data-earlier>
+                    <button type="button" class="show-earlier" data-focus-key="earlier-resolved" data-earlier-url="${EARLIER_URL}">Show earlier threads</button>
+                    <span data-earlier-error role="alert" hidden></span>
+                </li>
+                <li data-thread-id="31">thread 31</li>
+                <li data-thread-id="32">thread 32</li>
+            </ul>
+        </details>`;
+    const EARLIER_PAGE = '<li data-thread-id="29">thread 29</li><li data-thread-id="30">thread 30</li>';
+
+    let panel;
+    let answerEarlier;
+
+    /**
+     * The GM page's Campaign tab on session 12, the tab's refetch answered at
+     * once with ``refetched``, the earlier page held until answerEarlier() is
+     * called, and any other page answered from ``pages`` by its URL.
+     */
+    function setUpTab({ refetched = RESOLVED, pages = {} } = {}) {
+        const config = JSON.stringify({
+            campaignPanelUrlTemplate: '/tarmar/gm/sessions/{session_id}/campaign/',
+            sessionId: 12,
+        });
+        document.body.innerHTML = `
+            <script id="gm-panel-config" type="application/json">${config}<\/script>
+            <section id="gm-panel-campaign">${RESOLVED}</section>
+            <input id="user-input">`;
+        const earlier = new Promise((resolve) => { answerEarlier = resolve; });
+        global.fetch.mockImplementation((url) => {
+            if (url === EARLIER_URL) return earlier;
+            return htmlResponse(url in pages ? pages[url] : refetched);
+        });
+        panel = require('../gm-panel-characters.js');
+    }
+
+    function shownThreads() {
+        return Array.from(document.querySelectorAll('#gm-panel-campaign li[data-thread-id]'))
+            .map((item) => item.dataset.threadId);
+    }
+
+    afterEach(() => { delete window.gmPanelDrafts; delete window.gmPanelCharacters; });
+
+    test('the page goes in place of the control the refetch put there', async () => {
+        setUpTab();
+        const pressed = document.querySelector('.show-earlier');
+
+        const loading = history.loadEarlier(pressed);
+        await panel.refreshPanel();
+        // The refetch asked from the same thread and replaced the control.
+        expect(global.fetch.mock.calls.map(([url]) => url)).toContain(CAMPAIGN_URL);
+        expect(pressed.isConnected).toBe(false);
+        answerEarlier(htmlResponse(EARLIER_PAGE));
+
+        await expect(loading).resolves.toBe(true);
+        expect(shownThreads()).toEqual(['29', '30', '31', '32']);
+        expect(document.querySelector('#gm-panel-campaign [data-earlier]')).toBeNull();
+    });
+
+    test('a failure is said beside the control on the page', async () => {
+        setUpTab();
+
+        const loading = history.loadEarlier(document.querySelector('.show-earlier'));
+        await panel.refreshPanel();
+        answerEarlier(htmlResponse('', { ok: false, status: 500, statusText: 'Server Error' }));
+
+        await expect(loading).resolves.toBe(false);
+        const error = document.querySelector('#gm-panel-campaign [data-earlier-error]');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toBe('The earlier page could not be loaded: Server Error');
+    });
+
+    test('pressing the new control meanwhile asks once and puts the page in once', async () => {
+        setUpTab();
+
+        const first = history.loadEarlier(document.querySelector('.show-earlier'));
+        await panel.refreshPanel();
+        const second = history.loadEarlier(document.querySelector('.show-earlier'));
+        answerEarlier(htmlResponse(EARLIER_PAGE));
+
+        await expect(first).resolves.toBe(true);
+        await expect(second).resolves.toBe(true);
+        expect(global.fetch.mock.calls.filter(([url]) => url === EARLIER_URL)).toHaveLength(1);
+        expect(shownThreads()).toEqual(['29', '30', '31', '32']);
+    });
+
+    test('a list fetched again from another thread loads the page its control asks for', async () => {
+        // Thread 31 was reopened meanwhile: the list now starts at 32, and
+        // its control asks for the page above 32.
+        const fromThirtyTwo = '/tarmar/gm/sessions/12/threads/resolved/?before=32';
+        setUpTab({
+            refetched: RESOLVED
+                .replace(EARLIER_URL, fromThirtyTwo)
+                .replace('<li data-thread-id="31">thread 31</li>', ''),
+            pages: {
+                [fromThirtyTwo]: '<li data-thread-id="29">thread 29</li><li data-thread-id="30">thread 30</li>',
+            },
+        });
+
+        const loading = history.loadEarlier(document.querySelector('.show-earlier'));
+        await panel.refreshPanel();
+        answerEarlier(htmlResponse('<li data-thread-id="29">stale</li><li data-thread-id="30">stale</li>'));
+
+        await expect(loading).resolves.toBe(true);
+        expect(global.fetch.mock.calls.map(([url]) => url)).toContain(fromThirtyTwo);
+        expect(shownThreads()).toEqual(['29', '30', '32']);
+        expect(document.getElementById('gm-panel-campaign').textContent).not.toContain('stale');
+    });
+
+    test('a page handed on to the new control is not what a later ask for the first page waits on', async () => {
+        const fromThirtyTwo = '/tarmar/gm/sessions/12/threads/resolved/?before=32';
+        setUpTab({
+            refetched: RESOLVED
+                .replace(EARLIER_URL, fromThirtyTwo)
+                .replace('<li data-thread-id="31">thread 31</li>', ''),
+        });
+        // The page above 32 is held, so the handed-on load is still out.
+        const answerOthers = global.fetch.getMockImplementation();
+        let answerThirtyTwo;
+        global.fetch.mockImplementation((url) => (url === fromThirtyTwo
+            ? new Promise((resolve) => { answerThirtyTwo = resolve; })
+            : answerOthers(url)));
+
+        const first = history.loadEarlier(document.querySelector('.show-earlier'));
+        await panel.refreshPanel();
+        answerEarlier(htmlResponse('<li data-thread-id="29">stale</li>'));
+        for (let tick = 0; tick < 6; tick += 1) await Promise.resolve();
+        expect(global.fetch.mock.calls.map(([url]) => url)).toContain(fromThirtyTwo);
+
+        // A control asking for the first page again, elsewhere on the page.
+        document.body.insertAdjacentHTML('beforeend', `
+            <ul id="other"><li data-earlier>
+                <button type="button" id="again" data-earlier-url="${EARLIER_URL}">Show earlier threads</button>
+                <span data-earlier-error role="alert" hidden></span>
+            </li></ul>`);
+        const again = history.loadEarlier(document.getElementById('again'));
+
+        expect(global.fetch.mock.calls.filter(([url]) => url === EARLIER_URL)).toHaveLength(2);
+        answerThirtyTwo(htmlResponse('<li data-thread-id="30">thread 30</li>'));
+        await expect(first).resolves.toBe(true);
+        await expect(again).resolves.toBe(true);
+        expect(document.getElementById('other').textContent).toContain('stale');
+    });
+
+    test('a page landing after the reader moved on leaves the focus where it is', async () => {
+        setUpTab();
+
+        const loading = history.loadEarlier(document.querySelector('.show-earlier'));
+        await panel.refreshPanel();
+        const messageBox = document.getElementById('user-input');
+        messageBox.focus();
+        answerEarlier(htmlResponse(EARLIER_PAGE));
+
+        await expect(loading).resolves.toBe(true);
+        expect(shownThreads()).toEqual(['29', '30', '31', '32']);
+        expect(document.activeElement).toBe(messageBox);
+    });
+
+    test('a page landing while the focus is still on the control takes it along', async () => {
+        setUpTab();
+
+        const loading = history.loadEarlier(document.querySelector('.show-earlier'));
+        await panel.refreshPanel();
+        // The reader is on the control the refetch put there.
+        document.querySelector('.show-earlier').focus();
+        answerEarlier(htmlResponse(EARLIER_PAGE));
+
+        await expect(loading).resolves.toBe(true);
+        expect(document.activeElement.dataset.threadId).toBe('29');
+    });
+});

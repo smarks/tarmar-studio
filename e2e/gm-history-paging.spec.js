@@ -136,4 +136,43 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
         await expect(resolved).toHaveAttribute('open', '');
         await expect(resolved.locator('[data-earlier]')).toHaveCount(0);
     });
+
+    test('an earlier page that lands after a turn refetched the tab is still shown (#14)', async ({ page }, testInfo) => {
+        const sessionId = seedLongSession(`race-${testInfo.workerIndex}-${Date.now()}`);
+        await loginAs(page, TEST_USER);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        await page.click('#gm-panel-tab-campaign');
+        const resolved = page.locator('#gm-panel-campaign .gm-campaign-resolved');
+        await resolved.locator('summary').click();
+        const names = resolved.locator('li[data-thread-id] .gm-campaign-name');
+        await expect(names).toHaveCount(PAGE_SIZE);
+
+        // The earlier page is held on its way until the turn's refetch of
+        // the tab has landed and replaced the control that asked for it.
+        let releaseEarlier;
+        const earlierHeld = new Promise((resolve) => { releaseEarlier = resolve; });
+        await page.route((url) => url.pathname.endsWith(`/sessions/${sessionId}/threads/resolved/`), async (route) => {
+            await earlierHeld;
+            await route.continue();
+        });
+        const button = resolved.getByRole('button', { name: 'Show earlier threads' });
+        const pressed = await button.elementHandle();
+        await button.click();
+
+        const refetched = page.waitForResponse((response) => response.url().includes(`/sessions/${sessionId}/campaign/`));
+        await page.fill('#user-input', 'I look around the crypt.');
+        await page.click('#send-btn');
+        await expect(page.locator('#messages .message.assistant').last()).toContainText('nothing stirs', { timeout: 30000 });
+        await refetched;
+        await expect.poll(() => pressed.evaluate((element) => element.isConnected)).toBe(false);
+
+        releaseEarlier();
+
+        await expect(names).toHaveCount(TURNS);
+        await expect(names.first()).toHaveText('Settled matter 1');
+        await expect(resolved.locator('[data-earlier]')).toHaveCount(0);
+        // The reader had moved on to the chat: a page landing a turn later
+        // does not take the focus from it.
+        await expect(resolved.locator(':focus')).toHaveCount(0);
+    });
 });

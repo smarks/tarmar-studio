@@ -588,6 +588,45 @@ class GMStreamBudgetSettingTest(DotenvStagingMixin, TestCase):
         self.assertEqual(self._budget(env), 420.0)
 
 
+class GMQueueMessageSettingTest(DotenvStagingMixin, TestCase):
+    """A reworded GM message is checked at startup, never mid-turn (issue #64)."""
+
+    def _import_settings(self, env):
+        program = (
+            "import sys;"
+            "sys.argv = ['manage.py', 'test'];"
+            "import tarmar_studio.settings as settings;"
+            "print(settings.GM_QUEUE_STATUS_MANY_AHEAD)"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=BASE_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_the_environment_rewords_the_line(self):
+        env = self.subprocess_environment()
+        env["GM_QUEUE_STATUS_MANY_AHEAD"] = "{turns_ahead} ahead, {seconds}s"
+
+        result = self._import_settings(env)
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "{turns_ahead} ahead, {seconds}s")
+
+    def test_a_field_it_may_not_use_refuses_to_start(self):
+        env = self.subprocess_environment()
+        env["GM_QUEUE_STATUS_MANY_AHEAD"] = "{turns} ahead"
+
+        result = self._import_settings(env)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ImproperlyConfigured", result.stderr)
+        self.assertIn("GM_QUEUE_STATUS_MANY_AHEAD names {turns}", result.stderr)
+
+
 class PinnedDiceSettingTest(DotenvStagingMixin, TestCase):
     """E2E_DICE_SEEDING, the browser tests' pinned dice (issue #959).
 

@@ -34,6 +34,8 @@ unseated figure would name an owner who does not exist.
 
 from __future__ import annotations
 
+from .refusals import BattleRefusal
+
 #: The AI decides this combatant's action.
 AUTOMATIC = "automatic"
 #: This combatant's owner states its action at each decision point.
@@ -67,14 +69,14 @@ def clean_mode(value) -> str:
     """The battle-level mode ``value`` names.
 
     Raises:
-        ValueError: for anything that is not one of the two real modes.
+        BattleRefusal: for anything that is not one of the two real modes.
             Inherit is not among them: a *battle* has nothing to inherit
             from, so accepting the empty string here would store a battle
             whose default is undefined.
     """
     mode = str(value or "").strip()
     if mode not in MODES:
-        raise ValueError("Control mode must be automatic or manual")
+        raise BattleRefusal("Control mode must be automatic or manual")
     return mode
 
 
@@ -82,11 +84,11 @@ def clean_combatant_mode(value) -> str:
     """The per-combatant mode ``value`` names, ``INHERIT`` included.
 
     Raises:
-        ValueError: for anything outside :data:`COMBATANT_MODES`.
+        BattleRefusal: for anything outside :data:`COMBATANT_MODES`.
     """
     mode = str(value or "").strip()
     if mode not in COMBATANT_MODES:
-        raise ValueError("Control mode must be automatic, manual, or inherited")
+        raise BattleRefusal("Control mode must be automatic, manual, or inherited")
     return mode
 
 

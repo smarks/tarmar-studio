@@ -4,6 +4,7 @@ Imports kept broad to match the original module — the legacy file did
 most of its imports inline inside test methods.
 """
 
+import time
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
@@ -417,3 +418,86 @@ class DiceExpressionTest(SimpleTestCase):
             result, log = roll_d20_logged()
         self.assertEqual(result, 14)
         self.assertEqual(log, "d20: 14")
+
+
+class DiceInTextPatternTest(SimpleTestCase):
+    """``DICE_IN_TEXT`` reads dice back out of prose in linear time (issue #44).
+
+    The text is what the server writes into a procedure frame, and the
+    behaviour script reads it back. These pin what the pattern reads, so the
+    rewrite changed how long it takes and nothing else.
+    """
+
+    def read_dice(self, text: str) -> list[tuple[str, str, str]]:
+        from characters.dice import DICE_IN_TEXT
+
+        return DICE_IN_TEXT.findall(text)
+
+    def test_dice_faces_and_total_are_read(self):
+        cases = {
+            "3d6: [1, 2, 3] = 6": [("3d6", "1, 2, 3", "6")],
+            "1d8+1: [4] = 5": [("1d8+1", "4", "5")],
+            "3d6-2:[1,2,3]=4": [("3d6-2", "1,2,3", "4")],
+            "2d6 [3, 4] = 7": [("2d6", "3, 4", "7")],
+            "2d6   :   [3, 4]   =   7": [("2d6", "3, 4", "7")],
+            "d6: [4] = 4": [("d6", "4", "4")],
+            "12d6: [1] = 1": [("12d6", "1", "1")],
+            "rolled 3d6\n[1, 2, 3]\n=\n6": [("3d6", "1, 2, 3", "6")],
+            "x3d6: [1, 2, 3] = 6": [("3d6", "1, 2, 3", "6")],
+            "1d6: [2] = 2; 2d6: [3, 4] = 7": [
+                ("1d6", "2", "2"),
+                ("2d6", "3, 4", "7"),
+            ],
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.read_dice(text), expected)
+
+    def test_text_that_is_not_a_dice_line_is_not_read(self):
+        for text in (
+            "3d6:: [1, 2, 3] = 6",
+            "3d6: [] = 6",
+            "3d6: [1, 2, 3] =",
+            "3d6: [1, x] = 6",
+            "3d6: [1, 2, 3] 6",
+            "3d6: 1, 2, 3 = 6",
+            "3d6 and [1, 2, 3] = 6",
+            "6: [1, 2, 3] = 6",
+            "3d: [1, 2, 3] = 6",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(self.read_dice(text), [])
+
+    def test_a_long_log_is_read_whole(self):
+        line = "3d6: [1, 2, 3] = 6\n"
+        self.assertEqual(len(self.read_dice(line * 5000)), 5000)
+        padding = " " * 5000
+        self.assertEqual(
+            self.read_dice(f"3d6{padding}:{padding}[1, 2, 3]{padding}={padding}6"),
+            [("3d6", "1, 2, 3", "6")],
+        )
+
+    def test_the_pattern_stays_fast_on_crafted_input(self):
+        # The tests above check what the pattern reads; this one checks how
+        # long it takes. The old pattern took 10 to 27 s on each input below
+        # that is not marked "guard", measured on one machine on 2026-10-18
+        # (the leading digits and the two runs of whitespace around the
+        # optional colon were each quadratic), so code that backtracks again
+        # fails here within the minute while the new pattern takes
+        # milliseconds. The guards were fast for the old pattern too; they
+        # hold the new one's other paths to the same bound.
+        crafted = {
+            "a run of digits": "1" * 120_000,
+            "a run of digits then d": "1" * 120_000 + "d",
+            "spaces after the dice": "1d6" + " " * 120_000,
+            "spaces then a word": "1d6" + " " * 120_000 + "x",
+            "spaces around a colon": "1d6" + " " * 90_000 + ":" + " " * 90_000,
+            "guard: spaces after the open bracket": "1d6 [" + " " * 120_000,
+            "guard: spaces before the equals sign": "1d6 [1]" + " " * 120_000,
+            "guard: digits after the equals sign": "1d6 [1] = " + "1" * 120_000 + "x",
+        }
+        for label, text in crafted.items():
+            with self.subTest(input=label):
+                started = time.perf_counter()
+                self.read_dice(text)
+                self.assertLess(time.perf_counter() - started, 1.0)

@@ -98,7 +98,8 @@ describe('renderMarkdown', () => {
 
     test('still renders fenced code blocks', () => {
         const html = renderMarkdown('```\nconst x = 1;\n```');
-        expect(html).toContain('<pre>');
+        // The block now carries the sideways-scroll cue class (issue #63).
+        expect(html).toContain('<pre class="scroll-cue">');
         expect(html).toContain('const x = 1;');
     });
 
@@ -121,6 +122,18 @@ describe('renderMarkdown', () => {
         expect(html).toContain('<th align="right">b</th>');
         expect(html).toContain('<td align="left">1</td>');
         expect(html).toContain('<td align="right">2</td>');
+    });
+
+    // Issue #63: a table or a code block wider than the bubble scrolls
+    // sideways, and base.css draws the edge cue for anything with this class.
+    test('marks a reply\'s tables and code blocks as sideways scrollers', () => {
+        const container = document.createElement('div');
+        container.innerHTML = renderMarkdown(
+            '| a | b |\n|--|--|\n| 1 | 2 |\n\n```\nlong code\n```\n\nplain words'
+        );
+        expect(container.querySelector('table').classList.contains('scroll-cue')).toBe(true);
+        expect(container.querySelector('pre').classList.contains('scroll-cue')).toBe(true);
+        expect(container.querySelector('p').classList.contains('scroll-cue')).toBe(false);
     });
 
     // The task-list allowlist entry is only safe because of the
@@ -196,10 +209,10 @@ describe('deleteSession', () => {
         expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/');
     });
 
-    test('reloads instead of redirecting when a non-active session is deleted', async () => {
+    test('neither reloads nor redirects when a non-active session is deleted (#15)', async () => {
         fetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true }) });
         await deleteSession(99, 'Other Session'); // not the config's sessionId
-        expect(pageNavigation.reload).toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
         expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
@@ -218,6 +231,202 @@ describe('deleteSession', () => {
         fetch.mockRejectedValue(new Error('Network error'));
         await deleteSession(42, 'Test Session');
         expect(alert).toHaveBeenCalledWith('Delete failed: Network error');
+    });
+});
+
+/**
+ * Deleting another session leaves the page as it is (issue #15): a reload
+ * threw away every earlier page of the chat the reader had loaded (#972).
+ * The session leaves the rail and the menu, and each picker asks the server
+ * again for the page it shows.
+ */
+describe('deleting another session', () => {
+    const RAIL_URL = '/tarmar/gm/sessions/rail/';
+    const MENU_URL = '/tarmar/gm/sessions/menu/';
+    let chatModule;
+
+    /** The page on session ``sessionId``, with sessions 42 and 99 listed. */
+    function setUpPage({ sessionId = 42, active = '?active=42', extra = '' } = {}) {
+        const chatConfig = JSON.stringify({
+            streamUrl: '/tarmar/gm/stream/',
+            saveUrl: '/tarmar/gm/save/',
+            deleteUrl: '/tarmar/gm/delete/',
+            sessionId,
+            mode: 'play',
+        });
+        document.body.innerHTML = `
+            <script id="chat-config" type="application/json">${chatConfig}<\/script>
+            <div data-picker id="session-menu-picker" data-picker-url="${MENU_URL}${active}">
+                <input type="search" data-picker-search>
+                <div data-picker-body>
+                    <select id="mobile-session-select">
+                        <option value="42">The crypt</option><option value="99">The road</option>
+                    </select>
+                </div>
+            </div>
+            <div data-picker id="session-rail-picker" data-picker-url="${RAIL_URL}${active}">
+                <input type="search" data-picker-search>
+                <div data-picker-body>
+                    <ul id="session-list">
+                        <li class="session-item active" data-id="42">The crypt</li>
+                        <li class="session-item" data-id="99">The road</li>
+                    </ul>
+                    <p data-picker-status>2 sessions</p>
+                </div>
+            </div>
+            ${extra}
+            <div id="messages">
+                <div class="message user" id="loaded-earlier"><div class="message-content">From an earlier page</div></div>
+                <div class="message assistant"><div class="message-content" data-markdown>The latest reply</div></div>
+            </div>
+            <input id="user-input">
+            <button id="send-btn"></button>
+        `;
+        jest.resetModules();
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        window.picker = require('../picker.js');
+        chatModule = require('../chat.js');
+        confirm.mockReturnValue(true);
+        fetch.mockReset();
+        fetch.mockImplementation((url) => {
+            const asked = new URL(url, 'http://localhost/');
+            if (asked.pathname === '/tarmar/gm/delete/') {
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+            }
+            const body = asked.pathname === RAIL_URL
+                ? `<ul id="session-list"><li class="session-item" data-id="7">Page ${asked.searchParams.get('page')}</li></ul>`
+                : '<select id="mobile-session-select"><option value="7">The ford</option></select>';
+            return Promise.resolve({ ok: true, text: () => Promise.resolve(body) });
+        });
+    }
+
+    /** What the session pickers asked their endpoints for. */
+    function pickerAsks() {
+        return fetch.mock.calls
+            .map(([url]) => new URL(url, 'http://localhost/'))
+            .filter((asked) => asked.pathname === RAIL_URL || asked.pathname === MENU_URL);
+    }
+
+    async function settle() {
+        for (let tick = 0; tick < 6; tick += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+    }
+
+    afterEach(() => { delete window.picker; });
+
+    test('takes it off the rail and the menu, and keeps the chat pages loaded', async () => {
+        setUpPage();
+        // Held, so what the page shows between the delete and the refetch
+        // can be read.
+        fetch.mockImplementationOnce(() => Promise.resolve({
+            ok: true, json: () => Promise.resolve({ ok: true }),
+        }));
+        const pickerAnswers = [];
+        const answerPickers = fetch.getMockImplementation();
+        fetch.mockImplementation((url) => new Promise((resolve) => {
+            pickerAnswers.push(() => resolve(answerPickers(url)));
+        }));
+
+        await chatModule.deleteSession(99, 'The road');
+
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(document.querySelector('.session-item[data-id="99"]')).toBeNull();
+        expect(document.querySelector('#mobile-session-select option[value="99"]')).toBeNull();
+        expect(document.querySelector('.session-item[data-id="42"]')).not.toBeNull();
+        expect(document.getElementById('loaded-earlier')).not.toBeNull();
+        pickerAnswers.forEach((answer) => answer());
+        await settle();
+        expect(document.getElementById('loaded-earlier')).not.toBeNull();
+    });
+
+    test('each picker asks again for the page it shows, keeping the open session pinned', async () => {
+        setUpPage();
+        document.getElementById('session-rail-picker').dataset.pickerShownPage = '3';
+        document.getElementById('session-rail-picker').dataset.pickerShownQuery = '';
+
+        await chatModule.deleteSession(99, 'The road');
+        await settle();
+
+        const rail = pickerAsks().find((asked) => asked.pathname === RAIL_URL);
+        const menu = pickerAsks().find((asked) => asked.pathname === MENU_URL);
+        expect(rail.searchParams.get('page')).toBe('3');
+        expect(rail.searchParams.get('active')).toBe('42');
+        expect(menu.searchParams.get('page')).toBe('1');
+        expect(document.querySelector('#session-list').textContent).toContain('Page 3');
+    });
+
+    test('drops the line saying the open session continues the deleted one', async () => {
+        setUpPage({
+            extra: '<p class="session-continued" id="gm-session-continued" data-continued-from="99">Continues the campaign of The road</p>',
+        });
+        await chatModule.deleteSession(99, 'The road');
+        expect(document.getElementById('gm-session-continued')).toBeNull();
+    });
+
+    test('keeps that line when it names another session', async () => {
+        setUpPage({
+            extra: '<p class="session-continued" id="gm-session-continued" data-continued-from="5">Continues the campaign of The ford</p>',
+        });
+        await chatModule.deleteSession(99, 'The road');
+        expect(document.getElementById('gm-session-continued')).not.toBeNull();
+    });
+
+    test('asks the server again for an offer to continue the deleted session', async () => {
+        // The offer is shown only on a page with no history, so the reload
+        // loses nothing loaded; the server picks the session to offer.
+        setUpPage({
+            sessionId: null,
+            active: '',
+            extra: `<form id="gm-campaign-continue"><input type="hidden" name="session_id" value="99"></form>`,
+        });
+        await chatModule.deleteSession(99, 'The road');
+        expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
+    });
+
+    test('leaves an offer to continue another session alone, without a reload', async () => {
+        setUpPage({
+            sessionId: null,
+            active: '',
+            extra: `<form id="gm-campaign-continue"><input type="hidden" name="session_id" value="5"></form>`,
+        });
+        await chatModule.deleteSession(99, 'The road');
+        await settle();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(document.querySelector('#gm-campaign-continue input').value).toBe('5');
+        expect(document.querySelector('.session-item[data-id="99"]')).toBeNull();
+    });
+
+    test('a session the first message made stays pinned in the pickers it asks', async () => {
+        setUpPage({ sessionId: null, active: '' });
+        const encoder = new TextEncoder();
+        const frames = [
+            'data: {"session_id":12,"session_name":"The ford"}\n\n',
+            'data: {"done":true,"full_response":"You wade in."}\n\n',
+        ].map((frame) => encoder.encode(frame));
+        const answerOthers = fetch.getMockImplementation();
+        fetch.mockImplementationOnce(() => Promise.resolve({
+            ok: true,
+            status: 200,
+            body: {
+                getReader: () => ({
+                    read: () => Promise.resolve(frames.length
+                        ? { done: false, value: frames.shift() }
+                        : { done: true, value: undefined }),
+                }),
+            },
+        }));
+        fetch.mockImplementation(answerOthers);
+
+        await chatModule.streamMessage({ message: 'I wade into the ford' });
+        await chatModule.deleteSession(99, 'The road');
+        await settle();
+
+        expect(pickerAsks()).toHaveLength(2);
+        pickerAsks().forEach((asked) => expect(asked.searchParams.get('active')).toBe('12'));
     });
 });
 
@@ -921,6 +1130,42 @@ describe('parseChoicePrompt', () => {
         expect(parseChoicePrompt(reply)).toEqual([]);
     });
 
+    // The reply is the model's, and a player can steer it. These pin what the
+    // parser reads at the edges of the pattern, then hold it to a second on
+    // replies of 100,000 spaces, which took the old code 6 to 25 s on each
+    // case that is not marked "guard" (issue #44).
+    test('reads the text from its first to its last non-space character', () => {
+        expect(parseChoicePrompt('1.   Left  door \t \n2. \u00a0Right\u3000\n')).toEqual(['Left  door', 'Right']);
+        expect(parseChoicePrompt('1. A\n2. B C   D   ')).toEqual(['A', 'B C   D']);
+        expect(parseChoicePrompt('1. A\r\n2. B\r\n')).toEqual(['A', 'B']);
+    });
+
+    test('does not read a line with nothing after its marker', () => {
+        expect(parseChoicePrompt('1. A\n2.   \n')).toEqual([]);
+        expect(parseChoicePrompt('1. A\n2.')).toEqual([]);
+    });
+
+    test('does not read a line that breaks inside its text', () => {
+        expect(parseChoicePrompt('1. A\n2. B\rC')).toEqual([]);
+    });
+
+    test('stays fast on replies with long runs of whitespace', () => {
+        const spaces = ' '.repeat(100000);
+        const crafted = {
+            'spaces inside the last option': `1. A\n2. B${spaces}C`,
+            'spaces inside the last option, then a carriage return': `1. A\n2. B${spaces}\rC`,
+            'spaces inside the prose': `Look.${spaces}Think.\n1. A\n2. B`,
+            'spaces between the options': `1. A\n${spaces}\n2. B`,
+            'guard: spaces after the last option': `1. A\n2. B${spaces}`,
+            'a leading run of spaces': `${spaces}1. A\n2. B`,
+        };
+        for (const [label, reply] of Object.entries(crafted)) {
+            const started = Date.now();
+            parseChoicePrompt(reply);
+            expect({ label, seconds: (Date.now() - started) / 1000 < 1 }).toEqual({ label, seconds: true });
+        }
+    });
+
     test('rejects a single numbered line', () => {
         expect(parseChoicePrompt('You may only:\n1. Wait')).toEqual([]);
     });
@@ -1360,7 +1605,7 @@ describe('session name', () => {
         counted.textContent = '0 msgs';
         entry.querySelector('a').append(counted);
 
-        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 2);
+        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 2, '2 msgs');
 
         expect(entry.querySelector('.session-name').textContent)
             .toBe('I walk into the tavern.');
@@ -1370,8 +1615,21 @@ describe('session name', () => {
         expect(document.querySelector('#mobile-session-select option').textContent)
             .toBe('I walk into the tavern. (2)');
 
-        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 1);
+        // The wording is the server's, so the page writes whatever it sends.
+        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 1, '1 msg');
         expect(counted.textContent).toBe('1 msg');
+    });
+
+    test('a count without the server\'s wording leaves the rail\'s words alone (#62)', () => {
+        const entry = document.querySelector('.session-item[data-id="7"]');
+        const counted = document.createElement('span');
+        counted.className = 'session-count';
+        counted.textContent = '0 msgs';
+        entry.querySelector('a').append(counted);
+
+        chatModule.refreshSessionAfterTurn(7, '', 3);
+
+        expect(counted.textContent).toBe('0 msgs');
     });
 
     test('a count alone keeps the picker\'s name (#829)', () => {
@@ -1916,9 +2174,233 @@ describe('a delete confirmation names the session date (#705)', () => {
         expect(asked[0]).not.toEqual(asked[1]);
     });
 
+    test('the question reads as one sentence, with no comma before its question mark', async () => {
+        await deleteSession(1, 'I walk into the crypt.', 'Sep 25, 2026');
+
+        expect(confirm).toHaveBeenCalledWith(
+            'Delete "I walk into the crypt.", started Sep 25, 2026? This can\'t be undone.'
+        );
+    });
+
     test('a caller with no date still asks a sensible question', async () => {
         await deleteSession(3, 'A lone session');
 
         expect(confirm.mock.calls[0][0]).toBe('Delete "A lone session"? This can\'t be undone.');
+    });
+});
+
+describe('localiseSessionOptions (issue #62)', () => {
+    const SESSION_MENU = `
+        <select id="mobile-session-select">
+            <option value="">Sessions…</option>
+            <option value="7" data-name="Rat cellar" data-message-count="3"
+                    data-started="Oct 15, 2026" data-started-at="2026-10-15T02:50:00+00:00">Rat cellar — Oct 15, 2026 (3)</option>
+        </select>
+    `;
+    const SERVER_LABEL = 'Rat cellar \u2014 Oct 15, 2026 (3)';
+    const LOCAL_LABEL = 'Rat cellar \u2014 Oct 14, 2026 (3)';
+    let localiseSessionOptions;
+
+    /** Load chat.js on the page as the server renders it, with a renderer or none. */
+    function loadChat(renderer) {
+        jest.resetModules();
+        setUpDom();
+        document.body.insertAdjacentHTML('beforeend', SESSION_MENU);
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        if (renderer) window.formatLocalTime = renderer;
+        ({ localiseSessionOptions } = require('../chat.js'));
+    }
+
+    afterEach(() => {
+        delete window.formatLocalTime;
+    });
+
+    test('runs when the page loads, putting the date in the viewer\'s zone into the label', () => {
+        const renderer = jest.fn(() => 'Oct 14, 2026');
+
+        loadChat(renderer);
+
+        const option = document.querySelector('option[value="7"]');
+        expect(renderer).toHaveBeenCalledWith('2026-10-15T02:50:00+00:00', 'date');
+        expect(option.textContent).toBe(LOCAL_LABEL);
+        expect(option.dataset.started).toBe('Oct 14, 2026');
+    });
+
+    test('can be run again over options the server painted later', () => {
+        loadChat(null);
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+        window.formatLocalTime = jest.fn(() => 'Oct 14, 2026');
+
+        localiseSessionOptions(document);
+
+        expect(document.querySelector('option[value="7"]').textContent).toBe(LOCAL_LABEL);
+    });
+
+    test('leaves the placeholder and any option without an instant alone', () => {
+        loadChat(null);
+        document.querySelector('option[value="7"]').removeAttribute('data-started-at');
+        window.formatLocalTime = jest.fn(() => 'Oct 14, 2026');
+
+        localiseSessionOptions(document);
+
+        expect(document.querySelector('option[value=""]').textContent).toBe('Sessions…');
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+    });
+
+    test('keeps the server\'s words when the renderer cannot read the instant', () => {
+        loadChat(jest.fn(() => null));
+
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+    });
+
+    test('keeps the server\'s words when local-time.js never loaded', () => {
+        loadChat(null);
+
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+    });
+});
+
+describe('showNewSessionInRail (issue #62)', () => {
+    let showNewSessionInRail;
+    let deleteSession;
+
+    /** The row gm/_session_rail_row.html writes for a session, as the server sends it. */
+    const SERVER_ROW = `<li class="session-item active" data-id="9">
+        <a href="?session=9">
+            <span class="session-name" id="session-name-9">Fresh start</span>
+            <span class="session-meta"><span id="session-date-9"><time class="local-time" datetime="2026-10-15T02:50:00+00:00" data-local-time-style="date">Oct 15, 2026 UTC</time></span> &middot; <span class="session-count">2 msgs</span></span>
+        </a>
+        <span class="sr-only" id="session-started-9">started</span>
+        <button type="button" class="session-delete-btn" id="session-delete-9" aria-label="Delete session"
+                aria-labelledby="session-delete-9 session-name-9 session-started-9 session-date-9" title="Delete session"
+                onclick="deleteSession(9, 'Fresh start', document.getElementById('session-date-9').textContent)">&times;</button>
+    </li>`;
+
+    /** The option gm/_session_menu_option.html writes for the same session. */
+    const SERVER_OPTION = `<option value="9" data-message-count="2" data-name="Fresh start"
+        data-started="Oct 15, 2026" data-started-at="2026-10-15T02:50:00+00:00" selected>Fresh start &mdash; Oct 15, 2026 (2)</option>`;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setUpDom();
+        document.body.insertAdjacentHTML('beforeend', `
+            <select id="mobile-session-select">
+                <option value="">Sessions…</option>
+                <option value="3">Older</option>
+            </select>
+            <ul id="session-list"><li class="session-item" data-id="3"><a href="?session=3">Older</a></li></ul>
+            <p class="session-name-none">A new session takes its name from your first message</p>
+        `);
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        window.applyLocalTimes = jest.fn();
+        ({ showNewSessionInRail, deleteSession } = require('../chat.js'));
+        // The row's onclick names it as a browser's script does: a global.
+        window.deleteSession = deleteSession;
+    });
+
+    afterEach(() => {
+        delete window.applyLocalTimes;
+        delete window.deleteSession;
+    });
+
+    test('puts the server\'s row at the head of the rail, untouched', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        const rows = document.querySelectorAll('#session-list > li');
+        expect(rows).toHaveLength(2);
+        expect(rows[0].dataset.id).toBe('9');
+        expect(rows[0].outerHTML).toBe(
+            new DOMParser().parseFromString(SERVER_ROW, 'text/html').body.firstElementChild.outerHTML
+        );
+        expect(rows[1].dataset.id).toBe('3');
+    });
+
+    test('asks local-time.js to write the new row\'s time in the viewer\'s zone', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(window.applyLocalTimes).toHaveBeenCalledTimes(1);
+        expect(window.applyLocalTimes).toHaveBeenCalledWith(document.querySelector('[data-id="9"]'));
+    });
+
+    test('takes the message count and the labels from the server\'s row, not from the page', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelector('[data-id="9"] .session-count').textContent).toBe('2 msgs');
+        expect(document.getElementById('session-delete-9').getAttribute('aria-labelledby'))
+            .toBe('session-delete-9 session-name-9 session-started-9 session-date-9');
+    });
+
+    test('does not add a row the rail already has', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelectorAll('#session-list > li[data-id="9"]')).toHaveLength(1);
+        expect(window.applyLocalTimes).toHaveBeenCalledTimes(1);
+    });
+
+    test('swaps the "new session" line for the name field', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelector('.session-name-none')).toBeNull();
+        const field = document.getElementById('session-name');
+        expect(field.value).toBe('Fresh start');
+        expect(field.dataset.sessionId).toBe('9');
+    });
+
+    test('puts the server\'s option into the small-screen menu, after its prompt', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+
+        const options = [...document.querySelectorAll('#mobile-session-select option')];
+        expect(options.map((option) => option.value)).toEqual(['', '9', '3']);
+        expect(options[1].selected).toBe(true);
+        expect(options[1].dataset.messageCount).toBe('2');
+    });
+
+    test('writes the menu option\'s date in the viewer\'s zone like the others', () => {
+        window.formatLocalTime = jest.fn(() => 'Oct 14, 2026');
+
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+
+        const option = document.querySelector('#mobile-session-select option[value="9"]');
+        expect(window.formatLocalTime).toHaveBeenCalledWith('2026-10-15T02:50:00+00:00', 'date');
+        expect(option.textContent).toBe('Fresh start \u2014 Oct 14, 2026 (2)');
+        delete window.formatLocalTime;
+    });
+
+    test('does not add a menu option the menu already has', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+        document.querySelector('#session-list > li[data-id="9"]').remove();
+
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+
+        expect(document.querySelectorAll('#mobile-session-select option[value="9"]')).toHaveLength(1);
+    });
+
+    test('adds no option when the frame carried none', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelectorAll('#mobile-session-select option')).toHaveLength(2);
+    });
+
+    test('adds no row, and nothing that is not the server\'s, when the frame carried none', () => {
+        showNewSessionInRail(9, { name: 'Fresh start' });
+
+        expect(document.querySelectorAll('#session-list > li')).toHaveLength(1);
+        expect(window.applyLocalTimes).not.toHaveBeenCalled();
+    });
+
+    test('names the date the rail shows when the delete control is pressed', async () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+        confirm.mockClear();
+        confirm.mockReturnValue(false);
+
+        document.getElementById('session-delete-9').click();
+        await Promise.resolve();
+
+        expect(confirm).toHaveBeenCalledWith(
+            `Delete "Fresh start", started Oct 15, 2026 UTC? This can't be undone.`
+        );
     });
 });

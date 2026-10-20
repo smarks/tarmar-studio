@@ -9,6 +9,7 @@ from .views import (
     battle_control,
     battle_delete,
     battle_hth_agreement,
+    battle_magic_bounds,
     battle_rename,
     battle_resnapshot,
     battle_restart,
@@ -90,6 +91,8 @@ urlpatterns = [
     path("<int:pk>/control/", battle_control, name="control"),
     # A Game Master's "HTH by agreement" ruling (#867).
     path("<int:pk>/hth-agreement/", battle_hth_agreement, name="hth-agreement"),
+    # A Game Master's ruling lifting a figure's magic bounds (#37).
+    path("<int:pk>/magic-bounds/", battle_magic_bounds, name="magic-bounds"),
     path(
         "<int:pk>/combatants/<int:combatant_id>/control/",
         combatant_control,

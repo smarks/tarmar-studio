@@ -23,7 +23,9 @@ fight's runner sets the record, while that account is a Game Master
 session fight's owner, any other battle's maker, so a bystander Game Master
 cannot mark another's fight and a player's own practice battle cannot be
 marked (coordinator's ruling under the standing rule; Spencer may overrule).
-Every change writes one line to the battle log.
+Every change writes one line to the battle log. The words the page, the log
+and the refusals use are configuration (``battle.wording``,
+``config/battle-rulings.toml``).
 """
 
 from __future__ import annotations
@@ -32,14 +34,7 @@ from dataclasses import dataclass
 
 from tarmar_engine.state import BattleState
 
-#: The phrase the page and the log use for the ruling.
-RULING_NAME = "hand-to-hand by agreement"
-
-#: Why only a Game Master may change the record.
-GAME_MASTER_ONLY = (
-    "Only the Game Master running this fight marks it, or a pair in it, as "
-    "hand-to-hand by agreement; players alone still need one of the rules' ways in"
-)
+from .wording import name_of, words
 
 
 @dataclass(frozen=True)
@@ -109,20 +104,21 @@ def fill(state: BattleState, agreement: Agreement) -> None:
 
 def describe(agreement: Agreement, names: dict[int, str]) -> str:
     """The ruling in one sentence, for the page; ``""`` when nothing is marked."""
+    hth_words = words().hth_agreement
     if agreement.whole_battle:
-        return (
-            "A Game Master rules every pair of enemies in this battle may "
-            "enter hand-to-hand by agreement."
-        )
+        return hth_words.whole_battle_line
     if not agreement.pairs:
         return ""
     listed = "; ".join(pair_names(pair, names) for pair in sorted(agreement.pairs))
-    return f"A Game Master rules these pairs may enter hand-to-hand by agreement: {listed}."
+    return hth_words.pairs_line.format(pairs=listed)
 
 
 def pair_names(pair: tuple[int, int], names: dict[int, str]) -> str:
+    """The two figures of a pair, named."""
     first, second = pair
-    return f"{names.get(first, '?')} and {names.get(second, '?')}"
+    return words().hth_agreement.pair_names.format(
+        first=name_of(names, first), second=name_of(names, second)
+    )
 
 
 def change_message(
@@ -134,19 +130,14 @@ def change_message(
     by: str,
 ) -> str:
     """The battle-log line for one change to the ruling."""
+    hth_words = words().hth_agreement
     if whole_battle is not None:
         if agreed:
-            return (
-                f"{by} rules the whole battle {RULING_NAME}: every pair of "
-                "enemies may now enter hand-to-hand"
-            )
-        return (
-            f"{by} lifts {RULING_NAME} for the whole battle: pairs need one of "
-            "the rules' ways in, or a pair marked singly"
-        )
+            return hth_words.log_battle_marked.format(by=by)
+        return hth_words.log_battle_lifted.format(by=by)
     if pair is None:
         raise ValueError("A change names the whole battle or a pair")
     who = pair_names(pair, names)
     if agreed:
-        return f"{by} rules {who} {RULING_NAME}: they may enter hand-to-hand"
-    return f"{by} lifts {RULING_NAME} for {who}"
+        return hth_words.log_pair_marked.format(by=by, pair=who)
+    return hth_words.log_pair_lifted.format(by=by, pair=who)

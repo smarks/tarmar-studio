@@ -559,6 +559,110 @@ describe('initBattlePage', () => {
         expect(document.getElementById('battle-stale-pools')).toBeNull();
     });
 
+    // A Game Master's ruling panels (#867, #37), as the server renders them:
+    // the record in data-record, and a form whose next is the endpoint's path.
+    function rulingPanel(panelId, record, line) {
+        return `<div id="${panelId}" data-record='${record}'>`
+            + `<p class="ruling-line">${line}</p>`
+            + '<form><input type="hidden" name="next" value="/tarmar/battles/1/advance/"></form>'
+            + '</div>';
+    }
+
+    function respondWithRulings(rulingsHtml) {
+        return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+                status: 'paused',
+                turn: 1,
+                view: sampleState([sampleCombatant()]),
+                events: [],
+                rulings: {},
+                rulings_html: rulingsHtml,
+            }),
+        };
+    }
+
+    test('an advance repaints the hand-to-hand-by-agreement panel from its record (#867)', async () => {
+        mountDetailPage();
+        document.body.insertAdjacentHTML(
+            'beforeend', rulingPanel('battle-hth-agreement', '{}', 'No pair is marked.')
+        );
+        battle.initBattlePage();
+        require('../api.js');
+        global.fetch = jest.fn().mockResolvedValue(respondWithRulings({
+            'battle-hth-agreement': rulingPanel(
+                'battle-hth-agreement', '{"whole_battle": true}', 'Every pair may agree.'
+            ),
+        }));
+
+        document.getElementById('advance-turn').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+        const panel = document.getElementById('battle-hth-agreement');
+        expect(panel.querySelector('.ruling-line').textContent).toBe('Every pair may agree.');
+        // Back to the page the panel is on, never the endpoint that answered.
+        expect(panel.querySelector('input[name="next"]').value)
+            .toBe(`${window.location.pathname}${window.location.search}`);
+    });
+
+    test('a repainted rulings panel is written in the viewer\'s zone (#62)', async () => {
+        mountDetailPage();
+        document.body.insertAdjacentHTML(
+            'beforeend', rulingPanel('battle-magic-bounds', '[]', 'No bound is lifted.')
+        );
+        battle.initBattlePage();
+        require('../api.js');
+        global.applyLocalTimes = jest.fn();
+        const lifted = '[{"bound": "channel", "combatant_id": 1}]';
+        global.fetch = jest.fn().mockResolvedValue(respondWithRulings({
+            'battle-magic-bounds': rulingPanel(
+                'battle-magic-bounds', lifted, 'Channel lifted for Aldwin.'
+            ),
+        }));
+
+        document.getElementById('advance-turn').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+        const repainted = document.getElementById('battle-magic-bounds');
+        expect(global.applyLocalTimes).toHaveBeenCalledWith(repainted);
+        delete global.applyLocalTimes;
+    });
+
+    test('an advance repaints the magic-bounds panel, and leaves an unchanged one alone (#37)', async () => {
+        mountDetailPage();
+        document.body.insertAdjacentHTML(
+            'beforeend', rulingPanel('battle-magic-bounds', '[]', 'No bound is lifted.')
+        );
+        battle.initBattlePage();
+        require('../api.js');
+        const lifted = '[{"bound": "channel", "combatant_id": 1}]';
+        global.fetch = jest.fn().mockResolvedValue(respondWithRulings({
+            'battle-magic-bounds': rulingPanel(
+                'battle-magic-bounds', lifted, 'Channel lifted for Aldwin.'
+            ),
+        }));
+
+        document.getElementById('advance-turn').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        const repainted = document.getElementById('battle-magic-bounds');
+        expect(repainted.querySelector('.ruling-line').textContent)
+            .toBe('Channel lifted for Aldwin.');
+
+        // The same record again (a fresh render differs only in its CSRF
+        // token) is no change: the element on the page stays.
+        expect(battle.rulingPanelChanges({
+            'battle-magic-bounds': rulingPanel('battle-magic-bounds', lifted, 'Other.'),
+        })).toHaveLength(0);
+        // Looked up within the scope the page was wired with, as the arena is.
+        const elsewhere = document.createElement('section');
+        expect(battle.repaintRulings({ 'battle-magic-bounds': '' }, '/here', elsewhere))
+            .toBe(0);
+        expect(document.getElementById('battle-magic-bounds')).not.toBeNull();
+        expect(battle.repaintRulings({ 'battle-magic-bounds': '' }, '/here')).toBe(1);
+        expect(document.getElementById('battle-magic-bounds')).toBeNull();
+    });
+
     test('the chip takes its label from the page, not from battle.js', async () => {
         // #338 item 20: battle.js used to restate Battle.STATUS_CHOICES.
         mountDetailPage();
@@ -1771,6 +1875,45 @@ describe('a submitted choice names its pause (#644)', () => {
             global.fetch = jest.fn().mockResolvedValue(poll(''));
             await jest.advanceTimersByTimeAsync(2100);
             expect(document.getElementById('battle-stale-pools')).toBeNull();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a poll that brings a changed ruling repaints its panel (#37)', async () => {
+        jest.useFakeTimers();
+        try {
+            const pending = {
+                combatant_id: 4, turn: 3, display_name: 'Duel 2 Archer',
+                player: 'playeruser', is_you: false, candidates: [],
+            };
+            mountAwaitingPage(pending, 'data-is-dm="true"');
+            document.body.insertAdjacentHTML(
+                'beforeend',
+                '<div id="battle-magic-bounds" data-record="[]"><p>No bound is lifted.</p></div>'
+                + '<script id="battle-status-labels" type="application/json">'
+                + `${JSON.stringify(STATUS_CHOICES)}</script>`
+            );
+            battle.initBattlePage();
+            // Nothing else about the battle changed: only the ruling did.
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({
+                    status: 'awaiting', turn: 0,
+                    view: sampleState([sampleCombatant()]),
+                    events: [], turns_html: [], seats: [], pending,
+                    rulings_html: {
+                        'battle-magic-bounds': '<div id="battle-magic-bounds" '
+                            + `data-record='[{"bound": "channel"}]'>`
+                            + '<p>Channel lifted for Aldwin.</p></div>',
+                    },
+                }),
+            });
+
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(document.getElementById('battle-magic-bounds').textContent)
+                .toContain('Channel lifted for Aldwin.');
         } finally {
             jest.useRealTimers();
         }

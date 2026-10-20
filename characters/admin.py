@@ -9,12 +9,7 @@ class CharacterAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "user",
-        "strength",
-        "dexterity",
-        "intelligence",
-        "wisdom",
-        "constitution",
-        "charisma",
+        *CHARACTER_ATTRIBUTE_FIELDS,
         "is_deleted",
         "created_at",
     )

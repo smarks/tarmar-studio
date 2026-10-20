@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import functools
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, replace
 from typing import Concatenate
 
 from django.db import transaction
+from django.utils import timezone
 from tarmar_engine.magic import ChannelRules, ChannelUnclassifiedSpell
 from tarmar_engine.spells import Spell
 from tarmar_engine.weapons import missile_rate_from_note
 
+from accounts.models import User
 from bestiary.generation import DIFFICULTY_BANDS, pick_base
 from bestiary.models import CATEGORY_CHOICES, Beast
 from characters import services as character_services
@@ -39,7 +41,7 @@ from characters.services import FightReport, record_entry_into_play
 from characters.skills import glossary_skill_level
 from characters.weapon_skill import resolve_weapon_skill
 
-from . import agreement, control, policy, profiles, turn_menu
+from . import agreement, control, magic_bounds, policy, profiles, turn_menu
 from .access import (
     Actor,
     claimed_seat_q,
@@ -72,11 +74,13 @@ from .persistence import (
     dump_state,
     tarmar_state,
 )
+from .refusals import BattleRefusal
 from .signals import battle_ended
 from .spells import get_spell
+from .wording import game_master_name, words
 
 
-class DraftFieldError(ValueError):
+class DraftFieldError(BattleRefusal):
     """A refusal about one named field of the setup form (issue #711).
 
     "A battle needs a name" used to arrive as a bare ``ValueError`` and was
@@ -809,7 +813,7 @@ def create_battle(
     provenance FK. See ``battle.generation.generate_character``.
     """
     if user is None and character_ids:
-        raise ValueError(
+        raise BattleRefusal(
             "Sign in to bring saved characters — a guest's battle is fought "
             "with generated fighters and catalog beasts"
         )
@@ -819,11 +823,11 @@ def create_battle(
             f"{', '.join(sorted(dict(PROFILE_CHOICES)))}"
         )
     if len(set(character_ids)) != len(character_ids):
-        raise ValueError("A character cannot fight twice in the same battle")
+        raise BattleRefusal("A character cannot fight twice in the same battle")
     seatable = seatable_characters(user).in_bulk(character_ids)
     missing = [str(pk) for pk in character_ids if pk not in seatable]
     if missing:
-        raise ValueError(
+        raise BattleRefusal(
             "Not characters you can seat (they may have died or been "
             f"deleted): {', '.join(missing)}"
         )
@@ -841,7 +845,7 @@ def create_battle(
     )
     total = count + len(picked_characters) + len(beasts) + player_seats
     if not MIN_COMBATANTS <= total <= MAX_COMBATANTS:
-        raise ValueError(
+        raise BattleRefusal(
             f"A battle needs between {MIN_COMBATANTS} and {MAX_COMBATANTS} "
             f"combatants (characters, beasts, and player seats together); "
             f"got {total}"
@@ -1024,7 +1028,7 @@ def add_draft_team(draft: BattleDraft, name) -> str:
     """
     cleaned = " ".join(str(name or "").split())[:MAX_TEAM_NAME].strip()
     if not cleaned:
-        raise ValueError("A team needs a name")
+        raise BattleRefusal("A team needs a name")
     teams = list(draft.teams_json or [])
     unique = _numbered_variant(cleaned, set(teams))
     teams.append(unique)
@@ -1042,7 +1046,7 @@ def remove_draft_team(draft: BattleDraft, name: str) -> None:
     """
     teams = list(draft.teams_json or [])
     if name not in teams:
-        raise ValueError("No such team on this draft")
+        raise BattleRefusal("No such team on this draft")
     teams.remove(name)
     roster = []
     for entry in draft.roster_json or []:
@@ -1066,9 +1070,9 @@ def set_entry_team(draft: BattleDraft, index: int, team: str) -> None:
     """
     roster = list(draft.roster_json or [])
     if not 0 <= index < len(roster):
-        raise ValueError("No such muster entry")
+        raise BattleRefusal("No such muster entry")
     if team and team not in (draft.teams_json or []):
-        raise ValueError("No such team on this draft")
+        raise BattleRefusal("No such team on this draft")
     entry = dict(roster[index])
     if team:
         entry["team"] = team
@@ -1106,16 +1110,16 @@ def import_party_into_draft(draft: BattleDraft, user, party_id: int) -> dict:
 
     party = Party.objects.filter(pk=party_id).first()
     if party is None:
-        raise ValueError("No such party")
+        raise BattleRefusal("No such party")
     if party.is_deleted:
         # The picker offers no disbanded party; one named by hand is refused
         # and says why (#971).
-        raise ValueError(disbanded_refusal(party))
+        raise BattleRefusal(disbanded_refusal(party))
     member_ids = list(
         party.memberships.order_by("added_at").values_list("character_id", flat=True)
     )
     if not member_ids:
-        raise ValueError(f"{party.name} has no members to import")
+        raise BattleRefusal(f"{party.name} has no members to import")
     visible = set(
         characters_visible_to(user)
         .filter(pk__in=member_ids)
@@ -1134,13 +1138,13 @@ def import_party_into_draft(draft: BattleDraft, user, party_id: int) -> dict:
     fallen = sum(1 for pk in member_ids if pk in visible and pk not in seatable)
     already = sum(1 for pk in member_ids if pk in seatable and pk in mustered)
     if not importable:
-        raise ValueError(
+        raise BattleRefusal(
             f"Nobody in {party.name} can join: {hidden} hidden from you, "
             f"{fallen} dead or gone, {already} already on the muster"
         )
     roster = list(draft.roster_json or [])
     if len(roster) + len(importable) > MAX_COMBATANTS:
-        raise ValueError(
+        raise BattleRefusal(
             f"No room for {party.name}: {len(importable)} would join a "
             f"muster of {len(roster)}, and a battle holds at most "
             f"{MAX_COMBATANTS}"
@@ -1188,41 +1192,41 @@ def add_draft_entry(
     """
     roster = list(draft.roster_json or [])
     if len(roster) >= MAX_COMBATANTS:
-        raise ValueError(
+        raise BattleRefusal(
             f"The muster is full — a battle holds at most {MAX_COMBATANTS}"
         )
     if team and team not in (draft.teams_json or []):
-        raise ValueError("No such team on this draft")
+        raise BattleRefusal("No such team on this draft")
     if kind == "fighter":
         if archetype not in ARCHETYPES:
-            raise ValueError("Unknown archetype")
+            raise BattleRefusal("Unknown archetype")
         entry = {"kind": "fighter", "archetype": archetype}
     elif kind == "beast":
         if not Beast.objects.filter(slug=slug).exists():
-            raise ValueError("No catalog beast matches that request")
+            raise BattleRefusal("No catalog beast matches that request")
         entry = {"kind": "beast", "slug": slug}
     elif kind == "random_beast":
         if category and category not in dict(CATEGORY_CHOICES):
-            raise ValueError("Unknown beast category")
+            raise BattleRefusal("Unknown beast category")
         if difficulty and difficulty not in DIFFICULTY_BANDS:
-            raise ValueError("Unknown difficulty band")
+            raise BattleRefusal("Unknown difficulty band")
         entry = {"kind": "random_beast", "category": category, "difficulty": difficulty}
     elif kind == "character":
         character = seatable_characters(user).filter(pk=character_id).first()
         if character is None:
-            raise ValueError("Not a character you can seat")
+            raise BattleRefusal("Not a character you can seat")
         already = any(
             existing.get("kind") == "character"
             and existing.get("character_id") == character.pk
             for existing in roster
         )
         if already:
-            raise ValueError(f"{character.name} is already on the muster")
+            raise BattleRefusal(f"{character.name} is already on the muster")
         entry = {"kind": "character", "character_id": character.pk}
     elif kind == "open_seat":
         entry = {"kind": "open_seat"}
     else:
-        raise ValueError("Unknown roster entry kind")
+        raise BattleRefusal("Unknown roster entry kind")
     if team:
         entry["team"] = team
     roster.append(entry)
@@ -1239,7 +1243,7 @@ def remove_draft_entry(draft: BattleDraft, index: int) -> None:
     """
     roster = list(draft.roster_json or [])
     if not 0 <= index < len(roster):
-        raise ValueError("No such muster entry")
+        raise BattleRefusal("No such muster entry")
     roster.pop(index)
     draft.roster_json = roster
     draft.save(update_fields=["roster_json", "updated_at"])
@@ -1378,32 +1382,32 @@ def claim_seat(
             already seated, bad character or archetype choice.
     """
     if bool(character_id) == bool(archetype):
-        raise ValueError("Choose a character or an archetype to generate")
+        raise BattleRefusal("Choose a character or an archetype to generate")
     if user is None and not guest_key:
-        raise ValueError("This browser has no guest session — reload and try again")
+        raise BattleRefusal("This browser has no guest session — reload and try again")
     if user is None and character_id:
-        raise ValueError("Sign in to bring one of your own characters to a seat")
+        raise BattleRefusal("Sign in to bring one of your own characters to a seat")
     actor = Actor.for_user_or_guest(user, guest_key)
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if battle.status != Battle.STATUS_LOBBY:
-            raise ValueError("This battle is no longer open for joining")
+            raise BattleRefusal("This battle is no longer open for joining")
         if battle.combatants.filter(actor.seat_filter()).exists():
-            raise ValueError("You already hold a seat in this battle")
+            raise BattleRefusal("You already hold a seat in this battle")
         won = (
             BattleCombatant.objects.filter(pk=seat_id, battle=battle, is_open_seat=True)
             .exclude(claimed_seat_q())
             .update(player=user, guest_key="" if user is not None else guest_key)
         )
         if not won:
-            raise ValueError("That seat is already taken")
+            raise BattleRefusal("That seat is already taken")
         seat = battle.combatants.get(pk=seat_id)
         if character_id:
             # Own, living, undeleted (#270) — the same chokepoint the lobby's
             # character menu renders from.
             character = claimable_characters(user).filter(pk=character_id).first()
             if character is None:
-                raise ValueError("That is not one of your living characters")
+                raise BattleRefusal("That is not one of your living characters")
             display_name = _display_name_for(battle, character.name)
             loadout = battle_loadout(character)
             snapshot = snapshot_character(
@@ -1416,7 +1420,7 @@ def claim_seat(
             )
         else:
             if archetype not in ARCHETYPES:
-                raise ValueError("Unknown archetype")
+                raise BattleRefusal("Unknown archetype")
             used_names = set(battle.combatants.values_list("display_name", flat=True))
             generated = generate_character(
                 user,
@@ -1472,13 +1476,13 @@ def release_seat(
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if battle.status != Battle.STATUS_LOBBY:
-            raise ValueError("This battle is no longer open for joining")
+            raise BattleRefusal("This battle is no longer open for joining")
         seat = battle.combatants.filter(pk=seat_id, is_open_seat=True).first()
         if seat is None or not seat_is_held(seat):
-            raise ValueError("That is not an occupied seat")
+            raise BattleRefusal("That is not an occupied seat")
         actor = Actor.for_user_or_guest(user, guest_key)
         if not actor.holds_seat(seat) and not actor.is_dm:
-            raise ValueError("Only the seat's player or a DM can release it")
+            raise BattleRefusal("Only the seat's player or a DM can release it")
         rank = list(
             battle.combatants.filter(is_open_seat=True).values_list("pk", flat=True)
         ).index(seat.pk)
@@ -1511,11 +1515,11 @@ def set_seat_ready(
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if battle.status != Battle.STATUS_LOBBY:
-            raise ValueError("This battle is no longer open for joining")
+            raise BattleRefusal("This battle is no longer open for joining")
         actor = Actor.for_user_or_guest(user, guest_key)
         seat = battle.combatants.filter(actor.seat_filter(), pk=seat_id).first()
         if seat is None:
-            raise ValueError("That is not your seat")
+            raise BattleRefusal("That is not your seat")
         seat.is_ready = ready
         seat.save(update_fields=["is_ready"])
         if battle.auto_start and ready:
@@ -1545,7 +1549,7 @@ def _with_current_pools(combatant: BattleCombatant, entry: dict) -> dict:
     if character is None:
         return entry
     if not character.is_alive:
-        raise ValueError(
+        raise BattleRefusal(
             f"{combatant.display_name} has died since claiming a seat; the seat "
             "must be released before the battle can start"
         )
@@ -1598,15 +1602,15 @@ def _start_locked(battle: Battle) -> Battle:
     joined before anyone claims a seat.
     """
     if battle.status != Battle.STATUS_LOBBY:
-        raise ValueError("This battle has already started")
+        raise BattleRefusal("This battle has already started")
     if battle.combatants.filter(
         claimed_seat_q(), is_open_seat=True, is_ready=False
     ).exists():
-        raise ValueError("Every seated player must be ready first")
+        raise BattleRefusal("Every seated player must be ready first")
     battle.combatants.filter(is_open_seat=True).exclude(claimed_seat_q()).delete()
     combatants = list(battle.combatants.select_related("character"))
     if len(combatants) < MIN_COMBATANTS:
-        raise ValueError(
+        raise BattleRefusal(
             f"A battle needs at least {MIN_COMBATANTS} combatants; "
             "wait for more seats to fill"
         )
@@ -1661,16 +1665,21 @@ RESNAPSHOT_GAME_MASTER_ONLY = (
 )
 
 
-class StalePools(ValueError):
-    """A record-writing fight whose figures no longer match their records."""
+class StalePools(BattleRefusal):
+    """A record-writing fight whose figures no longer match their records.
+
+    A refusal in the player's words (#842), which the advance view answers
+    with the readout beside it and every other battle view as text (#39).
+    """
 
 
-class BattleInLobby(ValueError):
+class BattleInLobby(BattleRefusal):
     """A battle asked to advance before it has started.
 
-    Its own type, so the advance view can answer this refusal in its words
-    while every other exception the engine raises stays behind a fixed
-    message (issue #13). A ``ValueError`` still, as the refusal always was.
+    Its own type since issue #13, so the advance view could answer this
+    refusal in its words while every other exception the engine raises stays
+    behind a fixed message; a :class:`BattleRefusal` since #39, as every
+    refusal the battle views show is.
     """
 
 
@@ -1855,16 +1864,16 @@ def resnapshot_pools(battle_id: int, *, is_game_master: bool) -> Battle:
         ValueError: A player asking, or nothing to take.
     """
     if not is_game_master:
-        raise ValueError(RESNAPSHOT_GAME_MASTER_ONLY)
+        raise BattleRefusal(RESNAPSHOT_GAME_MASTER_ONLY)
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if not battle.state_json:
-            raise ValueError("This battle has not started")
+            raise BattleRefusal("This battle has not started")
         profile = profiles.for_battle(battle)
         state = profile.load(battle.state_json)
         moved = _moved_figures(battle, state)
         if not moved:
-            raise ValueError("Every figure already holds its record's pools")
+            raise BattleRefusal("Every figure already holds its record's pools")
         lines = []
         for combatant, figure in moved:
             fatigue, body, mana, debt = _record_pools(figure, combatant.character)
@@ -2046,9 +2055,9 @@ def restart_battle(battle_id: int, *, is_game_master: bool = False) -> Battle:
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if not battle.initial_state_json:
-            raise ValueError("This battle has no starting snapshot to restart from")
+            raise BattleRefusal("This battle has no starting snapshot to restart from")
         if not is_game_master and results_recorded(battle):
-            raise ValueError(RESULTS_RECORDED_REFUSAL)
+            raise BattleRefusal(RESULTS_RECORDED_REFUSAL)
         profile = profiles.for_battle(battle)
         state = profile.load(battle.initial_state_json)
         starting = profile.figure_vitals(state)
@@ -2395,17 +2404,14 @@ def set_hth_agreement(
             ``whole_battle`` and ``pair``, or a pair that is not two enemies
             in this battle.
     """
+    hth_words = words().hth_agreement
     if whole_battle == (pair is not None):
-        raise ValueError("Name the whole battle or one pair")
+        raise BattleRefusal(hth_words.refuse_scope)
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
-        if not runs_the_seats(battle, actor.user):
-            raise ValueError(agreement.GAME_MASTER_ONLY)
+        game_master = _ruling_game_master(battle, actor, hth_words.game_master_only)
         if battle.rules_profile != TARMAR_PROFILE:
-            raise ValueError(
-                "Hand-to-hand by agreement is a Tarmar ruling; a classic "
-                "battle plays Melee's own hand-to-hand"
-            )
+            raise BattleRefusal(hth_words.refuse_classic)
         rows = {row.pk: row for row in battle.combatants.all()}
         names = {pk: row.display_name for pk, row in rows.items()}
         current = agreement.Agreement.of(battle)
@@ -2413,10 +2419,12 @@ def set_hth_agreement(
         if pair is not None:
             first, second = pair
             if first == second or first not in rows or second not in rows:
-                raise ValueError("Name two different combatants in this battle")
+                raise BattleRefusal(hth_words.refuse_pair)
             if rows[first].team and rows[first].team == rows[second].team:
-                raise ValueError(
-                    f"{names[first]} and {names[second]} are on the same side"
+                raise BattleRefusal(
+                    hth_words.refuse_same_side.format(
+                        first=names[first], second=names[second]
+                    )
                 )
             key = agreement.pair_key(first, second)
             pairs = set(current.pairs)
@@ -2430,14 +2438,7 @@ def set_hth_agreement(
         if updated == current:
             return battle, None
         battle.hth_agreement_json = updated.to_json()
-        if battle.status == Battle.STATUS_AWAITING:
-            battle.pending_input_json = {}
-            battle.status = Battle.STATUS_PAUSED
-        by = (
-            f"Game Master {actor.user.username}"
-            if actor.user is not None
-            else "A Game Master"
-        )
+        _reopen_awaited_menu(battle)
         event = _control_event(
             battle,
             agreement.change_message(
@@ -2445,13 +2446,138 @@ def set_hth_agreement(
                 pair=key,
                 agreed=agreed,
                 names=names,
-                by=by,
+                by=game_master_name(game_master.username),
             ),
             {
                 "hth_agreement": updated.to_json(),
                 "scope": "battle" if whole_battle else "pair",
                 "pair": list(key) if key is not None else None,
                 "agreed": agreed,
+            },
+        )
+        battle.save()
+    return battle, event
+
+
+def _reopen_awaited_menu(battle: Battle) -> None:
+    """Clear a pause on a person's move after a ruling that changes menus.
+
+    A Game Master's ruling made while a move is awaited changes that
+    person's menu, so the pause is cleared and the next advance replays the
+    turn under the new ruling; a recorded choice no longer on the menu is
+    asked again (the replay's stale check).
+    """
+    if battle.status == Battle.STATUS_AWAITING:
+        battle.pending_input_json = {}
+        battle.status = Battle.STATUS_PAUSED
+
+
+def _ruling_game_master(battle: Battle, actor: Actor, refusal: str) -> User:
+    """The fight's Game Master making a ruling on it, or refuse.
+
+    The runner of the fight, while a Game Master (:func:`runs_the_seats`),
+    is the one account that records a ruling on it.
+
+    Raises:
+        BattleRefusal: ``refusal``, for anyone else.
+    """
+    game_master = actor.user
+    if not isinstance(game_master, User) or not runs_the_seats(battle, game_master):
+        raise BattleRefusal(refusal)
+    return game_master
+
+
+def set_magic_bounds_lifted(
+    battle_id: int,
+    actor: Actor,
+    *,
+    combatant_id: int,
+    bounds: Collection[str],
+    lifted: bool,
+) -> tuple[Battle, BattleEvent | None]:
+    """Lift, or hold again, magic bounds for one figure (issue #37).
+
+    Spencer's ruling of 2026-10-14: a Game Master records "Channel lifted
+    for <figure>", and likewise the push cap and the counter's commitment
+    bounds, each separately or together, as a ruling on the battle; players'
+    menus for other figures are unchanged. Who may record it is the
+    HTH-by-agreement ruling's answer (:func:`set_hth_agreement`): the fight's
+    runner, while a Game Master (:func:`runs_the_seats`). This path is the
+    only one that changes the record (the admin shows the field read-only);
+    the record keeps who lifted each bound and when, and each change files
+    one line in the log. Lifting a bound already lifted keeps its first
+    record. A change made while a move is awaited clears the pause
+    (:func:`_reopen_awaited_menu`).
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        combatant_id: The ``BattleCombatant`` pk of the figure.
+        bounds: Which of :data:`battle.magic_bounds.LIFTABLE_BOUNDS` to change.
+        lifted: Lift (True) or hold the figure to them again (False).
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        BattleRefusal: not the fight's Game Master, a classic battle, no bound
+            named, a bound to lift that the loaded canon does not impose
+            (:func:`battle.magic_bounds.offered_bounds`) or an unknown one to
+            hold again, or a figure not in this battle.
+    """
+    bounds_words = words().magic_bounds
+    offered = magic_bounds.offered_bounds()
+    # Any known bound may be held again, even one a changed canon no longer
+    # imposes; only a bound the canon imposes may be lifted.
+    allowed = offered if lifted else magic_bounds.LIFTABLE_BOUNDS
+    if not bounds or any(bound not in allowed for bound in bounds):
+        raise BattleRefusal(
+            bounds_words.refuse_bounds.format(bounds=magic_bounds.bound_words(offered))
+        )
+    with transaction.atomic():
+        battle = Battle.objects.select_for_update().get(pk=battle_id)
+        game_master = _ruling_game_master(battle, actor, bounds_words.game_master_only)
+        if battle.rules_profile != TARMAR_PROFILE:
+            raise BattleRefusal(bounds_words.refuse_classic)
+        figure = battle.combatants.filter(pk=combatant_id).first()
+        if figure is None:
+            raise BattleRefusal(bounds_words.refuse_combatant)
+        current = magic_bounds.LiftedBounds.of(battle)
+        already = current.for_figure(figure.pk)
+        requested = frozenset(bounds)
+        changing = [
+            bound
+            for bound in magic_bounds.LIFTABLE_BOUNDS
+            if bound in requested and (bound in already) != lifted
+        ]
+        if lifted:
+            updated = current.lifted(
+                figure.pk,
+                changing,
+                by=game_master.username,
+                by_id=game_master.pk,
+                at=timezone.now().isoformat(),
+            )
+        else:
+            updated = current.restored(figure.pk, changing)
+        if not changing:
+            return battle, None
+        battle.magic_bounds_lifted_json = updated.to_json()
+        _reopen_awaited_menu(battle)
+        event = _control_event(
+            battle,
+            magic_bounds.change_message(
+                bounds=changing,
+                lifted=lifted,
+                name=figure.display_name,
+                by=game_master_name(game_master.username),
+            ),
+            {
+                "magic_bounds_lifted": updated.to_json(),
+                "combatant_id": figure.pk,
+                "bounds": changing,
+                "lifted": lifted,
             },
         )
         battle.save()
@@ -2478,7 +2604,7 @@ def set_combatant_control_mode(
             battle.combatants.select_related("player").filter(pk=combatant_id).first()
         )
         if combatant is None:
-            raise ValueError("No such combatant in this battle")
+            raise BattleRefusal("No such combatant in this battle")
         combatant.control_mode = mode
         combatant.save(update_fields=["control_mode"])
         _resettle_pending(battle)
@@ -2584,14 +2710,16 @@ def _owned_seat(battle: Battle, combatant_id: int) -> BattleCombatant:
             character with an owner.
     """
     if battle.is_over:
-        raise ValueError("This battle is over")
+        raise BattleRefusal("This battle is over")
     seat = (
         battle.combatants.select_related("character", "character__user", "player")
         .filter(pk=combatant_id)
         .first()
     )
     if seat is None or seat.character is None or seat.character.user_id is None:
-        raise ValueError("Only a saved character's seat has an owner to stand in for")
+        raise BattleRefusal(
+            "Only a saved character's seat has an owner to stand in for"
+        )
     return seat
 
 
@@ -2628,14 +2756,14 @@ def take_seat(
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if not runs_the_seats(battle, game_master):
-            raise ValueError(TAKE_SEAT_GAME_MASTER_ONLY)
+            raise BattleRefusal(TAKE_SEAT_GAME_MASTER_ONLY)
         seat = _owned_seat(battle, combatant_id)
         if withdrawn_from_session(battle, seat.character):
-            raise ValueError(WITHDRAWN_SEAT_REFUSAL.format(name=seat.display_name))
+            raise BattleRefusal(WITHDRAWN_SEAT_REFUSAL.format(name=seat.display_name))
         if not seat_is_held(seat):
-            raise ValueError(NO_SEAT_TO_TAKE.format(name=seat.display_name))
+            raise BattleRefusal(NO_SEAT_TO_TAKE.format(name=seat.display_name))
         if seat.player_id == game_master.pk:
-            raise ValueError(f"You already play {seat.display_name}")
+            raise BattleRefusal(f"You already play {seat.display_name}")
         owner = seat.character.user
         seat.player = game_master
         seat.guest_key = ""
@@ -2675,11 +2803,11 @@ def return_seat(
         seat = _owned_seat(battle, combatant_id)
         owner = seat.character.user
         if user is None or not (user.pk == owner.pk or runs_the_seats(battle, user)):
-            raise ValueError(RETURN_SEAT_OWNER_OR_GAME_MASTER)
+            raise BattleRefusal(RETURN_SEAT_OWNER_OR_GAME_MASTER)
         if seat.player_id == owner.pk:
-            raise ValueError(f"{owner.username} already plays {seat.display_name}")
+            raise BattleRefusal(f"{owner.username} already plays {seat.display_name}")
         if not held_by_another(seat):
-            raise ValueError(NO_SEAT_TO_RETURN.format(name=seat.display_name))
+            raise BattleRefusal(NO_SEAT_TO_RETURN.format(name=seat.display_name))
         seat.player = owner
         seat.guest_key = ""
         seat.save(update_fields=["player", "guest_key"])
@@ -2873,6 +3001,12 @@ def unarmed_attached_line(session) -> str:
         f"{', '.join(names)} {verb} no weapon and would fight bare-handed. Buy "
         "gear on the character's sheet before the fight."
     )
+
+
+#: The key the bare-handed line travels under: in the board's payload, and in
+#: the Games Master's attach and detach answers (issues #844, #15). The pages
+#: reading either repaint the Battle tab's line from it.
+BARE_HANDED_KEY = "bare_handed"
 
 
 def bare_handed_line(battle: Battle) -> str:
@@ -3158,8 +3292,10 @@ def _channel_reading(
     The engine's own test (``tarmar_engine.policy._within_channel``): the
     spell's cost past the caster's Channel for it, or a spell the Channel
     rules give no kind of magic. Both are read from the engine's
-    :meth:`~tarmar_engine.magic.ChannelRules.channel_for`; only the words are
-    the cast stage's.
+    :meth:`~tarmar_engine.magic.ChannelRules.bound_for`, which is ``None``
+    for a caster a Game Master has lifted Channel for (#37): such a cast is
+    not withheld, and no Channel bounds it. Only the words are the cast
+    stage's.
 
     Args:
         channel: The canon's Channel rules, or ``None`` when it has none.
@@ -3167,16 +3303,19 @@ def _channel_reading(
         spell: The spell offered.
 
     Returns:
-        ``(channel, reason)``: the Channel, or ``None`` when no rules give the
-        spell one; and the reason in the player's words, or ``""`` when the
-        Channel allows the cast.
+        ``(channel, reason)``: the Channel bounding the cast, or ``None`` when
+        no rules give the spell one or it is lifted for the caster; and the
+        reason in the player's words, or ``""`` when the Channel allows the
+        cast.
     """
     if channel is None:
         return None, ""
     try:
-        limit = channel.channel_for(actor, spell)
+        limit = channel.bound_for(actor, spell)
     except ChannelUnclassifiedSpell:
         return None, "the rules give it no kind of magic, so no Channel for it"
+    if limit is None:
+        return None, ""
     if spell.level > limit:
         return limit, f"costs {spell.level} mana, past a Channel of {limit} for it"
     return limit, ""
@@ -3243,12 +3382,20 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         elif channel_refusal:
             other_reason = channel_refusal
         shortfall = turn_menu.mana_short(actor, spell.level)
+        # A borrowing casting's bound is the engine's own
+        # (:meth:`~tarmar_engine.magic.MagicRules.channel_bound`): with Channel
+        # lifted for the caster, the debt cap, or with none the purse plus
+        # the Channel (#37).
         borrowable = (
             bool(shortfall)
             and not other_reason
             and rules.borrowing is not None
             and spell.level
-            <= rules.borrowing.borrowing_ceiling(actor.mana, actor.debt, spell_channel)
+            <= rules.borrowing.borrowing_ceiling(
+                actor.mana,
+                actor.debt,
+                rules.channel_bound(actor, spell, borrowing=True),
+            )
         )
         if borrowable:
             reason = (
@@ -3276,7 +3423,8 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                 "borrowable": borrowable,
                 "shortfall": shortfall if borrowable else 0,
                 # The most mana one casting may take, cost and push together
-                # (issue #960); None when the canon bounds no casting by it.
+                # (issue #960); None when the canon bounds no casting by it, or
+                # a Game Master has lifted Channel for the caster (#37).
                 "channel": spell_channel,
             }
         )
@@ -3387,15 +3535,15 @@ def record_player_action(
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         if battle.status != Battle.STATUS_AWAITING:
-            raise ValueError("No player input is pending")
+            raise BattleRefusal("No player input is pending")
         pending = battle.pending_input_json or {}
         awaited_combatant_id = pending.get("combatant_id")
         seat = battle.combatants.filter(pk=awaited_combatant_id).first()
         if seat is None:
-            raise ValueError("No player input is pending")
+            raise BattleRefusal("No player input is pending")
         awaited_turn = pending.get("turn")
         if combatant_id != awaited_combatant_id or turn != awaited_turn:
-            raise ValueError(
+            raise BattleRefusal(
                 _stale_choice_message(battle, seat, awaited_turn, combatant_id, turn)
             )
         candidates = pending.get("candidates", [])
@@ -3406,12 +3554,12 @@ def record_player_action(
             # owner. A guest's battle has no DM at all, so the old rule left
             # a guest-run battle with no way past an absent player.
             if not (commands_foes(actor, battle) or decides_for(actor, battle, seat)):
-                raise ValueError(
+                raise BattleRefusal(
                     "Only this battle's DM, its owner, or the combatant's "
                     "own player can hand the choice to the AI"
                 )
             if not candidates:
-                raise ValueError("No pending menu to choose from")
+                raise BattleRefusal("No pending menu to choose from")
             # The option the AI chose, marked at the pause (#775): a player's
             # menu also holds each attack aimed elsewhere, and one of those
             # may score higher than the AI's own target. A menu stored
@@ -3438,7 +3586,7 @@ def record_player_action(
             destination = top.get("destination")
         else:
             if not decides_for(actor, battle, seat):
-                raise ValueError("That is not your combatant")
+                raise BattleRefusal("That is not your combatant")
             variant = option_variant(
                 {
                     "push_mana": push_mana,
@@ -3462,11 +3610,11 @@ def record_player_action(
                 None,
             )
             if matched is None:
-                raise ValueError("That option is not on the pending menu")
+                raise BattleRefusal("That option is not on the pending menu")
             if destination is not None and list(destination) not in matched.get(
                 "destinations", []
             ):
-                raise ValueError(
+                raise BattleRefusal(
                     f"{matched.get('name', 'That option')} cannot move "
                     f"{seat.display_name} to hex {tuple(destination)}: pick one "
                     "of the marked hexes, or none"
@@ -3500,14 +3648,14 @@ def rename_combatant(
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         combatant = battle.combatants.filter(pk=combatant_id).first()
         if combatant is None:
-            raise ValueError("No such combatant in this battle")
+            raise BattleRefusal("No such combatant in this battle")
         name_taken = (
             battle.combatants.exclude(pk=combatant_id)
             .filter(display_name=new_name)
             .exists()
         )
         if name_taken:
-            raise ValueError("Another combatant already has that name")
+            raise BattleRefusal("Another combatant already has that name")
         combatant.display_name = new_name
         combatant.save(update_fields=["display_name"])
         profile = profiles.for_battle(battle)

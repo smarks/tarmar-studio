@@ -23,8 +23,10 @@
  * <attribute> check" plans an attribute check (issue #911), "<name> makes a
  * <attribute> check at <total> with <modifier>" plans one a Game Master
  * stated with a modifier (issue #70), "twins in brackets"
- * names a character the name rule refuses (issue #908), and anything else
- * plans nothing. A structured call asking for a
+ * names a character the name rule refuses (issue #908), "behind another
+ * table" holds the planning call QUEUE_PAUSE_MS before answering anything,
+ * as Ollama holds a request queued behind another (issue #64), and anything
+ * else plans nothing. A structured call asking for a
  * player's foes is answered with set_foes: gray wolves (dire wolves when the
  * request says "dire"), as many as the request counts (issue #841), or
  * bandits by calling when it says "bandit" (issue #894). Every other call is narration: a fixed reply that pauses
@@ -43,6 +45,10 @@ const SLOW_PAUSE_MS = Number(process.env.FAKE_OLLAMA_SLOW_PAUSE_MS || 6000);
 // How long a "dice step" plan takes, which is how long the page has to show
 // that the turn is planning (issue #569).
 const MARKER_PAUSE_MS = Number(process.env.FAKE_OLLAMA_MARKER_PAUSE_MS || 4000);
+// How long a request "behind another table" is held before anything is sent,
+// not even headers, as Ollama holds one queued behind another turn (issue
+// #64). Past the server's 10 s keep-alive, so the page is told it waits.
+const QUEUE_PAUSE_MS = Number(process.env.FAKE_OLLAMA_QUEUE_PAUSE_MS || 12000);
 
 function lastUserMessage(messages) {
     const users = (messages || []).filter((message) => message.role === 'user');
@@ -235,6 +241,9 @@ async function answerChat(request, response, payload) {
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(JSON.stringify({ message: { role: 'assistant', content }, done: true }));
         return;
+    }
+    if (isPlanCall(said) && /behind another table/i.test(latestMessage(said))) {
+        await sleep(QUEUE_PAUSE_MS);
     }
     response.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     if (isPlanCall(said)) {

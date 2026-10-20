@@ -38,8 +38,10 @@ from dataclasses import dataclass
 from itertools import groupby
 
 from django.db import transaction
+from django.utils.text import capfirst
 
 from battle import profiles
+from battle.magic_bounds import event_past_by_ruling
 from battle.models import Battle, BattleEvent
 
 from .models import GMSession
@@ -155,13 +157,20 @@ def event_lines(event: BattleEvent) -> list[str]:
     give them; so are a Runaway's drain, collapse, death and anchor roll
     (tarmar-engine #30), and a Counterspell's declaration, opposed roll,
     result, lapse and contest's end (tarmar-engine #31), in the engine's own
-    words.
+    words. A cast or counter past a bound a Game Master lifted (#37) carries
+    a line beneath it saying so.
 
     Args:
         event: A battle log event.
     """
     withheld = (event.payload or {}).get("withheld", [])
-    return [f"- {event.message}", *(f"  - {reason}" for reason in withheld)]
+    lines = [f"- {event.message}", *(f"  - {reason}" for reason in withheld)]
+    # A cast or counter past a bound a Game Master lifted (#37), as the
+    # battle log prints it beneath the line.
+    past = event_past_by_ruling(event.payload)
+    if past:
+        lines.append(f"  - {capfirst(past)}")
+    return lines
 
 
 def turn_block(battle: Battle, turn: int, events: Sequence[BattleEvent]) -> str:

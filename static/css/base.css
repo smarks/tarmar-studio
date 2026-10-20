@@ -34,6 +34,8 @@
     --colour-surface-subtle: #f9f9f9; /* A second, very-light panel background (deleted rows, readonly fields). */
     --colour-surface-badge: #f7f7f7; /* Role-badge pill background. */
     --colour-shadow: rgba(0, 0, 0, 0.1); /* Dropdown menu's drop shadow. */
+    --colour-scroll-cue-shadow: rgba(0, 0, 0, 0.3); /* The edge shadow on a sideways scroller that has more to show (issue #63). */
+    --colour-scroll-cue-thumb: #858585; /* The thumb of a sideways scroller's always-drawn scrollbar (issue #63), on --colour-hairline's track: 3.18:1, which WCAG 1.4.11 asks of a graphic that tells a reader where they are. The contrast audit does not measure scrollbar parts as text, since none is ever set on one. */
     --colour-border-parchment: #b8a56a; /* The warm rule on generator cards and bestiary panels. Was written as var(--border-color, #b8a56a) in three sheets; --border-color was never defined anywhere, so #b8a56a is what always rendered. */
 
     /* Danger -- the legacy #c00 family: the danger button, field-error text,
@@ -485,6 +487,52 @@ th {
 .table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+}
+/* The cue that a sideways scroller scrolls (issue #63). A phone hides its
+   scrollbars, so a table cut off at the edge looked like a table that ends
+   there: the Core Attributes row lost CON mid-letter and CHR altogether with
+   nothing to say there was more. Every sideways scroller carries the class
+   scroll-cue (the templates give it to their own tables and wrappers;
+   chat.js gives it to the tables and code blocks in a reply, which it does
+   not write itself). Two parts, both from the element's own state:
+   - An edge shadow on each side that has more to show. It is the classic
+     scroll-shadow: a shadow pinned to the box, and a cover in the ground
+     colour that scrolls with the content and hides the shadow once that edge
+     is reached. A scroller that fits shows nothing. The cover must match the
+     ground the scroller sits on, so a scroller on a ground other than the
+     page's has it or an ancestor state it once, as
+     `--scroll-cue-ground: X; background-color: var(--scroll-cue-ground);`.
+     (background-color, not the shorthand: the shorthand would reset the
+     images below wherever it is the later or the more specific rule.)
+   - A scrollbar that stays drawn (WebKit and Blink styled bars do not
+     auto-hide on a phone; Firefox gets the standard properties. A rule that
+     sets scrollbar-width itself would make Chrome ignore the styled bar). */
+.scroll-cue {
+    background-image:
+        linear-gradient(to right, var(--scroll-cue-ground, var(--colour-surface)) 50%, transparent),
+        linear-gradient(to left, var(--scroll-cue-ground, var(--colour-surface)) 50%, transparent),
+        radial-gradient(farthest-side at 0 50%, var(--colour-scroll-cue-shadow), transparent),
+        radial-gradient(farthest-side at 100% 50%, var(--colour-scroll-cue-shadow), transparent);
+    background-position: left center, right center, left center, right center;
+    background-size: 2rem 100%, 2rem 100%, 1rem 100%, 1rem 100%;
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+}
+.scroll-cue::-webkit-scrollbar {
+    height: 0.5rem;
+}
+.scroll-cue::-webkit-scrollbar-track {
+    background: var(--colour-hairline);
+}
+.scroll-cue::-webkit-scrollbar-thumb {
+    background: var(--colour-scroll-cue-thumb);
+    border-radius: 0.25rem;
+}
+@supports not selector(::-webkit-scrollbar) {
+    .scroll-cue {
+        scrollbar-width: thin;
+        scrollbar-color: var(--colour-scroll-cue-thumb) var(--colour-hairline);
+    }
 }
 /* Stacked-card layout on phones: a table with class table-stack drops its
    header row and shows each row as a card, every cell labelled by its own

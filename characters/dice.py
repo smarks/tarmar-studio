@@ -138,7 +138,15 @@ parse_dice_expression = parse_dice_specification
 #: the server rolled -- ``scripts/gm_behaviour_check.py`` does -- has to read
 #: them out of prose. Keeping the pattern here, next to the writers, means the
 #: two cannot drift apart unnoticed (issue #604).
-DICE_IN_TEXT = re.compile(r"(\d*d\d+(?:[+-]\d+)?)\s*:?\s*\[([\d,\s]+)\]\s*=\s*(\d+)")
+#:
+#: The text can be long and the pattern is applied at every position, so no
+#: two repeated parts may take the same characters (issue #44). The lookbehind
+#: starts a leading ``\d*`` only at the front of a digit run, not again from
+#: each digit in it, and the colon carries the whitespace after it, so a run
+#: of spaces is never split between two ``\s*``.
+DICE_IN_TEXT = re.compile(
+    r"(?<!\d)(\d*d\d+(?:[+-]\d+)?)\s*(?::\s*)?\[([\d,\s]+)\]\s*=\s*(\d+)"
+)
 
 
 def roll_expression_record(

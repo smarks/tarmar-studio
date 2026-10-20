@@ -14,18 +14,19 @@ figure added here is not the model's until it is added there too.
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from characters.constants import CORE_ATTRIBUTE_FIELDS
 from characters.magic import known_spells
 from characters.models import Character, mana_owed_text
 from characters.purse import format_purse
 from characters.skills import calculate_attribute_modifier, format_skill_level
 
-ATTRIBUTE_LABELS = (
-    ("STR", "strength", "effective_strength"),
-    ("DEX", "dexterity", "effective_dexterity"),
-    ("INT", "intelligence", "effective_intelligence"),
-    ("WIS", "wisdom", "effective_wisdom"),
-    ("CON", "constitution", "effective_constitution"),
-    ("CHR", "charisma", "charisma"),
+#: Each core attribute as (label, base field, effective score property), in
+#: rolling order, built from the one table of the six. Every attribute has an
+#: ``effective_`` property (Charisma's is the recorded score, aging never
+#: reaching it), so the sheet and the draft ledger read all six alike.
+ATTRIBUTE_LABELS = tuple(
+    (short_name, field_name, f"effective_{field_name}")
+    for field_name, short_name in CORE_ATTRIBUTE_FIELDS
 )
 
 

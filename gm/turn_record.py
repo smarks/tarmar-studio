@@ -255,8 +255,8 @@ RUNNING_TURN_GRACE_SECONDS = 180.0
 STALE_RUNNING_TURN_ERROR = "the server stopped before this turn finished"
 
 
-def expire_stale_running_turns() -> None:
-    """Mark running turns that can no longer be running as failed (issue #515).
+def _running_turns_alive_since() -> datetime:
+    """The start time before which a running turn is taken to have died.
 
     A continued session's first turn writes its recap, within
     ``GM_RECAP_BUDGET_SECONDS``, before its own budget starts (issue #936),
@@ -267,10 +267,43 @@ def expire_stale_running_turns() -> None:
         + float(settings.GM_STREAM_BUDGET_SECONDS)
         + RUNNING_TURN_GRACE_SECONDS
     )
+    return timezone.now() - timedelta(seconds=limit)
+
+
+def expire_stale_running_turns() -> None:
+    """Mark running turns that can no longer be running as failed (issue #515)."""
     GMTurnRecord.objects.filter(
         outcome=GMTurnRecord.OUTCOME_RUNNING,
-        started_at__lt=timezone.now() - timedelta(seconds=limit),
+        started_at__lt=_running_turns_alive_since(),
     ).update(outcome=GMTurnRecord.OUTCOME_ERROR, error=STALE_RUNNING_TURN_ERROR)
+
+
+def turns_ahead_of(record_id: int) -> int:
+    """How many turns are ahead of this one for the model (issue #64).
+
+    The model answers one request at a time, and this app's own view of who
+    is waiting for it is the turns claimed and not yet finished: every
+    player's, every session's, fights included. Those claimed before this
+    one, and still within the time a live turn can take, are counted as ahead
+    of it. A turn that died with its worker is not, though nothing has marked
+    it yet; this is asked every few seconds while a turn waits, so it only
+    reads.
+
+    It is an estimate of the model's own line, which this app cannot see: a
+    turn claimed earlier may be between its calls just then, and anything
+    that asks the model outside a claimed turn is not counted.
+
+    Args:
+        record_id: The waiting turn's record.
+
+    Returns:
+        The number of running turns claimed before it.
+    """
+    return GMTurnRecord.objects.filter(
+        outcome=GMTurnRecord.OUTCOME_RUNNING,
+        pk__lt=record_id,
+        started_at__gte=_running_turns_alive_since(),
+    ).count()
 
 
 def running_turn_for(user: Any, session_id: int) -> GMTurnRecord | None:

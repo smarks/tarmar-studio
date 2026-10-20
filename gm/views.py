@@ -25,11 +25,13 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import ListView, TemplateView
 
 from battle.access import Actor, is_dm
+from battle.services import BARE_HANDED_KEY
 from battle.views import arena_context
 from characters.constants import too_long
 from characters.models import Character
@@ -127,6 +129,7 @@ from .turn_engine.engine import TurnBudgetExceeded, TurnEngine, TurnOutcome, Tur
 from .turn_engine.events import DatabaseSink, TurnEvent
 from .turn_engine.executor import RecordsExecutor
 from .turn_engine.model import OllamaModel
+from .turn_engine.model_queue import TURNS_AHEAD_KEY, ModelQueueWait
 from .turn_engine.policy import TurnPolicy
 from .turn_engine.state import (
     CarriedRecap,
@@ -143,7 +146,9 @@ from .turn_record import (
     claim_turn,
     expire_stale_running_turns,
     running_turn_for,
+    turns_ahead_of,
 )
+from .unarmed import unarmed_notice
 
 logger = logging.getLogger(__name__)
 
@@ -164,14 +169,75 @@ MAX_GM_MESSAGE_CHARS = 4000
 # cannot disagree about where a rename is refused.
 SESSION_NAME_MAX_STORED = column_length(GMSession, "name")
 
-# What the player reads when a turn outruns settings.GM_STREAM_BUDGET_SECONDS.
-# chat.js renders an ``error`` frame as an assistant message, so this arrives
-# in the GM's own place in the transcript rather than as a dead connection.
-GM_STREAM_TOO_SLOW_MESSAGE = (
-    "The Game Master is thinking longer than this table will wait, so that "
-    "turn was cut short. It usually means the model went cold. Send your "
-    "message again — the next attempt is normally much faster."
-)
+#: The frame key carrying the whole working line while a turn waits behind
+#: other tables' turns (issue #64); chat.js shows it in place of "The Game
+#: Master is working".
+BUSY_FRAME_KEY = "busy"
+
+#: How much of its budget a turn must have spent behind other tables' turns
+#: for the queue to be named as why it ran out, when it was no longer waiting
+#: at the end (issue #64). A turn still waiting when the budget ran out is
+#: always told it was the queue.
+QUEUE_BLAMED_SHARE = 0.5
+
+
+def queue_status_line(turns_ahead: int, seconds: int) -> str:
+    """The working line for a turn waiting behind other turns (issue #64).
+
+    Args:
+        turns_ahead: How many turns are ahead of it; at least one.
+        seconds: How long the turn has been going.
+
+    Returns:
+        The line, from the settings' wording.
+    """
+    if turns_ahead == 1:
+        return settings.GM_QUEUE_STATUS_ONE_AHEAD.format(seconds=seconds)
+    return settings.GM_QUEUE_STATUS_MANY_AHEAD.format(
+        turns_ahead=turns_ahead, seconds=seconds
+    )
+
+
+def too_slow_message(queue: ModelQueueWait, budget_seconds: float) -> str:
+    """What the player reads when a turn outruns its budget (issue #64).
+
+    The queue is named when the turn was still waiting behind other tables'
+    turns as the budget ran out, or had spent at least
+    :data:`QUEUE_BLAMED_SHARE` of it waiting behind them; the player is then
+    told not to resend straight away, which would only join the end of the
+    same line. Otherwise the turn was slow on its own, and the ordinary
+    message stands.
+
+    Args:
+        queue: The turn's waits behind other turns.
+        budget_seconds: The turn's budget.
+    """
+    # The budget is checked between silences, so the wait can run a moment
+    # past it; the player is never told it waited longer than it had.
+    waited = min(queue.waited(), budget_seconds)
+    if queue.still_waiting or waited >= budget_seconds * QUEUE_BLAMED_SHARE:
+        return settings.GM_STREAM_QUEUED_TOO_LONG_MESSAGE.format(
+            waited_seconds=round(waited), budget_seconds=round(budget_seconds)
+        )
+    # A template like every message setting, so it is filled in too (with no
+    # fields): a doubled brace in it reads as one, as it does in the others.
+    return settings.GM_STREAM_TOO_SLOW_MESSAGE.format()
+
+
+def _waiting_frame(payload: dict) -> dict:
+    """A ``waiting`` event as the page reads it.
+
+    A turn waiting behind other turns carries the whole line to show
+    (issue #64); any other silence carries the status and seconds alone.
+    """
+    frame = dict(payload)
+    turns_ahead = frame.pop(TURNS_AHEAD_KEY, 0)
+    if turns_ahead:
+        frame[BUSY_FRAME_KEY] = queue_status_line(
+            turns_ahead, int(frame.get("elapsed", 0))
+        )
+    return frame
+
 
 # What the player reads when a turn or a fight fails on an exception nobody
 # wrote for them (issue #13). The exception's own text can carry file paths,
@@ -201,11 +267,6 @@ FIGHT_COMMAND = "fight"
 FIGHT_MODEL_UNREACHABLE = (
     "The Game Master could not be reached to choose who you face. Nothing was "
     "started; try the fight again in a moment."
-)
-#: /fight when the model was still choosing at the fight's deadline (#936).
-FIGHT_MODEL_TOO_SLOW = (
-    "The Game Master took longer than this table will wait to choose who you "
-    "face, so nothing was started. Try the fight again in a moment."
 )
 # A Retry of a turn that in fact finished after its page lost the stream
 # (issue #515). Running it again would play its procedures twice.
@@ -299,7 +360,12 @@ def _get_attachable_character(
 
 
 def _session_characters_payload(session: GMSession) -> dict:
-    """The JSON both character endpoints answer with."""
+    """The JSON both character endpoints answer with.
+
+    It carries the Battle tab's bare-handed line as it stands after the
+    change, since the page shows an attach or a detach in place (issue #15)
+    and that line names the attached characters who carry no weapon.
+    """
     return {
         "ok": True,
         "session_id": session.pk,
@@ -307,6 +373,7 @@ def _session_characters_payload(session: GMSession) -> dict:
             {"id": character.pk, "name": character.name}
             for character in session.attached_characters()
         ],
+        BARE_HANDED_KEY: unarmed_notice(session),
     }
 
 
@@ -967,25 +1034,71 @@ CATCH_UP_GRACE_SECONDS = 1.0
 FOLDING_STATUS = "reading back over the story so far"
 
 
-def _with_session_id(frame: dict, session: GMSession | None) -> dict:
+#: The templates that write one session's entry in the rail and in the
+#: small-screen menu: for the page load, for every search, and for a session a
+#: turn creates.
+SESSION_RAIL_ROW_TEMPLATE = "gm/_session_rail_row.html"
+SESSION_MENU_OPTION_TEMPLATE = "gm/_session_menu_option.html"
+
+
+def session_entry_html(template: str, session: GMSession) -> str:
+    """One session's entry, written by the template that writes all of them.
+
+    The page puts it into the rail (or the menu) when a turn creates the
+    session, so the entry (its ids, its labels, its message count, its date)
+    is the one the server writes for every other and nothing in the page
+    copies it (issue #62).
+
+    Args:
+        template: :data:`SESSION_RAIL_ROW_TEMPLATE` or
+            :data:`SESSION_MENU_OPTION_TEMPLATE`.
+        session: The session the page is showing, so its entry is the active one.
+
+    Returns:
+        The ``<li>`` or ``<option>`` as HTML.
+    """
+    return render_to_string(template, {"s": session, "active_session": session})
+
+
+def _with_session_id(
+    frame: dict, session: GMSession | None, *, creating: bool = False
+) -> dict:
     """``frame`` carrying the session's id once there is one (issue #410).
 
     A turn's first procedure or roll can create the session, and the id used
     to arrive only on the done frame. A page whose connection broke after that
     retried into a brand-new session and played the years again.
+
+    Args:
+        frame: The frame to add to.
+        session: The session, or ``None`` before the turn has made one.
+        creating: Whether this turn is the one that makes the session, so the
+            page has no entry for it yet. Only then does the frame carry the
+            session's rail row and menu option; a later turn's frames would
+            only repeat what the page already holds.
     """
     if session is not None:
         frame["session_id"] = session.pk
-        # And what it is called, and when it started (issue #704). Sending the
-        # first message on a blank page creates a session, and the rail on the
-        # left went on showing only "+ New" until the next full page load -- a
-        # player who then pressed "+ New" could not see that the first session
-        # had been kept, and the panel still read "A new session takes its
-        # name from your first message" about something that had happened.
-        # The name is the server's, derived in gm.models.name_from_history, so
-        # the page never re-derives it.
+        # And what it is called (issue #704). Sending the first message on a
+        # blank page creates a session, and the rail on the left went on
+        # showing only "+ New" until the next full page load -- a player who
+        # then pressed "+ New" could not see that the first session had been
+        # kept, and the panel still read "A new session takes its name from
+        # your first message" about something that had happened. The name is
+        # the server's, derived in gm.models.name_from_history, so the page
+        # never re-derives it.
         frame["session_name"] = session.name
-        frame["session_started"] = session.created_at.isoformat()
+        if creating:
+            # The entries are the rail's and the menu's own templates', so the
+            # page never builds one (issue #62). They ride every frame of the
+            # creating turn because the first to name the session may be a
+            # procedure's, and a turn that then breaks has already made it.
+            frame["session_row_html"] = session_entry_html(
+                SESSION_RAIL_ROW_TEMPLATE, session
+            )
+            frame["session_menu_option_html"] = session_entry_html(
+                SESSION_MENU_OPTION_TEMPLATE, session
+            )
     return frame
 
 
@@ -1223,6 +1336,9 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
     # How many stored entries the fold took out of what the model reads; the
     # turn record counts entries of the stored history, which keeps them all.
     folded_away = 0
+    # Whether this turn is the one that makes the session: the page has no
+    # rail row or menu option for it until this turn's frames bring them.
+    creating_session = session is None
 
     def ground() -> None:
         """File the canon and battle log, and read what the turn answers."""
@@ -1360,7 +1476,12 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             history.insert(1, filed)
             prior_count += 1
 
-    def fold(sink: DatabaseSink, started_at: float, budget_seconds: float):
+    def fold(
+        sink: DatabaseSink,
+        started_at: float,
+        budget_seconds: float,
+        queue: ModelQueueWait,
+    ):
         """Fold a long session's older turns, inside the turn (issue #783).
 
         Run after the turn is claimed and recorded, on the turn's clock, with
@@ -1368,6 +1489,11 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         as an event of the turn so ``gm_transcript`` shows it. The recap is
         written off this thread -- it is one model call and touches no rows
         -- and kept under a lock on the session.
+
+        The call is not streamed, so it has no first token to tell its wait
+        in the model's line from its writing: like an engine call before its
+        first token, every keep-alive looks at the line, and the player is
+        told while turns are ahead of this one (issue #64).
 
         Raises:
             TurnBudgetExceeded: The recap outran the turn's budget; the
@@ -1387,6 +1513,7 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             try:
                 # Bounded by the turn's budget, so a recap the turn gives up
                 # on stops rather than holding the model (review of #783).
+                queue.call_started()
                 writing = pool.submit(
                     write_fold,
                     session,
@@ -1404,6 +1531,20 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                         if time.monotonic() - started_at > budget_seconds:
                             raise TurnBudgetExceeded from None
                         yield SSE_KEEPALIVE
+                        was_waiting = queue.still_waiting
+                        turns_ahead = queue.look()
+                        # Said while turns are ahead, and taken back to the
+                        # fold's own status once they are not.
+                        if turns_ahead or was_waiting:
+                            yield _sse(
+                                _waiting_frame(
+                                    {
+                                        "status": FOLDING_STATUS,
+                                        "elapsed": int(time.monotonic() - started_at),
+                                        TURNS_AHEAD_KEY: turns_ahead,
+                                    }
+                                )
+                            )
             finally:
                 # Never wait on a recap the turn has given up on, nor leave
                 # its call holding the model: a recap that ended is left
@@ -1425,9 +1566,12 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                 )
             )
             # A recap that ended at the deadline -- written, or given up on
-            # by its own bound -- leaves the turn no time to plan in.
+            # by its own bound -- leaves the turn no time to plan in. Until
+            # then it may still have been waiting in the line, so it is
+            # served only once it is known to have ended inside the budget.
             if time.monotonic() - started_at > budget_seconds:
                 raise TurnBudgetExceeded
+            queue.served()
         folded = folded_for_model(session, stored)
         if folded != stored:
             history[turn.stored_from : stored_until] = folded
@@ -1443,6 +1587,12 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         started_at = time.monotonic()
         assert recorder.record_id is not None
         sink = DatabaseSink(recorder.record_id)
+        # Queue time counts against the budget (issue #64): see
+        # docs/architecture.md, "A turn waiting for the model".
+        queue = ModelQueueWait(
+            turns_ahead=partial(turns_ahead_of, recorder.record_id),
+            clock=time.monotonic,
+        )
         ran_rolls: list[dict] = []
         ran_procedures: list[dict] = []
         applied: list[str] = []
@@ -1451,17 +1601,16 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         # nobody has played it yet (issue #761).
         if session is not None and not catching_up:
             try:
-                yield from fold(sink, started_at, budget_seconds)
+                yield from fold(sink, started_at, budget_seconds, queue)
             except TurnBudgetExceeded:
                 logger.warning(
                     "GM session %s fold passed the %gs budget; told the player",
                     session.pk,
                     budget_seconds,
                 )
-                recorder.finish(
-                    GMTurnRecord.OUTCOME_TOO_SLOW, error=GM_STREAM_TOO_SLOW_MESSAGE
-                )
-                yield _sse({"error": GM_STREAM_TOO_SLOW_MESSAGE})
+                too_slow_error = too_slow_message(queue, budget_seconds)
+                recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=too_slow_error)
+                yield _sse({"error": too_slow_error})
                 return
         ground()
         filed_before_reply = len(history)
@@ -1479,6 +1628,7 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             started_at=started_at,
             budget_seconds=budget_seconds,
             keepalive_seconds=GM_STREAM_KEEPALIVE_SECONDS,
+            queue=queue,
         )
 
         def record_failed_turn(
@@ -1527,7 +1677,7 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                     yield _sse({"status": event.payload["status"]})
                 elif event.kind == turn_events.WAITING:
                     yield SSE_KEEPALIVE
-                    yield _sse(dict(event.payload))
+                    yield _sse(_waiting_frame(event.payload))
                 elif event.kind == turn_events.ACTION and "frame" in event.payload:
                     frame = event.payload["frame"]
                     ran_procedures.append(frame)
@@ -1537,12 +1687,20 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
                     history.append(
                         turn_history.procedure_entry(event.payload["result"], frame)
                     )
-                    yield _sse(_with_session_id({"procedure": frame}, session))
+                    yield _sse(
+                        _with_session_id(
+                            {"procedure": frame}, session, creating=creating_session
+                        )
+                    )
                 elif event.kind == turn_events.ROLL:
                     frame = dict(event.payload)
                     ran_rolls.append(frame)
                     history.append(turn_history.roll_entry(frame))
-                    yield _sse(_with_session_id({"gm_roll": frame}, session))
+                    yield _sse(
+                        _with_session_id(
+                            {"gm_roll": frame}, session, creating=creating_session
+                        )
+                    )
         except TurnBudgetExceeded:
             logger.warning(
                 "GM plan turn passed its %gs budget after %.1fs; told the player",
@@ -1551,16 +1709,17 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             )
             kept_notice = cut_short_notice(ran_procedures, ran_rolls)
             kept = [kept_notice] if kept_notice else []
+            too_slow_error = too_slow_message(queue, budget_seconds)
             record_failed_turn(
                 GMTurnRecord.OUTCOME_TOO_SLOW,
-                GM_STREAM_TOO_SLOW_MESSAGE,
+                too_slow_error,
                 INTERRUPTED_BY_BUDGET,
                 kept,
             )
-            too_slow: dict = {"error": GM_STREAM_TOO_SLOW_MESSAGE}
+            too_slow: dict = {"error": too_slow_error}
             if kept:
                 too_slow["notices"] = kept
-            yield _sse(_with_session_id(too_slow, session))
+            yield _sse(_with_session_id(too_slow, session, creating=creating_session))
             return
         except Exception:
             logger.exception("GM plan turn failed")
@@ -1591,12 +1750,12 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         if outcome.session_id:
             named = GMSession.objects.filter(pk=outcome.session_id).first()
             if named is not None:
-                done_data["session_name"] = named.name
-                done_data["session_started"] = named.created_at.isoformat()
+                _with_session_id(done_data, named, creating=creating_session)
                 # And for one that already existed: the rail's count and the
                 # name the first reply gave it, which the page otherwise kept
                 # at "New Session · 0 msgs" until a reload (issue #829).
                 done_data["message_count"] = named.message_count
+                done_data["message_count_label"] = named.message_count_label
         if turn_notices:
             done_data["notices"] = turn_notices
         if ran_rolls:
@@ -2179,7 +2338,9 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
     except StreamDeadlinePassed as out_of_time:
         logger.warning("GM fight: the foe call passed its deadline: %s", out_of_time)
         recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=str(out_of_time))
-        return _json_error(FIGHT_MODEL_TOO_SLOW, status=504)
+        # When the foe call ran out of its deadline (#936); worded not to
+        # invite a resend into the model's line (issue #64).
+        return _json_error(settings.GM_FIGHT_TOO_SLOW_MESSAGE.format(), status=504)
     except Exception:
         # Django logs the traceback of what is raised; the record, which
         # ``gm:turn`` reads back to the player, gets the fixed sentence (#13).

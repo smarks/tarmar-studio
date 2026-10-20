@@ -164,6 +164,12 @@ class GMCharacterEndpointsTest(BaseTestCase):
                 "ok": True,
                 "session_id": self.session.pk,
                 "characters": [{"id": self.character.pk, "name": "Mine"}],
+                # The Battle tab's warning as it now stands, which the page
+                # repaints from this answer instead of reloading (issue #15).
+                "bare_handed": (
+                    "Mine carries no weapon and would fight bare-handed. Buy gear "
+                    "on the character's sheet before the fight."
+                ),
             },
         )
         self.assertEqual(list(self.session.characters.all()), [self.character])
@@ -282,7 +288,13 @@ class GMCharacterEndpointsTest(BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"ok": True, "session_id": self.session.pk, "characters": []},
+            {
+                "ok": True,
+                "session_id": self.session.pk,
+                "characters": [],
+                # Nobody bare-handed is attached any more (issue #15).
+                "bare_handed": "",
+            },
         )
         self.assertEqual(self.session.characters.count(), 0)
 

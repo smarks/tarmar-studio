@@ -41,6 +41,7 @@ from . import events
 from .events import EventSink, TurnEvent
 from .messages import PLAN_UNREADABLE, narrate_message, plan_message, replan_message
 from .model import KeepAliveTokens, Messages, ModelPort
+from .model_queue import TURNS_AHEAD_KEY, ModelQueueWait
 from .narration import (
     PlanLeakFilter,
     figures_raised,
@@ -223,6 +224,8 @@ class TurnEngine:
         budget_seconds: How long the whole turn may take.
         keepalive_seconds: How long the model may be silent before the
             engine yields a ``waiting`` event.
+        queue: Counts the time the turn's calls wait behind other turns
+            (issue #64); ``None`` when the caller has no line to ask about.
     """
 
     def __init__(
@@ -234,6 +237,7 @@ class TurnEngine:
         started_at: float,
         budget_seconds: float,
         keepalive_seconds: float = DEFAULT_KEEPALIVE_SECONDS,
+        queue: ModelQueueWait | None = None,
     ) -> None:
         self.model = model
         self.sink = sink
@@ -241,6 +245,7 @@ class TurnEngine:
         self.started_at = started_at
         self.budget_seconds = budget_seconds
         self.keepalive_seconds = keepalive_seconds
+        self.queue = queue
         self.state = TurnState.GROUNDING
         self._logged_prefix: Messages | None = None
         #: Set when the model wrote a plan into its narration (issue #603).
@@ -338,6 +343,11 @@ class TurnEngine:
         # stream that stalled, and whatever ends the turn early hangs it up
         # when ``tokens`` is closed, so it does not hold the model past the
         # turn once its response has begun (issue #904).
+        # Until its first token, a silent call may be waiting behind other
+        # tables' turns rather than being worked on (issue #64).
+        answered = False
+        if self.queue is not None:
+            self.queue.call_started()
         with _cut_off_is_out_of_time():
             tokens = KeepAliveTokens(
                 self.model.stream(messages, stop_at=self.deadline),
@@ -347,12 +357,20 @@ class TurnEngine:
                 for token in tokens:
                     self._check_budget()
                     if token is None:
-                        yield TurnEvent(
-                            events.WAITING,
-                            {"status": status, "elapsed": int(self.elapsed())},
-                            persist=False,
-                        )
+                        waiting: dict[str, Any] = {
+                            "status": status,
+                            "elapsed": int(self.elapsed()),
+                        }
+                        if not answered and self.queue is not None:
+                            turns_ahead = self.queue.look()
+                            if turns_ahead:
+                                waiting[TURNS_AHEAD_KEY] = turns_ahead
+                        yield TurnEvent(events.WAITING, waiting, persist=False)
                         continue
+                    if not answered:
+                        answered = True
+                        if self.queue is not None:
+                            self.queue.served()
                     raw_parts.append(token)
                     visible = thinking.feed(token)
                     if visible is None:

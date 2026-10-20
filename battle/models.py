@@ -131,6 +131,13 @@ class Battle(models.Model):
     # writes it onto the engine state every turn, and only a Game Master
     # changes it (``battle.services.set_hth_agreement``).
     hth_agreement_json = models.JSONField(default=dict, blank=True, db_default={})
+    # A Game Master's ruling lifting a figure's magic bounds (issue #37):
+    # Channel, the push cap and the counter's commitment bounds, each lifted
+    # for one figure with who lifted it and when. A list of
+    # ``{"combatant_id", "bound", "by", "by_id", "at"}``, ``[]`` for none.
+    # The one source of truth; ``battle.magic_bounds`` reads it, and only a
+    # Game Master changes it (``battle.services.set_magic_bounds_lifted``).
+    magic_bounds_lifted_json = models.JSONField(default=list, blank=True, db_default=[])
     # While ``status`` is ``awaiting``: which combatant the turn is paused
     # on, plus the legal candidates (policy scores included, as advice) that
     # were computed when the engine paused — so the player's page can render

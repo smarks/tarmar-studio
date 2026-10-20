@@ -176,6 +176,8 @@ class BattleAdvanceTest(BaseTestCase):
         with (
             mock.patch("battle.views.advance_turn", side_effect=RuntimeError(secret)),
             self.assertLogs("battle.views", "ERROR") as logs,
+            # The 500 itself, which Django logs too; captured, not leaked.
+            self.assertLogs("django.request", "ERROR"),
         ):
             response = self.client.post(reverse("battle:advance", args=[battle.pk]))
         return response, logs.records
@@ -189,7 +191,7 @@ class BattleAdvanceTest(BaseTestCase):
         response, records = self._advance_failing_with(self.battle, secret)
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], views.ADVANCE_FAILED_MESSAGE)
+        self.assertEqual(response.json()["error"], views.BATTLE_REQUEST_FAILED_MESSAGE)
         self.assertNotIn("hunter2", response.content.decode())
         self.assertNotIn("RuntimeError", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
@@ -204,7 +206,7 @@ class BattleAdvanceTest(BaseTestCase):
         response, records = self._advance_failing_with(own_battle, secret)
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], views.ADVANCE_FAILED_MESSAGE)
+        self.assertEqual(response.json()["error"], views.BATTLE_REQUEST_FAILED_MESSAGE)
         self.assertNotIn("secret_token", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
 

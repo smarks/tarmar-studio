@@ -9,13 +9,14 @@ here appears or vanishes on a timer. Every viewer reads the line; only a Game
 Master running this fight (``runs_the_seats``) gets the forms, and the
 endpoint refuses anyone else. Included by the battle page and by the GM
 chat's Battle tab; each form names the page it came from (``next``), so a
-post from the chat lands back in the chat, re-rendered from the record.
+post from the chat lands back in the chat, re-rendered from the record. The
+battle payload carries this partial too (``rulings_html``), and battle.js
+puts it in place when ``data-record`` changes. The words are configuration
+(``battle.wording``, config/battle-rulings.toml).
 {% endcomment %}
-<div class="battle-panel battle-agreement-panel" id="battle-hth-agreement">
-    <h2>Hand-to-hand by agreement</h2>
-    <p class="agreement-line">
-        {% if hth_agreement.line %}{{ hth_agreement.line }}{% else %}No pair is marked: a figure enters hand-to-hand only by one of the rules' ways in.{% endif %}
-    </p>
+<div class="battle-panel battle-agreement-panel" id="{{ hth_agreement.panel_id }}" data-record="{{ hth_agreement.record }}">
+    <h2>{{ hth_agreement.words.heading }}</h2>
+    <p class="agreement-line">{{ hth_agreement.line }}</p>
     {% if hth_agreement.can_rule %}
     <form method="post" action="{% url 'battle:hth-agreement' battle.pk %}" class="agreement-battle-form">
         {% csrf_token %}
@@ -23,10 +24,10 @@ post from the chat lands back in the chat, re-rendered from the record.
         <input type="hidden" name="scope" value="battle">
         {% if hth_agreement.whole_battle %}
         <input type="hidden" name="agreed" value="">
-        <button type="submit" class="battle-button battle-button-outline">Lift the ruling for the whole battle</button>
+        <button type="submit" class="battle-button battle-button-outline">{{ hth_agreement.words.lift_whole_battle }}</button>
         {% else %}
         <input type="hidden" name="agreed" value="true">
-        <button type="submit" class="battle-button battle-button-outline">Mark the whole battle</button>
+        <button type="submit" class="battle-button battle-button-outline">{{ hth_agreement.words.mark_whole_battle }}</button>
         {% endif %}
     </form>
     {% if hth_agreement.pairs %}
@@ -41,7 +42,7 @@ post from the chat lands back in the chat, re-rendered from the record.
                 <input type="hidden" name="first" value="{{ pair.first }}">
                 <input type="hidden" name="second" value="{{ pair.second }}">
                 <input type="hidden" name="agreed" value="">
-                <button type="submit" class="battle-button battle-button-quiet">Lift</button>
+                <button type="submit" class="battle-button battle-button-quiet">{{ hth_agreement.words.lift_pair }}</button>
             </form>
         </li>
         {% endfor %}
@@ -53,19 +54,19 @@ post from the chat lands back in the chat, re-rendered from the record.
         <input type="hidden" name="scope" value="pair">
         <input type="hidden" name="agreed" value="true">
         <label>
-            <span class="sr-only">First of the pair</span>
+            <span class="sr-only">{{ hth_agreement.words.first_of_pair }}</span>
             <select name="first">
                 {% for combatant in hth_agreement.combatants %}<option value="{{ combatant.id }}">{{ combatant.name }}</option>{% endfor %}
             </select>
         </label>
-        <span>and</span>
+        <span>{{ hth_agreement.and_word }}</span>
         <label>
-            <span class="sr-only">Second of the pair</span>
+            <span class="sr-only">{{ hth_agreement.words.second_of_pair }}</span>
             <select name="second">
                 {% for combatant in hth_agreement.combatants %}<option value="{{ combatant.id }}"{% if forloop.counter == 2 %} selected{% endif %}>{{ combatant.name }}</option>{% endfor %}
             </select>
         </label>
-        <button type="submit" class="battle-button battle-button-outline">Mark this pair</button>
+        <button type="submit" class="battle-button battle-button-outline">{{ hth_agreement.words.mark_pair }}</button>
     </form>
     {% endif %}
 </div>

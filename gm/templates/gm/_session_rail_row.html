@@ -1,10 +1,12 @@
 {% load local_time %}<li class="session-item {% if active_session and active_session.pk == s.pk %}active{% endif %}"
     data-id="{{ s.pk }}">
     <a href="?session={{ s.pk }}">
-        <span class="session-name">{{ s.name }}</span>
-        <span class="session-meta">{% local_time s.created_at "M d, Y" style="date" %} &middot; <span class="session-count">{{ s.message_count }} msg{{ s.message_count|pluralize }}</span></span>
+        <span class="session-name" id="session-name-{{ s.pk }}">{{ s.name }}</span>
+        <span class="session-meta"><span id="session-date-{{ s.pk }}">{% local_time s.created_at "M d, Y" style="date" %}</span> &middot; <span class="session-count">{{ s.message_count_label }}</span></span>
     </a>
-    <button type="button" class="session-delete-btn"
-            aria-label="Delete session {{ s.name }}, started {{ s.created_at|date:'M d, Y' }}" title="Delete session"
-            onclick="deleteSession({{ s.pk }}, '{{ s.name|escapejs }}', '{{ s.created_at|date:'M d, Y'|escapejs }}')">&times;</button>
+    {# The date is read from the row's own <time> as the viewer's zone has written it, so the label and the confirm prompt say what the rail shows (issue #62). #}
+    <span class="sr-only" id="session-started-{{ s.pk }}">started</span>
+    <button type="button" class="session-delete-btn" id="session-delete-{{ s.pk }}"
+            aria-label="Delete session" aria-labelledby="session-delete-{{ s.pk }} session-name-{{ s.pk }} session-started-{{ s.pk }} session-date-{{ s.pk }}" title="Delete session"
+            onclick="deleteSession({{ s.pk }}, '{{ s.name|escapejs }}', document.getElementById('session-date-{{ s.pk }}').textContent)">&times;</button>
 </li>

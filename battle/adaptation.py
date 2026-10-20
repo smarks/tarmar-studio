@@ -61,7 +61,11 @@ _DICE_PREFIX = re.compile(r"^\s*(\d+d\d+(?:\s*[+-]\s*\d+)?)")
 # Only the *primary* attack's damage is read this way (see ``beast_attack``):
 # a rider entry's conditional dice — a spider's "save at 3/ST or take an
 # additional 2d6" — belongs to the venom, not to the bite being readied.
-_DICE_ANYWHERE = re.compile(r"\d+d\d+(?:\s*[+-]\s*\d+)?")
+#
+# It is applied at every position of the catalog's damage text, so the lookbehind
+# starts the leading ``\d+`` only at the front of a digit run, not again from
+# each digit in it: a run of n digits cost n * n steps (issue #44).
+_DICE_ANYWHERE = re.compile(r"(?<!\d)\d+d\d+(?:\s*[+-]\s*\d+)?")
 
 # What a beast wears instead of an attack the catalog does not model, and
 # how the arena and the muster say so. One sentence, two renderings: the

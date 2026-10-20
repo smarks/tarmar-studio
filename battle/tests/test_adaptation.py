@@ -1,12 +1,14 @@
 """Beast → engine adaptation tests (pure: unsaved Beast instances, no DB)."""
 
 import json
+import time
 from pathlib import Path
 
 from django.test import SimpleTestCase
 
 import bestiary
 from battle.adaptation import (
+    _DICE_ANYWHERE,
     BEAST_ARCHETYPE,
     NO_MODELLED_ATTACK_NOTE,
     beast_attack,
@@ -398,3 +400,72 @@ class CatalogSubstitutionDriftTest(SimpleTestCase):
                 self.assertEqual(
                     attack.weapon.weapon_class, melee[0]["weapon_class"], beast.name
                 )
+
+
+class DiceAnywherePatternTest(SimpleTestCase):
+    """The catalog's dice, found anywhere in a damage string (issue #44).
+
+    The text is the bestiary catalog's. These pin what the pattern finds, so
+    the rewrite changed how long it takes and nothing else.
+    """
+
+    def test_dice_are_found_wherever_they_sit(self):
+        cases = {
+            "three heads, 1d6-1 per head": ["1d6-1"],
+            "2d6": ["2d6"],
+            "1d6 + 2 and 3d6": ["1d6 + 2", "3d6"],
+            "1d6 +  1": ["1d6 +  1"],
+            "12d10 - 3 hits": ["12d10 - 3"],
+            "save or take 2d6, 1d6+2": ["2d6", "1d6+2"],
+            "2d6+": ["2d6"],
+            "12345d6": ["12345d6"],
+            "x2d6": ["2d6"],
+        }
+        for damage, expected in cases.items():
+            with self.subTest(damage=damage):
+                self.assertEqual(_DICE_ANYWHERE.findall(damage), expected)
+
+    def test_text_without_a_whole_expression_finds_none(self):
+        for damage in ("d6", "2d", "2 d 6", "1 hit", "1d", "dd6", ""):
+            with self.subTest(damage=damage):
+                self.assertEqual(_DICE_ANYWHERE.findall(damage), [])
+
+    def test_a_catalog_attack_of_prose_is_still_read(self):
+        beast = make_beast(
+            attacks=[
+                {
+                    "name": "Bite",
+                    "damage": "three heads, 1d6 - 1 per head",
+                    "weapon_class": "Piercing",
+                }
+            ]
+        )
+        self.assertEqual(beast_attack(beast).weapon.damage, "1d6-1")
+
+    def test_the_pattern_stays_fast_on_crafted_input(self):
+        # The tests above check what the pattern finds; this one checks how
+        # long it takes. The old pattern took about 10 s on each digit run
+        # below (not the guard; measured on one machine, 2026-10-18), so code
+        # that backtracks again fails here within the minute while the new
+        # pattern takes milliseconds. The last case goes through beast_attack,
+        # which is how a catalog entry reaches the pattern.
+        crafted = {
+            "a run of digits": "1" * 120_000,
+            "a run of digits then d": "1" * 120_000 + "d",
+            "a run of digits then d and a sign": "1" * 120_000 + "d+",
+            "guard: dice then spaces": "1d6" + " " * 120_000,
+        }
+        for label, damage in crafted.items():
+            with self.subTest(input=label):
+                started = time.perf_counter()
+                _DICE_ANYWHERE.findall(damage)
+                self.assertLess(time.perf_counter() - started, 1.0)
+        beast = make_beast(
+            attacks=[
+                {"name": "Bite", "damage": "1" * 120_000, "weapon_class": "Piercing"}
+            ]
+        )
+        started = time.perf_counter()
+        attack = beast_attack(beast)
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertTrue(attack.substituted)

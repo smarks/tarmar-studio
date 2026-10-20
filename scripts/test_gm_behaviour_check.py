@@ -9,6 +9,8 @@ part that decides whether a sentence contradicts them, need guarding
 themselves. Every string below is prose, not a model call.
 """
 
+import time
+
 import gm_behaviour_check as harness
 import pytest
 
@@ -2832,3 +2834,291 @@ def test_a_tracks_xp_a_year_is_no_survival_figure(sentence, campaigner_rule):
     """
     assert harness.read_clause(sentence).figures == ()
     assert not harness.contradicting_survival_claims(sentence, campaigner_rule)
+
+
+# What _NAMED_TARGET reads out of a sentence, as the figures it finds (issue
+# #44 rewrote it for linear time; #760 and the boards of 2026-09-29 gave it the
+# wordings below). The rewrite changed how long it takes and nothing else.
+NAMED_TARGET_READINGS = {
+    "The Campaigner survivability target is 9 and the roll must meet or beat it.": [
+        "9"
+    ],
+    "The target for the Campaigner track is 9": ["9"],
+    "the target for your Underworld track number 8": ["8"],
+    "the track's target number (9 for Campaigners)": ["9"],
+    "The track's target, which is 9": ["9"],
+    "target,that is 11": ["11"],
+    "target number is 9": ["9"],
+    "Target Numbers is 10": ["10"],
+    "target number of 9": ["9"],
+    "targets: 12": ["12"],
+    "TN = 12": ["12"],
+    "The threshold of 14": ["14"],
+    "difficulty 7": ["7"],
+    "target ( 9 )": ["9"],
+    "target : (  7": ["7"],
+    "target\n\n 9": ["9"],
+    "target for the 9": ["9"],
+    "tn: 8 and the target is 9": ["8", "9"],
+    # No figure, or a figure that is the front of a longer number.
+    "target is": [],
+    "target of the": [],
+    "target , 9": [],
+    "target 123": [],
+    "target 1,200": [],
+    "target 9.5": [],
+    "target for the old grey wolf pack 8": [],
+}
+
+
+@pytest.mark.parametrize("sentence", NAMED_TARGET_READINGS)
+def test_the_named_target_pattern_reads_the_figure_it_always_did(sentence):
+    figures = [match.group(1) for match in harness._NAMED_TARGET.finditer(sentence)]
+    assert figures == NAMED_TARGET_READINGS[sentence]
+
+
+def test_a_long_run_of_spaces_is_read_past_by_the_named_target_pattern():
+    padding = " " * 5000
+    assert [
+        match.group(1)
+        for match in harness._NAMED_TARGET.finditer(f"target{padding}number{padding}9")
+    ] == ["9"]
+
+
+@pytest.mark.parametrize(
+    "crafted",
+    [
+        "target" + " " * 2000 + "x",
+        "target number" + " " * 1600 + "x",
+        "target for the" + " " * 2000 + "x",
+        "target for the track" + " " * 1600 + "x",
+        "target" + " " * 1400 + "number" + " " * 1400 + "x",
+        "target" + " " * 2000 + "," + " " * 2000 + "x",
+        "target" + " " * 1900 + "is" + " " * 1900 + "(" + " " * 1900 + "x",
+        "guard: target ( " + " " * 5000 + "x",
+        "guard: " + "tn " * 2500,
+        "guard: target for " + "a " * 2500,
+        "guard: target " + " " * 5000 + "9",
+    ],
+    ids=lambda crafted: f"{crafted[:24]!r}...{len(crafted)}",
+)
+def test_the_named_target_pattern_stays_fast_on_crafted_input(crafted):
+    # The harness is an offline script, so this input is the model's reply to a
+    # developer's own run, but the old pattern split a run of spaces three
+    # ways between "\s*" parts that held optional groups: about cubic: 8.6 to
+    # 10.6 s on each unguarded input below (1,400 to 2,000 spaces a run,
+    # measured on one machine, 2026-10-18), where 5,000 took 272 s. Code that
+    # backtracks again fails here; the new pattern takes milliseconds.
+    started = time.perf_counter()
+    list(harness._NAMED_TARGET.finditer(crafted))
+    assert time.perf_counter() - started < 1.0
+
+
+# The other patterns issue #44 made linear, each with what it reads. These
+# tables record what the patterns read before the rewrite, so the rewrite
+# changed how long they take and nothing else.
+DICE_COMPARISON_READINGS = {
+    "3d6 <= 12": [("3", "<=", "12")],
+    "3d6≤12": [("3", "≤", "12")],
+    "3 d 6 or less 12": [("3", "or less", "12")],
+    "3d6 > 9": [("3", ">", "9")],
+    "roll 2d6 = 7": [("2", "=", "7")],
+    "123d6 or more": [("123", "or more", None)],
+    "x13d6 < 4": [("13", "<", "4")],
+    "3d6 <": [("3", "<", None)],
+    "1d6 = 2 and 3d6 >= 9": [("1", "=", "2"), ("3", ">=", "9")],
+    "d6 < 4": [],
+    "3d < 4": [],
+    "3d6 or": [],
+}
+
+ROLLED_FIGURE_READINGS = {
+    "The goblin rolled a 14.": [("14", None)],
+    "rolled an 8": [("8", None)],
+    "rolled the 12": [("12", None)],
+    "rolled a total of 9": [("9", None)],
+    "rolled total  of  9": [("9", None)],
+    "rolled  14": [("14", None)],
+    "rolled a  \n 7": [("7", None)],
+    "The dice came up 18": [(None, "18")],
+    "came up a 5": [(None, "5")],
+    "shows an 8": [(None, "8")],
+    "showed 11": [(None, "11")],
+    "rolled14": [],
+    "showing the 4": [],
+    "rolled a 1234": [],
+    "rolled a total 9": [],
+    "rolled total of": [],
+}
+
+ATTRIBUTE_FIGURE_READINGS = {
+    "STR 13, DEX: 12, Constitution is 14": [
+        ("STR", "13"),
+        ("DEX", "12"),
+        ("Constitution", "14"),
+    ],
+    "STR=13": [("STR", "13")],
+    "int - 9": [("int", "9")],
+    "Wisdom:is 10": [("Wisdom", "10")],
+    "WIS : is 10": [("WIS", "10")],
+    "CHR\n\n 11": [("CHR", "11")],
+    "Strength:  \n 15": [("Strength", "15")],
+    "INT–8": [("INT", "8")],
+    "cha 12": [],
+    "STR 123": [],
+    "STR is": [],
+}
+
+LABELLED_FIGURE_READINGS = {
+    "None 11, Light: 14": ["None 11", "Light: 14"],
+    "medium=9": ["medium=9"],
+    "heavy   12": ["heavy   12"],
+    "unarmoured :  7": ["unarmoured :  7"],
+    "unarmored3": ["unarmored3"],
+    "Light: ": [],
+    "heavy 123 ": [],
+    "lightweight 12": [],
+}
+
+FIGURE_FOR_TRACK_READINGS = {
+    "8 for Underworld, 12 for the Campaigners": [
+        ("8", "Underworld"),
+        ("12", "Campaigner"),
+    ],
+    "9 or more for Campaigner": [("9", "Campaigner")],
+    "10+ on Merchant": [("10", "Merchant")],
+    "10 + for merchant": [("10", "merchant")],
+    "11 or  higher   for  the magic": [("11", "magic")],
+    "1,200 for campaigner": [],
+    "3.5 for campaigner": [],
+    "8forunderworld": [],
+    "12 for": [],
+}
+
+TRACK_FIGURE_READINGS = {
+    "Campaigner 9": [("Campaigner", "9")],
+    "campaigner: 9": [("campaigner", "9")],
+    "| Campaigner | 12 |": [("Campaigner", "12")],
+    "Campaigner track = 9": [("Campaigner", "9")],
+    "Campaigner track | 9": [("Campaigner", "9")],
+    "civil service 8": [("civil service", "8")],
+    "hunter_gatherer: 10": [("hunter_gatherer", "10")],
+    "Underworld - 8": [("Underworld", "8")],
+    "Underworld–8": [("Underworld", "8")],
+    "Campaigner  :  | 7": [("Campaigner", "7")],
+    "Campaigner track9": [("Campaigner", "9")],
+    "Campaigner: 1,200 XP": [],
+    "Campaigner 9 years": [],
+    "campaigner |": [],
+    "magic 123": [],
+}
+
+
+def _groups_read(pattern, text):
+    return [match.groups() for match in pattern.finditer(text)]
+
+
+@pytest.mark.parametrize("text", DICE_COMPARISON_READINGS)
+def test_the_dice_comparison_pattern_reads_what_it_always_did(text):
+    assert (
+        _groups_read(harness._DICE_COMPARISON, text) == (DICE_COMPARISON_READINGS[text])
+    )
+
+
+@pytest.mark.parametrize("text", ROLLED_FIGURE_READINGS)
+def test_the_rolled_figure_pattern_reads_what_it_always_did(text):
+    assert _groups_read(harness._ROLLED_FIGURE, text) == ROLLED_FIGURE_READINGS[text]
+
+
+@pytest.mark.parametrize("text", ATTRIBUTE_FIGURE_READINGS)
+def test_the_attribute_figure_pattern_reads_what_it_always_did(text):
+    assert (
+        _groups_read(harness._ATTRIBUTE_FIGURE, text)
+        == (ATTRIBUTE_FIGURE_READINGS[text])
+    )
+
+
+@pytest.mark.parametrize("text", LABELLED_FIGURE_READINGS)
+def test_the_labelled_figure_pattern_reads_what_it_always_did(text):
+    found = [match.group(0) for match in harness._LABELLED_FIGURE.finditer(text)]
+    assert found == LABELLED_FIGURE_READINGS[text]
+
+
+@pytest.mark.parametrize("text", FIGURE_FOR_TRACK_READINGS)
+def test_the_figure_for_track_pattern_reads_what_it_always_did(text):
+    assert (
+        _groups_read(harness._figure_for_track(), text)
+        == (FIGURE_FOR_TRACK_READINGS[text])
+    )
+
+
+@pytest.mark.parametrize("text", TRACK_FIGURE_READINGS)
+def test_the_track_figure_pattern_reads_what_it_always_did(text):
+    assert _groups_read(harness._track_figure(), text) == TRACK_FIGURE_READINGS[text]
+
+
+def _crafted_for_the_figure_patterns():
+    """Each input is sized so the old pattern took 9 to 17 s on it (issue #44).
+
+    Measured on one machine, 2026-10-18; code that backtracks again fails
+    the test below within the minute."""
+    return {
+        "dice comparison: a run of digits": (
+            lambda: harness._DICE_COMPARISON,
+            "1" * 42_000,
+        ),
+        "dice comparison: a run of digits then d": (
+            lambda: harness._DICE_COMPARISON,
+            "1" * 45_000 + "d",
+        ),
+        "rolled figure: spaces after rolled": (
+            lambda: harness._ROLLED_FIGURE,
+            "rolled" + " " * 30_000 + "x",
+        ),
+        "rolled figure: spaces after shows": (
+            lambda: harness._ROLLED_FIGURE,
+            "shows" + " " * 60_000 + "x",
+        ),
+        "attribute figure: spaces after the name": (
+            lambda: harness._ATTRIBUTE_FIGURE,
+            "INT" + " " * 25_000 + "x",
+        ),
+        "labelled figure: spaces after the tier": (
+            lambda: harness._LABELLED_FIGURE,
+            "none" + " " * 52_000 + "x",
+        ),
+        "figure for track: spaces after the figure": (
+            lambda: harness._figure_for_track(),
+            "9" + " " * 57_000 + "x",
+        ),
+        "figure for track: spaces around a plus": (
+            lambda: harness._figure_for_track(),
+            "9" + " " * 45_000 + "+" + " " * 45_000 + "x",
+        ),
+        "track figure: spaces after the track": (
+            lambda: harness._track_figure(),
+            "campaigner" + " " * 2_100 + "x",
+        ),
+        "track figure: spaces after track": (
+            lambda: harness._track_figure(),
+            "campaigner track" + " " * 2_000 + "x",
+        ),
+        "track figure: spaces around a bar": (
+            lambda: harness._track_figure(),
+            "campaigner" + " " * 2_100 + "|" + " " * 2_100 + "x",
+        ),
+    }
+
+
+@pytest.mark.parametrize("label", list(_crafted_for_the_figure_patterns()))
+def test_the_figure_patterns_stay_fast_on_crafted_input(label):
+    # A model's reply to a developer's own run, so only a development script
+    # waits on it, but the old patterns split a run of spaces between "\s*"
+    # parts that held optional groups. The track-figure pattern did so four
+    # ways: 8 s at 800 spaces, 10 to 12 s at 2,000. Code that backtracks again
+    # fails here; the new patterns take milliseconds.
+    get_pattern, crafted = _crafted_for_the_figure_patterns()[label]
+    pattern = get_pattern()
+    started = time.perf_counter()
+    list(pattern.finditer(crafted))
+    assert time.perf_counter() - started < 1.0

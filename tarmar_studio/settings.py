@@ -32,6 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from battle.wording import load_rulings_wording  # noqa: E402
 from common.base_url import (  # noqa: E402
     BASE_URL_RULE,
     BASE_URL_WITH_PATH_RULE,
@@ -43,11 +44,16 @@ from common.gate import (  # noqa: E402
     load_gate_hints,
     normalize_passphrase,
 )
+from common.message_templates import (  # noqa: E402
+    MessageTemplateError,
+    message_template_from_environment,
+)
 from common.public_paths import LOGIN_PATH  # noqa: E402
 from common.services import ollama_client  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
 from reference.paths import (  # noqa: E402
     CANON_NAME,
+    CONFIG_DIR,
     PUBLIC_RULES_DIR,
     warn_if_production_lacks_its_canon,
 )
@@ -148,10 +154,23 @@ GATE_PASSPHRASE = normalize_passphrase(_configured_gate_passphrase)
 # taken from the checkout root, not from whatever directory the process was
 # started in; an absolute value wins outright, because joining a Path with an
 # absolute right-hand side yields that absolute path.
-GATE_HINTS_FILE = BASE_DIR / (
-    os.environ.get("GATE_HINTS_FILE") or "config/gate-hints.txt"
+_configured_gate_hints_file = os.environ.get("GATE_HINTS_FILE")
+GATE_HINTS_FILE = (
+    BASE_DIR / _configured_gate_hints_file
+    if _configured_gate_hints_file
+    else CONFIG_DIR / "gate-hints.txt"
 )
 GATE_HINTS = load_gate_hints(GATE_HINTS_FILE)
+
+# The words a Game Master's rulings on a battle are shown in: panel headings
+# and buttons, battle-log lines, refusals (issues #867, #37). Content, not code,
+# so they live in a TOML file Spencer edits with no Python, read once here so a
+# missing key or a stray {name} fails at startup. BATTLE_RULINGS_WORDING_FILE
+# names another file, resolved as GATE_HINTS_FILE is; empty means the default.
+BATTLE_RULINGS_WORDING_FILE = BASE_DIR / (
+    os.environ.get("BATTLE_RULINGS_WORDING_FILE") or "config/battle-rulings.toml"
+)
+BATTLE_RULINGS_WORDING = load_rulings_wording(BATTLE_RULINGS_WORDING_FILE)
 
 # How many wrong guesses in a window before a hint is shown. Three because of
 # the #55 evidence, stated once beside the hints comment in common/gate.py. It
@@ -273,6 +292,17 @@ def _repository_url_from_environment(name: str, default: str) -> str:
             f"{name} is {configured!r}; it must be {BASE_URL_WITH_PATH_RULE}."
         )
     return configured.rstrip("/")
+
+
+def _message_from_environment(name: str, default: str, *fields: str) -> str:
+    """A player-facing message from the environment, or its default (issue #64).
+
+    A bad template stops startup with ``ImproperlyConfigured``, never a turn.
+    """
+    try:
+        return message_template_from_environment(os.environ, name, default, *fields)
+    except MessageTemplateError as error:
+        raise ImproperlyConfigured(str(error)) from error
 
 
 REPOSITORY_PUBLIC_URL = _repository_url_from_environment(
@@ -577,6 +607,67 @@ GM_RECAP_BUDGET_SECONDS = float(os.environ.get("GM_RECAP_BUDGET_SECONDS", "300")
 # plain JSON POST that sends nothing until it answers, so past 60 s nginx
 # cuts it with an HTML 504 while the server would go on holding the model.
 GM_FIGHT_BUDGET_SECONDS = float(os.environ.get("GM_FIGHT_BUDGET_SECONDS", "50"))
+
+# --- GM turn waiting and timeout messages (issue #64) ---
+# Ollama on the production host answers one request at a time, so a turn sent
+# while other tables' turns are being answered waits in its line, saying
+# nothing until its turn comes. While a turn's model call has had no reply yet
+# and turns claimed before it are still running (gm.turn_record.turns_ahead_of,
+# this app's own view of the line), the player's working line says so instead
+# of "The Game Master is working". {seconds} is how long the turn has been
+# going; {turns_ahead} how many turns started before it are still running.
+# That is an estimate of the model's line, which counts calls, not turns: a
+# turn whose call is being answered right now is still counted. So the
+# wording says what is known -- turns started earlier and still running --
+# rather than a place in the line. Every message here is a str.format
+# template, its fields whole numbers; a literal brace is written doubled.
+GM_QUEUE_STATUS_ONE_AHEAD = _message_from_environment(
+    "GM_QUEUE_STATUS_ONE_AHEAD",
+    "The Game Master is busy with another table: a turn started before yours "
+    "is still running ({seconds}s so far)",
+    "seconds",
+)
+GM_QUEUE_STATUS_MANY_AHEAD = _message_from_environment(
+    "GM_QUEUE_STATUS_MANY_AHEAD",
+    "The Game Master is busy with other tables: {turns_ahead} turns started "
+    "before yours are still running ({seconds}s so far)",
+    "turns_ahead",
+    "seconds",
+)
+# What the player reads when a turn outruns GM_STREAM_BUDGET_SECONDS. The page
+# renders the error frame as a GM message, in the GM's own place in the
+# transcript rather than as a dead connection. The first is for a turn that
+# was not held up behind other tables, the second for one that was: the queue
+# took its time, and a resend straight away only joins the end of that line.
+# {waited_seconds} is how long it waited behind other turns, {budget_seconds}
+# the budget.
+GM_STREAM_TOO_SLOW_MESSAGE = _message_from_environment(
+    "GM_STREAM_TOO_SLOW_MESSAGE",
+    "The Game Master is thinking longer than this table will wait, so that "
+    "turn was cut short. It usually means the model went cold. Send your "
+    "message again — the next attempt is normally much faster.",
+)
+GM_STREAM_QUEUED_TOO_LONG_MESSAGE = _message_from_environment(
+    "GM_STREAM_QUEUED_TOO_LONG_MESSAGE",
+    "The Game Master was busy with other tables, and this turn spent "
+    "{waited_seconds} of its {budget_seconds} seconds waiting behind their "
+    "turns, so it was cut short. Sending it again straight away puts it at the "
+    "back of the same line: give the other tables a minute, then send it again.",
+    "waited_seconds",
+    "budget_seconds",
+)
+# What the player reads when /fight's foe call outruns GM_FIGHT_BUDGET_SECONDS.
+# The call is one blocking request with no keep-alives to look at the line
+# from, so it cannot tell a wait behind other tables from a slow answer; on a
+# 50 s budget the line is the likelier cause, so it never invites an
+# immediate retry, which would only join the end of that line.
+GM_FIGHT_TOO_SLOW_MESSAGE = _message_from_environment(
+    "GM_FIGHT_TOO_SLOW_MESSAGE",
+    "The Game Master took longer than this table will wait to choose who you "
+    "face, so nothing was started. It is often busy with other tables when "
+    "that happens: give it a minute before you start the fight again.",
+)
+# --- end GM turn waiting and timeout messages ---
 
 # --- GM retrieval ---
 # Each ordinary GM chat turn is grounded in the top-k canon chunks retrieved

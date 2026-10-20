@@ -21,23 +21,49 @@ const {
     test, expect, loginAs, createCharacter, submitPassphrase, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
 const { startCoverage } = require('./coverage');
-const { runDjangoShell } = require('./django');
+const { runDjangoShell, readDjangoJson } = require('./django');
 const { pinDice } = require('./dice');
+const { loadedCharacterRules, originForPercentile } = require('./character-rules');
 
 /** Creation's dice pinned (issue #959) so the Origin has a check to roll. */
 const ROLLED_ORIGIN_SEED = 7;
-/** What creation's location roll gives on that seed. */
-const SEEDED_ORIGIN = 'Rural';
+/**
+ * The d100 face creation's location roll gives on that seed. Asserting the
+ * face is what proves the pin took (see dice.js); the Origin it lands on is
+ * the loaded canon's table's call, read from the server.
+ */
+const SEEDED_LOCATION_FACE = 81;
 
-/** The check each origin prints, from the default canon's location table (character-rules.json). */
-const CHECKS = {
-    City: '3d6 ≤ INT',
-    Village: '3d6 ≤ INT − 2',
-    Rural: '3d6 ≤ INT − 4',
-    'Consult GM': 'Consult GM',
-};
-const ORIGINS = Object.keys(CHECKS);
-const PENALTIES = { City: 0, Village: 2, Rural: 4 };
+/**
+ * The loaded canon's origins, read through the Django shell: each one's label,
+ * literacy modifier (null where the Game Master decides) and the check the
+ * sheet prints for it. Nothing about them is typed here, so the spec holds
+ * under any canon.
+ */
+const ORIGIN_RULES = loadedCharacterRules().origins;
+const ORIGINS = ORIGIN_RULES.map((origin) => origin.label);
+/** The check each origin prints. */
+const CHECKS = Object.fromEntries(ORIGIN_RULES.map((origin) => [origin.label, origin.check]));
+/** The origins with a check to roll. */
+const CHECKED_ORIGINS = ORIGIN_RULES.filter((origin) => origin.modifier !== null).map((origin) => origin.label);
+/** An origin the Game Master decides: it publishes no check, so nothing rolls. */
+const NO_CHECK_ORIGIN = ORIGIN_RULES.find((origin) => origin.modifier === null)?.label;
+if (CHECKED_ORIGINS.length < 2 || NO_CHECK_ORIGIN === undefined) {
+    throw new Error(
+        'These scenarios need two origins with a literacy check and one without; '
+        + `the loaded canon has ${JSON.stringify(ORIGIN_RULES)}`
+    );
+}
+
+/**
+ * Any origin other than `origin`, among those with a check unless asked
+ * otherwise.
+ * @param {string} origin
+ * @param {string[]} [among]
+ */
+function anotherOrigin(origin, among = CHECKED_ORIGINS) {
+    return among.find((candidate) => candidate !== origin);
+}
 
 /** The reason a player's sheet prints beside a rolled Origin (#970). */
 const ROLLED_ORIGIN_FIXED = 'The Origin was rolled, and a roll is final; only a Game Master can change it.';
@@ -91,18 +117,31 @@ async function chooseOrigin(page, origin) {
 }
 
 /**
- * What the row should read for a roll against an origin at this INT, in the
- * words Character.literacy_result prints.
- * @param {number} roll
- * @param {number} intelligence
- * @param {string} origin
+ * The literacy roll the server saved for a character, and the words it reads
+ * the row in (``Character.literacy_result``). The spec holds the page to the
+ * server's own answer and works out neither the pass mark nor the wording.
+ * @param {string} characterId
+ * @returns {{roll: number | null, result: string}}
  */
-function expectedResult(roll, intelligence, origin) {
-    const penalty = PENALTIES[origin];
-    const against = penalty ? `${intelligence} − ${penalty}` : `${intelligence}`;
-    return roll <= intelligence - penalty
-        ? `Literate (rolled ${roll} ≤ ${against})`
-        : `Illiterate (rolled ${roll} > ${against})`;
+function savedLiteracy(characterId) {
+    return readDjangoJson(`
+import json
+from characters.models import Character
+character = Character.objects.get(pk=${Number(characterId)})
+print("LITERACY " + json.dumps({"roll": character.literacy_roll, "result": character.literacy_result}))
+`, 'LITERACY');
+}
+
+/**
+ * Hold the row to the server's saved answer for a roll the page showed.
+ * @param {import('@playwright/test').Locator} row - The sheet's literacy result
+ * @param {string} characterId
+ * @param {number} shownRoll - The roll the row printed
+ */
+async function expectRowToMatchServer(row, characterId, shownRoll) {
+    const saved = savedLiteracy(characterId);
+    expect(saved.roll, 'the roll the server saved is the one the page showed').toBe(shownRoll);
+    await expect(row).toHaveText(saved.result);
 }
 
 test.describe('Literacy row (#740, #741)', () => {
@@ -122,7 +161,7 @@ test.describe('Literacy row (#740, #741)', () => {
             await chooseOrigin(page, origin);
             // Consult GM has no check to roll, so the control hides; any
             // other origin has one, so it is back.
-            if (origin === 'Consult GM') {
+            if (origin === NO_CHECK_ORIGIN) {
                 await expect(page.locator('#roll-literacy-btn')).toBeHidden();
             } else {
                 await expect(page.locator('#roll-literacy-btn')).toBeVisible();
@@ -136,14 +175,10 @@ test.describe('Literacy row (#740, #741)', () => {
         await loginAs(page, TEST_USER);
         const characterId = await createWithChosenOrigin(page);
         let origin = await originSelect(page).inputValue();
-        if (origin === 'Consult GM') {
-            origin = 'Village';
+        if (origin === NO_CHECK_ORIGIN) {
+            origin = CHECKED_ORIGINS[0];
             await chooseOrigin(page, origin);
         }
-        const intelligence = Number(
-            // A player's INT is read-only once rolled (issue #748).
-            await page.locator('[data-readonly-field="intelligence"]').textContent()
-        );
         const result = page.locator('#literacy-result');
         await expect(result).toHaveText('Not rolled');
         await expect(originSelect(page)).toBeEnabled();
@@ -153,9 +188,11 @@ test.describe('Literacy row (#740, #741)', () => {
 
         await expect(result).toHaveText(/^(Literate|Illiterate) \(rolled \d+ [≤>] \d+/);
         const roll = Number((await result.textContent()).match(/rolled (\d+)/)[1]);
-        expect(roll).toBeGreaterThanOrEqual(3);
-        expect(roll).toBeLessThanOrEqual(18);
-        await expect(result).toHaveText(expectedResult(roll, intelligence, origin));
+        // The loaded canon's literacy dice bound the roll, not a typed 3 to 18.
+        const [lowest, highest] = loadedCharacterRules().literacy_range;
+        expect(roll).toBeGreaterThanOrEqual(lowest);
+        expect(roll).toBeLessThanOrEqual(highest);
+        await expectRowToMatchServer(result, characterId, roll);
         // A player has had their one roll, so the control hides, and their
         // Origin is fixed, with the reason beside it -- no reload.
         await expect(page.locator('#roll-literacy-btn')).toBeHidden();
@@ -163,20 +200,20 @@ test.describe('Literacy row (#740, #741)', () => {
         await expect(page.locator('#origin-fixed-note')).toBeVisible();
 
         // The lock is the server's, not the page's: a hand-built POST is refused.
-        const refused = await page.evaluate(async (id) => {
+        const refused = await page.evaluate(async ({ id, value }) => {
             const token = document.querySelector('meta[name="csrf-token"]').content;
             const response = await fetch(`/tarmar/characters/${id}/update-field/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-                body: JSON.stringify({ field: 'location', value: 'City' }),
+                body: JSON.stringify({ field: 'location', value }),
             });
             return { status: response.status, body: await response.json() };
-        }, characterId);
+        }, { id: characterId, value: anotherOrigin(origin, ORIGINS) });
         expect(refused.status).toBe(400);
         expect(refused.body.error).toContain('only a Game Master can change it');
 
         await page.reload();
-        await expect(result).toHaveText(expectedResult(roll, intelligence, origin));
+        await expectRowToMatchServer(result, characterId, roll);
         await expect(page.locator('#roll-literacy-btn')).toBeHidden();
         await expect(originSelect(page)).toBeDisabled();
         await expect(originSelect(page)).toHaveValue(origin);
@@ -195,15 +232,15 @@ test.describe('Literacy row (#740, #741)', () => {
             await expect(gameMaster.locator('#origin-fixed-note')).toHaveCount(1);
             await expect(gameMaster.locator('#origin-fixed-note')).toBeHidden();
 
-            const next = origin === 'Rural' ? 'City' : 'Rural';
+            const next = anotherOrigin(origin);
             await chooseOrigin(gameMaster, next);
             const gmResult = gameMaster.locator('#literacy-result');
             await expect(gmResult).toHaveText(/^(Literate|Illiterate) \(rolled \d+ [≤>] \d+/);
             const reroll = Number((await gmResult.textContent()).match(/rolled (\d+)/)[1]);
-            await expect(gmResult).toHaveText(expectedResult(reroll, intelligence, next));
+            await expectRowToMatchServer(gmResult, characterId, reroll);
 
-            // Consult GM publishes no check: the roll is cleared.
-            await chooseOrigin(gameMaster, 'Consult GM');
+            // An origin the Game Master decides publishes no check: the roll is cleared.
+            await chooseOrigin(gameMaster, NO_CHECK_ORIGIN);
             await expect(gmResult).toHaveText('Roll cleared; the Game Master decides');
             await expect(gameMaster.locator('#roll-literacy-btn')).toBeHidden();
         } finally {
@@ -215,7 +252,7 @@ test.describe('Literacy row (#740, #741)', () => {
         // still held to it: no fresh Origin, and no second roll.
         await page.reload();
         await expect(result).toHaveText('Roll cleared; the Game Master decides');
-        await expect(page.locator('#literacy-check')).toHaveText('Consult GM');
+        await expect(page.locator('#literacy-check')).toHaveText(CHECKS[NO_CHECK_ORIGIN]);
         await expect(originSelect(page)).toBeDisabled();
         await expect(page.locator('#origin-fixed-note')).toBeVisible();
         await expect(page.locator('#roll-literacy-btn')).toBeHidden();
@@ -224,8 +261,8 @@ test.describe('Literacy row (#740, #741)', () => {
     test('a Game Master rules at Consult GM and the ruling fixes the player\'s Origin (#743)', async ({ page, browser }) => {
         await loginAs(page, TEST_USER);
         const characterId = await createWithChosenOrigin(page);
-        if (await originSelect(page).inputValue() !== 'Consult GM') {
-            await chooseOrigin(page, 'Consult GM');
+        if (await originSelect(page).inputValue() !== NO_CHECK_ORIGIN) {
+            await chooseOrigin(page, NO_CHECK_ORIGIN);
         }
         // A player is offered no ruling: literacy is the Game Master's call here.
         await expect(page.locator('#literacy-ruling-select')).toHaveCount(0);
@@ -252,10 +289,10 @@ test.describe('Literacy row (#740, #741)', () => {
 
             // Away from Consult GM the control hides and the check is rolled
             // where the ruling was, as any Game Master's Origin change rolls it.
-            await chooseOrigin(gameMaster, 'City');
+            await chooseOrigin(gameMaster, CHECKED_ORIGINS[0]);
             await expect(ruling).toBeHidden();
             await expect(gmResult).toHaveText(/^(Literate|Illiterate) \(rolled \d+ [≤>] \d+\)$/);
-            await chooseOrigin(gameMaster, 'Consult GM');
+            await chooseOrigin(gameMaster, NO_CHECK_ORIGIN);
             await expect(gmResult).toHaveText('Roll cleared; the Game Master decides');
             await expect(ruling).toBeVisible();
             await ruling.selectOption('literate');
@@ -279,14 +316,15 @@ test.describe('Literacy row (#740, #741)', () => {
         const characterId = page.url().match(/\/characters\/(\d+)\//)[1];
         // Creation rolled it: text with the reason, no select, and no
         // literacy note beside it, before literacy and after.
-        await expect(page.locator('#dice-log')).toContainText('Location: d100=');
+        // The seed's face proves the pin took; the loaded canon's table says
+        // which Origin that face is, and the scenario needs one with a check.
+        await expect(page.locator('#dice-log')).toContainText(`Location: d100=${SEEDED_LOCATION_FACE} `);
         await expect(page.locator('[data-field="location"]')).toHaveCount(0);
         await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
         await expect(page.locator('#origin-fixed-note')).toHaveCount(0);
-        const rolled = (await page.locator('#location .physical-table td').first().innerText())
-            .match(/^(City|Village|Rural|Consult GM)/)[1];
-        // The seed's Origin, which proves the pin took and has a check.
-        expect(rolled).toBe(SEEDED_ORIGIN);
+        const rolled = originForPercentile(SEEDED_LOCATION_FACE);
+        expect(CHECKED_ORIGINS, `face ${SEEDED_LOCATION_FACE} is ${rolled}, which has no check to roll`).toContain(rolled);
+        expect((await page.locator('#location .physical-table td').first().innerText()).startsWith(rolled)).toBe(true);
         await page.locator('#roll-literacy-btn').click();
         await expect(page.locator('#literacy-result')).toHaveText(/^(Literate|Illiterate) \(rolled/);
         await expect(page.locator('#origin-fixed-note')).toHaveCount(0);
@@ -301,7 +339,7 @@ test.describe('Literacy row (#740, #741)', () => {
                 body: JSON.stringify({ field: 'location', value }),
             });
             return { status: response.status, body: await response.json() };
-        }, { id: characterId, value: rolled === 'City' ? 'Rural' : 'City' });
+        }, { id: characterId, value: anotherOrigin(rolled, ORIGINS) });
         expect(refused.status).toBe(400);
         expect(refused.body.error).toBe(ROLLED_ORIGIN_FIXED);
 
@@ -315,7 +353,7 @@ test.describe('Literacy row (#740, #741)', () => {
             await gameMaster.goto(`/tarmar/characters/${characterId}/`);
             await expect(originSelect(gameMaster)).toBeEnabled();
             await expect(gameMaster.locator('[data-locked-field="location"]')).toHaveCount(0);
-            await chooseOrigin(gameMaster, rolled === 'Rural' ? 'City' : 'Rural');
+            await chooseOrigin(gameMaster, anotherOrigin(rolled));
         } finally {
             await context.close();
         }
