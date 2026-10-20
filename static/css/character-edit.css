@@ -674,8 +674,13 @@ details.help .help-body {
     border-radius: 4px;
     flex-wrap: wrap;
 }
+/* A packed item whose pack has been dropped is not being carried. It says so
+   with a greyer ground and a dashed border, not by fading the row: opacity 0.5
+   took the name to 2.73:1 and the weight, "In pack", Equipped and Remove
+   texts to between 2.0:1 and 2.3:1, on controls that still work (issue #49). */
 .equipment-row.in-pack.pack-dropped {
-    opacity: 0.5;
+    border-style: dashed;
+    border-color: var(--colour-ink-muted);
     background: var(--colour-surface-muted);
 }
 .equipment-row .item-name {
