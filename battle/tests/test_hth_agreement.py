@@ -16,12 +16,15 @@ from battle.engine.state import BattleState
 from battle.models import Battle, BattleEvent
 from battle.policy import choose_option
 from battle.services import advance_turn, create_battle, set_hth_agreement
+from battle.wording import game_master_name, words
 from common.test_helpers import BaseTestCase
 
+from .rulings_words import with_fixed_words
 from .test_lobby import started_battle_with_player
 from .test_turn_menu import figure
 
 
+@with_fixed_words
 class AgreementRecordTest(BaseTestCase):
     """The ruling as the battle stores it, and as the engine is given it."""
 
@@ -65,21 +68,23 @@ class AgreementRecordTest(BaseTestCase):
     def test_the_words_for_the_page_and_the_log(self):
         names = {1: "Aldwin", 2: "Brin"}
         self.assertEqual(agreement.describe(agreement.Agreement(), names), "")
-        self.assertIn(
-            "every pair of enemies",
+        self.assertEqual(
             agreement.describe(agreement.Agreement(whole_battle=True), names),
+            "hth_agreement.whole_battle_line",
         )
-        self.assertIn(
-            "Aldwin and Brin",
+        self.assertEqual(
             agreement.describe(agreement.Agreement(pairs=frozenset({(1, 2)})), names),
+            "hth_agreement.pairs_line hth_agreement.pair_names Aldwin Brin",
         )
         lifted = agreement.change_message(
             whole_battle=False, pair=None, agreed=False, names=names, by="GM"
         )
+        self.assertEqual(lifted, "hth_agreement.log_battle_lifted GM")
         self.assertEqual(
-            lifted,
-            "GM lifts hand-to-hand by agreement for the whole battle: pairs need "
-            "one of the rules' ways in, or a pair marked singly",
+            agreement.change_message(
+                whole_battle=None, pair=(1, 2), agreed=True, names=names, by="GM"
+            ),
+            "hth_agreement.log_pair_marked GM hth_agreement.pair_names Aldwin Brin",
         )
         with self.assertRaisesMessage(ValueError, "whole battle or a pair"):
             agreement.change_message(
@@ -97,6 +102,7 @@ class AgreementRecordTest(BaseTestCase):
         self.assertIn("o", letters)
 
 
+@with_fixed_words
 class SetAgreementTest(BaseTestCase):
     """Who may set the ruling, and what each change leaves behind."""
 
@@ -121,8 +127,19 @@ class SetAgreementTest(BaseTestCase):
         )
         self.assertIsNotNone(event)
         assert event is not None
-        self.assertIn("Game Master dmuser rules", event.message)
-        self.assertIn("hand-to-hand by agreement", event.message)
+        names = {row.pk: row.display_name for row in battle.combatants.all()}
+        self.assertEqual(
+            event.message,
+            agreement.change_message(
+                whole_battle=None,
+                pair=(first, second),
+                agreed=True,
+                names=names,
+                by=game_master_name(self.dm.username),
+            ),
+        )
+        self.assertTrue(event.message.startswith("hth_agreement.log_pair_marked"))
+        self.assertIn(f"common.game_master {self.dm.username}", event.message)
         self.assertEqual(event.payload["pair"], [first, second])
         # The same change again changes nothing and logs nothing.
         _battle, again = set_hth_agreement(
@@ -134,7 +151,7 @@ class SetAgreementTest(BaseTestCase):
         )
         self.assertEqual(battle.hth_agreement_json, {})
         assert lifted is not None
-        self.assertIn("lifts", lifted.message)
+        self.assertTrue(lifted.message.startswith("hth_agreement.log_pair_lifted"))
 
     def test_a_game_master_marks_the_whole_battle(self):
         battle, event = set_hth_agreement(
@@ -142,7 +159,10 @@ class SetAgreementTest(BaseTestCase):
         )
         self.assertTrue(battle.hth_agreement_json["whole_battle"])
         assert event is not None
-        self.assertIn("whole battle", event.message)
+        self.assertEqual(
+            event.message,
+            f"hth_agreement.log_battle_marked common.game_master {self.dm.username}",
+        )
 
     def test_only_a_game_master_sets_it(self):
         # The battle's own maker is not enough, and neither is a player.
@@ -155,7 +175,9 @@ class SetAgreementTest(BaseTestCase):
         ):
             with (
                 self.subTest(who=who),
-                self.assertRaisesMessage(ValueError, agreement.GAME_MASTER_ONLY),
+                self.assertRaisesMessage(
+                    ValueError, words().hth_agreement.game_master_only
+                ),
             ):
                 set_hth_agreement(battle.pk, actor, agreed=True, whole_battle=True)
         self.assertEqual(Battle.objects.get(pk=own.pk).hth_agreement_json, {})
@@ -165,7 +187,9 @@ class SetAgreementTest(BaseTestCase):
         standing rule; Spencer may overrule): another Game Master is a
         spectator here, as at a seat hand-off."""
         bystander = self.create_dm(username="bystander")
-        with self.assertRaisesMessage(ValueError, agreement.GAME_MASTER_ONLY):
+        with self.assertRaisesMessage(
+            ValueError, words().hth_agreement.game_master_only
+        ):
             set_hth_agreement(
                 self.battle.pk,
                 Actor(user=bystander, guest_key=""),
@@ -181,7 +205,9 @@ class SetAgreementTest(BaseTestCase):
         for who, user in (("the player", self.player), ("a Game Master", self.dm)):
             with (
                 self.subTest(who=who),
-                self.assertRaisesMessage(ValueError, agreement.GAME_MASTER_ONLY),
+                self.assertRaisesMessage(
+                    ValueError, words().hth_agreement.game_master_only
+                ),
             ):
                 set_hth_agreement(
                     practice.pk,
@@ -193,19 +219,19 @@ class SetAgreementTest(BaseTestCase):
     def test_a_pair_must_be_two_enemies_in_this_battle(self):
         first, second, third = self.ids
         for pair, message in (
-            ((first, first), "two different combatants"),
-            ((first, 999_999), "two different combatants"),
+            ((first, first), "hth_agreement.refuse_pair"),
+            ((first, 999_999), "hth_agreement.refuse_pair"),
         ):
             with self.subTest(pair=pair), self.assertRaisesMessage(ValueError, message):
                 set_hth_agreement(
                     self.battle.pk, self.game_master(), agreed=True, pair=pair
                 )
         self.battle.combatants.filter(pk__in=[first, second]).update(team="Red")
-        with self.assertRaisesMessage(ValueError, "same side"):
+        with self.assertRaisesMessage(ValueError, "hth_agreement.refuse_same_side"):
             set_hth_agreement(
                 self.battle.pk, self.game_master(), agreed=True, pair=(first, second)
             )
-        with self.assertRaisesMessage(ValueError, "whole battle or one pair"):
+        with self.assertRaisesMessage(ValueError, "hth_agreement.refuse_scope"):
             set_hth_agreement(
                 self.battle.pk,
                 self.game_master(),
@@ -218,7 +244,7 @@ class SetAgreementTest(BaseTestCase):
         classic = create_battle(
             self.dm, name="Melee", count=2, seed=3, rules_profile="classic-melee"
         )
-        with self.assertRaisesMessage(ValueError, "Tarmar ruling"):
+        with self.assertRaisesMessage(ValueError, words().hth_agreement.refuse_classic):
             set_hth_agreement(
                 classic.pk, self.game_master(), agreed=True, whole_battle=True
             )
@@ -251,6 +277,7 @@ class SetAgreementTest(BaseTestCase):
         self.assertIn("hth_agreement_json", BattleAdmin.readonly_fields)
 
 
+@with_fixed_words
 class AgreementEndpointTest(BaseTestCase):
     """The page's control: a Game Master's forms, everyone else the line."""
 
@@ -274,8 +301,8 @@ class AgreementEndpointTest(BaseTestCase):
         )
         self.assertRedirects(response, reverse("battle:detail", args=[self.battle.pk]))
         page = self.client.get(reverse("battle:detail", args=[self.battle.pk]))
-        self.assertContains(page, "these pairs may enter hand-to-hand by agreement")
-        self.assertContains(page, "Mark the whole battle")
+        self.assertContains(page, "hth_agreement.pairs_line")
+        self.assertContains(page, words().hth_agreement.mark_whole_battle)
         self.assertEqual(
             BattleEvent.objects.filter(
                 battle=self.battle, payload__scope="pair"
@@ -288,10 +315,28 @@ class AgreementEndpointTest(BaseTestCase):
         response = self.post_json(self.url, {"scope": "battle", "agreed": True})
         self.assertEqual(response.status_code, 200)
         self.assertIn("view", response.json())
+        # The caller reads back what it changed, and the page's panel comes
+        # rendered from the new record (battle.js puts it in place).
+        self.assertTrue(response.json()["rulings"]["hth_agreement"]["whole_battle"])
+        self.assertIn(
+            words().hth_agreement.whole_battle_line,
+            response.json()["rulings_html"]["battle-hth-agreement"],
+        )
         bad = self.post_json(self.url, {"scope": "everyone", "agreed": True})
         self.assertEqual(bad.status_code, 400)
         no_pair = self.post_json(self.url, {"scope": "pair", "first": "x"})
         self.assertEqual(no_pair.status_code, 400)
+        not_an_object = self.client.post(
+            self.url, "[]", content_type="application/json"
+        )
+        self.assertEqual(not_an_object.status_code, 400)
+        # The service's own refusal comes back in the caller's shape.
+        same_figure = self.post_json(
+            self.url,
+            {"scope": "pair", "first": self.ids[0], "second": self.ids[0]},
+        )
+        self.assertEqual(same_figure.status_code, 400)
+        self.assertEqual(same_figure.json()["error"], words().hth_agreement.refuse_pair)
 
     def test_a_bystander_game_master_reads_only_the_line(self):
         bystander = self.create_dm(username="bystander")
@@ -299,8 +344,8 @@ class AgreementEndpointTest(BaseTestCase):
         response = self.post_json(self.url, {"scope": "battle", "agreed": True})
         self.assertEqual(response.status_code, 403)
         page = self.client.get(reverse("battle:detail", args=[self.battle.pk]))
-        self.assertContains(page, "No pair is marked")
-        self.assertNotContains(page, "Mark the whole battle")
+        self.assertContains(page, words().hth_agreement.none_marked)
+        self.assertNotContains(page, words().hth_agreement.mark_whole_battle)
 
     def test_a_form_post_lands_back_where_it_came_from(self):
         self.login_as(self.dm)
@@ -323,10 +368,12 @@ class AgreementEndpointTest(BaseTestCase):
         self.login_as(player)
         response = self.post_json(self.url, {"scope": "battle", "agreed": True})
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["error"], agreement.GAME_MASTER_ONLY)
+        self.assertEqual(
+            response.json()["error"], words().hth_agreement.game_master_only
+        )
         page = self.client.get(reverse("battle:detail", args=[self.battle.pk]))
-        self.assertContains(page, "No pair is marked")
-        self.assertNotContains(page, "Mark the whole battle")
+        self.assertContains(page, words().hth_agreement.none_marked)
+        self.assertNotContains(page, words().hth_agreement.mark_whole_battle)
         self.assertEqual(Battle.objects.get(pk=self.battle.pk).hth_agreement_json, {})
 
     def test_a_classic_battle_shows_no_panel(self):
@@ -338,6 +385,7 @@ class AgreementEndpointTest(BaseTestCase):
         self.assertNotContains(page, "battle-hth-agreement")
 
 
+@with_fixed_words
 class GmChatBattleTabTest(BaseTestCase):
     """The GM chat's Battle tab carries the ruling's panel (#867): session
     fights are where it is wanted. Its context is arena_context's, and a
@@ -368,4 +416,4 @@ class GmChatBattleTabTest(BaseTestCase):
         )
         self.assertRedirects(response, self.chat, fetch_redirect_response=False)
         page = self.client.get(self.chat)
-        self.assertContains(page, "every pair of enemies in this battle")
+        self.assertContains(page, words().hth_agreement.whole_battle_line)

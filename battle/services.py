@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import functools
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, replace
 from typing import Concatenate
 
 from django.db import transaction
+from django.utils import timezone
 from tarmar_engine.magic import ChannelRules, ChannelUnclassifiedSpell
 from tarmar_engine.spells import Spell
 from tarmar_engine.weapons import missile_rate_from_note
 
+from accounts.models import User
 from bestiary.generation import DIFFICULTY_BANDS, pick_base
 from bestiary.models import CATEGORY_CHOICES, Beast
 from characters import services as character_services
@@ -39,7 +41,7 @@ from characters.services import FightReport, record_entry_into_play
 from characters.skills import glossary_skill_level
 from characters.weapon_skill import resolve_weapon_skill
 
-from . import agreement, control, policy, profiles, turn_menu
+from . import agreement, control, magic_bounds, policy, profiles, turn_menu
 from .access import (
     Actor,
     claimed_seat_q,
@@ -74,6 +76,7 @@ from .persistence import (
 )
 from .signals import battle_ended
 from .spells import get_spell
+from .wording import game_master_name, words
 
 
 class DraftFieldError(ValueError):
@@ -2395,17 +2398,14 @@ def set_hth_agreement(
             ``whole_battle`` and ``pair``, or a pair that is not two enemies
             in this battle.
     """
+    hth_words = words().hth_agreement
     if whole_battle == (pair is not None):
-        raise ValueError("Name the whole battle or one pair")
+        raise ValueError(hth_words.refuse_scope)
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
-        if not runs_the_seats(battle, actor.user):
-            raise ValueError(agreement.GAME_MASTER_ONLY)
+        game_master = _ruling_game_master(battle, actor, hth_words.game_master_only)
         if battle.rules_profile != TARMAR_PROFILE:
-            raise ValueError(
-                "Hand-to-hand by agreement is a Tarmar ruling; a classic "
-                "battle plays Melee's own hand-to-hand"
-            )
+            raise ValueError(hth_words.refuse_classic)
         rows = {row.pk: row for row in battle.combatants.all()}
         names = {pk: row.display_name for pk, row in rows.items()}
         current = agreement.Agreement.of(battle)
@@ -2413,10 +2413,12 @@ def set_hth_agreement(
         if pair is not None:
             first, second = pair
             if first == second or first not in rows or second not in rows:
-                raise ValueError("Name two different combatants in this battle")
+                raise ValueError(hth_words.refuse_pair)
             if rows[first].team and rows[first].team == rows[second].team:
                 raise ValueError(
-                    f"{names[first]} and {names[second]} are on the same side"
+                    hth_words.refuse_same_side.format(
+                        first=names[first], second=names[second]
+                    )
                 )
             key = agreement.pair_key(first, second)
             pairs = set(current.pairs)
@@ -2430,14 +2432,7 @@ def set_hth_agreement(
         if updated == current:
             return battle, None
         battle.hth_agreement_json = updated.to_json()
-        if battle.status == Battle.STATUS_AWAITING:
-            battle.pending_input_json = {}
-            battle.status = Battle.STATUS_PAUSED
-        by = (
-            f"Game Master {actor.user.username}"
-            if actor.user is not None
-            else "A Game Master"
-        )
+        _reopen_awaited_menu(battle)
         event = _control_event(
             battle,
             agreement.change_message(
@@ -2445,13 +2440,138 @@ def set_hth_agreement(
                 pair=key,
                 agreed=agreed,
                 names=names,
-                by=by,
+                by=game_master_name(game_master.username),
             ),
             {
                 "hth_agreement": updated.to_json(),
                 "scope": "battle" if whole_battle else "pair",
                 "pair": list(key) if key is not None else None,
                 "agreed": agreed,
+            },
+        )
+        battle.save()
+    return battle, event
+
+
+def _reopen_awaited_menu(battle: Battle) -> None:
+    """Clear a pause on a person's move after a ruling that changes menus.
+
+    A Game Master's ruling made while a move is awaited changes that
+    person's menu, so the pause is cleared and the next advance replays the
+    turn under the new ruling; a recorded choice no longer on the menu is
+    asked again (the replay's stale check).
+    """
+    if battle.status == Battle.STATUS_AWAITING:
+        battle.pending_input_json = {}
+        battle.status = Battle.STATUS_PAUSED
+
+
+def _ruling_game_master(battle: Battle, actor: Actor, refusal: str) -> User:
+    """The fight's Game Master making a ruling on it, or refuse.
+
+    The runner of the fight, while a Game Master (:func:`runs_the_seats`),
+    is the one account that records a ruling on it.
+
+    Raises:
+        ValueError: ``refusal``, for anyone else.
+    """
+    game_master = actor.user
+    if not isinstance(game_master, User) or not runs_the_seats(battle, game_master):
+        raise ValueError(refusal)
+    return game_master
+
+
+def set_magic_bounds_lifted(
+    battle_id: int,
+    actor: Actor,
+    *,
+    combatant_id: int,
+    bounds: Collection[str],
+    lifted: bool,
+) -> tuple[Battle, BattleEvent | None]:
+    """Lift, or hold again, magic bounds for one figure (issue #37).
+
+    Spencer's ruling of 2026-10-14: a Game Master records "Channel lifted
+    for <figure>", and likewise the push cap and the counter's commitment
+    bounds, each separately or together, as a ruling on the battle; players'
+    menus for other figures are unchanged. Who may record it is the
+    HTH-by-agreement ruling's answer (:func:`set_hth_agreement`): the fight's
+    runner, while a Game Master (:func:`runs_the_seats`). This path is the
+    only one that changes the record (the admin shows the field read-only);
+    the record keeps who lifted each bound and when, and each change files
+    one line in the log. Lifting a bound already lifted keeps its first
+    record. A change made while a move is awaited clears the pause
+    (:func:`_reopen_awaited_menu`).
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        combatant_id: The ``BattleCombatant`` pk of the figure.
+        bounds: Which of :data:`battle.magic_bounds.LIFTABLE_BOUNDS` to change.
+        lifted: Lift (True) or hold the figure to them again (False).
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        ValueError: not the fight's Game Master, a classic battle, no bound
+            named, a bound to lift that the loaded canon does not impose
+            (:func:`battle.magic_bounds.offered_bounds`) or an unknown one to
+            hold again, or a figure not in this battle.
+    """
+    bounds_words = words().magic_bounds
+    offered = magic_bounds.offered_bounds()
+    # Any known bound may be held again, even one a changed canon no longer
+    # imposes; only a bound the canon imposes may be lifted.
+    allowed = offered if lifted else magic_bounds.LIFTABLE_BOUNDS
+    if not bounds or any(bound not in allowed for bound in bounds):
+        raise ValueError(
+            bounds_words.refuse_bounds.format(bounds=magic_bounds.bound_words(offered))
+        )
+    with transaction.atomic():
+        battle = Battle.objects.select_for_update().get(pk=battle_id)
+        game_master = _ruling_game_master(battle, actor, bounds_words.game_master_only)
+        if battle.rules_profile != TARMAR_PROFILE:
+            raise ValueError(bounds_words.refuse_classic)
+        figure = battle.combatants.filter(pk=combatant_id).first()
+        if figure is None:
+            raise ValueError(bounds_words.refuse_combatant)
+        current = magic_bounds.LiftedBounds.of(battle)
+        already = current.for_figure(figure.pk)
+        requested = frozenset(bounds)
+        changing = [
+            bound
+            for bound in magic_bounds.LIFTABLE_BOUNDS
+            if bound in requested and (bound in already) != lifted
+        ]
+        if lifted:
+            updated = current.lifted(
+                figure.pk,
+                changing,
+                by=game_master.username,
+                by_id=game_master.pk,
+                at=timezone.now().isoformat(),
+            )
+        else:
+            updated = current.restored(figure.pk, changing)
+        if not changing:
+            return battle, None
+        battle.magic_bounds_lifted_json = updated.to_json()
+        _reopen_awaited_menu(battle)
+        event = _control_event(
+            battle,
+            magic_bounds.change_message(
+                bounds=changing,
+                lifted=lifted,
+                name=figure.display_name,
+                by=game_master_name(game_master.username),
+            ),
+            {
+                "magic_bounds_lifted": updated.to_json(),
+                "combatant_id": figure.pk,
+                "bounds": changing,
+                "lifted": lifted,
             },
         )
         battle.save()
@@ -3164,8 +3284,10 @@ def _channel_reading(
     The engine's own test (``tarmar_engine.policy._within_channel``): the
     spell's cost past the caster's Channel for it, or a spell the Channel
     rules give no kind of magic. Both are read from the engine's
-    :meth:`~tarmar_engine.magic.ChannelRules.channel_for`; only the words are
-    the cast stage's.
+    :meth:`~tarmar_engine.magic.ChannelRules.bound_for`, which is ``None``
+    for a caster a Game Master has lifted Channel for (#37): such a cast is
+    not withheld, and no Channel bounds it. Only the words are the cast
+    stage's.
 
     Args:
         channel: The canon's Channel rules, or ``None`` when it has none.
@@ -3173,16 +3295,19 @@ def _channel_reading(
         spell: The spell offered.
 
     Returns:
-        ``(channel, reason)``: the Channel, or ``None`` when no rules give the
-        spell one; and the reason in the player's words, or ``""`` when the
-        Channel allows the cast.
+        ``(channel, reason)``: the Channel bounding the cast, or ``None`` when
+        no rules give the spell one or it is lifted for the caster; and the
+        reason in the player's words, or ``""`` when the Channel allows the
+        cast.
     """
     if channel is None:
         return None, ""
     try:
-        limit = channel.channel_for(actor, spell)
+        limit = channel.bound_for(actor, spell)
     except ChannelUnclassifiedSpell:
         return None, "the rules give it no kind of magic, so no Channel for it"
+    if limit is None:
+        return None, ""
     if spell.level > limit:
         return limit, f"costs {spell.level} mana, past a Channel of {limit} for it"
     return limit, ""
@@ -3249,12 +3374,20 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         elif channel_refusal:
             other_reason = channel_refusal
         shortfall = turn_menu.mana_short(actor, spell.level)
+        # A borrowing casting's bound is the engine's own
+        # (:meth:`~tarmar_engine.magic.MagicRules.channel_bound`): with Channel
+        # lifted for the caster, the debt cap, or with none the purse plus
+        # the Channel (#37).
         borrowable = (
             bool(shortfall)
             and not other_reason
             and rules.borrowing is not None
             and spell.level
-            <= rules.borrowing.borrowing_ceiling(actor.mana, actor.debt, spell_channel)
+            <= rules.borrowing.borrowing_ceiling(
+                actor.mana,
+                actor.debt,
+                rules.channel_bound(actor, spell, borrowing=True),
+            )
         )
         if borrowable:
             reason = (
@@ -3282,7 +3415,8 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                 "borrowable": borrowable,
                 "shortfall": shortfall if borrowable else 0,
                 # The most mana one casting may take, cost and push together
-                # (issue #960); None when the canon bounds no casting by it.
+                # (issue #960); None when the canon bounds no casting by it, or
+                # a Game Master has lifted Channel for the caster (#37).
                 "channel": spell_channel,
             }
         )

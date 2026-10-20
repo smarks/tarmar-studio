@@ -542,8 +542,10 @@
     margin: 0.2rem 0 0.2rem 1.2rem;
 }
 
-/* A cast the Channel withheld from the menu (#960), under its decision. */
-.event-withheld {
+/* A cast the Channel withheld from the menu (#960), under its decision; and a
+   cast or counter past a bound a Game Master lifted (#37), under its line. */
+.event-withheld,
+.event-past-by-ruling {
     display: block;
     font-size: 0.8rem;
     font-style: italic;
@@ -1869,14 +1871,20 @@
 
 /* A Game Master's "HTH by agreement" ruling (#867): the marked pairs, each
    with its Lift, and the row a new pair is chosen in. */
-.battle-agreement-panel .agreement-pairs {
+.battle-agreement-panel .agreement-pairs,
+.battle-magic-bounds-panel .magic-bounds-liftings {
     list-style: none;
     padding: 0;
     margin: 0.5rem 0;
 }
 
+/* A Game Master's ruling lifting a figure's magic bounds (#37) lays out the
+   same way: each lifting with its Hold again, and the row a lifting is made
+   in. */
 .battle-agreement-panel .agreement-pair,
-.battle-agreement-panel .agreement-add-form {
+.battle-agreement-panel .agreement-add-form,
+.battle-magic-bounds-panel .magic-bounds-lifting,
+.battle-magic-bounds-panel .magic-bounds-lift-form {
     display: flex;
     flex-wrap: wrap;
     align-items: center;

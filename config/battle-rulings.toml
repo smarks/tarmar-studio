@@ -1,0 +1,58 @@
+# The words a Game Master's rulings on a battle are shown in: the battle
+# page's panels, the battle log's lines, and the refusals (issues #867, #37).
+#
+# Read once at startup (battle.wording.load_rulings_wording); a missing key, an
+# unknown key or a {name} a sentence may not use stops the server there rather
+# than in front of a player. BATTLE_RULINGS_WORDING_FILE names another file.
+# Change the wording freely; keep each {name} a sentence uses, or drop it.
+
+[common]
+# How the page and the log name the Game Master who made a ruling.
+game_master = "Game Master {name}"
+# The word before the last of a list ("Channel, the push cap and ...").
+and_word = "and"
+# A figure no longer in the battle.
+unknown_figure = "?"
+
+[hth_agreement]
+heading = "Hand-to-hand by agreement"
+game_master_only = "Only the Game Master running this fight marks it, or a pair in it, as hand-to-hand by agreement; players alone still need one of the rules' ways in"
+none_marked = "No pair is marked: a figure enters hand-to-hand only by one of the rules' ways in."
+whole_battle_line = "A Game Master rules every pair of enemies in this battle may enter hand-to-hand by agreement."
+pairs_line = "A Game Master rules these pairs may enter hand-to-hand by agreement: {pairs}."
+pair_names = "{first} and {second}"
+log_battle_marked = "{by} rules the whole battle hand-to-hand by agreement: every pair of enemies may now enter hand-to-hand"
+log_battle_lifted = "{by} lifts hand-to-hand by agreement for the whole battle: pairs need one of the rules' ways in, or a pair marked singly"
+log_pair_marked = "{by} rules {pair} hand-to-hand by agreement: they may enter hand-to-hand"
+log_pair_lifted = "{by} lifts hand-to-hand by agreement for {pair}"
+mark_whole_battle = "Mark the whole battle"
+lift_whole_battle = "Lift the ruling for the whole battle"
+lift_pair = "Lift"
+mark_pair = "Mark this pair"
+first_of_pair = "First of the pair"
+second_of_pair = "Second of the pair"
+refuse_scope = "Name the whole battle or one pair"
+refuse_pair = "Name two different combatants in this battle"
+refuse_pair_missing = "Name two combatants for the pair"
+refuse_same_side = "{first} and {second} are on the same side"
+refuse_classic = "Hand-to-hand by agreement is a Tarmar ruling; a classic battle plays Melee's own hand-to-hand"
+
+[magic_bounds]
+heading = "Magic bounds lifted"
+channel = "Channel"
+push_cap = "the push cap"
+counter_bounds = "the counter's commitment bounds"
+game_master_only = "Only the Game Master running this fight lifts a figure's magic bounds; players are held to the rules"
+none_lifted = "No bound is lifted: every figure is held to {bounds}."
+lifting_line = "{bound} lifted for {name} by {by}"
+log_lifted = "{by} lifts {bounds} for {name}"
+log_held = "{by} holds {name} to {bounds} again"
+# Beside a menu option, and beneath its log line, when it goes past a lifted bound.
+past_by_ruling = "past {bounds} by the Game Master's ruling"
+figure_label = "Figure"
+lift_button = "Lift for this figure"
+hold_again = "Hold again"
+refuse_bounds = "Name one or more of the bounds this canon imposes, which a Game Master may lift: {bounds}"
+refuse_bounds_list = "Name the bounds as a list"
+refuse_combatant = "Name a combatant in this battle"
+refuse_classic = "Lifting a figure's magic bounds is a Tarmar ruling; a classic battle has no Channel, push or counter"

@@ -859,6 +859,26 @@ seat sets it to `MANUAL`; releasing resets it to `INHERIT`. Hiding buttons is
 never the enforcement — `battle_control`, `combatant_control` and
 `record_player_action` each re-check.
 
+### A Game Master's rulings on a battle
+
+Two rulings let a Game Master lift what players are held to, each stored on
+the battle and changed only through the battle's GM controls by the fight's
+runner while a Game Master (`battle/services.py::runs_the_seats`):
+hand-to-hand by agreement (`Battle.hth_agreement_json`, `battle/agreement.py`,
+#867) and a figure's lifted magic bounds (`Battle.magic_bounds_lifted_json`,
+`battle/magic_bounds.py`, #37). The second offers only the bounds the loaded
+canon imposes (Channel, the push cap, the counter's commitment bounds) and
+records who lifted each and when; the Tarmar profile writes it onto each
+figure's `lifted_magic_bounds` every turn (tarmar-engine v0.9.17), so the
+engine's menu offers that figure the wider amounts and a cast or counter past
+a lifted bound is narrated as such. Every change writes a log line; the battle
+payload carries both records and their panels (`rulings`, `rulings_html`),
+which `battle.js` repaints. Their words (headings, buttons, log lines,
+refusals) are configuration: `config/battle-rulings.toml`, read and checked at
+startup by `battle/wording.py::load_rulings_wording` into
+`settings.BATTLE_RULINGS_WORDING` (`BATTLE_RULINGS_WORDING_FILE` names another
+file).
+
 ### A battle's life
 
 ```mermaid

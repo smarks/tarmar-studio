@@ -32,10 +32,12 @@ discovers by a control quietly not being there is a bug.
 """
 
 import functools
+import json
 import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from itertools import groupby
 
 from django.contrib.auth.views import redirect_to_login
@@ -47,6 +49,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import capfirst
 from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import DetailView, ListView
 
@@ -66,7 +69,7 @@ from common.pagination import PAGE_SIZE, query_without
 from common.pickers import asked_for, picker_body_response
 from common.seeds import InvalidSeed, parse_seed
 
-from . import agreement, control, profiles
+from . import agreement, control, magic_bounds, profiles
 from .access import (
     Actor,
     actor_of,
@@ -124,6 +127,7 @@ from .services import (
     set_combatant_control_mode,
     set_entry_team,
     set_hth_agreement,
+    set_magic_bounds_lifted,
     set_seat_ready,
     stale_pools,
     start_battle,
@@ -131,6 +135,7 @@ from .services import (
     take_seat,
     withdrawn_from_session,
 )
+from .wording import game_master_name, name_of, words
 
 #: The setup form's seed bound: the battle's own range (``SEED_RANGE``).
 MAX_SEED = SEED_RANGE
@@ -1347,7 +1352,60 @@ def battle_payload(
         # control, rendered once for every response (#842): a poll while a
         # player's move is awaited shows it too, and "" clears it.
         "stale_html": stale_pools_html(advance, request),
+        # A Game Master's rulings on the battle (#867, #37): the records, so
+        # a JSON caller reads back what it changed, and each panel rendered
+        # once, keyed by its element id, which battle.js puts in its place.
+        "rulings": {
+            "hth_agreement": battle.hth_agreement_json,
+            "magic_bounds_lifted": battle.magic_bounds_lifted_json,
+        },
+        "rulings_html": ruling_panels_html(battle, actor, request),
     }
+
+
+#: The ruling panels' element ids, named once for the templates (through
+#: the panel dicts), the payload and battle.js (which reads them as the
+#: payload's keys).
+HTH_AGREEMENT_PANEL_ID = "battle-hth-agreement"
+MAGIC_BOUNDS_PANEL_ID = "battle-magic-bounds"
+
+#: The names the ruling partials read their panel by.
+HTH_AGREEMENT_CONTEXT = "hth_agreement"
+MAGIC_BOUNDS_CONTEXT = "magic_bounds"
+
+
+def ruling_panels_html(
+    battle, actor: Actor, request: HttpRequest | None
+) -> dict[str, str]:
+    """Each ruling's panel as the page renders it, keyed by its element id.
+
+    ``""`` for a panel the battle does not show. The partials are the page's
+    own, so the page carries one copy of their markup; a form's ``next`` is
+    the endpoint's path here, and battle.js points it back at the page.
+    """
+    rendered = {}
+    for panel_id, template, name, panel in (
+        (
+            HTH_AGREEMENT_PANEL_ID,
+            "battle/_hth_agreement.html",
+            HTH_AGREEMENT_CONTEXT,
+            hth_agreement_panel(battle, actor),
+        ),
+        (
+            MAGIC_BOUNDS_PANEL_ID,
+            "battle/_magic_bounds.html",
+            MAGIC_BOUNDS_CONTEXT,
+            magic_bounds_panel(battle, actor),
+        ),
+    ):
+        rendered[panel_id] = (
+            ""
+            if panel is None
+            else render_to_string(
+                template, {name: panel, "battle": battle}, request=request
+            )
+        )
+    return rendered
 
 
 def stale_pools_html(advance: dict | None, request: HttpRequest | None) -> str:
@@ -1456,7 +1514,8 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
         "seats": seat_summaries(battle, actor),
         "pending": pending_payload(battle, actor),
         "advance": advance_control(battle, actor),
-        "hth_agreement": hth_agreement_panel(battle, actor),
+        HTH_AGREEMENT_CONTEXT: hth_agreement_panel(battle, actor),
+        MAGIC_BOUNDS_CONTEXT: magic_bounds_panel(battle, actor),
     }
 
 
@@ -1466,7 +1525,9 @@ def hth_agreement_panel(battle, actor: Actor) -> dict | None:
     Rendered from the battle's record, the one source of truth: the line
     every viewer reads, and, for the fight's Game Master
     (:func:`battle.services.runs_the_seats`, the only one who may change it),
-    the marked pairs and the combatants a new pair is chosen from. A classic battle has no such ruling and gets nothing.
+    the marked pairs and the combatants a new pair is chosen from. The words
+    are configuration (``battle.wording``). A classic battle has no such
+    ruling and gets nothing.
 
     Args:
         battle: The battle.
@@ -1477,8 +1538,13 @@ def hth_agreement_panel(battle, actor: Actor) -> dict | None:
     record = agreement.Agreement.of(battle)
     rows = list(battle.combatants.order_by("pk"))
     names = {row.pk: row.display_name for row in rows}
+    hth_words = words().hth_agreement
     return {
-        "line": agreement.describe(record, names),
+        "panel_id": HTH_AGREEMENT_PANEL_ID,
+        "record": json.dumps(battle.hth_agreement_json, sort_keys=True),
+        "words": hth_words,
+        "and_word": words().common.and_word,
+        "line": agreement.describe(record, names) or hth_words.none_marked,
         "whole_battle": record.whole_battle,
         "pairs": [
             {
@@ -1490,6 +1556,63 @@ def hth_agreement_panel(battle, actor: Actor) -> dict | None:
         ],
         "can_rule": runs_the_seats(battle, actor.user),
         "combatants": [{"id": row.pk, "name": row.display_name} for row in rows],
+    }
+
+
+def magic_bounds_panel(battle, actor: Actor) -> dict | None:
+    """What the page shows of the magic-bounds ruling (#37), or None.
+
+    Rendered from the battle's record, the one source of truth: every
+    lifting, with who lifted it and when, for every viewer; and, for the
+    fight's Game Master (:func:`battle.services.runs_the_seats`, the only one
+    who may change it), the forms, offering only the bounds the loaded canon
+    imposes (:func:`battle.magic_bounds.offered_bounds`). The words are
+    configuration (``battle.wording``). A classic battle, and a Tarmar
+    battle under a canon that imposes none of the bounds and with nothing
+    lifted, get nothing.
+
+    Args:
+        battle: The battle.
+        actor: The viewer.
+    """
+    if battle.rules_profile != TARMAR_PROFILE:
+        return None
+    record = magic_bounds.LiftedBounds.of(battle)
+    offered = magic_bounds.offered_bounds()
+    if not offered and not record.liftings:
+        return None
+    rows = list(battle.combatants.order_by("pk"))
+    names = {row.pk: row.display_name for row in rows}
+    bounds_words = words().magic_bounds
+    return {
+        "panel_id": MAGIC_BOUNDS_PANEL_ID,
+        "record": json.dumps(battle.magic_bounds_lifted_json, sort_keys=True),
+        "words": bounds_words,
+        "none_lifted_line": magic_bounds.none_lifted_line(),
+        "liftings": [
+            {
+                "combatant_id": lifting.combatant_id,
+                "bound": lifting.bound,
+                "line": bounds_words.lifting_line.format(
+                    bound=capfirst(magic_bounds.bound_label(lifting.bound)),
+                    name=name_of(names, lifting.combatant_id),
+                    by=game_master_name(lifting.by),
+                ),
+                "at": datetime.fromisoformat(lifting.at),
+            }
+            for lifting in sorted(record.liftings, key=magic_bounds.order)
+        ],
+        "can_rule": bool(offered) and runs_the_seats(battle, actor.user),
+        "combatants": [{"id": row.pk, "name": row.display_name} for row in rows],
+        "bounds": [
+            {"key": bound, "label": capfirst(magic_bounds.bound_label(bound))}
+            for bound in offered
+        ],
+        "fields": {
+            "combatant": magic_bounds.COMBATANT_FIELD,
+            "bounds": magic_bounds.BOUNDS_FIELD,
+            "lifted": magic_bounds.LIFTED_FIELD,
+        },
     }
 
 
@@ -1768,8 +1891,9 @@ def battle_hth_agreement(request, pk):
     ``second``.
     """
     actor, battle = _actor_and_readable_battle(request, pk)
+    hth_words = words().hth_agreement
     if not runs_the_seats(battle, actor.user):
-        return _refuse(request, battle, agreement.GAME_MASTER_ONLY, status=403)
+        return _refuse(request, battle, hth_words.game_master_only, status=403)
     data, err = (
         _parse_json_body(request) if _wants_json(request) else (request.POST, None)
     )
@@ -1781,9 +1905,9 @@ def battle_hth_agreement(request, pk):
         try:
             pair = (whole_number(data.get("first")), whole_number(data.get("second")))
         except ValueError:
-            return _refuse(request, battle, "Name two combatants for the pair")
+            return _refuse(request, battle, hth_words.refuse_pair_missing)
     elif scope != "battle":
-        return _refuse(request, battle, "Name the whole battle or one pair")
+        return _refuse(request, battle, hth_words.refuse_scope)
     try:
         battle, _event = set_hth_agreement(
             battle.pk,
@@ -1791,6 +1915,51 @@ def battle_hth_agreement(request, pk):
             agreed=_form_flag(data.get("agreed")),
             whole_battle=scope == "battle",
             pair=pair,
+        )
+    except ValueError as ruling_error:
+        return _refuse(request, battle, str(ruling_error))
+    if _wants_json(request):
+        return JsonResponse(battle_payload(battle, actor, [], request))
+    return _back_or_detail(request, battle)
+
+
+@require_POST
+def battle_magic_bounds(request, pk):
+    """Lift, or hold again, magic bounds for one figure (#37).
+
+    The fight's Game Master only (:func:`battle.services.runs_the_seats`),
+    here and in the service it calls. A form post lands back where it came
+    from (the battle page, or the GM chat's Battle tab), whose panel renders
+    from the battle's record; an XHR caller gets the battle payload, which
+    carries the record. The fields are :data:`battle.magic_bounds.COMBATANT_FIELD`,
+    :data:`~battle.magic_bounds.BOUNDS_FIELD` (repeated in a form, a list in
+    JSON) and :data:`~battle.magic_bounds.LIFTED_FIELD`.
+    """
+    actor, battle = _actor_and_readable_battle(request, pk)
+    bounds_words = words().magic_bounds
+    if not runs_the_seats(battle, actor.user):
+        return _refuse(request, battle, bounds_words.game_master_only, status=403)
+    if _wants_json(request):
+        data, err = _parse_json_body(request)
+        if err:
+            return err
+        bounds = data.get(magic_bounds.BOUNDS_FIELD)
+        if not isinstance(bounds, list):
+            return _refuse(request, battle, bounds_words.refuse_bounds_list)
+    else:
+        data = request.POST
+        bounds = request.POST.getlist(magic_bounds.BOUNDS_FIELD)
+    try:
+        combatant_id = whole_number(data.get(magic_bounds.COMBATANT_FIELD))
+    except ValueError:
+        return _refuse(request, battle, bounds_words.refuse_combatant)
+    try:
+        battle, _event = set_magic_bounds_lifted(
+            battle.pk,
+            actor,
+            combatant_id=combatant_id,
+            bounds=[str(bound) for bound in bounds],
+            lifted=_form_flag(data.get(magic_bounds.LIFTED_FIELD)),
         )
     except ValueError as ruling_error:
         return _refuse(request, battle, str(ruling_error))
