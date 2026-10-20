@@ -31,6 +31,7 @@ from typing import Any
 from django.templatetags.static import static
 
 from reference.paths import CANON_MAPS_FILE_NAME, DM_RULES_DIR
+from reference.rules_file import repeated_values
 
 # The canon's map manifest, beside its dm-rules pages.
 MAPS_MANIFEST_NAME = CANON_MAPS_FILE_NAME
@@ -233,8 +234,7 @@ def load_maps_manifest(path: Path = MAPS_MANIFEST) -> MapsManifest | None:
     slugs = [chart.slug for chart in manifest.charts] + [manifest.region_slug]
     if manifest.world is not None:
         slugs.append(manifest.world.slug)
-    duplicates = sorted({slug for slug in slugs if slugs.count(slug) > 1})
-    if duplicates:
+    if duplicates := repeated_values(slugs):
         raise ValueError(f"{path}: map slugs must be unique, repeated: {duplicates}")
     return manifest
 

@@ -34,11 +34,12 @@ from battle.magic_rules import MagicRulesError, load_magic_rules, magic_rules
 from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
-    DEFAULT_CANON_DIR,
     DM_RULES_DIR,
     MAGIC_RULES_FILE,
 )
 from reference.rules_file import RulesFileError
+
+from .magic_fixtures import DEFAULT_MAGIC_RULES
 
 # A complete file with invented numbers: every field present, both kinds of
 # Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell,
@@ -785,7 +786,7 @@ class CanonMagicRulesTest(SimpleTestCase):
         magic_rules.cache_clear()
 
     def test_the_default_canon_file_loads(self) -> None:
-        rules = load_magic_rules(DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME)
+        rules = DEFAULT_MAGIC_RULES
         self.assertIsNotNone(rules.push)
         # The default canon's channel.md sets no separate limit on Channel,
         # so its invented Borrowing carries a debt cap to bound a casting.

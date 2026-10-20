@@ -54,7 +54,7 @@ from .dice import location_effects, location_literacy_modifier
 from .equipment import get_item, settle_worn_armour
 from .equipment_service import custom_equipment_item
 from .models import CHARACTER_INT_FIELDS, DIE_ROLL_FIELDS, Character
-from .skills import MAX_SKILL_POINTS, normalize_skill_name
+from .skills import MAX_SKILL_POINTS, normalize_skill_name, skill_name_refusal
 
 #: The numbers an item stores as whole numbers and its readers add up with no
 #: type check: the Game Master's modifiers and a custom armour's or shield's
@@ -330,6 +330,10 @@ def _validate_skills(skills: dict) -> None:
             raise CharacterImportError(
                 "Imported skill name contains disallowed control characters"
             )
+        # Refused as the file spells it, before any name is normalized.
+        refusal = skill_name_refusal(str(skill_name))
+        if refusal:
+            raise CharacterImportError(refusal)
         if (
             not isinstance(points, int)
             or isinstance(points, bool)

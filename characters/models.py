@@ -49,7 +49,7 @@ from .movement import compute_gaits
 from .movement import movement_modifier as _movement_modifier
 from .rules import character_rules, scores_by_short_name
 from .skill_rules import skill_rules
-from .skills import specialised_skill_for_granted
+from .skills import skill_name_refusal, specialised_skill_for_granted
 from .weapon_skill import weapon_skill_for_granted
 
 
@@ -214,7 +214,7 @@ def validate_skills_size(value):
     # The sheet and the chat refuse a longer name (issue #928), so a record
     # holding one could not be one this site wrote.
     for skill_name in value:
-        refusal = too_long("Skill name", str(skill_name), MAX_SKILL_NAME_LENGTH)
+        refusal = skill_name_refusal(str(skill_name))
         if refusal:
             raise ValidationError(refusal)
 

@@ -2047,7 +2047,9 @@ class NormalizeSkillNamePatternsTest(TestCase):
     A skill name comes from a player's request, an imported file or the
     model. These pin what the function makes of one, so the rewrite changed
     how long it takes and nothing else. Some expectations below are odd; they
-    record what the function has always done with an odd name.
+    record what the function has always done with an odd name. Issue #52
+    changed one kind of odd name, one with parentheses nested or unbalanced
+    inside a bonus, which used to come apart; those cases say so below.
     """
 
     def test_parenthetical_bonuses(self):
@@ -2062,8 +2064,11 @@ class NormalizeSkillNamePatternsTest(TestCase):
             "Knowledge (history)": "knowledge (history)",
             "Sword (+1 to hit": "sword (+1 to hit",
             "Sword (+1 to hit) II": "sword ii to hit",
-            "Lore (+1 (old) tales)": "lore tales) (old",
-            "Sword (+1 ) x)": "sword x) )",
+            # Issue #52: the bonus is removed and the parentheses balanced
+            # inside it stay. These two used to come out as "lore tales)
+            # (old" and "sword x) )".
+            "Lore (+1 (old) tales)": "lore (old) tales",
+            "Sword (+1 ) x)": "sword (+1 ) x)",
             # An unclosed "(" after the last ")" stays as it was.
             "Sword (+1 to hit) (": "sword ( to hit",
             "Axe (+1 to hit) (((": "axe ((( to hit",
@@ -2071,6 +2076,44 @@ class NormalizeSkillNamePatternsTest(TestCase):
         for raw, expected in cases.items():
             with self.subTest(raw=raw):
                 self.assertEqual(normalize_skill_name(raw), expected)
+
+    def test_nested_parentheses_stay_balanced(self):
+        """Issue #52: a name with parentheses inside parentheses is not torn."""
+        from characters.skills import normalize_skill_name
+
+        cases = {
+            "Lore (+1 (old) tales)": "lore (old) tales",
+            "Lore (+1 (old (older)) tales) (rare)": "lore (old (older)) tales",
+            "Lore (rare) (+2 (old) tales)": "lore (old) tales",
+            "Lore (+1 (old tales)": "lore (+1 (old tales)",
+            "Lore (+1 (old) tales": "lore (+1 (old) tales",
+            # A bonus inside another group is not the name's bonus.
+            "Lore (old (+1 tales))": "lore (old (+1 tales))",
+            "Lore (old (rare))": "lore (old (rare))",
+            "Lore (+1 (old) tales) II": "lore ii (old) tales",
+            # Unbalanced: the "(" before the bonus never closes, so the
+            # balanced group inside it is the name's only group.
+            "Sword (x (+1 y)": "sword (x y",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_skill_name(raw), expected)
+
+    def test_top_level_parentheses_pairs_only_balanced_groups(self):
+        from characters.skill_names import top_level_parentheses
+
+        cases = {
+            "": [],
+            "no groups": [],
+            "a (b) c": [(2, 4)],
+            "a (b (c)) (d)": [(2, 8), (10, 12)],
+            ") a (b) (": [(4, 6)],
+            "(a (b) c": [(3, 5)],
+            "(a (b) c)": [(0, 8)],
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(top_level_parentheses(text), expected)
 
     def test_roman_numeral_suffixes(self):
         from characters.skills import normalize_skill_name
@@ -2105,13 +2148,14 @@ class NormalizeSkillNamePatternsTest(TestCase):
         # 256 KB. The first group goes through the function, which is how
         # every caller reaches the patterns; the second gives each pattern
         # whitespace runs the function would have collapsed, so each stays
-        # linear on its own. The inputs marked "guard" were fast for the old
+        # linear on its own (the parenthesis scanner is not a pattern, but is
+        # held to the same bound). The inputs marked "guard" were fast for the old
         # code too; they hold the new code's own paths to the same bound.
         from characters.skill_names import (
-            _BONUS_IN_PARENTHESES,
-            _PARENTHESES,
+            _BONUS_CONTENT,
             _ROMAN_NUMERAL_SUFFIX,
             normalize_skill_name,
+            top_level_parentheses,
         )
 
         through_the_function = {
@@ -2119,6 +2163,16 @@ class NormalizeSkillNamePatternsTest(TestCase):
             "a bonus then unclosed parentheses": "(1 a)" + "(" * 250_000,
             "a bonus then spaced unclosed parentheses": "(1 a)" + " (" * 125_000,
             "guard: a bonus then a long text": "(+1 " + "a " * 100_000 + ")",
+            # Issue #52: nesting is paired by a stack, not matched by backtracking.
+            "deeply nested groups": "(" * 100_000 + ")" * 100_000,
+            "a bonus around deeply nested groups": (
+                "(+1 " + "(a " * 100_000 + ")" * 100_000 + ")"
+            ),
+            "deeply nested unclosed groups": "(+1 " * 100_000 + ")" * 50_000,
+            "many groups before a bonus": "(a) " * 60_000 + "(+1 b)",
+            "whitespace before a group": "x" + " " * 160_000 + "(+1 y)",
+            "many stray closing parentheses": ")" * 250_000 + "(+1 a)",
+            "empty groups side by side": "()" * 130_000,
             "guard: roman numerals and spaces": "a " + "i " * 100_000 + "z",
         }
         for label, raw in through_the_function.items():
@@ -2128,16 +2182,32 @@ class NormalizeSkillNamePatternsTest(TestCase):
                 self.assertLess(time.perf_counter() - started, 1.0)
         on_their_own = {
             ("bonus", "spaces then a word"): (
-                _BONUS_IN_PARENTHESES.search,
-                "(+1" + " " * 80_000 + "y",
+                _BONUS_CONTENT.fullmatch,
+                "+1" + " " * 80_000 + "y",
             ),
-            ("bonus", "guard: spaces then a closing parenthesis"): (
-                _BONUS_IN_PARENTHESES.search,
-                "(+1" + " " * 80_000 + ")",
+            ("bonus", "guard: spaces then nothing"): (
+                _BONUS_CONTENT.fullmatch,
+                "+1" + " " * 80_000,
+            ),
+            ("bonus", "spaces then a newline"): (
+                _BONUS_CONTENT.fullmatch,
+                "+1" + " " * 80_000 + "\n",
             ),
             ("parentheses", "spaces then a word"): (
-                lambda text: _PARENTHESES.sub("", text),
+                top_level_parentheses,
                 "a" + " " * 160_000 + "y",
+            ),
+            ("parentheses", "a long run of openers then closers"): (
+                top_level_parentheses,
+                "(" * 130_000 + ")" * 130_000,
+            ),
+            ("parentheses", "empty groups side by side"): (
+                top_level_parentheses,
+                "()" * 130_000,
+            ),
+            ("parentheses", "alternating nested openers and closers"): (
+                top_level_parentheses,
+                "(a (b " * 40_000 + ")" * 40_000 + "(c) " * 20_000,
             ),
             ("roman numeral", "spaces then a word"): (
                 lambda text: _ROMAN_NUMERAL_SUFFIX.sub("", text),

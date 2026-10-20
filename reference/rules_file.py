@@ -41,7 +41,8 @@ clear every one of them when a test seats other rules (issue #70).
 """
 
 import math
-from collections.abc import Callable, Iterator, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar, NoReturn, Protocol
@@ -128,6 +129,47 @@ class RulesFileError(Exception):
     """
 
 
+def repeated_values(values: Iterable[str]) -> list[str]:
+    """Every value given more than once, each named once, in sorted order.
+
+    The one "nothing repeated" check (issue #76): :func:`repeats_problem`
+    words it for the rules files, and ``gm.maps`` words it for the map
+    manifest's slugs.
+
+    Args:
+        values: The values, in any order; read once, so an iterator will do.
+
+    Returns:
+        The repeated values, sorted; empty when no value appears twice.
+    """
+    return sorted(
+        value for value, times_given in Counter(values).items() if times_given > 1
+    )
+
+
+def repeats_problem(kind: str, values: Iterable[str]) -> str | None:
+    """The refusal for values that should each appear once, or ``None``.
+
+    The wording every rules file shares for :func:`repeated_values`: the
+    reader's object hook and :meth:`RulesFileReader.unique_keys` use it, and
+    so does each rules dataclass whose ``__post_init__`` refuses a repeated
+    label or key, raising it as a ``ValueError`` for
+    :meth:`RulesFileReader.wrapped_value_errors` to name by field path.
+
+    Args:
+        kind: What the values are, as the refusal names them (``"key"``).
+        values: The values, in any order.
+
+    Returns:
+        ``"repeats the <kind> [...]"``, naming each repeated value once and
+        in sorted order, or ``None`` when no value appears twice.
+    """
+    repeated = repeated_values(values)
+    if not repeated:
+        return None
+    return f"repeats the {kind} {repeated}"
+
+
 def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """``json.loads``'s object hook: one object, every key once.
 
@@ -137,10 +179,8 @@ def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     Raises:
         ValueError: A key appears twice in one object.
     """
-    keys = [key for key, _value in pairs]
-    repeated = sorted({key for key in keys if keys.count(key) > 1})
-    if repeated:
-        raise ValueError(f"an object repeats the key {repeated}")
+    if problem := repeats_problem("key", (key for key, _value in pairs)):
+        raise ValueError(f"an object {problem}")
     return dict(pairs)
 
 
@@ -372,10 +412,8 @@ class RulesFileReader:
 
     def unique_keys(self, items: Sequence[Keyed], field_path: str) -> None:
         """Entries whose ``key``s are all different."""
-        keys = [item.key for item in items]
-        repeated = sorted({key for key in keys if keys.count(key) > 1})
-        if repeated:
-            self.fail(field_path, f"repeats the key {repeated}")
+        if problem := repeats_problem("key", (item.key for item in items)):
+            self.fail(field_path, problem)
 
     def mapping[Value](
         self,

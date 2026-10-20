@@ -3413,6 +3413,167 @@ describe('the hex picker (#819, #866)', () => {
     });
 });
 
+describe('the poll follows the pause, and only forwards (#9)', () => {
+    const figureA = sampleCombatant({ combatant_id: 1, name: 'Duel 1 Archer' });
+    const figureB = sampleCombatant({ combatant_id: 2, name: 'Duel 2 Mage' });
+    const pauseFor = (combatantId, displayName, isYou) => ({
+        combatant_id: combatantId, turn: 1, display_name: displayName,
+        player: isYou ? '' : 'playeruser', is_you: isYou,
+        candidates: isYou ? [{ letter: 'D', name: 'DODGE', target_id: null }] : [],
+    });
+
+    /** A page awaiting `pending` on turn 0, its panel polling the state URL. */
+    function mountAwaitingPage(pending, extraAttributes = '') {
+        document.body.innerHTML = `
+            <strong id="battle-status">Awaiting players</strong>
+            <span id="battle-turn">0</span>
+            <div id="battle-roster"></div>
+            <svg id="battle-arena"></svg>
+            <div id="battle-log"></div>
+            <div id="turn-panel" hidden ${extraAttributes}
+                 data-act-url="/tarmar/battles/1/act/"
+                 data-state-url="/tarmar/battles/1/state/"></div>
+            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([figureA, figureB]))}</script>
+            <script id="battle-seats" type="application/json">[]</script>
+            <script id="battle-status-labels" type="application/json">${JSON.stringify(STATUS_CHOICES)}</script>
+            <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+        `;
+        battle.initBattlePage();
+        return document.getElementById('turn-panel');
+    }
+
+    /** The state endpoint's answer while the turn is still paused. */
+    const stillAwaiting = (pending) => ({
+        status: 'awaiting', turn: 0, view: sampleState([figureA, figureB]),
+        events: [], turns_html: [], seats: [], pending,
+    });
+
+    test('a poll that only moves the pause to the next figure repaints the panel', async () => {
+        // One player's choice resumed the turn, and it paused again on
+        // another player's figure. The partial turn rolled back, so no
+        // event was written and the turn and status are as they were: who
+        // is awaited is the only thing that changed.
+        jest.useFakeTimers();
+        try {
+            const panel = mountAwaitingPage(pauseFor(1, 'Duel 1 Archer', false));
+            expect(panel.querySelector('.turn-waiting').textContent)
+                .toContain('Duel 1 Archer');
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => stillAwaiting(pauseFor(2, 'Duel 2 Mage', true)),
+            });
+
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(global.fetch).toHaveBeenCalled();
+            expect(panel.querySelector('.turn-prompt').textContent)
+                .toContain('Duel 2 Mage');
+            expect(panel.querySelector('.turn-waiting')).toBeNull();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a poll answer the act overtook is dropped, not drawn or read as a restart', async () => {
+        // The Game Master's page polls while a move is awaited. A poll asked
+        // before the choice was sent answers with the battle before it; the
+        // act's own answer, which committed the turn, is applied first.
+        jest.useFakeTimers();
+        try {
+            pageNavigation.reload.mockClear();
+            const awaited = pauseFor(1, 'Duel 1 Archer', true);
+            const panel = mountAwaitingPage(awaited, 'data-is-dm="true"');
+            require('../api.js');
+            let answerThePoll;
+            const committed = {
+                status: 'paused', turn: 1,
+                view: Object.assign(sampleState([figureA, figureB]), { next_sequence: 9 }),
+                events: [], seats: [], pending: null,
+                turns_html: [{
+                    turn: 1,
+                    html: '<section class="turn-group" data-turn="1"><ul class="turn-events"></ul></section>',
+                }],
+            };
+            global.fetch = jest.fn((url) => {
+                if (String(url).includes('/state/')) {
+                    return new Promise((resolve) => {
+                        answerThePoll = () => resolve({
+                            ok: true, json: async () => stillAwaiting(awaited),
+                        });
+                    });
+                }
+                return Promise.resolve({
+                    ok: true, status: 200, json: async () => committed,
+                });
+            });
+
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(answerThePoll).toBeDefined();
+            panel.querySelector('.turn-option').click();
+            panel.querySelector('.turn-confirm').click();
+            await jest.advanceTimersByTimeAsync(0);
+            expect(document.querySelector('.turn-group[data-turn="1"]')).not.toBeNull();
+            expect(panel.hidden).toBe(true);
+
+            answerThePoll();
+            await jest.advanceTimersByTimeAsync(0);
+
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+            expect(panel.hidden).toBe(true);
+            expect(panel.querySelector('.turn-prompt')).toBeNull();
+            expect(document.getElementById('battle-turn').textContent).toBe('1');
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a poll answer the act overtook does not bring back the earlier pause', async () => {
+        // The Game Master answers for A and the turn pauses again on B, in
+        // the same turn: nothing but who is awaited changed. A poll asked
+        // before the choice was sent still shows A, and would redraw A's
+        // menu over B's if it were applied after the act.
+        jest.useFakeTimers();
+        try {
+            pageNavigation.reload.mockClear();
+            const awaitingA = pauseFor(1, 'Duel 1 Archer', true);
+            const awaitingB = pauseFor(2, 'Duel 2 Mage', true);
+            const panel = mountAwaitingPage(awaitingA, 'data-is-dm="true"');
+            require('../api.js');
+            let answerThePoll;
+            global.fetch = jest.fn((url) => {
+                if (String(url).includes('/state/')) {
+                    return new Promise((resolve) => {
+                        answerThePoll = () => resolve({
+                            ok: true, json: async () => stillAwaiting(awaitingA),
+                        });
+                    });
+                }
+                return Promise.resolve({
+                    ok: true, status: 200, json: async () => stillAwaiting(awaitingB),
+                });
+            });
+
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(answerThePoll).toBeDefined();
+            panel.querySelector('.turn-option').click();
+            panel.querySelector('.turn-confirm').click();
+            await jest.advanceTimersByTimeAsync(0);
+            expect(panel.querySelector('.turn-prompt').textContent)
+                .toContain('Duel 2 Mage');
+
+            answerThePoll();
+            await jest.advanceTimersByTimeAsync(0);
+
+            expect(panel.querySelector('.turn-prompt').textContent)
+                .toContain('Duel 2 Mage');
+            expect(panel.textContent).not.toContain('Duel 1 Archer');
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+});
+
 describe('stopping the page polls (#25)', () => {
     test('ends the battle page poll', async () => {
         jest.useFakeTimers();

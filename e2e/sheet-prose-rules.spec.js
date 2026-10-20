@@ -12,7 +12,7 @@
  */
 
 const {
-    test, expect, loginAs, createCharacter, TEST_USER,
+    test, expect, loginAs, createCharacter, TEST_USER, escaped,
 } = require('./fixtures');
 const { runDjangoShell, readDjangoShell } = require('./django');
 const { loadedCharacterRules } = require('./character-rules');
@@ -129,10 +129,9 @@ test.describe('The sheet states the loaded canon\'s numbers (#68)', () => {
         await expect(preview).toHaveText(note);
 
         // The survival roll's automatic totals, named as the dice's ends are.
-        const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         await expect(page.locator('.workbench-note')).toHaveText(new RegExp(
-            `^${escape(survival.death_name)} always kills?; `
-            + `${escape(survival.survival_name)} always survives?\\.$`, 'i'
+            `^${escaped(survival.death_name)} always kills?; `
+            + `${escaped(survival.survival_name)} always survives?\\.$`, 'i'
         ));
     });
 
