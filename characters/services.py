@@ -1958,7 +1958,9 @@ def apply_skill_rename(
 
     Returns:
         ``(what the history records as the new name, points)``: the new name,
-        with a note when a Game Master moved points to another skill.
+        with a note when a Game Master moved points to another skill. Moving
+        the Origin's point between the skills its row lists is the player's
+        choice whoever makes it, so it carries no note (#67).
 
     Raises:
         CharacterChangeError: No such skill, a name already held, a name
@@ -1968,7 +1970,10 @@ def apply_skill_rename(
     skills = dict(character.skills or {})
     if old_skill not in skills:
         raise CharacterChangeError(f"Skill '{old_skill}' not found")
-    if new_skill in skills and _village_choice(character, old_skill, new_skill):
+    # Read before the rename changes the character: the row's choice is the
+    # player's on every path below, so neither refused nor noted as a call.
+    origin_choice = _village_choice(character, old_skill, new_skill)
+    if new_skill in skills and origin_choice:
         # The Origin's point joins a Survival or Street Smarts the character
         # already holds from a track (location.md: "choose").
         del skills[old_skill]
@@ -1987,10 +1992,7 @@ def apply_skill_rename(
                 "be renamed, nor another skill renamed into one; only a Game "
                 "Master can"
             )
-        if not (
-            _village_choice(character, old_skill, new_skill)
-            or _names_chosen_part(old_skill, new_skill)
-        ):
+        if not (origin_choice or _names_chosen_part(old_skill, new_skill)):
             raise CharacterChangeError(RENAME_REFUSED_REASON)
     points = skills.pop(old_skill)
     skills[new_skill] = points
@@ -2000,7 +2002,7 @@ def apply_skill_rename(
     if character.origin_skill == old_skill:
         character.origin_skill = new_skill
     recorded = new_skill
-    if glossary_skill(old_skill) != glossary_skill(new_skill):
+    if not origin_choice and glossary_skill(old_skill) != glossary_skill(new_skill):
         recorded += " (points moved from another skill: the Game Master's call)"
     return recorded, points
 
