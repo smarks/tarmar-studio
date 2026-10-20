@@ -106,7 +106,11 @@ from pathlib import Path
 from typing import Any
 
 from reference.paths import SKILL_RULES_FILE
-from reference.rules_file import RulesFileError, RulesFileReader
+from reference.rules_file import (
+    RulesFileError,
+    RulesFileReader,
+    repeats_problem,
+)
 
 from .constants import CHARACTER_ATTRIBUTE_FIELDS
 from .rules import DiceRollRules, require_at_least
@@ -290,10 +294,9 @@ class SkillTrackRules:
         for key, track in self.tracks.items():
             if track.key != key:
                 raise ValueError(f"track {key!r} carries the key {track.key!r}")
-        labels = [track.label for track in self.tracks.values()]
-        repeated = sorted({label for label in labels if labels.count(label) > 1})
-        if repeated:
-            raise ValueError(f"repeats the label {repeated}")
+        labels = (track.label for track in self.tracks.values())
+        if problem := repeats_problem("label", labels):
+            raise ValueError(problem)
 
 
 @dataclass(frozen=True)
