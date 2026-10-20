@@ -32,6 +32,7 @@ from characters.dice import starting_coin_for_wealth
 from characters.models import Character
 from characters.skills import calculate_attribute_modifier
 from common.rolling import Roller
+from reference.markdown_tables import split_table_row
 from reference.markdown_tables import table_rows_under_heading as _table_rows
 from reference.paths import PUBLIC_RULES_DIR
 
@@ -445,3 +446,94 @@ class AuditPageReportsClosedIssuesAsClosedTest(SimpleTestCase):
         module_docstring = sys.modules[__name__].__doc__ or ""
         self.assertNotIn("Known mismatches are filed, not fixed", module_docstring)
         self.assertIn("all fixed and closed", module_docstring)
+
+
+class AuditSummaryCountsTheTableTest(SimpleTestCase):
+    """The audit's summary counts the table as it stands (#93).
+
+    The summary is a current statement, not a dated record, but it went on
+    saying "66 rows" and "G1–G3" after #75 added G4–G8: nothing compared it
+    with the table. This does, for the row count, each section's range and
+    inserted rows, and the doc→engine tally with the n/a rows it names.
+    """
+
+    #: A mechanic row's first cell: a section letter, a number, and an
+    #: optional suffix for a row inserted later (H3b).
+    row_label = re.compile(r"([A-I])(\d+)([a-z]?)")
+    #: A section range the summary claims, such as "G1–G8", whole.
+    claimed_range = re.compile(r"(?<![A-Za-z\d])([A-Z])1–\1(\d+)(?!\d)")
+    doc_to_engine_heading = "doc→engine"
+    inventory_bullet = "**Mechanics inventoried:**"
+    not_applicable = "n/a"
+    verdicts: tuple[str, ...] = ("VERIFIED", "MISMATCH", not_applicable)
+
+    def setUp(self) -> None:
+        audit = AUDIT_MD.read_text()
+        self.rows: list[tuple[str, str]] = []
+        doc_to_engine_column: int | None = None
+        for line in audit.splitlines():
+            if not line.startswith("|"):
+                continue
+            cells = split_table_row(line)
+            if cells[0] == "#":
+                doc_to_engine_column = cells.index(self.doc_to_engine_heading)
+            elif (
+                self.row_label.fullmatch(cells[0]) and doc_to_engine_column is not None
+            ):
+                self.rows.append((cells[0], cells[doc_to_engine_column]))
+        summary = audit.split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
+        self.summary = " ".join(summary.split())
+        self.inventory = self.summary.split(self.inventory_bullet, 1)[1].split(
+            "- **", 1
+        )[0]
+
+    def test_the_summary_states_the_row_count_and_each_sections_range(self) -> None:
+        self.assertIn(f"{self.inventory_bullet} {len(self.rows)} rows", self.summary)
+        numbers: dict[str, list[int]] = {}
+        suffixed: list[str] = []
+        for label, _verdict in self.rows:
+            match = self.row_label.fullmatch(label)
+            assert match is not None
+            section, number, suffix = match.groups()
+            numbers.setdefault(section, []).append(int(number))
+            if suffix:
+                suffixed.append(label)
+        for section, section_numbers in numbers.items():
+            with self.subTest(section=section):
+                self.assertEqual(
+                    sorted(set(section_numbers)),
+                    list(range(1, max(section_numbers) + 1)),
+                    "a range in the summary stands for every number in it",
+                )
+        claimed = {
+            section: int(top)
+            for section, top in self.claimed_range.findall(self.inventory)
+        }
+        self.assertEqual(
+            claimed,
+            {
+                section: max(section_numbers)
+                for section, section_numbers in numbers.items()
+            },
+        )
+        for label in suffixed:
+            with self.subTest(label=label):
+                self.assertRegex(
+                    self.inventory, rf"(?<![A-Za-z\d]){label}(?![A-Za-z\d])"
+                )
+
+    def test_the_summary_states_the_doc_to_engine_tally(self) -> None:
+        tally = dict.fromkeys(self.verdicts, 0)
+        not_applicable_labels: list[str] = []
+        for label, verdict in self.rows:
+            matching = [name for name in self.verdicts if verdict.startswith(name)]
+            self.assertEqual(len(matching), 1, f"{label}: {verdict[:60]}")
+            tally[matching[0]] += 1
+            if matching[0] == self.not_applicable:
+                not_applicable_labels.append(label)
+        stated = ", ".join(f"{tally[name]} {name}" for name in self.verdicts)
+        self.assertIn(
+            f"**{self.doc_to_engine_heading}:** {stated} "
+            f"({', '.join(not_applicable_labels)})",
+            self.summary,
+        )
