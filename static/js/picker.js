@@ -16,10 +16,21 @@
  *
  * A failed search says so in the picker's status line, where it stays until
  * the next search succeeds; nothing here dismisses itself.
+ *
+ * What holds a picker can be fetched again while a page is on its way (the
+ * GM page's Characters tab, while a turn runs), replacing the picker. The
+ * page asked for is recorded on the picker before the request goes, so the
+ * refetch asks the new picker for the page the reader turned to, and the
+ * answer to the old picker is dropped unwritten (issue #14).
  */
 (function (root) {
     /** How long typing must pause before the server is asked. */
     const SEARCH_DELAY_MS = 200;
+
+    /** A picker's search box, its body, and its pager's buttons. */
+    const SEARCH_BOX = '[data-picker-search]';
+    const PICKER_BODY = '[data-picker-body]';
+    const PAGER_BUTTON = '[data-picker-page]';
 
     /**
      * Ask a picker's endpoint for one page of results and show it.
@@ -31,8 +42,7 @@
      * @returns {Promise<void>}
      */
     async function loadPage(picker, page, focusDirection) {
-        const input = picker.querySelector('[data-picker-search]');
-        const body = picker.querySelector('[data-picker-body]');
+        const input = picker.querySelector(SEARCH_BOX);
         const url = new URL(picker.dataset.pickerUrl, root.document.baseURI);
         url.searchParams.set('q', input ? input.value.trim() : '');
         url.searchParams.set('page', String(page));
@@ -40,6 +50,10 @@
         // query must not replace the answer to the one typed since.
         const ticket = String(Number(picker.dataset.pickerTicket || '0') + 1);
         picker.dataset.pickerTicket = ticket;
+        // The page on its way, so a refetch of what holds the picker while it
+        // is out asks for it again rather than for the page it replaces.
+        picker.dataset.pickerAskedPage = String(page);
+        picker.dataset.pickerAskedQuery = url.searchParams.get('q');
         let html;
         try {
             const response = await root.fetch(url.toString(), {
@@ -51,11 +65,25 @@
             }
             html = await response.text();
         } catch (error) {
-            if (picker.dataset.pickerTicket !== ticket) return;
+            // A picker replaced meanwhile is not the reader's any more.
+            if (!picker.isConnected || picker.dataset.pickerTicket !== ticket) return;
+            delete picker.dataset.pickerAskedPage;
+            delete picker.dataset.pickerAskedQuery;
             showFailure(picker, error);
             return;
         }
-        if (picker.dataset.pickerTicket !== ticket) return;
+        if (!picker.isConnected || picker.dataset.pickerTicket !== ticket) return;
+        delete picker.dataset.pickerAskedPage;
+        delete picker.dataset.pickerAskedQuery;
+        const body = picker.querySelector(PICKER_BODY);
+        // The pager keeps the focus only from where the press left it: on
+        // the pager, or lost with it (on the page's body, or on what holds
+        // the picker, where a refetch puts a focus it could not place).
+        const focused = root.document.activeElement;
+        const focusFollows = Boolean(focusDirection) && (!focused
+            || focused === root.document.body
+            || body.contains(focused)
+            || focused.contains(picker));
         body.innerHTML = html;
         // The page shown and the search it is a page of, so a refetch of
         // what holds the picker can ask for it again instead of falling back
@@ -63,7 +91,29 @@
         // pager's buttons, and the click handler finds them by it.
         picker.dataset.pickerShownPage = String(page);
         picker.dataset.pickerShownQuery = url.searchParams.get('q');
-        if (focusDirection) focusPager(picker, focusDirection);
+        if (focusFollows) focusPager(picker, focusDirection);
+    }
+
+    /**
+     * The page a picker shows, as the page to ask for again when what holds
+     * it is refetched (issue #16) or a row on it is deleted (issue #15): the
+     * page on its way, if the reader asked for one (issue #14), else the
+     * page last loaded, while the search box still holds the search it was
+     * asked for. A page of an earlier search is no page of the one typed
+     * since, so then the first; and a picker never paged shows the first.
+     *
+     * @param {HTMLElement} picker - The `[data-picker]` element.
+     * @returns {string}
+     */
+    function shownPage(picker) {
+        const search = picker.querySelector(SEARCH_BOX);
+        const typed = search ? search.value.trim() : '';
+        const { dataset } = picker;
+        if ('pickerAskedPage' in dataset && dataset.pickerAskedQuery === typed) {
+            return dataset.pickerAskedPage;
+        }
+        const sameSearch = (dataset.pickerShownQuery || '') === typed;
+        return sameSearch ? dataset.pickerShownPage || '1' : '1';
     }
 
     /** Write a failed search into the picker's status line, to stay. */
@@ -74,19 +124,27 @@
             + 'type again to retry.';
     }
 
-    /** Put the focus back on the pager after it turned a page. */
+    /**
+     * Put the focus back on the pager after it turned a page: the button in
+     * the direction pressed, else the other one, else the search box, so a
+     * page with no pager to press does not leave the focus on the page's body.
+     */
     function focusPager(picker, direction) {
-        const buttons = picker.querySelectorAll('[data-picker-page]');
-        if (!buttons.length) return;
-        const wanted = direction === 'previous' ? buttons[0] : buttons[buttons.length - 1];
-        const other = direction === 'previous' ? buttons[buttons.length - 1] : buttons[0];
-        (wanted.disabled ? other : wanted).focus();
+        const buttons = picker.querySelectorAll(PAGER_BUTTON);
+        const first = buttons[0];
+        const last = buttons[buttons.length - 1];
+        const pager = direction === 'previous' ? [first, last] : [last, first];
+        [...pager, picker.querySelector(SEARCH_BOX)].some((candidate) => {
+            if (!candidate || candidate.disabled) return false;
+            candidate.focus();
+            return root.document.activeElement === candidate;
+        });
     }
 
     /** Narrow the rows already on screen, while the server is asked. */
     function narrowOnScreen(picker, query) {
         if (!root.rosterFilter) return;
-        const body = picker.querySelector('[data-picker-body]');
+        const body = picker.querySelector(PICKER_BODY);
         root.rosterFilter.filterCharacters(body, query);
     }
 
@@ -99,7 +157,7 @@
     function initPicker(picker) {
         if (picker.dataset.pickerReady === 'yes') return;
         picker.dataset.pickerReady = 'yes';
-        const input = picker.querySelector('[data-picker-search]');
+        const input = picker.querySelector(SEARCH_BOX);
         let timer = null;
         if (input) {
             input.addEventListener('input', () => {
@@ -115,10 +173,10 @@
             });
         }
         picker.addEventListener('click', (event) => {
-            const button = event.target.closest('[data-picker-page]');
+            const button = event.target.closest(PAGER_BUTTON);
             if (!button || button.disabled || !button.dataset.pickerPage) return;
             event.preventDefault();
-            const buttons = Array.from(picker.querySelectorAll('[data-picker-page]'));
+            const buttons = Array.from(picker.querySelectorAll(PAGER_BUTTON));
             const direction = buttons.indexOf(button) === 0 ? 'previous' : 'next';
             loadPage(picker, button.dataset.pickerPage, direction);
         });
@@ -138,7 +196,9 @@
         initPickers(document);
     }
 
-    const api = { initPickers, initPicker, loadPage, SEARCH_DELAY_MS };
+    const api = {
+        initPickers, initPicker, loadPage, shownPage, SEARCH_DELAY_MS,
+    };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
     }

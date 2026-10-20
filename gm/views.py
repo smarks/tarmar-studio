@@ -30,6 +30,7 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import ListView, TemplateView
 
 from battle.access import Actor, is_dm
+from battle.services import BARE_HANDED_KEY
 from battle.views import arena_context
 from characters.constants import too_long
 from characters.models import Character
@@ -146,6 +147,7 @@ from .turn_record import (
     running_turn_for,
     turns_ahead_of,
 )
+from .unarmed import unarmed_notice
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +359,12 @@ def _get_attachable_character(
 
 
 def _session_characters_payload(session: GMSession) -> dict:
-    """The JSON both character endpoints answer with."""
+    """The JSON both character endpoints answer with.
+
+    It carries the Battle tab's bare-handed line as it stands after the
+    change, since the page shows an attach or a detach in place (issue #15)
+    and that line names the attached characters who carry no weapon.
+    """
     return {
         "ok": True,
         "session_id": session.pk,
@@ -365,6 +372,7 @@ def _session_characters_payload(session: GMSession) -> dict:
             {"id": character.pk, "name": character.name}
             for character in session.attached_characters()
         ],
+        BARE_HANDED_KEY: unarmed_notice(session),
     }
 
 

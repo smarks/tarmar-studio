@@ -2875,6 +2875,12 @@ def unarmed_attached_line(session) -> str:
     )
 
 
+#: The key the bare-handed line travels under: in the board's payload, and in
+#: the Games Master's attach and detach answers (issues #844, #15). The pages
+#: reading either repaint the Battle tab's line from it.
+BARE_HANDED_KEY = "bare_handed"
+
+
 def bare_handed_line(battle: Battle) -> str:
     """The Battle tab's line on who fights, or would fight, bare-handed.
 
