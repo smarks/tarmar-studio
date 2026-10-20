@@ -76,13 +76,15 @@ def coverage_from_report(report_path: Path) -> float | None:
 
 def coverage_from_output(output: str) -> float | None:
     """Total coverage read back from the printed summary, never rounded up."""
-    # Match "Total coverage: 92.86%"
-    match = re.search(r"Total coverage: (\d+\.?\d*)%", output)
+    # Match "Total coverage: 92.86%". The decimals sit inside the optional group
+    # so the digits before the point are the only digits that can be read twice;
+    # "\d+\.?\d*" divided a long run of digits every way (issue #44).
+    match = re.search(r"Total coverage: (\d+(?:\.\d*)?)%", output)
     if match:
         return lower_bound_of_printed(match.group(1))
 
     # Match "TOTAL ... 93%"
-    match = re.search(r"TOTAL\s+\d+\s+\d+\s+(\d+\.?\d*)%", output)
+    match = re.search(r"TOTAL\s+\d+\s+\d+\s+(\d+(?:\.\d*)?)%", output)
     if match:
         return lower_bound_of_printed(match.group(1))
 

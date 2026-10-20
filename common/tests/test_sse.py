@@ -10,6 +10,8 @@ tag-prefix buffering across feed() calls, with the tag-plus-trailing-text
 case and the streaming feel (no unbounded buffering) both preserved.
 """
 
+import time
+
 from django.test import TestCase
 
 from common.services.sse import ThinkingFilter, strip_thinking
@@ -156,3 +158,45 @@ class StripThinkingTest(TestCase):
         start of an independent block -- exactly like ThinkingFilter, which
         never exits an open block except on a real "</think>"."""
         self.assertEqual(strip_thinking("a<think>one<think>two"), "a")
+
+    def test_blocks_are_removed_whatever_surrounds_them(self):
+        cases = {
+            "<think></think>": "",
+            "<think>a</think><think>b</think>": "",
+            "a<think>x\ny</think>\nb": "a\nb",
+            "a<think>x<think>y</think>z": "az",
+            "a</think>b": "a</think>b",
+            "<think>a</think>b</think>c": "b</think>c",
+            "a<think>b</think>c<think>d</think>e<think>f": "ace",
+            "a<think>b</think>c<think>d<think>e": "ac",
+            # Removing a block can close up a tag; that tag is cut like any
+            # other left open, as it was when a regular expression did this.
+            "a<th<think>x</think>ink>b": "a",
+        }
+        for reply, expected in cases.items():
+            with self.subTest(reply=reply):
+                self.assertEqual(strip_thinking(reply), expected)
+
+    def test_a_long_reply_is_read_whole(self):
+        pair = "<think>a</think>b"
+        self.assertEqual(strip_thinking(pair * 20_000), "b" * 20_000)
+
+    def test_strip_thinking_stays_fast_on_crafted_input(self):
+        # The tests above check what is removed; this one checks how long it
+        # takes. A player can steer the model into a reply of many opening
+        # tags and no closing one. The old pattern read to the end of the text
+        # from each opening tag: 10 to 16 s on each of the first three inputs
+        # below (measured on one machine, 2026-10-18), so code that backtracks
+        # again fails here within the minute while this takes milliseconds.
+        crafted = {
+            "opening tags and no closing tag": "<think>" * 26_000,
+            "opening tags with text between": "<think>a " * 26_000,
+            "a pair then opening tags": "<think>a</think>" + "<think>" * 26_000,
+            "guard: closing tags and no opening tag": "</think>" * 26_000,
+            "guard: many pairs": "<think>a</think>b" * 26_000,
+        }
+        for label, reply in crafted.items():
+            with self.subTest(input=label):
+                started = time.perf_counter()
+                strip_thinking(reply)
+                self.assertLess(time.perf_counter() - started, 1.0)

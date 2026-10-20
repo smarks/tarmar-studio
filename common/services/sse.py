@@ -1,7 +1,5 @@
 """SSE streaming helpers for Ollama responses."""
 
-import re
-
 
 def strip_thinking(text: str) -> str:
     """Remove <think>...</think> blocks from model output.
@@ -11,13 +9,13 @@ def strip_thinking(text: str) -> str:
     already does for a stream that ends mid-thinking-block -- once inside an
     unclosed block, everything through the end is thinking content, not
     visible output, even if it contains further literal "<think>" text.
-    Whichever `<think>` remains after the regex above has removed every
-    complete pair is therefore always the start of a single dangling block
+    Whichever `<think>` remains after every complete pair has been removed
+    is therefore always the start of a single dangling block
     that runs to the end of the string (if a `</think>` existed anywhere
-    after it, the regex would have consumed it), so cutting at that point is
+    after it, its pair would have been removed), so cutting at that point is
     the correct -- not just the simplest -- fix.
     """
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = _without_complete_blocks(text)
     idx = text.find(_OPEN_TAG)
     if idx != -1:
         text = text[:idx]
@@ -26,6 +24,39 @@ def strip_thinking(text: str) -> str:
 
 _OPEN_TAG = "<think>"
 _CLOSE_TAG = "</think>"
+
+
+def _without_complete_blocks(text: str) -> str:
+    """``text`` with every ``<think>...</think>`` pair removed, left to right.
+
+    Each block runs from an opening tag to the first closing tag after it. An
+    opening tag with no closing tag anywhere after it ends the search, because
+    every later opening tag has none either; that tag and what follows it stay.
+
+    This used to be ``re.sub(r"<think>.*?</think>", ...)``, which read to the
+    end of the text from every opening tag that had no closing one: a reply of
+    many ``<think>`` tags took time in proportion to the square of its length,
+    and a player can steer the model into writing one (issue #44). Each
+    ``find`` here starts where the last one stopped, so the text is read once.
+
+    Args:
+        text: The model's accumulated reply.
+
+    Returns:
+        The reply without its complete blocks.
+    """
+    kept: list[str] = []
+    cursor = 0
+    while True:
+        open_at = text.find(_OPEN_TAG, cursor)
+        close_at = (
+            -1 if open_at == -1 else text.find(_CLOSE_TAG, open_at + len(_OPEN_TAG))
+        )
+        if close_at == -1:
+            kept.append(text[cursor:])
+            return "".join(kept)
+        kept.append(text[cursor:open_at])
+        cursor = close_at + len(_CLOSE_TAG)
 
 
 def partial_suffix_len(text: str, tag: str) -> int:

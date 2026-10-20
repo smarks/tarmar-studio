@@ -934,6 +934,42 @@ describe('parseChoicePrompt', () => {
         expect(parseChoicePrompt(reply)).toEqual([]);
     });
 
+    // The reply is the model's, and a player can steer it. These pin what the
+    // parser reads at the edges of the pattern, then hold it to a second on
+    // replies of 100,000 spaces, which took the old code 6 to 25 s on each
+    // case that is not marked "guard" (issue #44).
+    test('reads the text from its first to its last non-space character', () => {
+        expect(parseChoicePrompt('1.   Left  door \t \n2. \u00a0Right\u3000\n')).toEqual(['Left  door', 'Right']);
+        expect(parseChoicePrompt('1. A\n2. B C   D   ')).toEqual(['A', 'B C   D']);
+        expect(parseChoicePrompt('1. A\r\n2. B\r\n')).toEqual(['A', 'B']);
+    });
+
+    test('does not read a line with nothing after its marker', () => {
+        expect(parseChoicePrompt('1. A\n2.   \n')).toEqual([]);
+        expect(parseChoicePrompt('1. A\n2.')).toEqual([]);
+    });
+
+    test('does not read a line that breaks inside its text', () => {
+        expect(parseChoicePrompt('1. A\n2. B\rC')).toEqual([]);
+    });
+
+    test('stays fast on replies with long runs of whitespace', () => {
+        const spaces = ' '.repeat(100000);
+        const crafted = {
+            'spaces inside the last option': `1. A\n2. B${spaces}C`,
+            'spaces inside the last option, then a carriage return': `1. A\n2. B${spaces}\rC`,
+            'spaces inside the prose': `Look.${spaces}Think.\n1. A\n2. B`,
+            'spaces between the options': `1. A\n${spaces}\n2. B`,
+            'guard: spaces after the last option': `1. A\n2. B${spaces}`,
+            'a leading run of spaces': `${spaces}1. A\n2. B`,
+        };
+        for (const [label, reply] of Object.entries(crafted)) {
+            const started = Date.now();
+            parseChoicePrompt(reply);
+            expect({ label, seconds: (Date.now() - started) / 1000 < 1 }).toEqual({ label, seconds: true });
+        }
+    });
+
     test('rejects a single numbered line', () => {
         expect(parseChoicePrompt('You may only:\n1. Wait')).toEqual([]);
     });

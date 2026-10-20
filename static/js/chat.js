@@ -276,8 +276,12 @@ function removeThinking() {
 // player one typed digit, a false positive dresses a recap or a rules list
 // up as a menu.
 
-// `N. text` or `N) text`, any indentation, trailing whitespace ignored.
-const CHOICE_LINE = /^\s*(\d+)([.)])\s+(\S.*?)\s*$/;
+// `N. text` or `N) text`, any indentation, trailing whitespace ignored. The
+// text runs from its first to its last non-space character, so the whitespace
+// after it is read once, by the last `\s*`: with a lazy `.*?` in front of it,
+// a line of many spaces inside the text was read again from each of them, and
+// a model reply of 20,000 spaces froze the tab for 3 s (issue #44).
+const CHOICE_LINE = /^\s*(\d+)([.)])\s+(\S(?:.*\S)?)\s*$/;
 const CHOICE_LABEL_MAX_LENGTH = 80;
 const CHOICE_OTHER_LABEL = 'Something else…';
 // A last numbered item that only offers "something else" (issue #384). The
@@ -304,7 +308,9 @@ const CHOICE_ESCAPE_ITEM = new RegExp(
  */
 function parseChoicePrompt(markdown) {
   if (typeof markdown !== 'string') return [];
-  const lines = markdown.replace(/\s+$/, '').split('\n');
+  // trimEnd, not /\s+$/: that pattern re-read every run of whitespace inside
+  // the reply to its end (issue #44).
+  const lines = markdown.trimEnd().split('\n');
   const options = [];
   let marker = null;
   for (let index = lines.length - 1; index >= 0; index -= 1) {

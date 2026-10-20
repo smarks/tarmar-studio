@@ -74,8 +74,9 @@ def coverage_from_summary_text(output: str) -> float | None:
     The printed percentage is rounded for display, so "45.19%" guarantees only
     45.185%; the bottom of that interval is what the ratchet may rely on.
     """
-    # Match "Statements   : 45.19% ( 94/208 )"
-    match = re.search(r"Statements\s+:\s+(\d+\.?\d*)%", output)
+    # Match "Statements   : 45.19% ( 94/208 )". The decimals sit inside the
+    # optional group so a long run of digits is not read twice (issue #44).
+    match = re.search(r"Statements\s+:\s+(\d+(?:\.\d*)?)%", output)
     if match is None:
         return None
     printed = match.group(1)

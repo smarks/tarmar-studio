@@ -6,6 +6,7 @@ which outcomes fail the hook and which are tolerated.
 """
 
 import json
+import time
 
 import pytest
 import update_js_coverage_threshold as hook
@@ -220,3 +221,30 @@ def test_ratchet_never_lowers_the_threshold(monkeypatch, capsys):
     stub_hook(monkeypatch, run=make_run(), coverage=44, threshold=45)
 
     assert hook.main() == 0
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("Statements   : 45.19% ( 94/208 )", 45.185),
+        ("Statements : 45%", 44.5),
+        ("Statements : 45.%", 44.5),
+        ("Statements : 45.19", None),
+        ("Branches : 45.19%", None),
+    ],
+)
+def test_the_printed_statement_coverage_is_read_as_it_always_was(output, expected):
+    reading = hook.coverage_from_summary_text(output)
+    if expected is None:
+        assert reading is None
+    else:
+        assert reading == pytest.approx(expected)
+
+
+def test_the_statements_pattern_stays_fast_on_a_long_run_of_digits():
+    # The old pattern split a run of digits between "\d+" and "\d*": about 10 s
+    # on this (measured on one machine, 2026-10-18), so code that backtracks
+    # again fails here.
+    started = time.perf_counter()
+    assert hook.coverage_from_summary_text("Statements : " + "1" * 55_000) is None
+    assert time.perf_counter() - started < 1.0

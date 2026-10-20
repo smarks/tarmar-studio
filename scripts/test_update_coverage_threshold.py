@@ -10,6 +10,7 @@ run is needed.
 
 import json
 import subprocess
+import time
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
@@ -235,3 +236,43 @@ def test_a_luckier_run_keeps_a_point_of_slack(monkeypatch):
     """
     assert _main_with_measurement(monkeypatch, measured=99.0142, current=90) == [98]
     assert _main_with_measurement(monkeypatch, measured=99.0142, current=98) == []
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("Total coverage: 92.86%", 92.855),
+        ("Total coverage: 93%", 92.5),
+        ("Total coverage: 93.%", 92.5),
+        ("TOTAL      33510   1000    97.5%", 97.45),
+        ("TOTAL 10 2 98%", 97.5),
+        ("Total coverage: 92.86", None),
+        ("Total coverage: %", None),
+        ("TOTAL 10 98%", None),
+    ],
+)
+def test_the_printed_percentage_is_read_as_it_always_was(output, expected):
+    reading = update_coverage_threshold.coverage_from_output(output)
+    if expected is None:
+        assert reading is None
+    else:
+        assert reading == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Total coverage: " + "1" * 60_000,
+        "TOTAL 1 1 " + "1" * 66_000,
+        "Total coverage: " + "1" * 74_000 + ".",
+        "TOTAL 1 1 " + "1" * 96_000 + ".",
+    ],
+    ids=["total line", "table row", "total line, point", "table row, point"],
+)
+def test_the_percentage_patterns_stay_fast_on_a_long_run_of_digits(output):
+    # The old patterns split a run of digits between "\d+" and "\d*": 10 to 26 s
+    # on each of these (measured on one machine, 2026-10-18), so code that
+    # backtracks again fails here.
+    started = time.perf_counter()
+    assert update_coverage_threshold.coverage_from_output(output) is None
+    assert time.perf_counter() - started < 1.0
