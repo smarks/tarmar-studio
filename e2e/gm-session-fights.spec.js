@@ -82,15 +82,16 @@ ${variable}.body_damage = ${variable}.body + 200
 ${variable}.save()`;
 
 /**
- * Attach characters from the picker (each attach reloads on the session),
- * then put `/fight <foes>` on the board.
+ * Attach characters from the picker, then put `/fight <foes>` on the board.
  *
- * Each attach waits for its own reload, then for the sheet the reloaded page
- * renders from the record (#942). A URL wait cannot tell them apart: from the
- * second attach on, the page is already at `?session=N`, so `waitForURL`
- * returned at once and `/fight` went in while the attach was still posting,
- * either before the second character joined or into a page the reload threw
- * away.
+ * The first attach, from a blank chat, makes the session and the page goes
+ * to it: that one waits for its load. Every later attach is to the session
+ * the page is on and shows in place (#15): the Characters tab is fetched
+ * again and the page is not reloaded, so there is no load to wait for. Each
+ * then waits for the sheet the server renders from the record (#942), which
+ * is on the page only once the attach is saved, so `/fight` never goes in
+ * while an attach is still posting. A URL wait could not tell the attaches
+ * apart: from the second on, the page is already at `?session=N`.
  * @param {import('@playwright/test').Page} page
  * @param {string[]} names
  * @param {string} foes
@@ -98,12 +99,17 @@ ${variable}.save()`;
 async function attachAndFight(page, names, foes) {
     for (const name of names) {
         await chooseToAttach(page, name);
-        await Promise.all([
-            page.waitForEvent('load'),
-            page.click('#gm-character-attach'),
-        ]);
-        await expect(page).toHaveURL(/\/tarmar\/gm\/\?session=\d+$/);
+        const sessionUrl = new URL(page.url()).searchParams.has('session') ? page.url() : null;
+        if (sessionUrl) {
+            await page.click('#gm-character-attach');
+        } else {
+            await Promise.all([
+                page.waitForEvent('load'),
+                page.click('#gm-character-attach'),
+            ]);
+        }
         await expect(page.locator('.gm-sheet-name', { hasText: name })).toHaveCount(1);
+        await expect(page).toHaveURL(sessionUrl || /\/tarmar\/gm\/\?session=\d+$/);
     }
     await page.fill('#user-input', `/fight ${foes}`);
     await page.press('#user-input', 'Enter');
