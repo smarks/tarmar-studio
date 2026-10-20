@@ -742,7 +742,7 @@ class EquipmentRulesFileTest(_FileTestCase):
                         forbidden_gaits=["dash", "dash"]
                     ),
                     "encumbrance.levels[1].forbidden_gaits",
-                    "repeats an entry",
+                    "repeats the entry ['dash']",
                 ),
                 (
                     lambda stored: stored["armour_restriction_codes"].update(
@@ -759,7 +759,7 @@ class EquipmentRulesFileTest(_FileTestCase):
                 (
                     lambda stored: stored["gaits"].update(order=["dash", "dash"]),
                     "gaits.order",
-                    "repeats an entry",
+                    "repeats the entry ['dash']",
                 ),
                 (
                     lambda stored: stored["defender_dodge"].update(minimum=False),
@@ -939,6 +939,16 @@ class EquipmentRulesValuesTest(SimpleTestCase):
         self.assertEqual(self.encumbrance.heaviest.key, "crushed")
         self.assertIsNone(self.encumbrance.heaviest.max_multiplier)
         self.assertEqual(INVENTED_EQUIPMENT_RULES.gaits.slowest, "amble")
+
+    def test_gaits_built_with_a_repeated_gait_names_only_the_repeat(self) -> None:
+        # Issue #82: built directly (the file reader's text_list refuses a
+        # repeat first), the refusal names the repeated gait, not the order.
+        with self.assertRaises(ValueError) as caught:
+            GaitRules(
+                order=("dash", "trot", "dash", "amble"),
+                base_distances={"dash": 9, "trot": 5, "amble": 0},
+            )
+        self.assertEqual(str(caught.exception), "order repeats the gait ['dash']")
 
 
 class CanonCatalogWrittenBackTest(SimpleTestCase):
