@@ -31,6 +31,7 @@ from characters.skills import (
     calculate_skill_points_from_xp,
     glossary_skill,
     specialised_skill_for_granted,
+    split_specialised_skill,
 )
 from characters.tests.rules_fixtures import seated_skill_rules
 from common.test_helpers import BaseTestCase, create_character
@@ -634,6 +635,62 @@ class ChosenPartTest(BaseTestCase):
         self.assertEqual(glossary_skill("knowledge (history)"), "knowledge")
         self.assertEqual(glossary_skill("weapon (broadsword)"), "weapon")
         self.assertEqual(governing_attribute("maker skill (smith)"), "intelligence")
+
+    def test_a_chosen_part_may_hold_parentheses_of_its_own(self):
+        # Issue #52: the normaliser keeps balanced parentheses, so the split
+        # reads the chosen part the same way instead of calling it another skill.
+        self.assertEqual(
+            split_specialised_skill("knowledge (history (old))"),
+            ("knowledge", "history (old)"),
+        )
+        self.assertEqual(glossary_skill("maker skill (smith (bronze))"), "maker skill")
+        self.assertEqual(
+            split_specialised_skill("knowledge (a) (b)"), ("knowledge (a) (b)", "")
+        )
+        for name in (
+            "knowledge",
+            "knowledge ()",
+            "knowledge (a",
+            "(knowledge)",
+            "lore (history)",
+            "knowledge(history)",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(split_specialised_skill(name), (name, ""))
+
+    def test_a_player_may_start_a_maker_skill_craft_with_parentheses(self):
+        # Issue #52: the craft is read whole, so the Maker Skill's player
+        # choice still covers it.
+        character = create_character(
+            self.create_user("nested-smith"), free_skill_points=1
+        )
+        services.apply_skill_points(
+            character, "Maker Skill (Smith (Bronze))", 1, is_game_master=False
+        )
+        self.assertEqual(character.skills, {"maker skill (smith (bronze))": 1})
+
+    def test_a_knowledge_field_with_parentheses_is_the_game_masters(self):
+        player_character = create_character(
+            self.create_user("nested-scholar"), free_skill_points=1
+        )
+        with self.assertRaisesMessage(
+            services.CharacterChangeError, services.KNOWLEDGE_FIELD_REFUSED_REASON
+        ):
+            services.apply_skill_points(
+                player_character,
+                "Knowledge (History (Old))",
+                1,
+                is_game_master=False,
+            )
+        self.assertEqual(player_character.skills, {})
+
+        master_character = create_character(
+            self.create_user("nested-scholar-gm"), free_skill_points=1
+        )
+        services.apply_skill_points(
+            master_character, "Knowledge (History (Old))", 1, is_game_master=True
+        )
+        self.assertEqual(master_character.skills, {"knowledge (history (old))": 1})
 
     def test_a_rolled_maker_skill_goes_to_the_chosen_craft(self):
         self.assertEqual(

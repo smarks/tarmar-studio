@@ -41,7 +41,6 @@ from .constants import (
     CHARACTER_ATTRIBUTE_FIELDS,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
-    MAX_SKILL_NAME_LENGTH,
     too_long,
 )
 from .dice import (
@@ -92,6 +91,7 @@ from .skills import (
     glossary_skill,
     normalize_skill_name,
     simulate_experience_years,
+    skill_name_refusal,
     specialised_skill_for_granted,
     split_specialised_skill,
     track_keys,
@@ -1582,7 +1582,7 @@ def _hold_skill_name(skills: Mapping[str, int], name: str) -> None:
     """
     if name in skills:
         return
-    refusal = too_long("Skill name", name, MAX_SKILL_NAME_LENGTH)
+    refusal = skill_name_refusal(name)
     if refusal:
         raise CharacterChangeError(refusal)
 
@@ -1615,12 +1615,17 @@ def apply_skill_points(
 
     Raises:
         CharacterChangeError: Too few free points for a player, a name
-            :func:`allocation_refusal` refuses a player, a new name past
-            :data:`MAX_SKILL_NAME_LENGTH`, or the skill would pass the
-            storage ceiling.
+            :func:`allocation_refusal` refuses a player, a name (as asked for
+            or as stored) past :data:`MAX_SKILL_NAME_LENGTH`, or the skill
+            would pass the storage ceiling.
     """
     if points < 1:
         raise CharacterChangeError("A skill purchase must be at least one point")
+    # As asked for, before it is normalized: a storage bound, the same for a
+    # Game Master (issue #52).
+    received_refusal = skill_name_refusal(skill)
+    if received_refusal:
+        raise CharacterChangeError(received_refusal)
     granted = 0
     if character.free_skill_points < points:
         if not is_game_master and not character.free_skill_points:
