@@ -266,7 +266,10 @@ Notes on the edges, each checkable:
   (`reference.paths.CHARACTER_RULES_FILE`) into `CharacterRules`: every number
   character creation uses (the attribute ceiling and point buy, the starting
   age and aging stage, the attribute, Fatigue and literacy dice, the height
-  and weight tables, and the provenance, location and wealth tables). Callers
+  and weight tables, the provenance, location and wealth tables, and under
+  `defaults` the row of each table a character holds until it is rolled or
+  set, which the `Character` model's background defaults, its validation of
+  those fields and the Games Master's blank draft read; issue #66). Callers
   read it through the cached `character_rules()` when they run, never at
   import, so the offline CLI's import chain stays free of Django and a canon
   whose file is refused is reported by the `characters.E001` system check.

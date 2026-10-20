@@ -318,7 +318,9 @@ class RulesFileReader:
         building it inside this block names the file and the field instead.
 
         Args:
-            field_path: The field whose values are built inside the block.
+            field_path: The field whose values are built inside the block, or
+                ``""`` when the block builds the whole file and each check
+                across blocks names its own field in its message.
 
         Raises:
             RulesFileError: As :attr:`error_class`, when the block raised
@@ -327,7 +329,8 @@ class RulesFileReader:
         try:
             yield
         except ValueError as error:
-            raise self.error_class(f"{self.path}: {field_path}: {error}") from error
+            where = f"{field_path}: " if field_path else ""
+            raise self.error_class(f"{self.path}: {where}{error}") from error
 
     def file_object(
         self,

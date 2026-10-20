@@ -18,7 +18,7 @@ from unittest import mock
 from django.conf import settings
 
 from characters.constants import CHARACTER_TEXT_LIMITS
-from characters.models import Character
+from characters.models import Character, character_field_options
 from characters.skill_rules import skill_rules
 from characters.skills import (
     DEFAULT_RUN_YEARS,
@@ -522,13 +522,15 @@ class EditableChoiceCellsFollowTheModelTest(BaseTestCase):
             r'<option value="([^"]*)"[^>]*>([^<]*)</option>', block.group(1)
         )
 
-    def test_every_choice_field_offers_exactly_the_model_choices(self):
+    def test_every_choice_field_offers_exactly_the_canons_rows(self):
+        """The select lists the loaded canon's rows, the one statement of a
+        field's options (issue #66)."""
         for field in self.CHOICE_FIELDS:
             with self.subTest(field=field):
-                choices = self.character._meta.get_field(field).choices
-                self.assertIsNotNone(choices, f"{field} declares no choices")
-                assert choices is not None
-                self.assertEqual(self._options(field), [tuple(c) for c in choices])
+                options = character_field_options(field)
+                self.assertIsNotNone(options, f"{field} has no options")
+                assert options is not None
+                self.assertEqual(self._options(field), list(options.items()))
 
     def test_the_characters_own_value_is_the_selected_option(self):
         for field in self.CHOICE_FIELDS:
@@ -551,7 +553,7 @@ class EditableChoiceCellsFollowTheModelTest(BaseTestCase):
         ).content.decode()
 
         self.assertNotIn('data-field="location"', html)
-        self.assertIn(self.character.get_location_display(), html)
+        self.assertIn(self.character.location, html)
 
 
 class _NumberInputs(HTMLParser):

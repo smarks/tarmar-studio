@@ -19,11 +19,6 @@ import re
 # GM's /character command, issue #344) accept only documents carrying it.
 CHARACTER_EXPORT_FORMAT = "tarmar-character"
 
-# The wealth level a character has until one is rolled or set: the model's
-# default, a new session character's draft, and the level whose starting coin
-# the extraction schema names as the default (issue #68).
-DEFAULT_WEALTH_LEVEL = "Moderate"
-
 # The attribute a "+1 STR"/"+1 DEX"/"+1 CON" experience result raises, keyed by
 # the short name the result carries. Lives here rather than in ``skills.py``
 # because both the simulator (which raises its running score) and

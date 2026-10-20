@@ -807,9 +807,22 @@ class ImportServiceTest(BaseTestCase):
             self._save({"is_alive": False, "death_cause": ""})
         self.assertIn("death cause", str(raised.exception))
 
-        with self.assertRaises(self.import_service.CharacterImportError) as raised:
-            self._save({"provenance_class": "royalty"})
-        self.assertIn("Import failed", str(raised.exception))
+        # A background outside the loaded canon's tables is held by the
+        # sheet's own rule, in its words (issue #66).
+        for field, value, rows in (
+            ("provenance_class", "royalty", "nobility, merchant, commoner"),
+            ("location", "Underwater Volcano", "City, Village, Rural, Consult GM"),
+            ("wealth_level", "Comfortable", "Subsistence, Moderate, Merchant, Rich"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(
+                    self.import_service.CharacterImportError
+                ) as raised:
+                    self._save({field: value})
+                self.assertEqual(
+                    str(raised.exception),
+                    f"Import failed: {field}: {field} must be one of: {rows}",
+                )
         self.assertFalse(Character.objects.exists())
 
     def test_validate_rejects_a_non_object(self):

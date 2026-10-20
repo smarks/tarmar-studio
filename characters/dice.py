@@ -28,7 +28,7 @@ import re
 from common.rolling import Roller, RollRecord, parse_dice_specification
 
 from .constants import CORE_ATTRIBUTE_FIELDS, point_buy_budget_note
-from .rules import CoinRoll, character_rules
+from .rules import CoinRoll, character_rules, social_class_display
 from .skill_names import normalize_skill_name
 from .skill_rules import skill_rules
 
@@ -549,7 +549,7 @@ def roll_provenance_logged(roller: Roller | None = None) -> tuple[str, str, str]
     detail_roll = roll_d100(roller)
     detail = rules.detail_table(social_class).lookup(detail_roll)
     log = (
-        f"Provenance: d100={class_roll} -> {social_class.capitalize()}, "
+        f"Provenance: d100={class_roll} -> {social_class_display(social_class)}, "
         f"d100={detail_roll} -> {detail}"
     )
     return social_class, detail, log

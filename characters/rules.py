@@ -36,6 +36,8 @@ The file is a JSON object::
       },
       "wealth": [{"up_to": int, "label": str,
                   "coin": int | {"base": int, "dice": str} | null}, ...],
+      "defaults": {"social_class": str, "provenance_detail": str,
+                   "location": str, "wealth": str},
       "rulings": [{"key": str, "reading": str, ...}]
     }
 
@@ -76,6 +78,12 @@ What the values mean, and what else is refused:
   the page leaves the result to the Game Master.
 - ``wealth``: each level's starting coin, a fixed number, a base plus dice,
   or ``null`` where the Game Master sets it.
+- ``defaults``: the row of each table a character holds until it is rolled
+  or set (issue #66): a label of ``social_class``, of the detail table that
+  label names, of ``location`` and of ``wealth``. A default that names no
+  row is refused. Nothing in studio's code names a row of these tables;
+  the ``Character`` model's defaults and the Games Master's blank draft read
+  this block.
 
 Dice are ``NdS`` or ``NdS±M`` in ``common.rolling``'s standard form (no
 spaces, a lower-case ``d``, no leading zeros, no ``+0``); the lowest and
@@ -131,6 +139,14 @@ PERCENTILE_TOP = 100
 #: The tables a ``social_class`` result is rolled on next, by its label.
 SOCIAL_CLASS_DETAIL_TABLES = ("nobility", "merchant", "commoner")
 
+
+def social_class_display(label: str) -> str:
+    """A social-class label as the sheet, the dice log, the export and the
+    Games Master's panel print it (``"commoner"`` as ``"Commoner"``): the one
+    rendering, so the label is capitalised one way everywhere (issue #66)."""
+    return label.capitalize()
+
+
 POINT_BUY_FIELDS = ("total", "minimum", "maximum")
 ATTRIBUTES_FIELDS = ("maximum", "point_buy")
 AGE_FIELDS = ("starting", "years_per_stage")
@@ -151,6 +167,7 @@ LOCATION_FIELDS = ("skill_points", "rows")
 LOCATION_ROW_FIELDS = (*TABLE_ROW_FIELDS, "skills", "literacy_modifier")
 WEALTH_ROW_FIELDS = (*TABLE_ROW_FIELDS, "coin")
 COIN_ROLL_FIELDS = ("base", "dice")
+DEFAULTS_FIELDS = ("social_class", "provenance_detail", "location", "wealth")
 TOP_LEVEL_FIELDS = (
     "attributes",
     "age",
@@ -163,6 +180,7 @@ TOP_LEVEL_FIELDS = (
     *SOCIAL_CLASS_DETAIL_TABLES,
     "location",
     "wealth",
+    "defaults",
 )
 
 
@@ -680,6 +698,42 @@ class WealthTable(PercentileTable[WealthRow]):
 
 
 @dataclass(frozen=True)
+class TableDefaults:
+    """The row of each table a character holds until it is rolled or set.
+
+    The ``Character`` model's defaults and the Games Master's blank draft
+    (issue #66). Each is a label; that it names a row of its table is
+    :class:`CharacterRules`'s check, which has the tables.
+
+    Attributes:
+        social_class: A label of ``social_class``.
+        provenance_detail: A label of the detail table ``social_class`` names.
+        location: A label of ``location``.
+        wealth: A label of ``wealth``.
+    """
+
+    social_class: str
+    provenance_detail: str
+    location: str
+    wealth: str
+
+
+def _require_row(
+    field_path: str, label: str, table_name: str, table: PercentileTable[Any]
+) -> None:
+    """Refuse a default that names no row of its table.
+
+    Raises:
+        ValueError: ``table`` has no row labelled ``label``.
+    """
+    if table.row_labelled(label) is None:
+        raise ValueError(
+            f"{field_path} {label!r} names no row of {table_name}; its rows are "
+            f"{list(table.labels)}"
+        )
+
+
+@dataclass(frozen=True)
 class CharacterRules:
     """Every number character creation reads from the canon.
 
@@ -697,6 +751,7 @@ class CharacterRules:
         commoner: The provenance detail for a commoner.
         location: The origin table and its effects.
         wealth: The wealth table and starting coin.
+        defaults: The row of each table an unrolled character holds.
     """
 
     attributes: AttributeRules
@@ -712,6 +767,26 @@ class CharacterRules:
     commoner: RollTable
     location: LocationTable
     wealth: WealthTable
+    defaults: TableDefaults
+
+    @property
+    def default_wealth_row(self) -> WealthRow:
+        """The wealth row an unrolled character holds (``defaults.wealth``)."""
+        row = self.wealth.row_labelled(self.defaults.wealth)
+        # __post_init__ refused a default that names no row.
+        assert row is not None
+        return row
+
+    @property
+    def default_starting_coin(self) -> int | None:
+        """The coin an unrolled character starts with (issues #68, #66).
+
+        The default wealth row's coin when it is a fixed number; ``None`` (the
+        Game Master's to set) when that row's coin is rolled or the Game
+        Master's, rather than a number the canon never gave.
+        """
+        coin = self.default_wealth_row.coin
+        return coin if isinstance(coin, int) else None
 
     def detail_table(self, social_class: str) -> RollTable:
         """The table a ``social_class`` result is rolled on next.
@@ -734,6 +809,21 @@ class CharacterRules:
                 f"social_class labels {list(self.social_class.labels)} must be "
                 f"the detail tables {list(SOCIAL_CLASS_DETAIL_TABLES)}"
             )
+        # The defaults name rows of the tables (the social class first, since
+        # the detail default is checked against the table it names).
+        defaults = self.defaults
+        for table_name, label, table in (
+            ("social_class", defaults.social_class, self.social_class),
+            ("location", defaults.location, self.location),
+            ("wealth", defaults.wealth, self.wealth),
+        ):
+            _require_row(f"defaults.{table_name}", label, table_name, table)
+        _require_row(
+            "defaults.provenance_detail",
+            defaults.provenance_detail,
+            defaults.social_class,
+            self.detail_table(defaults.social_class),
+        )
 
 
 class _CharacterRulesFileReader(RulesFileReader):
@@ -876,6 +966,17 @@ class _CharacterRulesFileReader(RulesFileReader):
         with self.wrapped_value_errors(field_path):
             return WealthTable(rows=rows)
 
+    def defaults(self, value: Any, field_path: str) -> TableDefaults:
+        """``defaults``: a label per table, checked against the tables by
+        :class:`CharacterRules`."""
+        fields = self.json_object(value, field_path, DEFAULTS_FIELDS)
+        return TableDefaults(
+            **{
+                name: self.text(fields[name], f"{field_path}.{name}")
+                for name in DEFAULTS_FIELDS
+            }
+        )
+
     def character_rules(self, value: Any) -> CharacterRules:
         """The whole file."""
         fields = self.file_object(value, TOP_LEVEL_FIELDS)
@@ -896,8 +997,10 @@ class _CharacterRulesFileReader(RulesFileReader):
         }
         location = self.location(fields["location"], "location")
         wealth = self.wealth(fields["wealth"], "wealth")
-        # The one check across blocks: social_class's labels name the tables.
-        with self.wrapped_value_errors("social_class"):
+        defaults = self.defaults(fields["defaults"], "defaults")
+        # The checks across blocks (social_class's labels name the tables, the
+        # defaults name rows) each name their own field.
+        with self.wrapped_value_errors(""):
             return CharacterRules(
                 attributes=attributes,
                 age=age,
@@ -908,6 +1011,7 @@ class _CharacterRulesFileReader(RulesFileReader):
                 weight=weight,
                 location=location,
                 wealth=wealth,
+                defaults=defaults,
                 **tables,
             )
 

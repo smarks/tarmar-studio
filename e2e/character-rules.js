@@ -27,7 +27,10 @@ let loaded = null;
  * ``origins`` lists the location table's rows in order: each origin's label,
  * its literacy ``modifier`` (``null`` where the Game Master decides, so there
  * is no check to roll) and the ``check`` the sheet prints for it
- * (``Character.location_literacy_check``).
+ * (``Character.location_literacy_check``). ``social_class_labels`` and
+ * ``wealth_labels`` are those tables' rows in order, and ``defaults`` the
+ * row of each table a character holds until it is rolled or set, with the
+ * ``starting_coin`` that goes with the default wealth row (issue #66).
  *
  * ``fatigue.formula`` and ``fatigue.help_formula`` are the sum as the sheet's
  * formula cell and its help write it
@@ -42,6 +45,7 @@ let loaded = null;
 function loadedCharacterRules() {
     if (loaded) return loaded;
     loaded = readDjangoJson(`
+import dataclasses
 import json
 from characters.constants import CORE_ATTRIBUTE_FIELDS
 from characters.models import Character
@@ -74,6 +78,12 @@ print("CHARACTER_RULES " + json.dumps({
         }
         for row in rules.location.rows
     ],
+    "social_class_labels": list(rules.social_class.labels),
+    "wealth_labels": list(rules.wealth.labels),
+    "defaults": {
+        **dataclasses.asdict(rules.defaults),
+        "starting_coin": rules.default_starting_coin,
+    },
     "aging": {
         "horizon_age": aging_preview_horizon_age(),
         "stage_years_words": number_in_words(stage_years),

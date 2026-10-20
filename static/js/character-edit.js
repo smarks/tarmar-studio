@@ -184,11 +184,12 @@ const autosave = initAutosave({
             document.getElementById('skills-list').innerHTML = data.skills_html;
             document.getElementById('allocated-points').textContent = data.total_allocated_points;
         }
-        // A Game Master's ruling shows at "Consult GM" only (#801), and moving
-        // the Origin off it withdraws the ruling.
-        if (field === 'location') {
+        // A Game Master's ruling shows only at the origin the rules leave to
+        // him (#801), the one with no literacy check, which the server says
+        // (a null modifier); moving the Origin off it withdraws the ruling.
+        if (field === 'location' && data.location_literacy_modifier !== undefined) {
             const rulingRow = document.getElementById('origin-ruling-row');
-            if (rulingRow) rulingRow.hidden = value !== 'Consult GM';
+            if (rulingRow) rulingRow.hidden = data.location_literacy_modifier !== null;
         }
         paintFieldInput('origin_ruling', data.origin_ruling);
         if (data.location_recorded !== undefined) {
