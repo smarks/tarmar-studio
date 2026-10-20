@@ -57,7 +57,7 @@ addopts, and would be one ``-m`` typo away from CI.
 
 Run it against a live Ollama with the GM model loaded::
 
-    DEBUG=true GM_MODEL=qwen3.6:27b-mlx uv run python scripts/gm_behaviour_check.py
+    DEBUG=true uv run python scripts/gm_behaviour_check.py
 
 It exits 0 when every check met its required pass rate, 1 when one did not,
 and 0 with a SKIPPED banner when Ollama is unreachable. It is never part of

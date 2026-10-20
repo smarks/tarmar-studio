@@ -2,8 +2,10 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -1333,7 +1335,6 @@ class GMModelConfigTest(SimpleTestCase):
         self.assertEqual(config.model, DEFAULT_GM_MODEL)
         self.assertEqual(config.num_ctx, DEFAULT_GM_NUM_CTX)
         self.assertEqual(config.temperature, DEFAULT_GM_TEMPERATURE)
-        self.assertEqual(DEFAULT_GM_MODEL, "qwen3:32b")
         self.assertEqual(DEFAULT_GM_NUM_CTX, 65536)
         self.assertEqual(DEFAULT_GM_TEMPERATURE, 0.8)
 
@@ -1387,6 +1388,189 @@ class GMModelConfigTest(SimpleTestCase):
             with self.subTest(variable=variable):
                 self.assertIn(f"# {variable}=", env_example)
         self.assertNotIn("TARMAR_GM_MODEL", env_example)
+
+
+class GMModelDefaultSingleSourceTest(SimpleTestCase):
+    """The default GM model name has one home and every copy agrees (issue #65).
+
+    A development server has no ``.env``, so its GM model is the default. On
+    the Mac Studio, which is also production's Ollama host, a default that
+    differs from the model production has loaded makes Ollama load a second
+    model and evict one of the two it holds, which on 2026-09-16 failed a live
+    turn. The name therefore lives in :data:`gm.model_config.DEFAULT_GM_MODEL`
+    and nowhere else in code; the prose that states the default is checked
+    against it here.
+    """
+
+    #: (file, phrase) pairs. Each phrase, built from ``DEFAULT_GM_MODEL``, must
+    #: appear in the file once its whitespace is collapsed, so prose may wrap
+    #: wherever it likes. A phrase that goes missing fails the test, whether the
+    #: doc was rewritten or still holds an old name.
+    DOCUMENTED_DEFAULT_PHRASES = (
+        ("README.md", "ollama pull {model}"),
+        ("README.md", "(default {model})"),
+        ("README.md", "`GM_MODEL` defaults to `{model}`"),
+        ("README.md", "| `GM_MODEL` | `{model}` |"),
+        ("CLAUDE.md", "| `GM_MODEL` | `{model}` |"),
+        (".env.example", "`ollama pull {model}`"),
+        (".env.example", "# GM_MODEL={model}"),
+        ("docs/project-structure.md", "`GM_MODEL` (default `{model}`)"),
+    )
+
+    #: Files whose text is prose, checked a sentence at a time; the rest are
+    #: checked a line at a time.
+    PROSE_SUFFIXES = (".md", ".example")
+
+    #: Files that could carry a model name outside the Python code the AST
+    #: check covers. A tracked file with no suffix (``run``) is included too.
+    NON_PYTHON_SUFFIXES = (
+        ".sh",
+        ".yml",
+        ".yaml",
+        ".conf",
+        ".plist",
+        ".toml",
+        ".json",
+        ".service",
+    )
+
+    @staticmethod
+    def _tracked_files(*, with_suffixes: tuple[str, ...]) -> list[Path]:
+        """Tracked files with one of ``with_suffixes``, or with none at all."""
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        candidates = [REPO_ROOT / name for name in listing.split("\0") if name]
+        return [
+            path
+            for path in candidates
+            if path.is_file() and path.suffix in (*with_suffixes, "")
+        ]
+
+    @staticmethod
+    def _text(path: Path) -> str:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def test_default_is_not_the_fallback(self):
+        from gm.model_config import DEFAULT_GM_MODEL, FALLBACK_GM_MODEL
+
+        self.assertNotEqual(DEFAULT_GM_MODEL, FALLBACK_GM_MODEL)
+
+    def test_a_cleared_environment_gives_settings_and_the_cli_the_default(self):
+        """Neither ``settings.GM_MODEL`` nor ``cli.gm.MODEL`` has its own copy.
+
+        Run in a fresh interpreter with no ``GM_*`` variable and an empty dotenv
+        file: both are computed at import, so the test process's own values say
+        nothing about what a machine with no ``.env`` gets.
+        """
+        from gm.model_config import DEFAULT_GM_MODEL
+
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith("GM_")
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            empty_dotenv = Path(directory) / ".env"
+            empty_dotenv.write_text("", encoding="utf-8")
+            environment.update(
+                DJANGO_SETTINGS_MODULE="tarmar_studio.settings",
+                TARMAR_DOTENV_PATH=str(empty_dotenv),
+                DEBUG="true",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from django.conf import settings; import cli.gm; "
+                    "print(settings.GM_MODEL); print(cli.gm.MODEL)",
+                ],
+                cwd=REPO_ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        self.assertEqual(result.stdout.split(), [DEFAULT_GM_MODEL, DEFAULT_GM_MODEL])
+
+    def test_documented_defaults_name_the_default_model(self):
+        from gm.model_config import DEFAULT_GM_MODEL
+
+        for relative_path, phrase_template in self.DOCUMENTED_DEFAULT_PHRASES:
+            phrase = phrase_template.format(model=DEFAULT_GM_MODEL)
+            collapsed = " ".join(self._text(REPO_ROOT / relative_path).split())
+            with self.subTest(file=relative_path, phrase=phrase):
+                self.assertIn(phrase, collapsed)
+
+    def test_the_fallback_is_named_only_where_it_is_called_the_fallback(self):
+        from gm.model_config import FALLBACK_GM_MODEL
+
+        python_and_prose = (".py", *self.PROSE_SUFFIXES, *self.NON_PYTHON_SUFFIXES)
+        for path in self._tracked_files(with_suffixes=python_and_prose):
+            text = self._text(path)
+            if FALLBACK_GM_MODEL not in text:
+                continue
+            if path.suffix in self.PROSE_SUFFIXES:
+                units = [
+                    " ".join(sentence.split())
+                    for paragraph in text.split("\n\n")
+                    for sentence in re.split(r"(?<=[.!?])\s+", paragraph)
+                ]
+            else:
+                units = text.splitlines()
+            for unit in units:
+                if FALLBACK_GM_MODEL in unit:
+                    with self.subTest(file=str(path.relative_to(REPO_ROOT))):
+                        self.assertIn("fallback", unit.lower())
+
+    def test_only_model_config_spells_the_default_in_code(self):
+        import ast
+
+        from gm.model_config import DEFAULT_GM_MODEL
+
+        offenders: list[str] = []
+        model_config_path = (REPO_ROOT / "gm" / "model_config.py").resolve()
+        for path in self._tracked_files(with_suffixes=(".py",)):
+            if path.suffix != ".py" or path.resolve() == model_config_path:
+                continue
+            source = self._text(path)
+            if DEFAULT_GM_MODEL not in source:
+                continue
+            tree = ast.parse(source)
+            docstring_nodes = {
+                id(node.body[0].value)
+                for node in ast.walk(tree)
+                if isinstance(
+                    node,
+                    (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+                )
+                and node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+            }
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and id(node) not in docstring_nodes
+                    and DEFAULT_GM_MODEL in node.value
+                ):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        self.assertEqual(offenders, [])
+
+    def test_no_script_or_config_file_spells_the_default(self):
+        from gm.model_config import DEFAULT_GM_MODEL
+
+        offenders = [
+            str(path.relative_to(REPO_ROOT))
+            for path in self._tracked_files(with_suffixes=self.NON_PYTHON_SUFFIXES)
+            if DEFAULT_GM_MODEL in self._text(path)
+        ]
+        self.assertEqual(offenders, [])
 
 
 class GMRetrievalConfigTest(SimpleTestCase):
