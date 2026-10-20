@@ -96,13 +96,13 @@ from .persistence import (
     storable_profile,
 )
 from .pickers import SETUP_PICKER_KINDS, claim_picker, setup_picker
+from .refusals import BattleRefusal
 from .services import (
     BARE_HANDED_KEY,
     MAX_COMBATANTS,
     MAX_TEAM_NAME,
     MIN_COMBATANTS,
     STALE_POOLS_REFUSAL,
-    BattleInLobby,
     StalePools,
     add_draft_entry,
     add_draft_team,
@@ -156,13 +156,16 @@ FOES_BELONG_TO_GAME_MASTER = (
     "Master, so only a Game Master can restart it or change who decides"
 )
 
-#: What anyone advancing a battle is told when the advance fails for a reason
-#: that is not a rule refusing it (issue #13). The exception's own text can
-#: carry file paths, SQL or internal state, and players run battles too, so it
-#: goes to the log with its traceback and the page gets this sentence.
-ADVANCE_FAILED_MESSAGE = (
-    "The battle could not advance because of an error on the server. It has "
-    "been logged; reload the page and try again."
+#: What a battle endpoint's script caller is told when the request fails for
+#: a reason that is not a rule refusing it: the advance's every exception
+#: (issue #13), and any other endpoint's ``ValueError`` that is not a
+#: :class:`~battle.refusals.BattleRefusal` (issue #39). The exception's own
+#: text can carry file paths, SQL, rules profiles or combatant ids, and players
+#: run battles too, so it goes to the log with its traceback and the page gets
+#: this sentence.
+BATTLE_REQUEST_FAILED_MESSAGE = (
+    "That could not be done because of an error on the server. It has been "
+    "logged; reload the page and try again."
 )
 
 #: The spellings a checkbox or a form-posted flag arrives as. A browser sends
@@ -229,6 +232,43 @@ def _wants_json(request) -> bool:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _internal_errors_logged(
+    *, json_only: bool = False
+) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
+    """Keep a service's internal ``ValueError`` text off the page (issue #39).
+
+    A battle view catches :class:`~battle.refusals.BattleRefusal` around its
+    service call and shows the player those words. Any other ``ValueError``
+    is an internal check failing, and its text is not the player's to read.
+    A script caller gets :data:`BATTLE_REQUEST_FAILED_MESSAGE` as JSON, with
+    the error logged here with its traceback, as the advance answers (#13).
+    A form post gets the error raised on, so Django logs it once with its
+    traceback and renders the site's own error page.
+
+    Args:
+        json_only: The endpoint answers only JSON, so its error is JSON even
+            for a post with no JSON body (a bodyless ``postJson``).
+
+    Returns:
+        The decorator.
+    """
+
+    def decorate(view: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+        @functools.wraps(view)
+        def guarded(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+            try:
+                return view(request, *args, **kwargs)
+            except ValueError:
+                if not (json_only or _wants_json(request)):
+                    raise
+                logger.exception("Battle endpoint %s failed", request.path)
+                return _json_error(BATTLE_REQUEST_FAILED_MESSAGE, status=500)
+
+        return guarded
+
+    return decorate
 
 
 #: What a guest is told, at the control the limit applies to. Each is a
@@ -417,7 +457,7 @@ def _clean_draft_name(value) -> str:
     name = str(value or "").strip()
     refusal = too_long("Name", name, BATTLE_NAME_MAX_LENGTH)
     if refusal:
-        raise ValueError(refusal)
+        raise BattleRefusal(refusal)
     return name
 
 
@@ -425,18 +465,18 @@ def _clean_draft_seed(value) -> int | None:
     try:
         seed = parse_seed(value or "")
     except InvalidSeed:
-        raise ValueError("Seed must be a whole number") from None
+        raise BattleRefusal("Seed must be a whole number") from None
     if seed is None:
         return None
     if not 0 <= seed < MAX_SEED:
-        raise ValueError(f"Seed must be between 0 and {MAX_SEED - 1}")
+        raise BattleRefusal(f"Seed must be between 0 and {MAX_SEED - 1}")
     return seed
 
 
 def _clean_draft_profile(value) -> str:
     profile = str(value or TARMAR_PROFILE).strip()
     if profile not in dict(PROFILE_CHOICES):
-        raise ValueError("Unknown rules profile")
+        raise BattleRefusal("Unknown rules profile")
     return profile
 
 
@@ -446,7 +486,7 @@ def _clean_draft_control_mode(value) -> str:
 
 
 #: The draft fields the terms stage edits, with their validators. Each
-#: validator returns the value to store, raising ValueError with a
+#: validator returns the value to store, raising BattleRefusal with a
 #: user-facing message otherwise. One table serves both writers — the
 #: autosave endpoint and the start-time merge — so they cannot drift.
 DRAFT_FIELD_CLEANERS = {
@@ -465,7 +505,7 @@ def _apply_draft_terms(draft: BattleDraft, data) -> None:
     """Store the terms fields present in ``data`` on the draft.
 
     Raises:
-        ValueError: with the first field's user-facing message.
+        BattleRefusal: with the first field's user-facing message.
     """
     changed = []
     for field, cleaner in DRAFT_FIELD_CLEANERS.items():
@@ -804,6 +844,7 @@ def _draft_gone_is_404(view):
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def battle_setup_update(request, pk):
     """Autosave one terms field (name, seed, rules profile, auto-start).
 
@@ -824,7 +865,7 @@ def battle_setup_update(request, pk):
         return _json_error("Unknown setup field")
     try:
         _apply_draft_terms(draft, {field: data.get("value")})
-    except ValueError as field_error:
+    except BattleRefusal as field_error:
         return _json_error(str(field_error))
     except BattleDraft.NotUpdated:
         return _json_error(DRAFT_GONE_MESSAGE, status=404)
@@ -833,6 +874,7 @@ def battle_setup_update(request, pk):
 
 @require_POST
 @_draft_gone_is_404
+@_internal_errors_logged()
 def battle_setup_add(request, pk):
     """Add one muster entry (fighter, beast, random beast, character, seat)."""
     draft = _own_draft_or_404(request, pk)
@@ -868,7 +910,7 @@ def battle_setup_add(request, pk):
             character_id=character_id,
             team=(request.POST.get("team") or "").strip(),
         )
-    except ValueError as add_error:
+    except BattleRefusal as add_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -880,6 +922,7 @@ def battle_setup_add(request, pk):
 
 @require_POST
 @_draft_gone_is_404
+@_internal_errors_logged()
 def battle_setup_remove(request, pk):
     """Strike one muster entry, by roster position."""
     draft = _own_draft_or_404(request, pk)
@@ -894,7 +937,7 @@ def battle_setup_remove(request, pk):
         )
     try:
         remove_draft_entry(draft, index)
-    except ValueError as remove_error:
+    except BattleRefusal as remove_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -906,6 +949,7 @@ def battle_setup_remove(request, pk):
 
 @require_POST
 @_draft_gone_is_404
+@_internal_errors_logged()
 def battle_setup_import_party(request, pk):
     """Import a party as a new team seeded with its visible members (#275).
 
@@ -933,7 +977,7 @@ def battle_setup_import_party(request, pk):
         )
     try:
         result = import_party_into_draft(draft, actor.user, party_id)
-    except ValueError as import_error:
+    except BattleRefusal as import_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -963,6 +1007,7 @@ def battle_setup_import_party(request, pk):
 
 @require_POST
 @_draft_gone_is_404
+@_internal_errors_logged()
 def battle_setup_team_add(request, pk):
     """Name a new, empty team on the draft's ledger."""
     draft = _own_draft_or_404(request, pk)
@@ -970,7 +1015,7 @@ def battle_setup_team_add(request, pk):
         # team_name, not name: the setup page's terms form owns "name" for
         # the battle itself, and the two must not shadow each other.
         add_draft_team(draft, request.POST.get("team_name") or "")
-    except ValueError as team_error:
+    except BattleRefusal as team_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -982,12 +1027,13 @@ def battle_setup_team_add(request, pk):
 
 @require_POST
 @_draft_gone_is_404
+@_internal_errors_logged()
 def battle_setup_team_remove(request, pk):
     """Disband one team; its entries return to the free-for-all pool."""
     draft = _own_draft_or_404(request, pk)
     try:
         remove_draft_team(draft, request.POST.get("team_name") or "")
-    except ValueError as team_error:
+    except BattleRefusal as team_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -999,6 +1045,7 @@ def battle_setup_team_remove(request, pk):
 
 @require_POST
 @_draft_gone_is_404
+@_internal_errors_logged()
 def battle_setup_entry_team(request, pk):
     """Move one muster entry onto a team (or back to the free pool)."""
     draft = _own_draft_or_404(request, pk)
@@ -1013,7 +1060,7 @@ def battle_setup_entry_team(request, pk):
         )
     try:
         set_entry_team(draft, index, (request.POST.get("team") or "").strip())
-    except ValueError as move_error:
+    except BattleRefusal as move_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -1024,6 +1071,7 @@ def battle_setup_entry_team(request, pk):
 
 
 @require_POST
+@_internal_errors_logged()
 def battle_setup_start(request, pk):
     """Compile the draft into a battle and go to it.
 
@@ -1047,7 +1095,7 @@ def battle_setup_start(request, pk):
         # the battle; this one goes to the list the battle is on, newest
         # first, rather than to a 404 about a setup that did what was asked.
         return redirect("battle:list")
-    except ValueError as start_error:
+    except BattleRefusal as start_error:
         return render(
             request,
             SETUP_TEMPLATE,
@@ -1835,18 +1883,20 @@ def battle_advance(request, pk):
             },
             status=409,
         )
-    except BattleInLobby as refusal:
+    except BattleRefusal as refusal:
         # A rule refusing, like the other battle views' refusals: its words,
-        # as a 400. Only this type is caught, not ValueError at large, since
-        # the engine's own ValueErrors are internal text (issue #13).
+        # as a 400 (the lobby's, BattleInLobby). Only refusals are caught, not
+        # ValueError at large, since the engine's own ValueErrors are
+        # internal text (issues #13, #39).
         return _json_error(str(refusal))
     except Exception:  # noqa: BLE001 — logged with its traceback, never shown
         logger.exception("Advancing battle %s failed", pk)
-        return _json_error(ADVANCE_FAILED_MESSAGE, status=500)
+        return _json_error(BATTLE_REQUEST_FAILED_MESSAGE, status=500)
     return JsonResponse(battle_payload(battle, actor, events, request))
 
 
 @require_POST
+@_internal_errors_logged()
 def battle_control(request, pk):
     """Set the battle's default control mode (#308), for whoever runs it.
 
@@ -1872,7 +1922,7 @@ def battle_control(request, pk):
             str(data.get("control_mode") or ""),
             apply_to_all=_form_flag(data.get("apply_to_all")),
         )
-    except ValueError as mode_error:
+    except BattleRefusal as mode_error:
         return _refuse(request, battle, str(mode_error))
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
@@ -1880,6 +1930,7 @@ def battle_control(request, pk):
 
 
 @require_POST
+@_internal_errors_logged()
 def battle_hth_agreement(request, pk):
     """Mark or unmark the battle, or a pair, "HTH by agreement" (#867).
 
@@ -1916,7 +1967,7 @@ def battle_hth_agreement(request, pk):
             whole_battle=scope == "battle",
             pair=pair,
         )
-    except ValueError as ruling_error:
+    except BattleRefusal as ruling_error:
         return _refuse(request, battle, str(ruling_error))
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
@@ -1924,6 +1975,7 @@ def battle_hth_agreement(request, pk):
 
 
 @require_POST
+@_internal_errors_logged()
 def battle_magic_bounds(request, pk):
     """Lift, or hold again, magic bounds for one figure (#37).
 
@@ -1961,7 +2013,7 @@ def battle_magic_bounds(request, pk):
             bounds=[str(bound) for bound in bounds],
             lifted=_form_flag(data.get(magic_bounds.LIFTED_FIELD)),
         )
-    except ValueError as ruling_error:
+    except BattleRefusal as ruling_error:
         return _refuse(request, battle, str(ruling_error))
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
@@ -1969,6 +2021,7 @@ def battle_magic_bounds(request, pk):
 
 
 @require_POST
+@_internal_errors_logged()
 def combatant_control(request, pk, combatant_id):
     """Set one combatant's control mode, or hand it back to the battle (#308).
 
@@ -2004,7 +2057,7 @@ def combatant_control(request, pk, combatant_id):
         battle, _combatant, _event = set_combatant_control_mode(
             battle.pk, combatant.pk, str(data.get("control_mode") or "")
         )
-    except ValueError as mode_error:
+    except BattleRefusal as mode_error:
         return _refuse(request, battle, str(mode_error))
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
@@ -2057,6 +2110,7 @@ def battle_restore(request, pk):
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def battle_restart(request, pk):
     """Replay from turn 0 with the same roster and seed (issue #188).
 
@@ -2077,7 +2131,7 @@ def battle_restart(request, pk):
         return _json_error(FOES_BELONG_TO_GAME_MASTER, status=403)
     try:
         battle = restart_battle(battle.pk, is_game_master=actor.is_dm)
-    except ValueError as restart_error:
+    except BattleRefusal as restart_error:
         return _json_error(str(restart_error))
     # The one line a restart writes -- who stays dead, because the record
     # says so (#854) -- comes back with it, so the log says why a figure is
@@ -2099,6 +2153,7 @@ def battle_restart(request, pk):
 
 
 @require_POST
+@_internal_errors_logged()
 def battle_resnapshot(request, pk):
     """A Game Master takes a fight's pools from the character records (#842).
 
@@ -2113,7 +2168,7 @@ def battle_resnapshot(request, pk):
         return denied
     try:
         battle = resnapshot_pools(battle.pk, is_game_master=actor.is_dm)
-    except ValueError as refusal:
+    except BattleRefusal as refusal:
         return _refuse(request, battle, str(refusal))
     if _wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
@@ -2131,6 +2186,7 @@ COMBATANT_NAME_PATTERN = re.compile(
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def battle_rename(request, pk):
     """Rename one combatant: row, state_json, future event names.
 
@@ -2171,7 +2227,7 @@ def battle_rename(request, pk):
         )
     try:
         battle, combatant = rename_combatant(battle.pk, combatant_id, name)
-    except ValueError as rename_error:
+    except BattleRefusal as rename_error:
         return _json_error(str(rename_error))
     return JsonResponse(
         {
@@ -2185,6 +2241,7 @@ def battle_rename(request, pk):
 
 
 @require_POST
+@_internal_errors_logged()
 def battle_start(request, pk):
     """Close the lobby and start the battle: its DM or its maker (#305)."""
     actor, battle = _actor_and_readable_battle(request, pk)
@@ -2197,12 +2254,13 @@ def battle_start(request, pk):
         )
     try:
         start_battle(battle.pk)
-    except ValueError as start_error:
+    except BattleRefusal as start_error:
         return _detail_with_error(request, battle, str(start_error))
     return redirect("battle:detail", pk=pk)
 
 
 @require_POST
+@_internal_errors_logged()
 def seat_claim(request, pk, combatant_id):
     """Claim one open seat, bringing or generating a character.
 
@@ -2230,23 +2288,25 @@ def seat_claim(request, pk, combatant_id):
             character_id=character_id,
             archetype=archetype,
         )
-    except ValueError as claim_error:
+    except BattleRefusal as claim_error:
         return _detail_with_error(request, battle, str(claim_error))
     return redirect("battle:detail", pk=pk)
 
 
 @require_POST
+@_internal_errors_logged()
 def seat_release(request, pk, combatant_id):
     """Give a claimed seat back to the lobby (its holder, or any DM)."""
     actor, battle = _actor_and_readable_battle(request, pk)
     try:
         release_seat(battle.pk, combatant_id, actor.user, guest_key=actor.guest_key)
-    except ValueError as release_error:
+    except BattleRefusal as release_error:
         return _detail_with_error(request, battle, str(release_error))
     return redirect("battle:detail", pk=pk)
 
 
 @require_POST
+@_internal_errors_logged()
 def seat_ready(request, pk, combatant_id):
     """Set your seat's ready flag; may auto-start the battle (see services)."""
     actor, battle = _actor_and_readable_battle(request, pk)
@@ -2259,7 +2319,7 @@ def seat_ready(request, pk, combatant_id):
             guest_key=actor.guest_key,
             ready=ready,
         )
-    except ValueError as ready_error:
+    except BattleRefusal as ready_error:
         return _detail_with_error(request, battle, str(ready_error))
     return redirect("battle:detail", pk=pk)
 
@@ -2280,7 +2340,7 @@ def _seat_hand_off(
     # A guest is refused by the service itself, in that service's words.
     try:
         _seat, event = hand_off(battle.pk, combatant_id, actor.user)
-    except ValueError as refusal:
+    except BattleRefusal as refusal:
         return _json_error(str(refusal), status=403)
     battle.refresh_from_db()
     return JsonResponse(
@@ -2289,6 +2349,7 @@ def _seat_hand_off(
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def seat_take(request, pk, combatant_id):
     """A Game Master takes the seat of a character's absent owner (#853)."""
     return _seat_hand_off(
@@ -2302,6 +2363,7 @@ def seat_take(request, pk, combatant_id):
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def seat_return(request, pk, combatant_id):
     """Hand a taken seat back to the character's owner (#853)."""
     return _seat_hand_off(
@@ -2313,6 +2375,7 @@ def seat_return(request, pk, combatant_id):
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def battle_act(request, pk):
     """The awaited player's turn choice (or the DM handing it to the AI).
 
@@ -2405,7 +2468,7 @@ def battle_act(request, pk):
             destination=destination,
             as_ai=as_ai,
         )
-    except ValueError as act_error:
+    except BattleRefusal as act_error:
         return _json_error(str(act_error))
     return JsonResponse(battle_payload(battle, actor, events, request))
 
