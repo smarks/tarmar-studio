@@ -184,6 +184,21 @@ class RequestTest(EmailChangeTestCase):
         self.assertContains(response, NEW_EMAIL)
         self.assertContains(response, f'value="{OLD_EMAIL}"')
 
+    def test_the_profile_says_when_the_link_was_sent_in_the_readers_zone(self) -> None:
+        """The time is a <time> element the page writes locally (issue #62)."""
+        self.request_change()
+        self.user.refresh_from_db()
+        assert self.user.pending_email_sent_at is not None
+
+        response = self.client.get(PROFILE_URL)
+
+        self.assertContains(
+            response,
+            f'<time class="local-time" '
+            f'datetime="{self.user.pending_email_sent_at.isoformat()}" '
+            'data-local-time-style="datetime">',
+        )
+
     def test_the_confirmed_address_itself_is_refused(self) -> None:
         response = self.request_change(OLD_EMAIL.upper())
         self.assertContains(response, "already the confirmed address")

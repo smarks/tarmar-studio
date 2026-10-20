@@ -164,3 +164,32 @@ describe('window.applyLocalTimes', () => {
         expect(document.querySelector('time').textContent).toContain('14');
     });
 });
+
+describe('window.formatLocalTime (issue #62)', () => {
+    test('is the one renderer: the words a <time> element gets, for a caller that writes them itself', () => {
+        require('../local-time.js');
+
+        expect(window.formatLocalTime('2026-10-15T02:50:00+00:00', 'datetime', 'America/New_York')).toBe(
+            expectedText('2026-10-15T02:50:00+00:00', DATETIME_OPTIONS, 'America/New_York')
+        );
+        expect(window.formatLocalTime('2026-10-15T02:50:00+00:00', 'date', 'America/New_York')).toBe(
+            expectedText('2026-10-15T02:50:00+00:00', DATE_OPTIONS, 'America/New_York')
+        );
+    });
+
+    test('moves the instant into the zone, not the UTC wall clock', () => {
+        require('../local-time.js');
+
+        const inNewYork = window.formatLocalTime('2026-10-15T02:50:00+00:00', 'datetime', 'America/New_York');
+        const inUtc = window.formatLocalTime('2026-10-15T02:50:00+00:00', 'datetime', 'UTC');
+
+        expect(inNewYork).not.toBe(inUtc);
+        expect(inNewYork).toContain('14');
+    });
+
+    test('says nothing for a value that is not a date', () => {
+        require('../local-time.js');
+
+        expect(window.formatLocalTime('not-a-real-timestamp', 'datetime')).toBeNull();
+    });
+});

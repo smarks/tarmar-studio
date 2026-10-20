@@ -1360,7 +1360,7 @@ describe('session name', () => {
         counted.textContent = '0 msgs';
         entry.querySelector('a').append(counted);
 
-        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 2);
+        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 2, '2 msgs');
 
         expect(entry.querySelector('.session-name').textContent)
             .toBe('I walk into the tavern.');
@@ -1370,8 +1370,21 @@ describe('session name', () => {
         expect(document.querySelector('#mobile-session-select option').textContent)
             .toBe('I walk into the tavern. (2)');
 
-        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 1);
+        // The wording is the server's, so the page writes whatever it sends.
+        chatModule.refreshSessionAfterTurn(7, 'I walk into the tavern.', 1, '1 msg');
         expect(counted.textContent).toBe('1 msg');
+    });
+
+    test('a count without the server\'s wording leaves the rail\'s words alone (#62)', () => {
+        const entry = document.querySelector('.session-item[data-id="7"]');
+        const counted = document.createElement('span');
+        counted.className = 'session-count';
+        counted.textContent = '0 msgs';
+        entry.querySelector('a').append(counted);
+
+        chatModule.refreshSessionAfterTurn(7, '', 3);
+
+        expect(counted.textContent).toBe('0 msgs');
     });
 
     test('a count alone keeps the picker\'s name (#829)', () => {
@@ -1916,9 +1929,233 @@ describe('a delete confirmation names the session date (#705)', () => {
         expect(asked[0]).not.toEqual(asked[1]);
     });
 
+    test('the question reads as one sentence, with no comma before its question mark', async () => {
+        await deleteSession(1, 'I walk into the crypt.', 'Sep 25, 2026');
+
+        expect(confirm).toHaveBeenCalledWith(
+            'Delete "I walk into the crypt.", started Sep 25, 2026? This can\'t be undone.'
+        );
+    });
+
     test('a caller with no date still asks a sensible question', async () => {
         await deleteSession(3, 'A lone session');
 
         expect(confirm.mock.calls[0][0]).toBe('Delete "A lone session"? This can\'t be undone.');
+    });
+});
+
+describe('localiseSessionOptions (issue #62)', () => {
+    const SESSION_MENU = `
+        <select id="mobile-session-select">
+            <option value="">Sessions…</option>
+            <option value="7" data-name="Rat cellar" data-message-count="3"
+                    data-started="Oct 15, 2026" data-started-at="2026-10-15T02:50:00+00:00">Rat cellar — Oct 15, 2026 (3)</option>
+        </select>
+    `;
+    const SERVER_LABEL = 'Rat cellar \u2014 Oct 15, 2026 (3)';
+    const LOCAL_LABEL = 'Rat cellar \u2014 Oct 14, 2026 (3)';
+    let localiseSessionOptions;
+
+    /** Load chat.js on the page as the server renders it, with a renderer or none. */
+    function loadChat(renderer) {
+        jest.resetModules();
+        setUpDom();
+        document.body.insertAdjacentHTML('beforeend', SESSION_MENU);
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        if (renderer) window.formatLocalTime = renderer;
+        ({ localiseSessionOptions } = require('../chat.js'));
+    }
+
+    afterEach(() => {
+        delete window.formatLocalTime;
+    });
+
+    test('runs when the page loads, putting the date in the viewer\'s zone into the label', () => {
+        const renderer = jest.fn(() => 'Oct 14, 2026');
+
+        loadChat(renderer);
+
+        const option = document.querySelector('option[value="7"]');
+        expect(renderer).toHaveBeenCalledWith('2026-10-15T02:50:00+00:00', 'date');
+        expect(option.textContent).toBe(LOCAL_LABEL);
+        expect(option.dataset.started).toBe('Oct 14, 2026');
+    });
+
+    test('can be run again over options the server painted later', () => {
+        loadChat(null);
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+        window.formatLocalTime = jest.fn(() => 'Oct 14, 2026');
+
+        localiseSessionOptions(document);
+
+        expect(document.querySelector('option[value="7"]').textContent).toBe(LOCAL_LABEL);
+    });
+
+    test('leaves the placeholder and any option without an instant alone', () => {
+        loadChat(null);
+        document.querySelector('option[value="7"]').removeAttribute('data-started-at');
+        window.formatLocalTime = jest.fn(() => 'Oct 14, 2026');
+
+        localiseSessionOptions(document);
+
+        expect(document.querySelector('option[value=""]').textContent).toBe('Sessions…');
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+    });
+
+    test('keeps the server\'s words when the renderer cannot read the instant', () => {
+        loadChat(jest.fn(() => null));
+
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+    });
+
+    test('keeps the server\'s words when local-time.js never loaded', () => {
+        loadChat(null);
+
+        expect(document.querySelector('option[value="7"]').textContent).toBe(SERVER_LABEL);
+    });
+});
+
+describe('showNewSessionInRail (issue #62)', () => {
+    let showNewSessionInRail;
+    let deleteSession;
+
+    /** The row gm/_session_rail_row.html writes for a session, as the server sends it. */
+    const SERVER_ROW = `<li class="session-item active" data-id="9">
+        <a href="?session=9">
+            <span class="session-name" id="session-name-9">Fresh start</span>
+            <span class="session-meta"><span id="session-date-9"><time class="local-time" datetime="2026-10-15T02:50:00+00:00" data-local-time-style="date">Oct 15, 2026 UTC</time></span> &middot; <span class="session-count">2 msgs</span></span>
+        </a>
+        <span class="sr-only" id="session-started-9">started</span>
+        <button type="button" class="session-delete-btn" id="session-delete-9" aria-label="Delete session"
+                aria-labelledby="session-delete-9 session-name-9 session-started-9 session-date-9" title="Delete session"
+                onclick="deleteSession(9, 'Fresh start', document.getElementById('session-date-9').textContent)">&times;</button>
+    </li>`;
+
+    /** The option gm/_session_menu_option.html writes for the same session. */
+    const SERVER_OPTION = `<option value="9" data-message-count="2" data-name="Fresh start"
+        data-started="Oct 15, 2026" data-started-at="2026-10-15T02:50:00+00:00" selected>Fresh start &mdash; Oct 15, 2026 (2)</option>`;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setUpDom();
+        document.body.insertAdjacentHTML('beforeend', `
+            <select id="mobile-session-select">
+                <option value="">Sessions…</option>
+                <option value="3">Older</option>
+            </select>
+            <ul id="session-list"><li class="session-item" data-id="3"><a href="?session=3">Older</a></li></ul>
+            <p class="session-name-none">A new session takes its name from your first message</p>
+        `);
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        window.applyLocalTimes = jest.fn();
+        ({ showNewSessionInRail, deleteSession } = require('../chat.js'));
+        // The row's onclick names it as a browser's script does: a global.
+        window.deleteSession = deleteSession;
+    });
+
+    afterEach(() => {
+        delete window.applyLocalTimes;
+        delete window.deleteSession;
+    });
+
+    test('puts the server\'s row at the head of the rail, untouched', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        const rows = document.querySelectorAll('#session-list > li');
+        expect(rows).toHaveLength(2);
+        expect(rows[0].dataset.id).toBe('9');
+        expect(rows[0].outerHTML).toBe(
+            new DOMParser().parseFromString(SERVER_ROW, 'text/html').body.firstElementChild.outerHTML
+        );
+        expect(rows[1].dataset.id).toBe('3');
+    });
+
+    test('asks local-time.js to write the new row\'s time in the viewer\'s zone', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(window.applyLocalTimes).toHaveBeenCalledTimes(1);
+        expect(window.applyLocalTimes).toHaveBeenCalledWith(document.querySelector('[data-id="9"]'));
+    });
+
+    test('takes the message count and the labels from the server\'s row, not from the page', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelector('[data-id="9"] .session-count').textContent).toBe('2 msgs');
+        expect(document.getElementById('session-delete-9').getAttribute('aria-labelledby'))
+            .toBe('session-delete-9 session-name-9 session-started-9 session-date-9');
+    });
+
+    test('does not add a row the rail already has', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelectorAll('#session-list > li[data-id="9"]')).toHaveLength(1);
+        expect(window.applyLocalTimes).toHaveBeenCalledTimes(1);
+    });
+
+    test('swaps the "new session" line for the name field', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelector('.session-name-none')).toBeNull();
+        const field = document.getElementById('session-name');
+        expect(field.value).toBe('Fresh start');
+        expect(field.dataset.sessionId).toBe('9');
+    });
+
+    test('puts the server\'s option into the small-screen menu, after its prompt', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+
+        const options = [...document.querySelectorAll('#mobile-session-select option')];
+        expect(options.map((option) => option.value)).toEqual(['', '9', '3']);
+        expect(options[1].selected).toBe(true);
+        expect(options[1].dataset.messageCount).toBe('2');
+    });
+
+    test('writes the menu option\'s date in the viewer\'s zone like the others', () => {
+        window.formatLocalTime = jest.fn(() => 'Oct 14, 2026');
+
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+
+        const option = document.querySelector('#mobile-session-select option[value="9"]');
+        expect(window.formatLocalTime).toHaveBeenCalledWith('2026-10-15T02:50:00+00:00', 'date');
+        expect(option.textContent).toBe('Fresh start \u2014 Oct 14, 2026 (2)');
+        delete window.formatLocalTime;
+    });
+
+    test('does not add a menu option the menu already has', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+        document.querySelector('#session-list > li[data-id="9"]').remove();
+
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW, optionHtml: SERVER_OPTION });
+
+        expect(document.querySelectorAll('#mobile-session-select option[value="9"]')).toHaveLength(1);
+    });
+
+    test('adds no option when the frame carried none', () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+
+        expect(document.querySelectorAll('#mobile-session-select option')).toHaveLength(2);
+    });
+
+    test('adds no row, and nothing that is not the server\'s, when the frame carried none', () => {
+        showNewSessionInRail(9, { name: 'Fresh start' });
+
+        expect(document.querySelectorAll('#session-list > li')).toHaveLength(1);
+        expect(window.applyLocalTimes).not.toHaveBeenCalled();
+    });
+
+    test('names the date the rail shows when the delete control is pressed', async () => {
+        showNewSessionInRail(9, { name: 'Fresh start', rowHtml: SERVER_ROW });
+        confirm.mockClear();
+        confirm.mockReturnValue(false);
+
+        document.getElementById('session-delete-9').click();
+        await Promise.resolve();
+
+        expect(confirm).toHaveBeenCalledWith(
+            `Delete "Fresh start", started Oct 15, 2026 UTC? This can't be undone.`
+        );
     });
 });

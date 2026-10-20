@@ -12,7 +12,10 @@ server's.
 ``{% local_time %}`` is the server-side half of that: it renders a
 ``<time datetime="...full ISO-8601 UTC...">`` element whose visible text is
 the UTC value formatted per ``format_string`` (Django's ``date`` filter
-syntax) -- a complete, correctly labeled fallback if JavaScript never runs.
+syntax) with the zone's name after it, "2026-10-15 02:50 UTC": a fallback
+that cannot be read as the reader's own clock if JavaScript never runs. (It
+was the bare clock once, and a reader took "Created 2026-10-15 02:50" for
+local time beside a header that had been rewritten, issue #62.)
 ``static/js/local-time.js`` is the other half: on load, it rewrites every
 such element's text to the viewer's own local zone via
 ``Intl.DateTimeFormat``.
@@ -47,14 +50,14 @@ def local_time(
     """Render ``value`` as a ``<time>`` element the browser reformats locally.
 
     Args:
-        value: The instant to render. Naive values are treated as UTC (this
+        value: The instant to render, a ``datetime`` (a ``date`` has no clock
+            to move between zones, and raises ``AttributeError``). Naive values are treated as UTC (this
             project runs with ``USE_TZ = True`` and ``TIME_ZONE = "UTC"``, so
             in practice every value reaching this tag is already aware --
             the naive branch is a defensive fallback, not the expected path).
         format_string: A Django ``date`` filter format string, used for the
-            UTC fallback text shown when JavaScript never runs. Match
-            whatever the call site rendered directly before adopting this
-            tag, so the no-JS experience is unchanged.
+            UTC fallback text shown when JavaScript never runs. The zone's
+            name is added after it, so a format need not carry one.
         style: ``"datetime"`` (default) or ``"date"``. Read by
             ``static/js/local-time.js`` to decide whether the viewer-local
             re-render includes a time of day. ``"date"`` still shifts the
@@ -70,9 +73,11 @@ def local_time(
         return ""
     if is_naive(value):
         value = make_aware(value, datetime.UTC)
+    # The fallback is written in UTC whatever the active zone, and says so.
+    value = value.astimezone(datetime.UTC)
     return format_html(
         '<time class="local-time" datetime="{}" data-local-time-style="{}">{}</time>',
         value.isoformat(),
         style,
-        format_date(value, format_string),
+        f"{format_date(value, format_string)} {value.tzname()}",
     )

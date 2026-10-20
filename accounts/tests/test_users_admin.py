@@ -141,7 +141,7 @@ class UsersListLastLoginColumnTest(BaseTestCase):
             response,
             f'<td class="last-login" data-label="Last login">'
             f'<time class="local-time" datetime="{self.admin.last_login.isoformat()}" '
-            f'data-local-time-style="datetime">{expected}</time></td>',
+            f'data-local-time-style="datetime">{expected} UTC</time></td>',
             html=True,
         )
 

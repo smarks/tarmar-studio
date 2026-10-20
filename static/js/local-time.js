@@ -13,8 +13,9 @@
  * time.local-time element's text from its machine-readable `datetime`
  * attribute, using the browser's own Intl.DateTimeFormat and time zone. If
  * this script never runs (JS disabled, blocked, errors before this point),
- * the server-rendered UTC text stands on its own as a complete, correctly
- * labeled timestamp.
+ * the server-rendered UTC text stands on its own as a complete timestamp
+ * that names its zone ("2026-10-15 02:50 UTC"), so it is not read as the
+ * visitor's own clock.
  *
  * data-local-time-style picks the re-rendered granularity:
  *   "datetime" (default) -- date and time of day, e.g. "Feb 03, 2026, 09:14"
@@ -41,6 +42,13 @@
     },
   };
 
+  /**
+   * An instant in words, in the viewer's zone.
+   * @param {string} isoString - The instant, ISO-8601.
+   * @param {string} [style] - "datetime" (default) or "date".
+   * @param {string} [timeZone] - An IANA zone; omitted, the viewer's own.
+   * @returns {string|null} null when `isoString` is not a date
+   */
   function formatInViewerTimeZone(isoString, style, timeZone) {
     const parsedInstant = new Date(isoString);
     if (isNaN(parsedInstant.getTime())) {
@@ -79,4 +87,7 @@
   applyLocalTimes(document);
 
   window.applyLocalTimes = applyLocalTimes;
+  // The one renderer, for the text that cannot be a <time> element (an
+  // <option>'s label): a caller asks it for the words and writes them itself.
+  window.formatLocalTime = formatInViewerTimeZone;
 })();

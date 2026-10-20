@@ -237,3 +237,44 @@ test('initPickers wires markup swapped in later, once', async () => {
     expect(calls).toHaveLength(1);
     expect(slot.textContent).toContain('found');
 });
+
+test('rows painted by a search are written in the viewer\'s zone, and the page is told (issue #62)', async () => {
+    const picker = buildPicker();
+    answering('<ul><li><time class="local-time" datetime="2026-10-15T02:50:00+00:00">2026-10-15 02:50</time></li></ul>');
+    global.applyLocalTimes = jest.fn();
+    const { SEARCH_DELAY_MS, PAINTED_EVENT } = loadPicker();
+    const body = picker.querySelector('[data-picker-body]');
+    const painted = jest.fn();
+    document.addEventListener(PAINTED_EVENT, painted);
+    const input = picker.querySelector('[data-picker-search]');
+
+    input.value = 'wren';
+    input.dispatchEvent(new Event('input'));
+    jest.advanceTimersByTime(SEARCH_DELAY_MS);
+    await settle();
+
+    // Asked about the new body, after the answer is in it.
+    expect(global.applyLocalTimes).toHaveBeenCalledTimes(1);
+    expect(global.applyLocalTimes).toHaveBeenCalledWith(body);
+    expect(body.querySelector('time')).not.toBeNull();
+    expect(painted).toHaveBeenCalledTimes(1);
+    expect(painted.mock.calls[0][0].target).toBe(body);
+    document.removeEventListener(PAINTED_EVENT, painted);
+    delete global.applyLocalTimes;
+});
+
+test('a failed search paints nothing, so local times are not asked for', async () => {
+    const picker = buildPicker();
+    answering(new Error('offline'));
+    global.applyLocalTimes = jest.fn();
+    const { SEARCH_DELAY_MS } = loadPicker();
+    const input = picker.querySelector('[data-picker-search]');
+
+    input.value = 'wren';
+    input.dispatchEvent(new Event('input'));
+    jest.advanceTimersByTime(SEARCH_DELAY_MS);
+    await settle();
+
+    expect(global.applyLocalTimes).not.toHaveBeenCalled();
+    delete global.applyLocalTimes;
+});

@@ -15,6 +15,12 @@ from common.test_helpers import BaseTestCase
 
 from .models import PLACEHOLDER_SESSION_NAME, GMSession, name_from_history
 from .testing import gm_replies
+from .views import (
+    SESSION_MENU_OPTION_TEMPLATE,
+    SESSION_RAIL_ROW_TEMPLATE,
+    _with_session_id,
+    session_entry_html,
+)
 
 CHAT_URL = "/tarmar/gm/"
 SAVE_URL = "/tarmar/gm/save/"
@@ -121,6 +127,98 @@ class SessionNamingThroughTheStreamTest(BaseTestCase):
         self.assertTrue(done["done"])
         self.assertEqual(done["session_name"], "I climb the wall")
         self.assertEqual(done["message_count"], 2)
+
+    def frames(self, response):
+        """Every SSE frame the response sent, in order."""
+        return [
+            json.loads(chunk[len("data: ") :])
+            for chunk in b"".join(response.streaming_content).decode().split("\n\n")
+            if chunk.startswith("data: ")
+        ]
+
+    def test_the_creating_turns_done_frame_carries_the_rails_own_entries(self):
+        """The page inserts the server's row and option; it builds none (issue #62).
+
+        Each is what its template writes for the session as the turn left it,
+        so the count is the real one and not a guess.
+        """
+        response = self.stream({"session_id": None, "message": "I climb the wall"})
+        done = self.frames(response)[-1]
+        session = GMSession.objects.get(user=self.player)
+
+        self.assertEqual(
+            done["session_row_html"],
+            session_entry_html(SESSION_RAIL_ROW_TEMPLATE, session),
+        )
+        self.assertEqual(
+            done["session_menu_option_html"],
+            session_entry_html(SESSION_MENU_OPTION_TEMPLATE, session),
+        )
+        row = done["session_row_html"]
+        self.assertIn(f'data-id="{session.pk}"', row)
+        self.assertIn(f'id="session-delete-{session.pk}"', row)
+        self.assertIn("I climb the wall", row)
+        self.assertIn("2 msgs", row)
+        self.assertIn('class="session-item active"', row)
+        option = done["session_menu_option_html"]
+        self.assertIn(f'<option value="{session.pk}"', option)
+        self.assertIn(" selected", option)
+        self.assertNotIn("session_started", done)
+
+    def test_a_turn_on_an_existing_session_sends_no_entries(self):
+        """The page holds them already; repeating them is a kilobyte a frame."""
+        session = GMSession.objects.create(name="The Salt Road", user=self.player)
+
+        frames = self.frames(
+            self.stream({"session_id": session.pk, "message": "I climb the wall"})
+        )
+
+        self.assertTrue(frames[-1]["done"])
+        for frame in frames:
+            self.assertNotIn("session_row_html", frame)
+            self.assertNotIn("session_menu_option_html", frame)
+
+    def test_a_frame_names_the_session_and_carries_entries_only_when_creating(self):
+        session = GMSession.objects.create(name="The Salt Road", user=self.player)
+
+        plain = _with_session_id({"procedure": {}}, session)
+        creating = _with_session_id({"procedure": {}}, session, creating=True)
+
+        self.assertEqual(
+            plain,
+            {
+                "procedure": {},
+                **{"session_id": session.pk, "session_name": "The Salt Road"},
+            },
+        )
+        self.assertEqual(creating["session_id"], session.pk)
+        self.assertEqual(
+            creating["session_row_html"],
+            session_entry_html(SESSION_RAIL_ROW_TEMPLATE, session),
+        )
+        self.assertEqual(
+            _with_session_id({"procedure": {}}, None, creating=True),
+            {"procedure": {}},
+        )
+
+    def test_the_done_frame_carries_the_count_as_the_server_words_it(self):
+        """Later turns send only this, so the page words no count of its own."""
+        session = GMSession.objects.create(name="The Salt Road", user=self.player)
+
+        done = self.frames(
+            self.stream({"session_id": session.pk, "message": "I climb the wall"})
+        )[-1]
+
+        self.assertEqual(done["message_count"], 2)
+        self.assertEqual(done["message_count_label"], "2 msgs")
+
+    def test_a_count_of_one_is_singular_in_the_row_and_the_label(self):
+        session = GMSession.objects.create(name="Counted", user=self.player)
+        session.history = [{"role": "user", "content": "one"}]
+        session.save()
+
+        self.assertEqual(session.message_count_label, "1 msg")
+        self.assertIn("1 msg<", session_entry_html(SESSION_RAIL_ROW_TEMPLATE, session))
 
     def test_a_named_session_keeps_its_name(self):
         session = GMSession.objects.create(name="The Salt Road", user=self.player)
