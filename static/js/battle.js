@@ -1909,6 +1909,9 @@ if (typeof module !== 'undefined' && module.exports) {
                 input.value = backTo;
             });
             current.replaceWith(fresh);
+            // local-time.js writes a timestamp in the viewer's zone; a panel
+            // painted after load is asked for explicitly (#62).
+            if (typeof window.applyLocalTimes === 'function') window.applyLocalTimes(fresh);
         });
         return changes.length;
     }

@@ -606,6 +606,29 @@ describe('initBattlePage', () => {
             .toBe(`${window.location.pathname}${window.location.search}`);
     });
 
+    test('a repainted rulings panel is written in the viewer\'s zone (#62)', async () => {
+        mountDetailPage();
+        document.body.insertAdjacentHTML(
+            'beforeend', rulingPanel('battle-magic-bounds', '[]', 'No bound is lifted.')
+        );
+        battle.initBattlePage();
+        require('../api.js');
+        global.applyLocalTimes = jest.fn();
+        const lifted = '[{"bound": "channel", "combatant_id": 1}]';
+        global.fetch = jest.fn().mockResolvedValue(respondWithRulings({
+            'battle-magic-bounds': rulingPanel(
+                'battle-magic-bounds', lifted, 'Channel lifted for Aldwin.'
+            ),
+        }));
+
+        document.getElementById('advance-turn').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+        const repainted = document.getElementById('battle-magic-bounds');
+        expect(global.applyLocalTimes).toHaveBeenCalledWith(repainted);
+        delete global.applyLocalTimes;
+    });
+
     test('an advance repaints the magic-bounds panel, and leaves an unchanged one alone (#37)', async () => {
         mountDetailPage();
         document.body.insertAdjacentHTML(

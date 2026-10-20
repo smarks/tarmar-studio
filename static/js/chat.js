@@ -1483,7 +1483,7 @@ function mobileOptionLabel(option) {
  */
 function localiseSessionOptions(scope) {
   if (typeof window.formatLocalTime !== 'function') return;
-  (scope || document).querySelectorAll('#mobile-session-select option[data-started-at]')
+  (scope || document).querySelectorAll(`#${SESSION_MENU_ID} option[data-started-at]`)
     .forEach((option) => {
       const local = window.formatLocalTime(option.dataset.startedAt, 'date');
       if (!local) return;
