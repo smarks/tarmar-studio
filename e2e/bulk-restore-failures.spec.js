@@ -7,14 +7,15 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 test('a restore that fails is reported and the page does not reload', async ({ adminPage: page }) => {
     // A dedicated owner, so the list can be filtered to exactly these two rows.
     // The character list pages at 50 and an admin sees everyone's characters,
     // so rows seeded under a shared account can land past page 1 in a full run.
-    const stamp = Date.now();
-    const ownerName = `e2e_restore_${stamp}`.slice(0, 25);
+    const stamp = uniqueStamp();
+    const ownerName = `e2e_restore_${stamp}`;
     const names = [`E2E Gone A ${stamp}`, `E2E Gone B ${stamp}`];
     const seeded = readDjangoShell(`
 from django.contrib.auth import get_user_model

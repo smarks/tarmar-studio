@@ -14,9 +14,10 @@
  */
 
 const { test, expect, loginAs, createNamedCharacter, TEST_USER } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
-test('a second save waits for the first, and the field ends on the later value', async ({ page }, testInfo) => {
-    const name = `Twice Saved ${testInfo.workerIndex}${Date.now()}`;
+test('a second save waits for the first, and the field ends on the later value', async ({ page }) => {
+    const name = uniqueName('Twice Saved');
     await loginAs(page, TEST_USER);
     await createNamedCharacter(page, name);
 

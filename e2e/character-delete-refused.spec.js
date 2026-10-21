@@ -14,9 +14,10 @@
  */
 
 const { test, expect, loginAs, createNamedCharacter, TEST_USER } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
-test('a refused delete leaves the row and says why, and the notice stays', async ({ page }, testInfo) => {
-    const name = `Undeletable ${testInfo.workerIndex}${Date.now()}`;
+test('a refused delete leaves the row and says why, and the notice stays', async ({ page }) => {
+    const name = uniqueName('Undeletable');
     await loginAs(page, TEST_USER);
     await createNamedCharacter(page, name);
 

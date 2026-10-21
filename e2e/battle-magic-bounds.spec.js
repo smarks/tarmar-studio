@@ -12,6 +12,7 @@
 const {
     test, expect, createBattleViaSetup, TEST_ADMIN, loadedCanon, DEFAULT_CANON,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { stopCoverage } = require('./coverage');
 const { runDjangoShell } = require('./django');
 const {
@@ -46,7 +47,7 @@ test.describe('Magic bounds lifted', () => {
         const words = rulingWords().magic_bounds;
         const username = TEST_ADMIN.username;
         await createBattleViaSetup(adminPage, {
-            name: `E2E MagicBounds ${Date.now()}`,
+            name: uniqueName('E2E MagicBounds'),
             fighters: ['unarmoured duelist', 'unarmoured duelist'],
             seed: 42,
         });
@@ -102,7 +103,7 @@ test.describe('Magic bounds lifted', () => {
         const past = pastByRuling([bound]);
 
         const playerPage = await openTheWizardsStage(
-            adminPage, browser, `E2E LiftedBound ${Date.now()}`,
+            adminPage, browser, uniqueName('E2E LiftedBound'),
             {
                 beforeTurn: async (battleId, wizardName) => {
                     fillTheWizardsPool(battleId);

@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { test, expect } = require('@playwright/test');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const {
     E2E_GUEST_BATTLE_PREFIX,
@@ -22,7 +23,7 @@ test.describe('E2E cleanup', () => {
     test('the teardown deletes the guest spec battles and keeps everything else', () => {
         // A prefix of this test's own, still under the guest spec's, so a
         // guest test running beside this one keeps its battle.
-        const prefix = `${E2E_GUEST_BATTLE_PREFIX}Cleanup ${process.pid}-${Date.now()} `;
+        const prefix = `${E2E_GUEST_BATTLE_PREFIX}Cleanup ${uniqueStamp()} `;
         const name = JSON.stringify(prefix);
         const made = readDjangoShell(`
 from django.contrib.auth import get_user_model

@@ -7,10 +7,11 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 test('registering with only an email saves email as the preferred contact', async ({ page }) => {
-    const username = `e2e_contact_${Date.now()}`.slice(0, 25);
+    const username = `e2e_pref_${uniqueStamp()}`;
 
     await page.goto('/tarmar/accounts/register/');
     await page.fill('input[name="username"]', username);

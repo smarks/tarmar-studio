@@ -10,6 +10,7 @@
  */
 
 const { test, expect, loginAs } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { runDjangoShell } = require('./django');
 const { missingMailMessage, takeMessageTo } = require('./mail');
 
@@ -18,7 +19,7 @@ const NEW_PASSWORD = 'LanternBridge42-new';
 const CONFIRM_LINK = /https?:\/\/\S+\/tarmar\/accounts\/password_reset\/[^/\s]+\/[^/\s]+\//;
 
 test('a forgotten password is reset through the emailed link', async ({ page, browser }) => {
-    const username = `e2e_reset_${Date.now()}`.slice(0, 25);
+    const username = `e2e_reset_${uniqueStamp()}`;
     const email = `${username}@example.test`;
     runDjangoShell(`
 from django.contrib.auth import get_user_model

@@ -10,6 +10,7 @@
  */
 
 const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 // The aging stage at 68 is the first to take a point off INT and WIS, and a
@@ -34,8 +35,8 @@ print('CHARACTER', character.pk)
 }
 
 test.describe('A run of experience years (#638)', () => {
-    test('leaves no attribute or derived cell showing the pre-run character', async ({ page }, testInfo) => {
-        const name = `Greying ${testInfo.workerIndex}${Date.now()}`;
+    test('leaves no attribute or derived cell showing the pre-run character', async ({ page }) => {
+        const name = uniqueName('Greying');
         const characterId = seedCharacterOnTheEdgeOfAging(name);
 
         await loginAs(page, TEST_USER);

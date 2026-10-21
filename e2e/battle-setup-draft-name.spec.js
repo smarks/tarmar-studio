@@ -7,9 +7,10 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test('a named draft is called by its name when the setup page is reopened', async ({ adminPage: page }) => {
-    const battleName = `E2E Siege ${Date.now()}`;
+    const battleName = uniqueName('E2E Siege');
     await page.goto('/tarmar/battles/');
     await page.click('.battle-list-masthead button[type="submit"]');
     await page.waitForURL(/\/tarmar\/battles\/setup\/\d+\/$/);

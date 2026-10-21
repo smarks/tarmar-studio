@@ -7,13 +7,14 @@
  */
 
 const { test, expect, loginAs, logout, createCharacter, TEST_USER, TEST_WATCHER, searchPicker } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test.describe('Parties', () => {
     test('A publishes a character, B parties it up, A withdraws it', async ({ page }) => {
         // A rolls a character, names it uniquely, and flips it public.
         await loginAs(page, TEST_USER);
         await createCharacter(page);
-        const name = `Band Member ${Date.now()}`;
+        const name = uniqueName('Band Member');
         const nameInput = page.locator('[data-field="name"] input');
         await nameInput.fill(name);
         await nameInput.blur();
@@ -28,7 +29,7 @@ test.describe('Parties', () => {
         await page.click('nav a:has-text("Parties")');
         await page.waitForURL('**/tarmar/parties/');
         await page.click('a:has-text("Form a New Party")');
-        const partyName = `The Company ${Date.now()}`;
+        const partyName = uniqueName('The Company');
         await page.fill('#id_name', partyName);
         await page.fill('#id_description', 'Formed by a bystander, as any user may.');
         await page.click('button:has-text("Form Party")');
@@ -69,7 +70,7 @@ test.describe('Parties', () => {
     test('the owner renames by autosave, disbands, and restores a party (#339 items 17-18)', async ({ page }) => {
         await loginAs(page, TEST_USER);
         await page.goto('/tarmar/parties/create/');
-        const partyName = `Autosave Band ${Date.now()}`;
+        const partyName = uniqueName('Autosave Band');
         await page.fill('#id_name', partyName);
         await page.click('button:has-text("Form Party")');
         await page.waitForURL(/\/tarmar\/parties\/\d+\//);

@@ -7,12 +7,13 @@
  */
 
 const { test, expect, battleRowOnList } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
-test('a double press of Begin the battle builds one battle', async ({ adminPage: page }, testInfo) => {
+test('a double press of Begin the battle builds one battle', async ({ adminPage: page }) => {
     // The worker's index keeps two workers that start in the same
     // millisecond from naming two battles alike, which reads as one setup
     // building two (issue #88).
-    const battleName = `E2E Once ${testInfo.workerIndex}${Date.now()}`;
+    const battleName = uniqueName('E2E Once');
     await page.goto('/tarmar/battles/');
     await page.click('.battle-list-masthead button[type="submit"]');
     await page.waitForURL(/\/tarmar\/battles\/setup\/\d+\/$/);
@@ -29,7 +30,7 @@ test('a double press of Begin the battle builds one battle', async ({ adminPage:
     await expect(await battleRowOnList(page, battleName)).toHaveCount(1);
 });
 
-test('the Begin button is disabled once pressed', async ({ adminPage: page }, testInfo) => {
+test('the Begin button is disabled once pressed', async ({ adminPage: page }) => {
     await page.goto('/tarmar/battles/');
     await page.click('.battle-list-masthead button[type="submit"]');
     await page.waitForURL(/\/tarmar\/battles\/setup\/\d+\/$/);
@@ -37,7 +38,7 @@ test('the Begin button is disabled once pressed', async ({ adminPage: page }, te
         await page.click(`.setup-fighter-grid form:has(input[value="${archetype}"]) button`);
         await page.waitForURL(/\/setup\/\d+\/$/);
     }
-    await page.fill('input[name="name"]', `E2E Held ${testInfo.workerIndex}${Date.now()}`);
+    await page.fill('input[name="name"]', uniqueName('E2E Held'));
     // Read in the same task as the press: the page is navigating away
     // straight after, and a locator would wait for that to finish.
     const disabledOnPress = await page.evaluate(() => {
@@ -49,8 +50,8 @@ test('the Begin button is disabled once pressed', async ({ adminPage: page }, te
     await page.waitForURL(/\/tarmar\/battles\/\d+\/$/);
 });
 
-test('a stopped press can be pressed again', async ({ adminPage: page }, testInfo) => {
-    const battleName = `E2E Stopped ${testInfo.workerIndex}${Date.now()}`;
+test('a stopped press can be pressed again', async ({ adminPage: page }) => {
+    const battleName = uniqueName('E2E Stopped');
     await page.goto('/tarmar/battles/');
     await page.click('.battle-list-masthead button[type="submit"]');
     await page.waitForURL(/\/tarmar\/battles\/setup\/\d+\/$/);

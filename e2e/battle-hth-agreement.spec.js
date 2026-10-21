@@ -10,13 +10,14 @@
  */
 
 const { test, expect, createBattleViaSetup, TEST_ADMIN } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { rulingWords, hthWholeBattleLogLine } = require('./rulings');
 
 test.describe('HTH by agreement', () => {
     test('a Game Master marks the whole battle and the log says so', async ({ adminPage }) => {
         const words = rulingWords().hth_agreement;
         await createBattleViaSetup(adminPage, {
-            name: `E2E Agreement ${Date.now()}`,
+            name: uniqueName('E2E Agreement'),
             fighters: ['unarmoured duelist', 'unarmoured duelist'],
             seed: 42,
         });
@@ -38,7 +39,7 @@ test.describe('HTH by agreement', () => {
     test('a Game Master marks a pair and lifts it', async ({ adminPage }) => {
         const words = rulingWords().hth_agreement;
         await createBattleViaSetup(adminPage, {
-            name: `E2E AgreementPair ${Date.now()}`,
+            name: uniqueName('E2E AgreementPair'),
             fighters: ['unarmoured duelist', 'unarmoured duelist'],
             seed: 42,
         });

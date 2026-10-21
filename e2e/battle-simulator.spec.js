@@ -9,13 +9,14 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
 test.describe('Battle simulator', () => {
     test('create, advance two turns, see rolls and decisions, survive reload', async ({ adminPage }) => {
         // Unique name per run so CI retries never collide.
-        const battleName = `E2E Skirmish ${Date.now()}`;
+        const battleName = uniqueName('E2E Skirmish');
 
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 42 });
 
@@ -59,7 +60,7 @@ test.describe('Battle simulator', () => {
         // proves the attack line reaches the page with its verdict, that the
         // forecast is labelled as one, and that the dice checkbox hides the
         // roll lines without dropping them from the page or the database.
-        const battleName = `E2E Dice ${Date.now()}`;
+        const battleName = uniqueName('E2E Dice');
 
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 42 });
 
@@ -116,7 +117,7 @@ test.describe('Battle simulator', () => {
     });
 
     test('a beast joins the battle, appears on the arena, and rolls', async ({ adminPage }) => {
-        const battleName = `E2E Beast Pit ${Date.now()}`;
+        const battleName = uniqueName('E2E Beast Pit');
 
         // The bestiary catalog (loaded by global-setup) feeds the picker.
         await createBattleViaSetup(adminPage, {
@@ -140,7 +141,7 @@ test.describe('Battle simulator', () => {
     });
 
     test('Restart rewinds to turn 0 and replays the same battle', async ({ adminPage }) => {
-        const battleName = `E2E Restart ${Date.now()}`;
+        const battleName = uniqueName('E2E Restart');
 
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 99 });
         await expect(adminPage.locator('h1')).toHaveText(battleName);
@@ -180,7 +181,7 @@ test.describe('Battle simulator', () => {
     });
 
     test('the command bar separates Advance from Restart and All battles', async ({ adminPage }) => {
-        const battleName = `E2E Command Bar ${Date.now()}`;
+        const battleName = uniqueName('E2E Command Bar');
 
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 21 });
 
@@ -209,7 +210,7 @@ test.describe('Battle simulator', () => {
     });
 
     test('the DM renames a combatant inline and the new name sticks', async ({ adminPage }) => {
-        const battleName = `E2E Rename ${Date.now()}`;
+        const battleName = uniqueName('E2E Rename');
 
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 11 });
         await expect(adminPage.locator('h1')).toHaveText(battleName);
@@ -243,7 +244,7 @@ test.describe('Battle simulator', () => {
         // A battle awaiting the DM's own move: his page polls the state while
         // it waits, and a poll that brings anything new redraws the roster.
         await createBattleViaSetup(adminPage, {
-            name: `E2E Rename poll ${Date.now()}`, fighters: 3, seed: 7, controlMode: 'manual',
+            name: uniqueName('E2E Rename poll'), fighters: 3, seed: 7, controlMode: 'manual',
         });
         const battleId = new URL(adminPage.url()).pathname.match(/battles\/(\d+)\//)[1];
         await adminPage.click('#advance-turn');

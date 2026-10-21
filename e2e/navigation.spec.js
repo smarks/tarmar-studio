@@ -7,6 +7,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test.describe('Navigation trail', () => {
     test('a character sheet trails back to the character list', async ({ adminPage }) => {
@@ -21,7 +22,7 @@ test.describe('Navigation trail', () => {
     });
 
     test('a battle trails back to the battle list after the create redirect', async ({ adminPage }) => {
-        const battleName = `E2E Trail ${Date.now()}`;
+        const battleName = uniqueName('E2E Trail');
         await adminPage.goto('/tarmar/battles/');
         await expect(adminPage.locator('.breadcrumb [aria-current="page"]')).toHaveText('Battles');
 

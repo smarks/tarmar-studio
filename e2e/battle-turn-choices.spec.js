@@ -13,6 +13,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -52,7 +53,7 @@ print("NAMES", json.dumps({"chooser": chooser.name, "foes": [left.name, right.na
 test.describe('Choosing a turn by hand', () => {
     test('each foe is its own ATTACK, read as a choice, and the pick is what swings', async ({ adminPage: page }) => {
         await createBattleViaSetup(page, {
-            name: `E2E Choices ${Date.now()}`,
+            name: uniqueName('E2E Choices'),
             fighters: ['unarmoured duelist', 'unarmoured duelist', 'unarmoured duelist'],
             seed: 42,
             controlMode: 'manual',

@@ -13,13 +13,14 @@
 const {
     test, expect, TEST_USER, TEST_WATCHER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
 test.describe('Battle lobby and remote play', () => {
     test('DM opens a lobby; a player claims, readies, and plays their turn', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);
-        const battleName = `E2E Lobby ${Date.now()}`;
+        const battleName = uniqueName('E2E Lobby');
 
         // The DM opens a battle: one generated AI fighter plus one player seat.
         await createBattleViaSetup(adminPage, {

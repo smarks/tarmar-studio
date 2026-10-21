@@ -13,11 +13,12 @@
 const {
     test, expect, loginAs, TEST_ADMIN, createNamedCharacter, searchPicker,
 } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 test.describe('Battle teams', () => {
     test('DM imports a party as a team and fights to a team victory', async ({ adminPage }) => {
         test.setTimeout(180000);
-        const stamp = Date.now();
+        const stamp = uniqueStamp();
         const partyName = `E2E Wolves ${stamp}`;
         const firstName = `E2E Ashe ${stamp}`;
         const secondName = `E2E Bram ${stamp}`;

@@ -10,6 +10,7 @@
  */
 
 const { test, expect, TEST_ADMIN, TEST_USER, chooseToAttach } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { runDjangoShell } = require('./django');
 
 /**
@@ -34,8 +35,8 @@ Character.objects.create(
 }
 
 test.describe('GM fight — people among the foes', () => {
-    test('bandits are armed people on the board, not beasts', async ({ adminPage: page }, testInfo) => {
-        const name = `Brannoc ${testInfo.workerIndex}-${Date.now() % 100000}`;
+    test('bandits are armed people on the board, not beasts', async ({ adminPage: page }) => {
+        const name = uniqueName('Brannoc');
         seedCharacter(name);
         await page.goto('/tarmar/gm/');
         await chooseToAttach(page, name);
@@ -59,11 +60,11 @@ test.describe('GM fight — people among the foes', () => {
             .toContainText('2 × Bandit (a person: unarmoured duelist)');
     });
 
-    test("a player's fight can face people the Game Master sets", async ({ authenticatedPage: page }, testInfo) => {
+    test("a player's fight can face people the Game Master sets", async ({ authenticatedPage: page }) => {
         // Issue #894: a player's /fight is answered by the model's set_foes,
         // which could name only catalog beasts, so a player never faced a
         // person. The fake Game Master answers "two bandits" by calling.
-        const name = `Wren ${testInfo.workerIndex}-${Date.now() % 100000}`;
+        const name = uniqueName('Wren');
         seedCharacter(name, TEST_USER);
         await page.goto('/tarmar/gm/');
         await chooseToAttach(page, name);

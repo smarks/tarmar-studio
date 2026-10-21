@@ -7,12 +7,13 @@
  */
 
 const { test, expect, createCharacter, searchPicker } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test.describe('Hook generator', () => {
     test('DM rolls a party-matched hook and sees the roll', async ({ adminPage }) => {
         // A fresh character (level 1), renamed so the party rows are unambiguous.
         await createCharacter(adminPage);
-        const name = `Hookbait ${Date.now()}`;
+        const name = uniqueName('Hookbait');
         const nameInput = adminPage.locator('[data-field="name"] input');
         await nameInput.fill(name);
         await nameInput.blur();
@@ -20,7 +21,7 @@ test.describe('Hook generator', () => {
         // Form a party and seat the character.
         await adminPage.goto('/tarmar/parties/');
         await adminPage.click('a:has-text("Form a New Party")');
-        const partyName = `Hook Party ${Date.now()}`;
+        const partyName = uniqueName('Hook Party');
         await adminPage.fill('#id_name', partyName);
         await adminPage.click('button:has-text("Form Party")');
         await adminPage.waitForURL(/\/tarmar\/parties\/\d+\//);

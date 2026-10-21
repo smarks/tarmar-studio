@@ -14,12 +14,13 @@ const {
     test, expect, TEST_USER, TEST_WATCHER, loginAs, submitPassphrase,
     createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 
 test.describe('Battle spectators', () => {
     test('a third user watches a turn play out without controls', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);
-        const battleName = `E2E Spectate ${Date.now()}`;
+        const battleName = uniqueName('E2E Spectate');
 
         // The DM opens a battle: one AI fighter plus one player seat.
         await createBattleViaSetup(adminPage, {

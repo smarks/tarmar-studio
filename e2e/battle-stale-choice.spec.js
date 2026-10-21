@@ -18,13 +18,14 @@
 
 const { refusalFixedParts } = require('./refusals');
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
 test.describe('A turn choice names the pause it was made for', () => {
     test('a submission for another figure is refused and the arena says so',
         async ({ adminPage }) => {
             await createBattleViaSetup(adminPage, {
-                name: `E2E Stale choice ${Date.now()}`,
+                name: uniqueName('E2E Stale choice'),
                 fighters: 3,
                 seed: 7,
                 controlMode: 'manual',

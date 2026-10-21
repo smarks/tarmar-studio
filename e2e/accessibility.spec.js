@@ -26,6 +26,7 @@ const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
     TEST_WATCHER, postAsGameMaster, characterIdFromUrl, createBattleViaSetup,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 //: The rule sets the review used, and the ones WCAG 2.1 AA is made of.
@@ -66,9 +67,9 @@ function describe(found) {
 }
 
 test.describe('the character sheet is readable by assistive technology', () => {
-    test('the editor has no axe violations at any of the three widths', async ({ page }, testInfo) => {
+    test('the editor has no axe violations at any of the three widths', async ({ page }) => {
         test.setTimeout(120000);
-        const name = `Axe Editor ${testInfo.workerIndex}${Date.now()}`;
+        const name = uniqueName('Axe Editor');
         await loginAs(page, TEST_USER);
         await createNamedCharacter(page, name);
         const editorUrl = page.url();
@@ -81,8 +82,8 @@ test.describe('the character sheet is readable by assistive technology', () => {
         }
     });
 
-    test('every attribute box and select carries its own name', async ({ page }, testInfo) => {
-        const name = `Axe Named ${testInfo.workerIndex}${Date.now()}`;
+    test('every attribute box and select carries its own name', async ({ page }) => {
+        const name = uniqueName('Axe Named');
         // A Game Master's sheet, where every one of these is a control; a
         // player's attributes, provenance and wealth are text (issue #748).
         await loginAs(page, TEST_ADMIN);
@@ -102,8 +103,8 @@ test.describe('the character sheet is readable by assistive technology', () => {
         }
     });
 
-    test('the character list has no axe violations with a row on it', async ({ page }, testInfo) => {
-        const name = `Axe List ${testInfo.workerIndex}${Date.now()}`;
+    test('the character list has no axe violations with a row on it', async ({ page }) => {
+        const name = uniqueName('Axe List');
         await loginAs(page, TEST_USER);
         await createNamedCharacter(page, name);
         await page.goto('/tarmar/characters/');
@@ -294,11 +295,11 @@ test.describe('a keyboard user can see where the focus is', () => {
         await expectFocusVisible(page, '.session-name-input');
     });
 
-    test('the character editor shows the ring on the fields that suppressed it', async ({ page, browser }, testInfo) => {
+    test('the character editor shows the ring on the fields that suppressed it', async ({ page, browser }) => {
         test.setTimeout(120000);
         // A Game Master's sheet, which carries every kind of field (#748).
         await loginAs(page, TEST_ADMIN);
-        await createNamedCharacter(page, `Axe Focus ${testInfo.workerIndex}${Date.now()}`);
+        await createNamedCharacter(page, uniqueName('Axe Focus'));
 
         for (const selector of [
             '.editable-field input',
@@ -326,10 +327,10 @@ test.describe('a keyboard user can see where the focus is', () => {
 });
 
 test.describe('the way from signing in to the journal (issues #786, #827, #828, #924, #952)', () => {
-    test('the journal page and its Play buttons pass at every width', async ({ page }, testInfo) => {
+    test('the journal page and its Play buttons pass at every width', async ({ page }) => {
         test.setTimeout(120000);
         await loginAs(page, TEST_USER);
-        await createNamedCharacter(page, `Axe Home ${testInfo.workerIndex}${Date.now()}`);
+        await createNamedCharacter(page, uniqueName('Axe Home'));
 
         for (const viewport of VIEWPORTS) {
             await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -376,10 +377,10 @@ test.describe('the way from signing in to the journal (issues #786, #827, #828, 
         expect(found, describe(found)).toEqual([]);
     });
 
-    test("the sheet's Play with the Game Master control passes at every width", async ({ page }, testInfo) => {
+    test("the sheet's Play with the Game Master control passes at every width", async ({ page }) => {
         test.setTimeout(120000);
         await loginAs(page, TEST_USER);
-        await createNamedCharacter(page, `Axe Play ${testInfo.workerIndex}${Date.now()}`);
+        await createNamedCharacter(page, uniqueName('Axe Play'));
         const sheetUrl = page.url();
 
         for (const viewport of VIEWPORTS) {
@@ -427,7 +428,7 @@ test.describe('Battle roster — a downed figure and the notes on its card (issu
         await loginAs(page, TEST_ADMIN);
         // A battle awaiting the DM's move, so his page polls the state.
         await createBattleViaSetup(page, {
-            name: `E2E Down contrast ${Date.now()}`, fighters: 3, seed: 7, controlMode: 'manual',
+            name: uniqueName('E2E Down contrast'), fighters: 3, seed: 7, controlMode: 'manual',
         });
         const battleId = new URL(page.url()).pathname.match(/battles\/(\d+)\//)[1];
         await page.click('#advance-turn');
