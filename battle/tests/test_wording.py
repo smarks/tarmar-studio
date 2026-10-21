@@ -127,6 +127,25 @@ class LoadRulingsWordingTest(SimpleTestCase):
                     "Pairs: {}",
                     "[hth_agreement] pairs_line cannot be filled (IndexError(",
                 ),
+                # A join that drops the sentence it carries (#90).
+                "dropped line": (
+                    "tarmar_menu",
+                    "yielded",
+                    "Moving in Final Movement instead",
+                    "[tarmar_menu] yielded must use ['line']",
+                ),
+                "dropped ruling": (
+                    "tarmar_menu",
+                    "cost_past_ruling",
+                    "{cost}",
+                    "[tarmar_menu] cost_past_ruling must use ['past']",
+                ),
+                "dropped guards": (
+                    "tarmar_menu",
+                    "dodge",
+                    "Dodge: +4 to your Target Number",
+                    "[tarmar_menu] dodge must use ['guards']",
+                ),
             }.items():
                 path = self.write(directory, self.shipped_with(table, key, value))
                 with (

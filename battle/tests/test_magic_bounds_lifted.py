@@ -176,11 +176,10 @@ class LiftedChannelTest(SimpleTestCase):
         # No Channel bounds the cast now, so the push control names none.
         self.assertIsNone(row["channel"])
         described = turn_menu.describe(state, state.by_id(1), bolt, ai_choice=False)
-        self.assertTrue(
-            described.cost.endswith(
-                "; magic_bounds.past_by_ruling magic_bounds.channel"
-            ),
+        self.assertRegex(
             described.cost,
+            r"^tarmar_menu\.cost_past_ruling .+ "
+            r"magic_bounds\.past_by_ruling magic_bounds\.channel$",
         )
         # Another figure's menu is unchanged: Fire Missile notes nothing.
         missile = next(
@@ -368,8 +367,10 @@ class MenuNoteEqualsTheEnginePayloadTest(SimpleTestCase):
         self.assertEqual(list(option.lifted_bounds), payload_bounds)
         # The described option, which the page is sent, keeps the answer.
         self.assertEqual(described.lifted_bounds, option.lifted_bounds)
+        past = magic_bounds.past_by_ruling(payload_bounds)
         self.assertTrue(
-            described.cost.endswith(f"; {magic_bounds.past_by_ruling(payload_bounds)}"),
+            described.cost.startswith("tarmar_menu.cost_past_ruling ")
+            and described.cost.endswith(f" {past}"),
             described.cost,
         )
 

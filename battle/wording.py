@@ -1,11 +1,12 @@
 """The words a Game Master's rulings on a battle are shown in (issues #867, #37).
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
-headings and buttons, the battle-log lines and the refusals live in
-``config/battle-rulings.toml``, which Spencer edits with no Python, read once at
-startup into ``settings.BATTLE_RULINGS_WORDING`` by :func:`load_rulings_wording`.
-A missing or unknown key, a value that is not text, and a ``{name}`` a sentence
-may not use all stop the server then, not in front of a player.
+headings and buttons, the battle-log lines, the refusals and the turn menu's
+lines (#90) live in ``config/battle-rulings.toml``, which Spencer edits with no
+Python, read once at startup into ``settings.BATTLE_RULINGS_WORDING`` by
+:func:`load_rulings_wording`. A missing or unknown key, a value that is not
+text, and a ``{name}`` a sentence may not use all stop the server then, not in
+front of a player.
 
 Each table of the file is one dataclass below and each key one field, so code
 and templates read a sentence as an attribute (``words().magic_bounds.heading``)
@@ -30,10 +31,24 @@ from django.core.exceptions import ImproperlyConfigured
 #: The field metadata key naming the placeholders a sentence may use.
 PLACEHOLDERS = "placeholders"
 
+#: The field metadata key naming the placeholders a sentence must use (#90):
+#: those whose loss would drop a whole line, a cost or a ruling the sentence
+#: carries ({line}, {cost}, {past}, {odds} and their kin). A name whose loss
+#: drops only a detail ({move} in no_nearer and ends_from, {average},
+#: {weapon}, {grapple}, {aimed}, {name}) stays optional, as every other
+#: placeholder is.
+REQUIRED = "required"
 
-def _sentence(*placeholders: str) -> Any:
-    """A wording field whose sentence may use ``placeholders``."""
-    return field(metadata={PLACEHOLDERS: frozenset(placeholders)})
+
+def _sentence(*placeholders: str, required: tuple[str, ...] = ()) -> Any:
+    """A wording field whose sentence may use ``placeholders`` and must use
+    ``required``, which are among them."""
+    return field(
+        metadata={
+            PLACEHOLDERS: frozenset(placeholders),
+            REQUIRED: frozenset(required),
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -43,6 +58,130 @@ class CommonWords:
     game_master: str = _sentence("name")
     and_word: str = _sentence()
     unknown_figure: str = _sentence()
+
+
+@dataclass(frozen=True)
+class TurnMenuWords:
+    """The turn menu's words both profiles' lines use (#90)."""
+
+    the_weapon: str = _sentence("weapon")
+    bare_hands: str = _sentence()
+    with_odds: str = _sentence("line", "odds", required=("line", "odds"))
+    no_nearer: str = _sentence("move", "aimed")
+    ends_from: str = _sentence("move", "distance", "aimed")
+    standing: str = _sentence("reason", required=("reason",))
+    stand: str = _sentence("reason", required=("reason",))
+    reach: str = _sentence("move", "hexes", required=("move",))
+    no_attack_charge: str = _sentence("aimed", "reason", required=("reason",))
+    attack: str = _sentence("aimed", "weapon")
+    shoot: str = _sentence("aimed", "weapon")
+    last_shot: str = _sentence("aimed", "weapon")
+    cast: str = _sentence("spell")
+    cast_at: str = _sentence("spell", "aimed")
+    ready: str = _sentence("weapon")
+    ready_another: str = _sentence()
+    change_to: str = _sentence("weapon")
+    change_weapons: str = _sentence()
+    dropped: str = _sentence("weapon")
+    pick_up: str = _sentence("weapon")
+    stand_up: str = _sentence()
+
+
+@dataclass(frozen=True)
+class TarmarMenuWords:
+    """A Tarmar figure's turn menu's own words (#788, #56, #57, #90)."""
+
+    odds: str = _sentence("faces", "sides", "dice", "average")
+    odds_armoured: str = _sentence("faces", "sides", "dice", "stops", "average")
+    under_one: str = _sentence()
+    about: str = _sentence("damage")
+    clear_gait: str = _sentence("gait")
+    nearest_enemy: str = _sentence()
+    run: str = _sentence("hexes", "aimed")
+    sprint: str = _sentence("hexes", "aimed")
+    fatigue: str = _sentence("fatigue")
+    fatigue_if_moving: str = _sentence("fatigue")
+    charge: str = _sentence("aimed", "hexes", "weapon")
+    dodge_guards: str = _sentence()
+    defend_guards: str = _sentence()
+    dodge: str = _sentence("guards", required=("guards",))
+    dodge_standing: str = _sentence("line", "standing", required=("line", "standing"))
+    dodge_toward: str = _sentence("line", "aimed", required=("line",))
+    defend: str = _sentence("guards", required=("guards",))
+    drop: str = _sentence("hexes")
+    leaves_hand: str = _sentence("weapon")
+    press_again: str = _sentence("spell")
+    press_again_at: str = _sentence("spell", "aimed")
+    pushing: str = _sentence("line", "pushed", required=("line",))
+    push_cost: str = _sentence("total", "level", "pushed", "paid", required=("paid",))
+    cast_cost: str = _sentence("mana", "paid", required=("paid",))
+    paid_on_success: str = _sentence()
+    paid_on_success_or_total: str = _sentence("totals")
+    or_separator: str = _sentence()
+    borrowing: str = _sentence("line", "owed", required=("line",))
+    borrowing_cost: str = _sentence("cost", "owed", required=("cost",))
+    pressing_cost: str = _sentence("cost", required=("cost",))
+    anchor: str = _sentence()
+    self_anchor: str = _sentence("spell", "dice", "attribute")
+    helper_anchor: str = _sentence("name", "spell", "dice", "attribute")
+    helper_anchor_cost: str = _sentence("mana")
+    helper_caught: str = _sentence("cost", "spell", required=("cost",))
+    counter: str = _sentence("name", "mana")
+    counter_cost: str = _sentence("mana", "name")
+    an_enemy_caster: str = _sentence()
+    step_away: str = _sentence()
+    step_away_stuck: str = _sentence("line", "stuck", required=("line", "stuck"))
+    no_step_away: str = _sentence("threat")
+    grapple: str = _sentence("aimed")
+    close_strike: str = _sentence("aimed", "weapon")
+    draw_dagger: str = _sentence()
+    break_away: str = _sentence()
+    break_away_stuck: str = _sentence("line", "stuck", required=("line", "stuck"))
+    break_away_steps: str = _sentence("line", required=("line",))
+    struggle_free: str = _sentence("aimed")
+    hold_still: str = _sentence("aimed")
+    squeeze: str = _sentence("aimed")
+    maintain: str = _sentence("aimed")
+    release: str = _sentence("aimed")
+    pick_up_any: str = _sentence()
+    yielded: str = _sentence("line", required=("line",))
+    yielded_blocked: str = _sentence("line", required=("line",))
+    cost_past_ruling: str = _sentence("cost", "past", required=("cost", "past"))
+
+
+@dataclass(frozen=True)
+class ClassicMenuWords:
+    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90)."""
+
+    move_word: str = _sentence()
+    no_foe_in_reach: str = _sentence("reason", "weapon", required=("reason",))
+    charge: str = _sentence("aimed", "hexes", "weapon")
+    charge_another: str = _sentence("aimed", "hexes", "struck", "weapon")
+    charge_grapple: str = _sentence("aimed", "hexes", "grapple")
+    charge_grapple_another: str = _sentence("aimed", "hexes", "struck", "grapple")
+    grapple_words: str = _sentence()
+    shift_attack: str = _sentence("aimed", "weapon")
+    odds: str = _sentence("needed", "dice", "chance")
+    odds_before_facing: str = _sentence("odds", required=("odds",))
+    odds_damage: str = _sentence("odds", "damage", required=("odds",))
+    odds_damage_armoured: str = _sentence("odds", "damage", "stops", required=("odds",))
+    move: str = _sentence("hexes")
+    move_toward: str = _sentence("hexes", "aimed")
+    half_move: str = _sentence("hexes")
+    half_move_toward: str = _sentence("hexes", "aimed")
+    dodge: str = _sentence("how", "dice", "plain_dice", required=("how",))
+    dodge_moving: str = _sentence("hexes")
+    dodge_moving_toward: str = _sentence("hexes", "aimed")
+    shift_defend: str = _sentence("dice", "plain_dice")
+    pick_up_any: str = _sentence()
+    crawl: str = _sentence("hexes")
+    disengage: str = _sentence()
+    hth_attack: str = _sentence("aimed", "grapple")
+    cast_cost: str = _sentence("strength")
+    go_prone: str = _sentence()
+    kneel: str = _sentence()
+    do_nothing: str = _sentence()
+    pass_turn: str = _sentence()
 
 
 @dataclass(frozen=True)
@@ -100,6 +239,9 @@ class RulingsWording:
     """The whole file: one table per ruling, and the words they share."""
 
     common: CommonWords
+    turn_menu: TurnMenuWords
+    tarmar_menu: TarmarMenuWords
+    classic_menu: ClassicMenuWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
 
@@ -143,6 +285,15 @@ def _table(path: Path, name: str, raw: Any, words_type: type) -> Any:
                     f"{{{field_name}{'!' + conversion if conversion else ''}"
                     f"{':' + spec if spec else ''}}}; write {{name}} alone"
                 )
+        used = {
+            field_name
+            for _text, field_name, _spec, _conversion in string.Formatter().parse(value)
+        }
+        dropped = sorted(word_field.metadata[REQUIRED] - used)
+        if dropped:
+            raise ImproperlyConfigured(
+                f"{where} {key} must use {dropped}: each carries another sentence"
+            )
     return words_type(**raw)
 
 

@@ -32,6 +32,7 @@ from battle.viewmodel import tarmar_view
 from common.test_helpers import BaseTestCase
 
 from .magic_fixtures import COUNTER_RULES, seated_rules
+from .rulings_words import with_fixed_words
 from .test_cast_flow import awaiting_wizard_battle
 from .test_state import make_combatant
 
@@ -125,6 +126,7 @@ class CounterChoiceMatchTest(BaseTestCase):
         self.assertIs(_match_candidate([self.one, self.two], choice), self.two)
 
 
+@with_fixed_words
 class CounterMenuTest(BaseTestCase):
     """A seated wizard facing an enemy mage, paused on its decision."""
 
@@ -170,12 +172,9 @@ class CounterMenuTest(BaseTestCase):
                 self.assertFalse(offered["ai_choice"])
                 name = offered["target_name"]
                 mana = offered["counter_mana"]
+                self.assertEqual(offered["plain"], f"tarmar_menu.counter {mana} {name}")
                 self.assertEqual(
-                    offered["plain"],
-                    f"Counter {name}'s spell this turn, committing {mana} mana",
-                )
-                self.assertEqual(
-                    offered["cost"], f"{mana} mana, spent whether {name} casts or not"
+                    offered["cost"], f"tarmar_menu.counter_cost {mana} {name}"
                 )
                 # The bonus the commitment buys is the engine's working.
                 self.assertIn(
@@ -248,6 +247,7 @@ class CounterMenuTest(BaseTestCase):
         self.assertFalse(status_events(battle, "counter_declared"))
 
 
+@with_fixed_words
 class EscalationMenuTest(BaseTestCase):
     """A seated wizard whose Fire Missile at its foe stands countered."""
 
@@ -277,9 +277,9 @@ class EscalationMenuTest(BaseTestCase):
         self.assertFalse(pressed["ai_choice"])
         self.assertEqual(
             pressed["plain"],
-            f"Press your countered Fire Missile again at {pressed['target_name']}",
+            f"tarmar_menu.press_again_at {pressed['target_name']} Fire Missile",
         )
-        self.assertIn("another opposed roll", pressed["cost"])
+        self.assertTrue(pressed["cost"].startswith("tarmar_menu.pressing_cost "))
 
     def test_an_unopposed_escalation_ends_the_contest_and_casts(self) -> None:
         (pressed, *_pushed) = self.escalations()

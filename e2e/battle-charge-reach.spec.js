@@ -12,8 +12,9 @@
  * and the engine's charge falls short.
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
 /**
  * Put the battle's first figure at the centre, the second three hexes off
@@ -22,11 +23,12 @@ const { readDjangoShell } = require('./django');
  * unconscious out of the way when ``withFar`` is false. The two enemies are
  * handed to the AI and rooted where they stand, so the board the chooser's
  * menu reads is the board its charge moves on. Also reads, from the engine,
- * where the chooser's jog toward the nearer enemy would end.
+ * where the chooser's jog toward the nearer enemy would end, the jog's
+ * reach and the engine's name for a CHARGE's gait.
  *
  * @param {number} battleId
  * @param {boolean} withFar
- * @returns {{chooser: string, near: string, far: string, arrival: string}}
+ * @returns {{chooser: string, near: string, far: string, arrival: string, jog: number, gait: string}}
  */
 function wallOffTheNearerEnemy(battleId, withFar) {
     const output = readDjangoShell(`
@@ -61,6 +63,8 @@ print("NAMES", json.dumps({
     "near": near.name,
     "far": far.name,
     "arrival": combat_math.hexes_text(arrival),
+    "jog": jog,
+    "gait": movement.MOVEMENT_GAITS["b"],
 }))
 `);
     return JSON.parse(output.split('NAMES ')[1]);
@@ -71,7 +75,7 @@ print("NAMES", json.dumps({
  *
  * @param {import('@playwright/test').Page} page
  * @param {boolean} withFar
- * @returns {Promise<{chooser: string, near: string, far: string, arrival: string, charges: import('@playwright/test').Locator}>}
+ * @returns {Promise<{chooser: string, near: string, far: string, arrival: string, jog: number, gait: string, charges: import('@playwright/test').Locator}>}
  */
 async function openTheChoosersMenu(page, withFar) {
     await createBattleViaSetup(page, {
@@ -106,10 +110,15 @@ test.describe('The CHARGE rows', () => {
     test('aim only at the enemy the charge reaches, and the engine strikes it', async ({ adminPage: page }) => {
         const { chooser, near, far, charges } = await openTheChoosersMenu(page, true);
         await expect(charges).toHaveCount(1);
+        // The configured words: a charge at Far, its jog, and its odds.
+        const { shared, tarmar } = menuWords();
         await expect(charges.locator('.turn-option-plain')).toHaveText(
-            new RegExp(`^Charge ${far}: jog up to \\d+ hexes and attack with the .+: \\d+ in 20 to hit`)
+            menuLine(shared.with_odds, {
+                line: sentencePattern(tarmar.charge, { aimed: escaped(far), hexes: '\\d+' }),
+                odds: `(?:${sentencePattern(tarmar.odds)}|${sentencePattern(tarmar.odds_armoured)})`,
+            })
         );
-        await expect(charges.filter({ hasText: `Charge ${near}` })).toHaveCount(0);
+        await expect(charges.filter({ hasText: near })).toHaveCount(0);
 
         await chargeIt(page, charges);
         await expect(page.locator('.battle-event', {
@@ -127,14 +136,24 @@ test.describe('The CHARGE rows', () => {
 
     test('say a charge no enemy is in reach of strikes nobody, and it falls short', async ({ adminPage: page }) => {
         const {
-            chooser, near, arrival, charges,
+            chooser, near, arrival, jog, gait, charges,
         } = await openTheChoosersMenu(page, false);
         await expect(charges).toHaveCount(1);
+        // The configured words: no attack, since the clear jog ends where
+        // the engine's route does.
+        const { shared, tarmar } = menuWords();
         await expect(charges.locator('.turn-option-plain')).toHaveText(
-            new RegExp(
-                `^Charge ${near}: no attack, since a clear jog of up to \\d+ hexes `
-                + `ends ${arrival} from ${near}$`
-            )
+            menuLine(shared.no_attack_charge, {
+                aimed: escaped(near),
+                reason: sentencePattern(shared.ends_from, {
+                    move: sentencePattern(shared.reach, {
+                        move: sentencePattern(tarmar.clear_gait, { gait: escaped(gait) }),
+                        hexes: String(jog),
+                    }),
+                    distance: escaped(arrival),
+                    aimed: escaped(near),
+                }),
+            })
         );
 
         await chargeIt(page, charges);

@@ -30,6 +30,7 @@ from characters.models import Character
 from common.test_helpers import BaseTestCase, create_character
 
 from .magic_fixtures import RUNAWAY_RULES, seated_rules
+from .rulings_words import with_fixed_words
 from .test_cast_flow import awaiting_wizard_battle
 from .test_state import make_combatant
 
@@ -94,6 +95,7 @@ class AnchorChoiceMatchTest(BaseTestCase):
         self.assertIs(_match_candidate([self.own, self.helping], choice), self.helping)
 
 
+@with_fixed_words
 class SelfAnchorMenuTest(BaseTestCase):
     """A seated wizard feeding a Runaway, paused on its decision."""
 
@@ -128,8 +130,7 @@ class SelfAnchorMenuTest(BaseTestCase):
         # The engine's AI always anchors its own: the panel tags it.
         self.assertTrue(self.offered["ai_choice"])
         self.assertEqual(
-            self.offered["plain"],
-            "Take back control of your runaway Fire Missile: 2d8 at or under your WIS",
+            self.offered["plain"], "tarmar_menu.self_anchor WIS 2d8 Fire Missile"
         )
         self.assertEqual(self.offered["cost"], "")
 
@@ -240,6 +241,7 @@ class SelfAnchorMenuTest(BaseTestCase):
         )
 
 
+@with_fixed_words
 class HelperAnchorMenuTest(BaseTestCase):
     """A seated wizard beside a foe feeding a Runaway."""
 
@@ -258,14 +260,13 @@ class HelperAnchorMenuTest(BaseTestCase):
         self.assertEqual(offered["target_id"], offered["anchor_target"])
         # The AI never helps: its own pick is something else.
         self.assertFalse(offered["ai_choice"])
-        self.assertTrue(
-            offered["plain"].startswith(f"Help {offered['target_name']} take back")
+        self.assertEqual(
+            offered["plain"],
+            f"tarmar_menu.helper_anchor INT 2d10 {offered['target_name']} Fire Missile",
         )
-        self.assertTrue(offered["plain"].endswith(": 2d10 at or under your INT"))
         self.assertEqual(
             offered["cost"],
-            "2 mana, paid whether it holds or not; if it fails, Fire Missile "
-            "runs away from you too",
+            "tarmar_menu.helper_caught tarmar_menu.helper_anchor_cost 2 Fire Missile",
         )
 
     def test_an_offered_help_is_paid_and_rolled(self) -> None:

@@ -81,14 +81,24 @@ from tarmar_engine.state import BattleState, CombatantState
 from . import magic_bounds
 from .magic_rules import magic_rules
 from .persistence import TARMAR_PROFILE
+from .wording import ClassicMenuWords, TarmarMenuWords, TurnMenuWords, words
 
-#: What DODGE and DEFEND guard against, in the words of the "Defending and
-#: Dodging" table (special-combat-situations.md): Dodge "Missiles and thrown
-#: only", Defend "Melee and non-missile only". The engine agrees: it applies
-#: Defend only to an attack that is not ranged, and a throw is ranged. A
-#: drift test holds these to the page.
-DODGE_DEFENDS_AGAINST = "missiles and thrown weapons only"
-DEFEND_DEFENDS_AGAINST = "melee and non-missile attacks only"
+
+def _shared() -> TurnMenuWords:
+    """The menu's words both profiles use: every sentence a player reads on
+    the menu is configuration (``config/battle-rulings.toml``, issue #90)."""
+    return words().turn_menu
+
+
+def _tarmar() -> TarmarMenuWords:
+    """A Tarmar figure's own menu words (issue #90)."""
+    return words().tarmar_menu
+
+
+def _classic() -> ClassicMenuWords:
+    """A classic figure's own menu words (issue #90)."""
+    return words().classic_menu
+
 
 #: The options that walk the engine's own route toward their target and say
 #: where it takes them, so a route that goes nowhere is read as standing
@@ -154,6 +164,8 @@ def _aimed(
 
     Each branch is the engine policy's own for that letter, so the line a
     player reads for the second wolf is the one the AI would have written.
+    Its words are therefore the engine's, as on the engine's own row beside
+    it, and not the menu's configuration (#90).
     """
     hurt = _hurt_fraction(actor) < HURT_THRESHOLD
     if option == "j":
@@ -262,31 +274,53 @@ def _odds(rationale: str) -> str:
     damage = _DAMAGE.search(rationale)
     if chance is None or damage is None:
         return ""
+    tarmar = _tarmar()
     faces = round(float(chance.group("chance")) * DIE_FACES)
     expected = float(damage.group("damage"))
-    average = "under 1" if expected < 0.5 else f"about {round(expected)}"
-    stops = damage.group("stops")
-    armour = f" less {stops} armour" if stops != "0" else ""
-    return (
-        f"{faces} in {DIE_FACES} to hit, {damage.group('dice')}{armour} "
-        f"({average} a hit)"
+    average = (
+        tarmar.under_one
+        if expected < 0.5
+        else tarmar.about.format(damage=round(expected))
     )
+    stops = damage.group("stops")
+    figures = {
+        "faces": faces,
+        "sides": DIE_FACES,
+        "dice": damage.group("dice"),
+        "average": average,
+    }
+    if stops == "0":
+        return tarmar.odds.format(**figures)
+    return tarmar.odds_armoured.format(stops=stops, **figures)
+
+
+def _weapon_words(weapon_name: str | None) -> str:
+    """ "the Saber", or "bare hands" for ``None``, in either profile."""
+    shared = _shared()
+    if weapon_name is None:
+        return shared.bare_hands
+    return shared.the_weapon.format(weapon=weapon_name)
 
 
 def _weapon_phrase(actor: CombatantState) -> str:
     """ "the Saber", or "bare hands" for a figure with no weapon in hand."""
-    return f"the {actor.weapon.name}" if actor.weapon.item_id else "bare hands"
+    return _weapon_words(actor.weapon.name if actor.weapon.item_id else None)
 
 
 def _close_weapon_phrase(actor: CombatantState) -> str:
     """What an HTH strike (t) is made with: "Bare hands or dagger", so a
     sword in hand strikes with bare hands (tarmar-engine #19)."""
-    return f"the {actor.weapon.name}" if actor.weapon.hth_usable else "bare hands"
+    return _weapon_words(actor.weapon.name if actor.weapon.hth_usable else None)
+
+
+def _joined_odds(sentence: str, odds: str) -> str:
+    """``sentence`` and its odds, or the sentence alone when there are none,
+    in either profile."""
+    return _shared().with_odds.format(line=sentence, odds=odds) if odds else sentence
 
 
 def _with_odds(sentence: str, rationale: str) -> str:
-    odds = _odds(rationale)
-    return f"{sentence}: {odds}" if odds else sentence
+    return _joined_odds(sentence, _odds(rationale))
 
 
 def _approach(
@@ -348,34 +382,66 @@ def _charge_reaches(approach: movement.Approach) -> bool:
 def _ends_from(move: str, distance: int, aimed: str) -> str:
     """ "a clear jog of up to 7 hexes ends 2 hexes from Foe": where a move
     that falls short stops, in either profile."""
-    return f"a {move} ends {combat_math.hexes_text(distance)} from {aimed}"
+    return _shared().ends_from.format(
+        move=move, distance=combat_math.hexes_text(distance), aimed=aimed
+    )
 
 
 def _no_attack_charge_line(aimed: str, reason: str) -> str:
     """The sentence for a charge that strikes nobody, in either profile
     (issue #56)."""
-    return f"Charge {aimed}: no attack, since {reason}"
+    return _shared().no_attack_charge.format(aimed=aimed, reason=reason)
+
+
+def _gait(option: str) -> str:
+    """The engine's gait for a Tarmar moving option: "jog", "run", "sprint"."""
+    return movement.MOVEMENT_GAITS[actions.base_option(option)]
 
 
 def _clear_gait(option: str) -> str:
     """ "clear jog": the move a Tarmar option makes, as :func:`_no_nearer`
     names it."""
-    return f"clear {movement.MOVEMENT_GAITS[actions.base_option(option)]}"
+    return _tarmar().clear_gait.format(gait=_gait(option))
 
 
 def _no_nearer(move: str, aimed: str) -> str:
     """ "no clear jog gets nearer to Foe": why a figure's move stays put."""
-    return f"no {move} gets nearer to {aimed}"
+    return _shared().no_nearer.format(move=move, aimed=aimed)
 
 
 def _standing(reason: str) -> str:
     """ "standing, since ...": a DODGE that does not move, in either profile."""
-    return f"standing, since {reason}"
+    return _shared().standing.format(reason=reason)
 
 
 def _stand_line(reason: str) -> str:
     """The sentence for a move the engine would not make, in either profile."""
-    return f"Stand where you are, since {reason}"
+    return _shared().stand.format(reason=reason)
+
+
+def _ready_line(weapon_name: str | None) -> str:
+    """ "Ready the Dagger", or "Ready another weapon", in either profile."""
+    shared = _shared()
+    if not weapon_name:
+        return shared.ready_another
+    return shared.ready.format(weapon=weapon_name)
+
+
+def _change_line(weapon_name: str | None) -> str:
+    """ "Change to the Dagger", or "Change weapons", in either profile."""
+    shared = _shared()
+    if not weapon_name:
+        return shared.change_weapons
+    return shared.change_to.format(weapon=weapon_name)
+
+
+def _cast_line(spell_name: str, aimed: str) -> str:
+    """ "Cast Fire Missile at Foe", or with no one aimed at, in either
+    profile."""
+    shared = _shared()
+    if aimed:
+        return shared.cast_at.format(spell=spell_name, aimed=aimed)
+    return shared.cast.format(spell=spell_name)
 
 
 def _no_step_away(
@@ -402,10 +468,7 @@ def _no_step_away(
     """
     if not threats or movement.step_away_hex(state, actor, threats[0]) is not None:
         return ""
-    return (
-        "with no hex picked you stay where you are, since no hex straight "
-        f"back from {threats[0].name} or to either flank is clear"
-    )
+    return _tarmar().no_step_away.format(threat=threats[0].name)
 
 
 def _mover_line(
@@ -433,17 +496,17 @@ def _mover_line(
     Returns:
         ``(plain, cost)``, as :func:`_plain_line` gives them.
     """
-    gait = movement.MOVEMENT_GAITS[actions.base_option(letter)]
-    fatigue_text = f"{fatigue} Fatigue"
+    tarmar = _tarmar()
     if target is not None and stands:
         return (
             _stand_line(_no_nearer(_clear_gait(letter), target.name)),
-            f"{fatigue_text}, only if you move",
+            tarmar.fatigue_if_moving.format(fatigue=fatigue),
         )
-    aimed = target.name if target is not None else "the nearest enemy"
+    aimed = target.name if target is not None else tarmar.nearest_enemy
+    sentence = tarmar.sprint if actions.base_option(letter) == "sprint" else tarmar.run
     return (
-        f"{gait.capitalize()} up to {allowance} hexes toward {aimed}",
-        fatigue_text,
+        sentence.format(hexes=allowance, aimed=aimed),
+        tarmar.fatigue.format(fatigue=fatigue),
     )
 
 
@@ -466,27 +529,32 @@ def _anchor_line(
     Returns:
         ``(plain, cost)``, as :func:`_plain_line` gives them.
     """
+    tarmar = _tarmar()
     rules = magic_rules().runaway
     if target is None or target.runaway is None or rules is None:
-        return "Anchor a runaway spell", ""
+        return tarmar.anchor, ""
     spell = get_spell(target.runaway.spell_key)
     if target.combatant_id == actor.combatant_id:
         roll = rules.self_anchor
         return (
-            f"Take back control of your runaway {spell.name}: {roll.dice} at or "
-            f"under your {roll.attribute}",
+            tarmar.self_anchor.format(
+                spell=spell.name, dice=roll.dice, attribute=roll.attribute
+            ),
             "",
         )
     roll = rules.helper_anchor
-    cost = (
-        f"{rules.helper_cost(target.runaway.original_cost)} mana, paid whether "
-        "it holds or not"
+    cost = tarmar.helper_anchor_cost.format(
+        mana=rules.helper_cost(target.runaway.original_cost)
     )
     if rules.helper_failure_catches_helper:
-        cost += f"; if it fails, {spell.name} runs away from you too"
+        cost = tarmar.helper_caught.format(cost=cost, spell=spell.name)
     return (
-        f"Help {target.name} take back their runaway {spell.name}: {roll.dice} "
-        f"at or under your {roll.attribute}",
+        tarmar.helper_anchor.format(
+            name=target.name,
+            spell=spell.name,
+            dice=roll.dice,
+            attribute=roll.attribute,
+        ),
         cost,
     )
 
@@ -502,14 +570,15 @@ def _when_mana_is_paid() -> str:
     Returns:
         The phrase, e.g. "paid only if it succeeds or the roll is 12 or 13".
     """
+    tarmar = _tarmar()
     casting_failure = magic_rules().casting_failure
     lost_totals = (
         [] if casting_failure is None else sorted(casting_failure.mana_lost_totals)
     )
     if not lost_totals:
-        return "paid only if it succeeds"
-    named = " or ".join(str(total) for total in lost_totals)
-    return f"paid only if it succeeds or the roll is {named}"
+        return tarmar.paid_on_success
+    named = tarmar.or_separator.join(str(total) for total in lost_totals)
+    return tarmar.paid_on_success_or_total.format(totals=named)
 
 
 def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
@@ -527,10 +596,11 @@ def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
     Returns:
         ``(plain, cost)``, as :func:`_plain_line` gives them.
     """
-    name = caster.name if caster is not None else "an enemy caster"
+    tarmar = _tarmar()
+    name = caster.name if caster is not None else tarmar.an_enemy_caster
     return (
-        f"Counter {name}'s spell this turn, committing {mana} mana",
-        f"{mana} mana, spent whether {name} casts or not",
+        tarmar.counter.format(name=name, mana=mana),
+        tarmar.counter_cost.format(mana=mana, name=name),
     )
 
 
@@ -568,6 +638,7 @@ def _plain_line(
         else None
     )
     falls_short = charge is not None and not _charge_reaches(charge)
+    shared, tarmar = _shared(), _tarmar()
     if option == "a":
         plain, cost = _mover_line(
             candidate.letter,
@@ -586,89 +657,91 @@ def _plain_line(
         )
     elif option == "b" and charge is not None and falls_short:
         jog = movement.gait_allowance(actor, movement.MOVEMENT_GAITS[option])
-        gait = _clear_gait(candidate.letter)
         plain = _no_attack_charge_line(
             aimed,
-            _ends_from(f"{gait} of up to {jog} hexes", charge.distance, aimed)
+            _ends_from(
+                shared.reach.format(move=_clear_gait(candidate.letter), hexes=jog),
+                charge.distance,
+                aimed,
+            )
             if charge.route
-            else _no_nearer(gait, aimed),
+            else _no_nearer(_clear_gait(candidate.letter), aimed),
         )
     elif option == "b":
         plain = _with_odds(
-            f"Charge {aimed}: jog up to {movement.gait_allowance(actor, 'jog')} "
-            f"hexes and attack "
-            f"with {weapon}",
+            tarmar.charge.format(
+                aimed=aimed,
+                hexes=movement.gait_allowance(actor, "jog"),
+                weapon=weapon,
+            ),
             rationale,
         )
     elif option == "c":
-        plain = f"Dodge: +4 to your Target Number against {DODGE_DEFENDS_AGAINST}"
+        plain = tarmar.dodge.format(guards=tarmar.dodge_guards)
         if stands:
-            plain += f", {_standing(_no_nearer(_clear_gait(candidate.letter), aimed))}"
+            plain = tarmar.dodge_standing.format(
+                line=plain,
+                standing=_standing(_no_nearer(_clear_gait(candidate.letter), aimed)),
+            )
         elif target is not None:
-            plain += f", jogging toward {aimed}"
+            plain = tarmar.dodge_toward.format(line=plain, aimed=aimed)
     elif option == "d":
-        plain = (
-            "Drop prone where you stand, or first jog up to "
-            f"{movement.gait_allowance(actor, 'jog')} hexes to a hex you pick"
-        )
+        plain = tarmar.drop.format(hexes=movement.gait_allowance(actor, "jog"))
     elif option == "e":
         spares = [spare for spare in actor.spare_weapons if spare.item_id]
         choice = best_weapon(actor, spares)
-        plain = f"Ready the {choice.name}" if choice else "Ready another weapon"
+        plain = _ready_line(choice.name if choice else None)
     elif option == "f":
-        plain = _with_odds(f"Shoot {aimed} with {weapon}", rationale)
+        plain = _with_odds(shared.shoot.format(aimed=aimed, weapon=weapon), rationale)
         if actor.weapon.is_thrown and not actor.weapon.is_missile:
-            cost = f"the {actor.weapon.name} leaves your hand"
+            cost = tarmar.leaves_hand.format(weapon=actor.weapon.name)
     elif option in ("g", "p"):
-        plain = "Stand up; it takes the whole turn"
+        plain = shared.stand_up
     elif option in ("h", "r") and candidate.spell_key:
         spell = get_spell(candidate.spell_key)
-        verb = (
-            f"Press your countered {spell.name} again"
-            if candidate.escalate
-            else f"Cast {spell.name}"
-        )
-        plain = verb + (f" at {aimed}" if aimed else "")
+        if not candidate.escalate:
+            plain = _cast_line(spell.name, aimed)
+        elif aimed:
+            plain = tarmar.press_again_at.format(spell=spell.name, aimed=aimed)
+        else:
+            plain = tarmar.press_again.format(spell=spell.name)
         paid_when = _when_mana_is_paid()
         if candidate.push_mana:
             # A pushed copy of the cast (issue #960): the engine's menu offers
             # it, with the Control Roll's working in its rationale.
-            plain += f", pushing {candidate.push_mana} more mana into it"
-            cost = (
-                f"{spell.level + candidate.push_mana} mana ({spell.level} and "
-                f"{candidate.push_mana} pushed), {paid_when}; a success makes a "
-                "Control Roll"
+            plain = tarmar.pushing.format(line=plain, pushed=candidate.push_mana)
+            cost = tarmar.push_cost.format(
+                total=spell.level + candidate.push_mana,
+                level=spell.level,
+                pushed=candidate.push_mana,
+                paid=paid_when,
             )
         else:
-            cost = f"{spell.level} mana, {paid_when}"
+            cost = tarmar.cast_cost.format(mana=spell.level, paid=paid_when)
         if candidate.borrow:
             # A borrowing copy (tarmar-engine #28): the engine offers it for a
             # cast the caster cannot afford, with the debt roll's working in
             # its rationale.
             owed = borrowed_mana(actor, candidate)
-            plain += f", borrowing the {owed} mana you lack"
-            cost += (
-                f"; paying it empties your pool and borrows the {owed} you lack "
-                "as debt, and a debt roll follows the spell"
-            )
+            plain = tarmar.borrowing.format(line=plain, owed=owed)
+            cost = tarmar.borrowing_cost.format(cost=cost, owed=owed)
         if candidate.escalate:
             # A cast pressing a countered spell again (tarmar-engine #31):
             # the engine marks it, for a player; the opposed roll comes again
             # if a counter meets it.
-            cost += (
-                "; a counter against it means another opposed roll, and "
-                "countered again its mana is spent with no casting roll"
-            )
+            cost = tarmar.pressing_cost.format(cost=cost)
     elif option == ANCHOR_OPTION:
         plain, cost = _anchor_line(actor, target)
     elif option == actions.COUNTER_OPTION and candidate.counter_mana is not None:
         plain, cost = _counter_line(candidate.counter_mana, target)
     elif option == "j":
-        plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
+        plain = _with_odds(shared.attack.format(aimed=aimed, weapon=weapon), rationale)
     elif option == "k":
-        plain = f"Defend: +4 to your Target Number against {DEFEND_DEFENDS_AGAINST}"
+        plain = tarmar.defend.format(guards=tarmar.defend_guards)
     elif option == "l":
-        plain = _with_odds(f"One last shot at {aimed} with {weapon}", rationale)
+        plain = _with_odds(
+            shared.last_shot.format(aimed=aimed, weapon=weapon), rationale
+        )
     elif option == "m":
         spares = [
             spare
@@ -676,59 +749,65 @@ def _plain_line(
             if spare.item_id and not spare.is_missile
         ]
         choice = best_weapon(actor, spares)
-        plain = f"Change to the {choice.name}" if choice else "Change weapons"
+        plain = _change_line(choice.name if choice else None)
         if actor.weapon.item_id:
-            cost = f"the {actor.weapon.name} is dropped"
+            cost = shared.dropped.format(weapon=actor.weapon.name)
     elif option == "n":
-        plain = "Step one hex away instead of attacking"
+        plain = tarmar.step_away
         # The engine steps away from the first adjacent enemy, the first of
         # the enemies an ATTACK reaches (``TurnRunner.disengage_step``).
         stuck = _no_step_away(state, actor, _legal_targets(state, actor, "j"))
         if stuck:
-            plain += f": {stuck}"
+            plain = tarmar.step_away_stuck.format(line=plain, stuck=stuck)
     elif option == "o":
-        plain = f"Try to grapple {aimed}: a hold pins them rather than hurting them"
+        plain = tarmar.grapple.format(aimed=aimed)
     elif option == "q":
         choice = best_weapon(actor, weapons_in_reach(state, actor))
-        plain = f"Pick up the {choice.name}" if choice else "Pick up a weapon"
+        plain = (
+            shared.pick_up.format(weapon=choice.name) if choice else tarmar.pick_up_any
+        )
         if actor.weapon.item_id:
-            cost = f"the {actor.weapon.name} is dropped"
+            cost = shared.dropped.format(weapon=actor.weapon.name)
     elif option == "t":
         plain = _with_odds(
-            f"Strike {aimed} in close with {_close_weapon_phrase(actor)}", rationale
+            tarmar.close_strike.format(aimed=aimed, weapon=_close_weapon_phrase(actor)),
+            rationale,
         )
     elif option == "u":
-        plain = "Try to draw your dagger: 3d6 at or under your DEX"
+        plain = tarmar.draw_dagger
     elif option == "v" and actor.grappled_by is None:
-        plain = "Break away from hand-to-hand: 4d6 at or under your DEX"
         # The engine steps away from the first partner it is in
         # hand-to-hand with (``TurnRunner.hth_disengage``).
         stuck = _no_step_away(state, actor, _hth_partners(state, actor))
-        plain += f"; {stuck}" if stuck else ", then stand in a hex next to you"
+        plain = (
+            tarmar.break_away_stuck.format(line=tarmar.break_away, stuck=stuck)
+            if stuck
+            else tarmar.break_away_steps.format(line=tarmar.break_away)
+        )
     elif option == "v":
-        plain = f"Struggle free of {aimed}: 4d6 at or under your DEX"
+        plain = tarmar.struggle_free.format(aimed=aimed)
     elif option == "hold_still":
-        plain = f"Hold still in {aimed}'s grip"
+        plain = tarmar.hold_still.format(aimed=aimed)
     elif option == "squeeze":
-        plain = f"Squeeze {aimed}"
+        plain = tarmar.squeeze.format(aimed=aimed)
     elif option == "maintain":
-        plain = f"Keep your hold on {aimed}"
+        plain = tarmar.maintain.format(aimed=aimed)
     elif option == "release":
-        plain = f"Let {aimed} go"
+        plain = tarmar.release.format(aimed=aimed)
     else:
         plain = candidate.name.capitalize()
     if actions.is_yielded(candidate.letter) and (stands or falls_short):
         # The engine walks a yielded mover's route from the board as it is
         # in Final Movement, so a way opened by then is taken.
-        plain += ", unless a way opens by Final Movement"
+        plain = tarmar.yielded_blocked.format(line=plain)
     elif actions.is_yielded(candidate.letter):
-        plain += ", moving in Final Movement instead"
+        plain = tarmar.yielded.format(line=plain)
     # A cast or counter past a bound a Game Master lifted for this figure
     # (#37) says so, as its log line will: the engine's own answer, carried
     # on the option (``Candidate.lifted_bounds``).
     past = magic_bounds.past_by_ruling(candidate.lifted_bounds)
     if past:
-        cost = f"{cost}; {past}" if cost else past
+        cost = tarmar.cost_past_ruling.format(cost=cost, past=past) if cost else past
     return plain, cost
 
 
@@ -901,11 +980,6 @@ _CLASSIC_STANDING_MOVERS = frozenset(
 )
 
 
-#: What a classic grapple does, in the HTH ATTACK row's words and a
-#: bare-handed CHARGE's (Melee p.17).
-_CLASSIC_GRAPPLE_WORDS = "move into their hex and fight hand to hand"
-
-
 @dataclass(frozen=True)
 class _ClassicChargeBlow:
     """A classic charge as the engine would make it (issue #56).
@@ -975,10 +1049,15 @@ def _classic_charge_blow(
     )
 
 
+def _classic_roll(dice_count: int) -> str:
+    """ "3d6": a classic roll of ``dice_count`` plain dice."""
+    return f"{dice_count}d{CLASSIC_DIE_FACES}"
+
+
 def _classic_dice(damage: DamageDice) -> str:
     """ "2d6", "1d6+2", "1d6-1": a classic damage expression in the page's words."""
     modifier = f"{damage.modifier:+d}" if damage.modifier else ""
-    return f"{damage.count}d{CLASSIC_DIE_FACES}{modifier}"
+    return f"{_classic_roll(damage.count)}{modifier}"
 
 
 def _classic_hit_chance(game: GameState, needed: int, dice_count: int) -> int:
@@ -1052,20 +1131,25 @@ def _classic_strike(
     )
     dice_count = game.rules.attack_dice_count(target, ranged=ranged)
     chance = _classic_hit_chance(game, needed, dice_count)
-    odds = (
-        f"{needed} or less on {dice_count}d{CLASSIC_DIE_FACES} to hit (about {chance}%)"
+    classic = _classic()
+    odds = classic.odds.format(
+        needed=needed, dice=_classic_roll(dice_count), chance=chance
     )
     if charging:
-        odds += " before any flank or rear bonus"
+        odds = classic.odds_before_facing.format(odds=odds)
     if weapon is None:
         return odds
     stopped = game.rules.absorbed(target, zone=zone)
-    armour = f" less {stopped} armour" if stopped else ""
     # No "about N a hit": what a hit does on average turns on the engine's
     # special totals (3 triple, 4 double) and a pole weapon's extra dice, and
     # the engine does not say it yet (smarks/tarmar-engine#23); the studio
     # does not work it out on its own.
-    return f"{odds}, {_classic_dice(weapon.damage)}{armour}"
+    damage = _classic_dice(weapon.damage)
+    if stopped:
+        return classic.odds_damage_armoured.format(
+            odds=odds, damage=damage, stops=stopped
+        )
+    return classic.odds_damage.format(odds=odds, damage=damage)
 
 
 def _classic_plain_line(
@@ -1077,11 +1161,11 @@ def _classic_plain_line(
     costs anything in a classic turn: the ST it invests, which is also the
     caster's hit points.
     """
+    shared, classic = _shared(), _classic()
     option = ClassicOption(candidate.letter)
     aimed = target.name if target is not None else ""
-    toward = f" toward {aimed}" if aimed else ""
     weapon = figure.ready_weapon
-    wielding = f"the {weapon.name}" if weapon is not None else "bare hands"
+    wielding = _weapon_words(weapon.name if weapon is not None else None)
     budget = game.rules.movement_budget(
         figure.movement_allowance, classic_spec(option).movement_cap
     )
@@ -1095,7 +1179,7 @@ def _classic_plain_line(
         else None
     )
     stands = plan is not None and not plan.path
-    move = f"move of up to {budget} hexes"
+    move = shared.reach.format(move=classic.move_word, hexes=budget)
     no_nearer = _no_nearer(move, aimed)
     # A charge says whom the engine's own charge strikes, or that it strikes
     # nobody (issue #56).
@@ -1106,115 +1190,125 @@ def _classic_plain_line(
         blow = _classic_charge_blow(game, figure, candidate)
         charge_path, struck, grapples = blow.path, blow.struck, blow.grapples
     if struck is None and target is not None and target.position is not None:
-        reach = f"with no foe in reach of {wielding}"
         reason = (
             _ends_from(
                 move,
                 game.arena.layout.distance(charge_path[-1], target.position),
                 aimed,
             )
-            + f", {reach}"
             if charge_path
-            else f"{no_nearer}, {reach}"
+            else no_nearer
         )
-        plain = _no_attack_charge_line(aimed, reason)
+        plain = _no_attack_charge_line(
+            aimed, classic.no_foe_in_reach.format(reason=reason, weapon=wielding)
+        )
     elif struck is not None and grapples:
         # A grapple is settled by the defender's roll, not a to-hit roll, so
         # it carries no odds (Melee p.17).
-        whom = "them" if struck is target else struck.name
-        lead = f"Charge {aimed}" if struck is target else f"Charge toward {aimed}"
-        plain = (
-            f"{lead}: move up to {budget} hexes and grapple {whom}: "
-            f"{_CLASSIC_GRAPPLE_WORDS}"
-        )
+        if struck is target:
+            plain = classic.charge_grapple.format(
+                aimed=aimed, hexes=budget, grapple=classic.grapple_words
+            )
+        else:
+            plain = classic.charge_grapple_another.format(
+                aimed=aimed,
+                hexes=budget,
+                struck=struck.name,
+                grapple=classic.grapple_words,
+            )
     elif struck is not None and target is not None and struck is not target:
-        odds = _classic_strike(game, figure, option, struck)
-        sentence = (
-            f"Charge toward {aimed}: move up to {budget} hexes and attack "
-            f"{struck.name} with {wielding}"
+        plain = _joined_odds(
+            classic.charge_another.format(
+                aimed=aimed, hexes=budget, struck=struck.name, weapon=wielding
+            ),
+            _classic_strike(game, figure, option, struck),
         )
-        plain = f"{sentence}: {odds}" if odds else sentence
     elif option in _CLASSIC_STRIKES and target is not None:
         verbs = {
-            ClassicOption.ATTACK: f"Attack {aimed} with {wielding}",
-            ClassicOption.SHIFT_ATTACK: (
-                f"Shift a hex and attack {aimed} with {wielding}"
-            ),
-            ClassicOption.CHARGE_ATTACK: (
-                f"Charge {aimed}: move up to {budget} hexes and attack with {wielding}"
-            ),
-            ClassicOption.MISSILE_ATTACK: f"Shoot {aimed} with {wielding}",
-            ClassicOption.ONE_LAST_SHOT: f"One last shot at {aimed} with {wielding}",
+            ClassicOption.ATTACK: shared.attack,
+            ClassicOption.SHIFT_ATTACK: classic.shift_attack,
+            ClassicOption.CHARGE_ATTACK: classic.charge,
+            ClassicOption.MISSILE_ATTACK: shared.shoot,
+            ClassicOption.ONE_LAST_SHOT: shared.last_shot,
         }
-        odds = _classic_strike(game, figure, option, target)
-        plain = f"{verbs[option]}: {odds}" if odds else verbs[option]
+        plain = _joined_odds(
+            verbs[option].format(aimed=aimed, hexes=budget, weapon=wielding),
+            _classic_strike(game, figure, option, target),
+        )
     elif option in (ClassicOption.MOVE, ClassicOption.HALF_MOVE) and stands:
         plain = _stand_line(no_nearer)
     elif option == ClassicOption.MOVE:
-        plain = f"Move up to {budget} hexes{toward}"
+        plain = (
+            classic.move_toward.format(hexes=budget, aimed=aimed)
+            if aimed
+            else classic.move.format(hexes=budget)
+        )
     elif option == ClassicOption.HALF_MOVE:
-        plain = f"Move up to {budget} hexes{toward} without attacking"
+        plain = (
+            classic.half_move_toward.format(hexes=budget, aimed=aimed)
+            if aimed
+            else classic.half_move.format(hexes=budget)
+        )
     elif option == ClassicOption.DODGE:
         dice = game.rules.resolution.attack_dice_count(
             dodging=True, defending=False, ranged=True
         )
-        how = (
-            _standing(no_nearer)
-            if stands
-            else f"while moving up to {budget} hexes{toward}"
-        )
-        plain = (
-            f"Dodge {how}: missiles and thrown weapons roll "
-            f"{dice}d{CLASSIC_DIE_FACES} to hit you, not "
-            f"{CLASSIC_PLAIN_DICE}d{CLASSIC_DIE_FACES}"
+        if stands:
+            how = _standing(no_nearer)
+        elif aimed:
+            how = classic.dodge_moving_toward.format(hexes=budget, aimed=aimed)
+        else:
+            how = classic.dodge_moving.format(hexes=budget)
+        plain = classic.dodge.format(
+            how=how,
+            dice=_classic_roll(dice),
+            plain_dice=_classic_roll(CLASSIC_PLAIN_DICE),
         )
     elif option == ClassicOption.SHIFT_DEFEND:
         dice = game.rules.resolution.attack_dice_count(
             dodging=False, defending=True, ranged=False
         )
-        plain = (
-            f"Shift a hex and defend: blows in melee roll {dice}d"
-            f"{CLASSIC_DIE_FACES} to hit you, not "
-            f"{CLASSIC_PLAIN_DICE}d{CLASSIC_DIE_FACES}"
+        plain = classic.shift_defend.format(
+            dice=_classic_roll(dice), plain_dice=_classic_roll(CLASSIC_PLAIN_DICE)
         )
     elif option in (ClassicOption.READY_WEAPON, ClassicOption.CHANGE_WEAPONS):
         # The weapon the engine takes up for this option, as it will enact it.
         taken = classic_policy.plan_for(game, figure, candidate).ready
         if option == ClassicOption.READY_WEAPON:
-            plain = f"Ready the {taken}" if taken else "Ready another weapon"
+            plain = _ready_line(taken)
         else:
-            plain = f"Change to the {taken}" if taken else "Change weapons"
+            plain = _change_line(taken)
             if weapon is not None:
-                cost = f"the {weapon.name} is dropped"
+                cost = shared.dropped.format(weapon=weapon.name)
     elif option == ClassicOption.PICK_UP:
         taken = classic_policy.plan_for(game, figure, candidate).ready
-        plain = f"Pick up the {taken}" if taken else "Pick up a weapon in reach"
+        plain = shared.pick_up.format(weapon=taken) if taken else classic.pick_up_any
     elif option == ClassicOption.STAND_UP:
-        plain = "Stand up; it takes the whole turn"
+        plain = shared.stand_up
     elif option == ClassicOption.CRAWL:
-        plain = f"Crawl up to {budget} hexes, staying down"
+        plain = classic.crawl.format(hexes=budget)
     elif option == ClassicOption.DISENGAGE:
-        plain = "Step away from the enemies engaging you"
+        plain = classic.disengage
     elif option == ClassicOption.HTH_ATTACK:
-        plain = f"Grapple {aimed}: {_CLASSIC_GRAPPLE_WORDS}"
+        plain = classic.hth_attack.format(aimed=aimed, grapple=classic.grapple_words)
     elif option == ClassicOption.CAST and candidate.spell_key:
         offers = {
             (spell.id, subject.uid): invested
             for spell, subject, invested in classic_ai.castable_spells(game, figure)
         }
         spell_name = candidate.name.removeprefix(f"{classic_spec(option).name} ")
-        plain = f"Cast {spell_name}" + (f" at {aimed}" if aimed else "")
+        plain = _cast_line(spell_name, aimed)
         invested = offers.get((candidate.spell_key, target.uid if target else ""))
         if invested is not None:
-            cost = f"{invested} ST"
+            cost = classic.cast_cost.format(strength=invested)
     elif option == ClassicOption.GO_PRONE:
-        plain = "Drop prone where you stand"
+        plain = classic.go_prone
     elif option == ClassicOption.KNEEL:
-        plain = "Drop to one knee"
+        plain = classic.kneel
     elif option == ClassicOption.DO_NOTHING:
-        plain = "Hold where you are and do nothing this turn"
+        plain = classic.do_nothing
     elif option == ClassicOption.PASS:
-        plain = "Wait: choose after the others have moved"
+        plain = classic.pass_turn
     else:
         plain = candidate.name.capitalize()
     return plain, cost

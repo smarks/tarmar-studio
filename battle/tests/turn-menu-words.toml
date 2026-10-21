@@ -1,0 +1,140 @@
+# The turn menu: the line a seated player reads for each option, and what it
+# costs (issues #788, #890, #56, #57, #90). [turn_menu] holds the words both
+# profiles use, [tarmar_menu] a Tarmar figure's own and [classic_menu] a
+# classic Melee figure's. A {line}, {reason}, {odds} or {cost} is another of
+# these sentences, already filled; {aimed} names the figure an option is aimed
+# at, and {weapon} is the_weapon or bare_hands.
+
+[turn_menu]
+the_weapon = "the {weapon}"
+bare_hands = "bare hands"
+# An attack's line and its chance to hit.
+with_odds = "{line}: {odds}"
+# Why a move stays put: {move} is tarmar_menu.clear_gait, or reach.
+no_nearer = "no {move} gets nearer to {aimed}"
+# Where a charge that falls short stops; {distance} is "2 hexes".
+ends_from = "a {move} ends {distance} from {aimed}"
+standing = "standing, since {reason}"
+stand = "Stand where you are, since {reason}"
+# How far a move goes: {move} is tarmar_menu.clear_gait or
+# classic_menu.move_word.
+reach = "{move} of up to {hexes} hexes"
+no_attack_charge = "Charge {aimed}: no attack, since {reason}"
+attack = "Attack {aimed} with {weapon}"
+shoot = "Shoot {aimed} with {weapon}"
+last_shot = "One last shot at {aimed} with {weapon}"
+cast = "Cast {spell}"
+cast_at = "Cast {spell} at {aimed}"
+ready = "Ready the {weapon}"
+ready_another = "Ready another weapon"
+change_to = "Change to the {weapon}"
+change_weapons = "Change weapons"
+dropped = "the {weapon} is dropped"
+pick_up = "Pick up the {weapon}"
+stand_up = "Stand up; it takes the whole turn"
+
+[tarmar_menu]
+# The chance to hit on the d20 ({sides}) and what a hit does; {average} is
+# under_one or about.
+odds = "{faces} in {sides} to hit, {dice} ({average} a hit)"
+odds_armoured = "{faces} in {sides} to hit, {dice} less {stops} armour ({average} a hit)"
+under_one = "under 1"
+about = "about {damage}"
+# {gait} is the engine's: run, sprint or jog.
+clear_gait = "clear {gait}"
+nearest_enemy = "the nearest enemy"
+run = "Run up to {hexes} hexes toward {aimed}"
+sprint = "Sprint up to {hexes} hexes toward {aimed}"
+fatigue = "{fatigue} Fatigue"
+fatigue_if_moving = "{fatigue} Fatigue, only if you move"
+charge = "Charge {aimed}: jog up to {hexes} hexes and attack with {weapon}"
+# What Dodge and Defend guard against, in the rules page's words (a drift
+# test holds these to special-combat-situations.md).
+dodge_guards = "missiles and thrown weapons only"
+defend_guards = "melee and non-missile attacks only"
+dodge = "Dodge: +4 to your Target Number against {guards}"
+dodge_standing = "{line}, {standing}"
+dodge_toward = "{line}, jogging toward {aimed}"
+defend = "Defend: +4 to your Target Number against {guards}"
+drop = "Drop prone where you stand, or first jog up to {hexes} hexes to a hex you pick"
+leaves_hand = "the {weapon} leaves your hand"
+press_again = "Press your countered {spell} again"
+press_again_at = "Press your countered {spell} again at {aimed}"
+pushing = "{line}, pushing {pushed} more mana into it"
+push_cost = "{total} mana ({level} and {pushed} pushed), {paid}; a success makes a Control Roll"
+cast_cost = "{mana} mana, {paid}"
+# When a cast pays its mana; {totals} are the canon's, each pair parted by
+# or_separator, spaces and all.
+paid_on_success = "paid only if it succeeds"
+paid_on_success_or_total = "paid only if it succeeds or the roll is {totals}"
+or_separator = " or "
+borrowing = "{line}, borrowing the {owed} mana you lack"
+borrowing_cost = "{cost}; paying it empties your pool and borrows the {owed} you lack as debt, and a debt roll follows the spell"
+pressing_cost = "{cost}; a counter against it means another opposed roll, and countered again its mana is spent with no casting roll"
+# Anchoring a runaway spell, with no Runaway rules loaded.
+anchor = "Anchor a runaway spell"
+self_anchor = "Take back control of your runaway {spell}: {dice} at or under your {attribute}"
+helper_anchor = "Help {name} take back their runaway {spell}: {dice} at or under your {attribute}"
+helper_anchor_cost = "{mana} mana, paid whether it holds or not"
+helper_caught = "{cost}; if it fails, {spell} runs away from you too"
+counter = "Counter {name}'s spell this turn, committing {mana} mana"
+counter_cost = "{mana} mana, spent whether {name} casts or not"
+an_enemy_caster = "an enemy caster"
+step_away = "Step one hex away instead of attacking"
+step_away_stuck = "{line}: {stuck}"
+no_step_away = "with no hex picked you stay where you are, since no hex straight back from {threat} or to either flank is clear"
+grapple = "Try to grapple {aimed}: a hold pins them rather than hurting them"
+close_strike = "Strike {aimed} in close with {weapon}"
+draw_dagger = "Try to draw your dagger: 3d6 at or under your DEX"
+break_away = "Break away from hand-to-hand: 4d6 at or under your DEX"
+break_away_stuck = "{line}; {stuck}"
+break_away_steps = "{line}, then stand in a hex next to you"
+struggle_free = "Struggle free of {aimed}: 4d6 at or under your DEX"
+hold_still = "Hold still in {aimed}'s grip"
+squeeze = "Squeeze {aimed}"
+maintain = "Keep your hold on {aimed}"
+release = "Let {aimed} go"
+pick_up_any = "Pick up a weapon"
+# An option yielded to Final Movement.
+yielded = "{line}, moving in Final Movement instead"
+yielded_blocked = "{line}, unless a way opens by Final Movement"
+# A cast or counter past a bound a Game Master lifted; {past} is
+# magic_bounds.past_by_ruling.
+cost_past_ruling = "{cost}; {past}"
+
+[classic_menu]
+# A classic move, as reach and no_nearer name it.
+move_word = "move"
+no_foe_in_reach = "{reason}, with no foe in reach of {weapon}"
+charge = "Charge {aimed}: move up to {hexes} hexes and attack with {weapon}"
+# A charge that strikes a foe other than the one it closes on.
+charge_another = "Charge toward {aimed}: move up to {hexes} hexes and attack {struck} with {weapon}"
+charge_grapple = "Charge {aimed}: move up to {hexes} hexes and grapple them: {grapple}"
+charge_grapple_another = "Charge toward {aimed}: move up to {hexes} hexes and grapple {struck}: {grapple}"
+# What a grapple does, in the HTH ATTACK row's words (Melee p.17).
+grapple_words = "move into their hex and fight hand to hand"
+shift_attack = "Shift a hex and attack {aimed} with {weapon}"
+# {dice} is "3d6"; {chance} a whole percent.
+odds = "{needed} or less on {dice} to hit (about {chance}%)"
+odds_before_facing = "{odds} before any flank or rear bonus"
+odds_damage = "{odds}, {damage}"
+odds_damage_armoured = "{odds}, {damage} less {stops} armour"
+move = "Move up to {hexes} hexes"
+move_toward = "Move up to {hexes} hexes toward {aimed}"
+half_move = "Move up to {hexes} hexes without attacking"
+half_move_toward = "Move up to {hexes} hexes toward {aimed} without attacking"
+# {how} is dodge_moving, dodge_moving_toward or turn_menu.standing.
+dodge = "Dodge {how}: missiles and thrown weapons roll {dice} to hit you, not {plain_dice}"
+dodge_moving = "while moving up to {hexes} hexes"
+dodge_moving_toward = "while moving up to {hexes} hexes toward {aimed}"
+shift_defend = "Shift a hex and defend: blows in melee roll {dice} to hit you, not {plain_dice}"
+pick_up_any = "Pick up a weapon in reach"
+crawl = "Crawl up to {hexes} hexes, staying down"
+disengage = "Step away from the enemies engaging you"
+hth_attack = "Grapple {aimed}: {grapple}"
+cast_cost = "{strength} ST"
+go_prone = "Drop prone where you stand"
+kneel = "Drop to one knee"
+do_nothing = "Hold where you are and do nothing this turn"
+pass_turn = "Wait: choose after the others have moved"
+

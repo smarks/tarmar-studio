@@ -10,6 +10,7 @@
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
 /**
  * Stand the two classic figures side by side, facing each other, so the
@@ -70,8 +71,21 @@ test.describe('Choosing a classic turn by hand', () => {
             has: page.locator('.turn-option-name', { hasText: /^ATTACK$/ }),
         });
         await expect(attack).toHaveCount(1);
+        // The configured words: the attack, its odds on 3d6 (or 4d6 against
+        // a defender) and the damage the weapon does.
+        const { shared, classic } = menuWords();
+        const odds = sentencePattern(classic.odds, {
+            needed: '\\d+', dice: '[34]d6', chance: '\\d+',
+        });
         await expect(attack.locator('.turn-option-plain')).toHaveText(
-            new RegExp(`^Attack (${names.map(escaped).join('|')}) with .+: \\d+ or less on [34]d6 to hit \\(about \\d+%\\)`)
+            menuLine(shared.with_odds, {
+                line: sentencePattern(shared.attack, {
+                    aimed: `(?:${names.map(escaped).join('|')})`,
+                }),
+                odds: `(?:${[classic.odds_damage, classic.odds_damage_armoured]
+                    .map((sentence) => sentencePattern(sentence, { odds }))
+                    .join('|')})`,
+            })
         );
         await expect(attack.locator('.turn-option-cost')).toHaveText('Costs nothing.');
         await expect(panel.locator('.turn-option-ai-pick')).toHaveCount(1);

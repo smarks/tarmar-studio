@@ -70,13 +70,14 @@
 
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
-    loadedCanon, DEFAULT_CANON,
+    loadedCanon, DEFAULT_CANON, escaped,
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
 const {
     BATTLE_SEED, PUSH_TURNS_SEED, WIZARD_SEED, pinTheTurns, claimAWizard, openTheWizardsStage,
 } = require('./wizard-stage');
 const { readDjangoShell, runDjangoShell } = require('./django');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
 /**
  * The turns' seed for the Runaway branch (tarmar-engine #30), set after the
@@ -405,13 +406,13 @@ test.describe('Pushing mana into a cast', () => {
         const anchor = playerPage.locator('#turn-panel .turn-option-anchor');
         await expect(anchor).toHaveCount(1, { timeout: 15000 });
         await expect(anchor.locator('.turn-option-ai-pick')).toBeVisible();
-        await expect(anchor.locator('.turn-option-plain'))
-            .toContainText('Take back control of your runaway Fire Missile');
-        if (defaultCanon) {
-            await expect(anchor.locator('.turn-option-plain')).toContainText(
-                '3d6 at or under your WIS'
-            );
-        }
+        // The configured words, with the default canon's roll: 3d6 against WIS.
+        await expect(anchor.locator('.turn-option-plain')).toHaveText(
+            menuLine(menuWords().tarmar.self_anchor, {
+                spell: 'Fire Missile',
+                ...(defaultCanon ? { dice: '3d6', attribute: 'WIS' } : {}),
+            })
+        );
         await expect(runawayLine).toHaveCount(1);
         await anchor.click();
         await playerPage.click('#turn-panel .turn-confirm');
@@ -546,8 +547,11 @@ test.describe('Pushing mana into a cast', () => {
                     committed = String(mana[picked]);
                     await amounts.nth(picked).click();
                     await expect(amounts.nth(picked)).toHaveAttribute('aria-pressed', 'true');
-                    await expect(control.locator('.turn-counter-cost'))
-                        .toContainText(`${committed} mana, spent whether`);
+                    await expect(control.locator('.turn-counter-cost')).toContainText(
+                        new RegExp(sentencePattern(menuWords().tarmar.counter_cost, {
+                            mana: committed,
+                        }))
+                    );
                     await playerPage.click('#turn-panel .turn-confirm');
                 },
             },
@@ -606,7 +610,9 @@ test.describe('Pushing mana into a cast', () => {
                     await adminPage.locator('#turn-panel .turn-option-cast').click();
                     const pressed = adminPage.locator('#turn-panel .turn-spell.is-escalation');
                     await expect(pressed.locator('.turn-spell-escalate')).toHaveText(
-                        `Press your countered Fire Missile again at ${defender}`
+                        menuLine(menuWords().tarmar.press_again_at, {
+                            spell: 'Fire Missile', aimed: escaped(defender),
+                        })
                     );
                     await pressed.click();
                     await adminPage.click('#turn-panel .turn-confirm');
