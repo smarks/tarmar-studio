@@ -18,12 +18,13 @@ from battle.services import (
     snapshot_combatant,
     starting_positions,
 )
+from battle.wording import words
 from characters.equipment_rules import equipment_catalog
 from characters.models import board_can_seat_weapon
 from characters.skills import points_for_level
 from characters.weapon_skill import resolve_weapon_skill
 from common.rolling import Roller
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, sentence_parts
 from common.test_helpers import make_beast as shared_make_beast
 
 GOLDEN_SEED = 42
@@ -344,7 +345,8 @@ class AdvanceTurnTest(BaseTestCase):
             if battle.status == Battle.STATUS_FINISHED:
                 break
         victory = BattleEvent.objects.filter(
-            battle=battle, message__contains="stands victorious"
+            battle=battle,
+            message__contains=sentence_parts(words().services.victorious)[0],
         )
         self.assertEqual(victory.count(), 1)
 

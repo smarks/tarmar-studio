@@ -391,11 +391,16 @@ class OriginLeftToTheGameMasterWordsTest(SimpleTestCase):
             words.literacy_ruling
             + words.literacy_ruling_origin.format(origin="Ask the GM"),
         )
-        self.assertTrue(
-            again.endswith(
-                "; plan roll_literacy where the Origin has a check, or say that at "
-                "Ask the GM the Game Master decides"
-            )
+        said = refusal_words().repeated_refusal
+        self.assertEqual(
+            again,
+            said.with_remedy.format(
+                said=said.already_refused.format(
+                    action="rule_literacy", reason=refusal
+                ),
+                remedy=said.instead_rule_literacy
+                + said.instead_origins.format(origins="Ask the GM"),
+            ),
         )
         self.assertIn(
             "literacy_ruling is the Game Master's ruling at an Origin of Ask the "
@@ -414,8 +419,15 @@ class OriginLeftToTheGameMasterWordsTest(SimpleTestCase):
             extraction = extraction_prompt()
             description = self.ruling_description()
         self.assertEqual(refusal, refusal_words().policy.literacy_ruling)
-        self.assertTrue(
-            again.endswith("; plan roll_literacy where the Origin has a check")
+        said = refusal_words().repeated_refusal
+        self.assertEqual(
+            again,
+            said.with_remedy.format(
+                said=said.already_refused.format(
+                    action="rule_literacy", reason=refusal
+                ),
+                remedy=said.instead_rule_literacy,
+            ),
         )
         self.assertIn(
             "literacy_ruling is always null: every Origin has a check to roll;",

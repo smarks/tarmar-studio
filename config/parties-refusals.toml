@@ -1,0 +1,25 @@
+# The words the parties app refuses a request in (issue #136): one table per
+# module.
+#
+# Read once at startup (parties.refusal_words.load_refusal_words); a missing
+# key, an unknown key or a {name} a sentence may not use stops the server there
+# rather than in front of a player. PARTIES_REFUSAL_WORDS_FILE names another
+# file. Change the wording freely; keep each {name} a sentence uses, or drop
+# it. Changing a sentence never changes who is refused.
+
+[models]
+# A disbanded party chosen by hand, on the battle setup, the hook generator or
+# its command (issue #971). {party}: the party's name.
+disbanded = "{party} was disbanded; its owner or a Game Master can restore it from the Parties page"
+
+[views]
+# The roster's controls on the party page.
+owner_only_add = "Only the party's owner may add members"
+numeric_membership_id = "A numeric membership_id is required"
+# {name}: the character already seated.
+already_in_party = "{name} is already in this party"
+remove_denied = "Only the party's owner or the character's owner may remove this member"
+# The edit page's autosave.
+request_not_json = "The request was not valid JSON"
+field_not_editable = "That field cannot be edited"
+text_value_required = "A text value is required"

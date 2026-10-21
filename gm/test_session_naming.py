@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from django.urls import reverse
 
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, limit_refusal_parts
 
 from .models import PLACEHOLDER_SESSION_NAME, GMSession, name_from_history
 from .refusal_words import refusal_words
@@ -299,7 +299,7 @@ class SessionRenameTest(BaseTestCase):
     def test_an_over_long_name_is_refused(self):
         response = self.post({"session_id": self.session.pk, "name": "x" * 500})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("characters or fewer", response.json()["error"])
+        self.assertIn(limit_refusal_parts()[-1], response.json()["error"])
 
     def test_somebody_elses_session_cannot_be_renamed(self):
         stranger = self.create_user(username="stranger")

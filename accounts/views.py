@@ -68,6 +68,7 @@ from battle.access import actor_of, listable_battles
 from battle.models import Battle, BattleCombatant
 from characters.models import Character
 from common.breadcrumbs import BreadcrumbMixin, step, trail
+from common.decorators import internal_errors_logged
 from common.helpers import _parse_json_body, client_ip, request_theme
 from common.middleware import has_passed_gate
 from common.mixins import ActivePageMixin
@@ -809,6 +810,7 @@ def _another_role_admin_exists(besides_pk: int | None) -> bool:
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def delete_user(request: HttpRequest, user_id: int) -> HttpResponse:
     """Delete a user, refusing anyone but a role admin an Admin account.
 
@@ -916,6 +918,7 @@ def _admin_sets_email(
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def profile_update_field(
     request: HttpRequest, user_id: int | None = None
 ) -> HttpResponse:

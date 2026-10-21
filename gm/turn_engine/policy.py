@@ -146,13 +146,14 @@ def refusal_text(reason: str) -> str:
     return text
 
 
-#: What to do instead, where the rules offer something. A player may not
+#: What to do instead, where the rules offer something: each action's
+#: ``[repeated_refusal]`` key in config/gm-refusals.toml (issue #136). A player may not
 #: state their scores, but they may have them rolled, and saying so turns a
 #: dead end into the next step.
 INSTEAD_OF: dict[str, str] = {
-    "record_attributes": "plan roll_attributes: a player's scores are rolled",
-    "rule_literacy": "plan roll_literacy where the Origin has a check",
-    "roll_fatigue": 'plan roll_fatigue with no "value": a player\'s is rolled',
+    "record_attributes": "instead_record_attributes",
+    "rule_literacy": "instead_rule_literacy",
+    "roll_fatigue": "instead_roll_fatigue",
 }
 
 
@@ -163,22 +164,26 @@ def _remedy(action: str) -> str | None:
     Args:
         action: The refused action's name.
     """
-    remedy = INSTEAD_OF.get(action)
-    if action == "rule_literacy" and remedy:
+    key = INSTEAD_OF.get(action)
+    if key is None:
+        return None
+    words = refusal_words().repeated_refusal
+    remedy = getattr(words, key)
+    if action == "rule_literacy":
         origins = game_master_origins_in_words(character_rules())
         if origins:
-            remedy += f", or say that at {origins} the Game Master decides"
+            remedy += words.instead_origins.format(origins=origins)
     return remedy
 
 
 def already_refused_error(action: str, reason: str) -> str:
     """Why a plan repeating a settled refusal is no plan at all."""
-    said = (
-        f"{action} was already refused in this session, because {reason}. "
-        "That will not change by asking again"
-    )
+    words = refusal_words().repeated_refusal
+    said = words.already_refused.format(action=action, reason=reason)
     remedy = _remedy(action)
-    return f"{said}; {remedy}" if remedy else f"{said}; do something else instead"
+    if remedy:
+        return words.with_remedy.format(said=said, remedy=remedy)
+    return words.something_else.format(said=said)
 
 
 #: Words that show a message is about dice: roll, rolls, rolling (and the

@@ -3,8 +3,10 @@
 from urllib.parse import parse_qs, urlparse
 
 from django.urls import reverse
+from django.utils.html import escape
 
-from common.test_helpers import BaseTestCase
+from common.refusal_words import refusal_words as common_words
+from common.test_helpers import BaseTestCase, sentence_parts
 from ruins.generation import MAX_ROOMS, generate_ruin
 
 
@@ -106,7 +108,9 @@ class GenerateFlowTest(RuinsViewTestCase):
         response = self.client.get(
             reverse("ruins:generate"), {"rooms": "3", "seed": "lucky"}
         )
-        self.assertContains(response, "Seed must be a whole number")
+        self.assertContains(
+            response, escape(sentence_parts(common_words().seeds.not_whole_number)[0])
+        )
         self.assertContains(response, 'value="lucky"')
 
 

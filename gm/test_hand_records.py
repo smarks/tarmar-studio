@@ -13,7 +13,7 @@ import json
 from django.urls import reverse
 from django.utils import timezone
 
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, too_long_refusal
 
 from .hand_records import (
     HandEditError,
@@ -110,7 +110,8 @@ class HandRecordsTest(BaseTestCase):
 
     def test_a_ruling_is_held_to_the_limits_a_plan_is(self):
         with self.assertRaisesMessage(
-            HandEditError, "The topic must be 60 characters or fewer"
+            HandEditError,
+            too_long_refusal(refusal_words().hand_records.label_topic, 60),
         ):
             add_ruling(self.session, self.game_master, "x" * 61, "rule")
         with self.assertRaisesMessage(

@@ -70,11 +70,55 @@ class ServicesWords:
 
 
 @dataclass(frozen=True)
+class PurseWords:
+    """``characters.purse``'s words (issue #136): how the purse prints, the
+    history lines a coin movement writes, and its refusals."""
+
+    held: str = sentence("coin", required=("coin",))
+    consult_gm: str = sentence()
+    held_and_unknown: str = sentence("held", "unknown", required=("held", "unknown"))
+    not_enough: str = sentence("reason", "cost", "held", "unknown", required=("cost",))
+    starting_coin_unknown: str = sentence()
+    paid: str = sentence("coin", "reason", "purse", required=("coin",))
+    received: str = sentence("coin", "reason", "purse", required=("coin",))
+    label_reason: str = sentence()
+    wealth_first: str = sentence()
+    before_wealth_note: str = sentence()
+    quantity_of: str = sentence("quantity", "name", required=("name",))
+    given_by_game_master: str = sentence("item", required=("item",))
+    custom_combat_item: str = sentence()
+    custom_item_price: str = sentence()
+    custom_item_more: str = sentence()
+    an_item: str = sentence()
+
+
+@dataclass(frozen=True)
+class ConstantsWords:
+    """``characters.constants``'s words (issue #136): the point-buy note and
+    the name a character takes when nothing names it."""
+
+    point_buy_over: str = sentence("spent", "off", "budget")
+    point_buy_under: str = sentence("spent", "off", "budget")
+    unnamed_character: str = sentence()
+
+
+@dataclass(frozen=True)
+class ViewsAccessWords:
+    """``characters.views.access``'s refusal: a character that is not there,
+    as the sheet's fetch-only endpoints answer it (issue #136)."""
+
+    not_found: str = sentence()
+
+
+@dataclass(frozen=True)
 class CharactersRefusalWords:
     """The whole file: one table per module, and the phrases they share."""
 
     common: CommonWords
     services: ServicesWords
+    purse: PurseWords
+    constants: ConstantsWords
+    views_access: ViewsAccessWords
 
 
 def load_refusal_words(path: Path) -> CharactersRefusalWords:

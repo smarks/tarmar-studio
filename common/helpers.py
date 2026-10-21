@@ -12,7 +12,7 @@ into the domain object's ``user`` ownership) so it stays local.
 
 import hmac
 import ipaddress
-from typing import Any
+from typing import Any, Final
 
 from django.conf import settings
 from django.db import models
@@ -150,16 +150,27 @@ def database_integer(value: Any) -> int:
     return number
 
 
+#: The header the page's script marks its requests with, and its value: what
+#: :func:`wants_json` reads, and what ``static/js/api.js`` sends as
+#: ``SCRIPT_CALLER_HEADERS`` (issue #139). A test client sends it as
+#: ``headers=SCRIPT_CALLER_HEADERS``.
+SCRIPT_CALLER_HEADER = "X-Requested-With"
+SCRIPT_CALLER_VALUE = "XMLHttpRequest"
+SCRIPT_CALLER_HEADERS: Final[dict[str, str]] = {
+    SCRIPT_CALLER_HEADER: SCRIPT_CALLER_VALUE
+}
+
+
 def wants_json(request: HttpRequest) -> bool:
     """True for a script caller, false for a plain form post.
 
     Endpoints that serve both answer a form post with a page or a redirect,
     the page rendered from stored state being the whole update, and a caller
-    driving them from script (``X-Requested-With: XMLHttpRequest``, or a JSON
+    driving them from script (:data:`SCRIPT_CALLER_HEADERS`, or a JSON
     body) in JSON: the battle controls, and the GM page's mode switch, which
     changes the mode without reloading the page (issue #89).
     """
-    return request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
+    return request.headers.get(SCRIPT_CALLER_HEADER) == SCRIPT_CALLER_VALUE or (
         request.content_type or ""
     ).startswith("application/json")
 

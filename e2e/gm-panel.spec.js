@@ -34,6 +34,7 @@ async function sessionWith(page, name) {
 const {
     test, expect, loginAs, TEST_USER, chooseToAttach, searchPicker,
 } = require('./fixtures');
+const { battleLine } = require('./rulings');
 
 test.describe('GM panel — Characters tab', () => {
     test.beforeEach(async ({ page }) => {
@@ -72,7 +73,9 @@ test.describe('GM panel — Characters tab', () => {
 
         // The seeded characters carry nothing, so the Battle tab warns (#844).
         const unarmed = page.locator('#gm-panel-unarmed');
-        await expect(unarmed).toContainText('Aldwin the Bold carries no weapon');
+        await expect(unarmed).toContainText(
+            battleLine('services', 'unarmed_one', { names: 'Aldwin the Bold' })
+        );
         await expect(unarmed).toHaveJSProperty('hidden', false);
 
         const sessionUrl = page.url();
@@ -92,7 +95,9 @@ test.describe('GM panel — Characters tab', () => {
         await page.selectOption('#gm-character-select', { label: 'Aldwin the Bold' });
         await page.click('#gm-character-attach');
         await expect(page.locator('.gm-sheet .gm-sheet-name')).toHaveText('Aldwin the Bold');
-        await expect(unarmed).toContainText('Aldwin the Bold carries no weapon');
+        await expect(unarmed).toContainText(
+            battleLine('services', 'unarmed_one', { names: 'Aldwin the Bold' })
+        );
         await expect(unarmed).toHaveJSProperty('hidden', false);
         expect(page.url()).toBe(sessionUrl);
         expect(await stillTheSamePage(page)).toBe(true);

@@ -33,7 +33,7 @@ const { startCoverage } = require('./coverage');
 const { pinDice } = require('./dice');
 const { diceLogLine } = require('./dice-log');
 const { runDjangoShell } = require('./django');
-const { refusal, gameMasterCallNote } = require('./refusals');
+const { refusal, refusalFixedParts, gameMasterCallNote } = require('./refusals');
 const { loadedSkillRules } = require('./skill-rules');
 const { item, sheetValues } = require('./equipment-rules');
 const { catalogSpells, lastStoryCast, schoolRowForPercentile } = require('./magic-rules');
@@ -311,7 +311,9 @@ test.describe('Sheet mechanics', () => {
         await page.locator('#equipment-category').selectOption('armor');
         await page.locator('#equipment-item').selectOption('chainmail');
         await page.locator('#add-equipment-btn').click();
-        await expect(page.locator('.notice .notice-text').first()).toContainText('Not enough coin');
+        await expect(page.locator('.notice .notice-text').first()).toContainText(
+            refusalFixedParts('characters', 'purse', 'not_enough')[0]
+        );
 
         // Removing an item returns nothing (the #757 review ruling).
         const swordRow = page.locator('.equipment-row', { hasText: 'Broadsword' });

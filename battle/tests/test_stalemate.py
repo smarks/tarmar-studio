@@ -26,7 +26,9 @@ from battle.services import (
     create_battle,
     restart_battle,
 )
-from common.test_helpers import BaseTestCase
+from battle.tests.rulings_words import with_shipped_words
+from battle.wording import words
+from common.test_helpers import BaseTestCase, sentence_parts
 from common.test_helpers import make_beast as shared_make_beast
 
 # Strong but barely damaging, so two of them can grind to a stalemate.
@@ -214,6 +216,7 @@ class TeamStalemateTest(BaseTestCase):
         self.assertEqual(battle.status, Battle.STATUS_STALEMATE)
 
 
+@with_shipped_words
 class GoldenSeedsStillFinishTest(BaseTestCase):
     """Normal battles never trip the window — event streams byte-identical.
 
@@ -370,7 +373,8 @@ class RestartKeepsCrossingNotesTest(BaseTestCase):
         self.assertTrue(notes)
         self.assertTrue(
             BattleEvent.objects.filter(
-                battle_id=self.battle.pk, message__startswith="Re-armed"
+                battle_id=self.battle.pk,
+                message__startswith=sentence_parts(words().services.re_armed)[0],
             ).exists()
         )
 

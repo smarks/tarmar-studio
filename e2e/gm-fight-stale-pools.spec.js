@@ -10,6 +10,7 @@
  */
 
 const { refusal } = require('./refusals');
+const { battleLineParts } = require('./rulings');
 const { test, expect, loginAs, TEST_ADMIN } = require('./fixtures');
 const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
@@ -105,7 +106,9 @@ test.describe('Battle page — a fight whose records moved under it', () => {
         await page.waitForURL(new RegExp(`/tarmar/battles/${battleId}/$`));
         await expect(page.locator('#battle-stale-pools')).toHaveCount(0);
         await expect(page.locator('#advance-turn')).toBeEnabled();
-        await expect(page.locator('#battle-log')).toContainText('took the pools from the character records');
+        await expect(page.locator('#battle-log')).toContainText(
+            battleLineParts('services', 'pools_taken')[0]
+        );
     });
 
     test('a page open when the records move gets the notice and the control from the refusal', async ({ page }) => {

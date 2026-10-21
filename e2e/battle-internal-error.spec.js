@@ -46,7 +46,7 @@ test.describe('Battle page — an internal failure under a choice', () => {
     test('is reported in the fixed sentence, not as a bare status (#113)', async ({ page }) => {
         const name = uniqueName('E2E internal');
         const battleId = seedPausedManualFight(name);
-        const message = refusal('battle', 'views', 'request_failed');
+        const message = refusal('common', 'decorators', 'request_failed');
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/battles/${battleId}/`);
         const panel = page.locator('#turn-panel');

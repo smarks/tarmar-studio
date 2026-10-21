@@ -7,20 +7,30 @@ since; ``characters.purse.move_coin`` is the one writer.
 from decimal import Decimal
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from characters import services
 from characters.models import Character
 from characters.purse import (
-    CONSULT_GM,
-    CUSTOM_COMBAT_ITEM_REFUSAL,
-    CUSTOM_ITEM_MORE_REFUSAL,
-    CUSTOM_ITEM_PRICE_REFUSAL,
     PurseError,
     charge_for_catalog_item,
     format_purse,
+    given_by_game_master,
     move_coin,
 )
-from common.test_helpers import BaseTestCase, create_character
+from characters.refusal_words import refusal_words
+from common.test_helpers import BaseTestCase, create_character, says
+
+
+def held(coin: str) -> str:
+    """What the purse prints for ``coin``, in the configured words (#136)."""
+    return refusal_words().purse.held.format(coin=coin)
+
+
+def held_and_unknown(coin: str) -> str:
+    """The purse while the starting coin is still the Game Master's to record."""
+    words = refusal_words().purse
+    return words.held_and_unknown.format(held=held(coin), unknown=words.consult_gm)
 
 
 class PurseRuleTest(BaseTestCase):
@@ -41,7 +51,9 @@ class PurseRuleTest(BaseTestCase):
     def test_a_spend_past_the_purse_is_refused(self):
         with self.assertRaises(PurseError) as refused:
             move_coin(self.character, Decimal(-41), reason="fine plate")
-        self.assertIn("purse holds 40 gp", str(refused.exception))
+        self.assertTrue(
+            says(str(refused.exception), refusal_words().purse.not_enough, "40")
+        )
         self.assertEqual(self.character.purse, Decimal(40))
 
 
@@ -63,17 +75,25 @@ class PurchaseEndpointTest(BaseTestCase):
     def test_a_catalog_item_costs_its_price_and_the_history_says_so(self):
         response = self.post("equipment_add", {"item_id": "broadsword"})
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()["purse"], "20 gp")
+        self.assertEqual(response.json()["purse"], held("20"))
         self.character.refresh_from_db()
         self.assertEqual(self.character.purse, Decimal(20))
         self.assertNotIn("paid", self.character.equipment[0])
         lines = [entry["new"] for entry in self.character.history]
-        self.assertTrue(any("paid 80 gp (1 × Broadsword)" in line for line in lines))
+        words = refusal_words().purse
+        paid = words.paid.format(
+            coin="80",
+            reason=words.quantity_of.format(quantity=1, name="Broadsword"),
+            purse=held("20"),
+        )
+        self.assertIn(paid, lines)
 
     def test_a_player_short_of_coin_is_refused_and_nothing_changes(self):
         response = self.post("equipment_add", {"item_id": "chainmail"})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Not enough coin", response.json()["error"])
+        self.assertTrue(
+            says(response.json()["error"], refusal_words().purse.not_enough)
+        )
         self.character.refresh_from_db()
         self.assertEqual(self.character.equipment, [])
         self.assertEqual(self.character.purse, Decimal(100))
@@ -135,7 +155,7 @@ class PurchaseEndpointTest(BaseTestCase):
         short = self.post(
             "equipment_add", {"is_custom": True, "name": "Crown", "cost": 500}
         )
-        self.assertIn("Not enough coin", short.json()["error"])
+        self.assertTrue(says(short.json()["error"], refusal_words().purse.not_enough))
 
     def test_a_non_finite_cost_or_weight_is_refused(self):
         """The second review: cost "nan" or "inf" answered a 500."""
@@ -177,7 +197,7 @@ class PurchaseEndpointTest(BaseTestCase):
         # The gift is recorded in the purse history (review of #927).
         self.assertEqual(
             (self.character.history[-1]["field"], self.character.history[-1]["new"]),
-            ("purse", "1 × Dragonhide given by a Game Master"),
+            ("purse", given_by_game_master(1, "Dragonhide")),
         )
 
     def test_more_of_an_item_carried_at_no_cost_is_a_game_masters_to_give(self):
@@ -193,7 +213,9 @@ class PurchaseEndpointTest(BaseTestCase):
                 raised = self.post("equipment_update", {"index": 0, "quantity": 4})
 
                 self.assertEqual(raised.status_code, 400)
-                self.assertEqual(raised.json()["error"], CUSTOM_ITEM_MORE_REFUSAL)
+                self.assertEqual(
+                    raised.json()["error"], refusal_words().purse.custom_item_more
+                )
                 self.character.refresh_from_db()
                 self.assertEqual(self.character.equipment, [carried])
                 self.assertEqual(self.character.purse, Decimal(100))
@@ -223,7 +245,7 @@ class PurchaseEndpointTest(BaseTestCase):
         self.assertEqual(raised.status_code, 400)
         self.assertIn("Game Master", raised.json()["error"])
         with self.assertRaisesMessage(
-            services.CharacterChangeError, CUSTOM_COMBAT_ITEM_REFUSAL
+            services.CharacterChangeError, refusal_words().purse.custom_combat_item
         ):
             services.add_equipment(
                 self.character.pk,
@@ -263,7 +285,7 @@ class PurchaseEndpointTest(BaseTestCase):
         # Something the catalog does not sell is bought at its stated price,
         # as the sheet buys it, and refused with none stated (#927).
         with self.assertRaisesMessage(
-            services.CharacterChangeError, CUSTOM_ITEM_PRICE_REFUSAL
+            services.CharacterChangeError, refusal_words().purse.custom_item_price
         ):
             services.add_equipment(
                 self.character.pk, "Vane's key", 1, actor=self.owner, purchase=True
@@ -282,7 +304,7 @@ class PurchaseEndpointTest(BaseTestCase):
 
     def test_the_sheet_shows_the_running_purse(self):
         page = self.client.get(reverse("characters:edit", args=[self.character.pk]))
-        self.assertContains(page, '<strong id="purse">100 gp</strong>')
+        self.assertContains(page, f'<strong id="purse">{escape(held("100"))}</strong>')
         self.assertContains(page, 'id="equipment-purse"')
         self.assertNotContains(page, "Move coin (Game Master)")
 
@@ -303,9 +325,9 @@ class GameMasterCoinTest(BaseTestCase):
     def test_a_game_master_gives_and_takes_coin_with_a_reason(self):
         self.login_as(self.create_dm())
         given = self.post_json(self.url, {"amount": "25.5", "reason": "the reward"})
-        self.assertEqual(given.json()["purse"], "35.50 gp")
+        self.assertEqual(given.json()["purse"], held("35.50"))
         taken = self.post_json(self.url, {"amount": "-35.50"})
-        self.assertEqual(taken.json()["purse"], "0 gp")
+        self.assertEqual(taken.json()["purse"], held("0"))
         overdrawn = self.post_json(self.url, {"amount": "-1"})
         self.assertEqual(overdrawn.status_code, 400)
         self.character.refresh_from_db()
@@ -328,7 +350,7 @@ class ConsultGameMasterPurseTest(BaseTestCase):
 
     def test_the_purse_reads_consult_gm_and_holds_nothing(self):
         self.assertEqual(self.character.purse, Decimal(0))
-        self.assertEqual(format_purse(self.character), CONSULT_GM)
+        self.assertEqual(format_purse(self.character), refusal_words().purse.consult_gm)
 
     def test_nothing_is_bought_until_coin_is_given_or_recorded(self):
         with self.assertRaises(PurseError) as refused:
@@ -339,21 +361,28 @@ class ConsultGameMasterPurseTest(BaseTestCase):
 
     def test_coin_a_game_master_gives_can_be_spent(self):
         line = move_coin(self.character, Decimal(50), reason="a Game Master's grant")
+        words = refusal_words().purse
         self.assertEqual(
-            line, "received 50 gp (a Game Master's grant); purse 50 gp + Consult GM"
+            line,
+            words.received.format(
+                coin="50", reason="a Game Master's grant", purse=held_and_unknown("50")
+            ),
         )
         charge_for_catalog_item(self.character, "dagger", 1)
-        self.assertEqual(format_purse(self.character), "40 gp + Consult GM")
+        self.assertEqual(format_purse(self.character), held_and_unknown("40"))
         self.character.starting_coin = 200
-        self.assertEqual(format_purse(self.character), "240 gp")
+        self.assertEqual(format_purse(self.character), held("240"))
 
     def test_the_sheet_says_consult_gm(self):
         self.login_as(self.owner)
         page = self.client.get(reverse("characters:edit", args=[self.character.pk]))
-        self.assertContains(page, '<strong id="purse">Consult GM</strong>')
+        self.assertContains(
+            page,
+            f'<strong id="purse">{escape(refusal_words().purse.consult_gm)}</strong>',
+        )
 
     def test_the_markdown_export_says_consult_gm(self):
         from character_export.export_utils import generate_character_markdown
 
         markdown = generate_character_markdown(self.character)
-        self.assertIn("- **Purse:** Consult GM\n", markdown)
+        self.assertIn(f"- **Purse:** {refusal_words().purse.consult_gm}\n", markdown)

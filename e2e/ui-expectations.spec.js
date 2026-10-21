@@ -16,6 +16,7 @@ const {
     createBattleViaSetup, battleRowOnList, chooseToAttach,
 } = require('./fixtures');
 const { uniqueName } = require('./unique-name');
+const { battleLineParts } = require('./rulings');
 const { startCoverage } = require('./coverage');
 
 /** A second, fully separate browser context signed in as the plain player. */
@@ -127,7 +128,9 @@ test.describe('Battles are reachable and manageable (#339)', () => {
 
         await expect(page.locator('#battle-my-control .control-combatant-line'))
             .toContainText('Automatic');
-        await expect(page.locator('#battle-log')).toContainText('hands its decisions');
+        for (const part of battleLineParts('control', 'hands_to_ai')) {
+            await expect(page.locator('#battle-log')).toContainText(part);
+        }
 
         await context.close();
     });

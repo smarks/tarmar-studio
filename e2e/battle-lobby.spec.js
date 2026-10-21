@@ -14,6 +14,7 @@ const {
     test, expect, TEST_USER, TEST_WATCHER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
 const { uniqueName } = require('./unique-name');
+const { chosenBy, ownManualLine } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
@@ -79,7 +80,7 @@ test.describe('Battle lobby and remote play', () => {
         // the battle view, their combatant tagged as theirs.
         await expect(playerPage.locator('#battle-arena'))
             .toBeVisible({ timeout: 15000 });
-        await expect(playerPage.locator('.combatant-card', { hasText: 'Played by you' }))
+        await expect(playerPage.locator('.combatant-card', { hasText: ownManualLine() }))
             .toBeVisible();
 
         // The DM advances into the player's turn: the battle parks awaiting
@@ -115,7 +116,7 @@ test.describe('Battle lobby and remote play', () => {
         // them with the alternatives preserved.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         const decision = playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         });
         await expect(decision).toBeVisible();
         await decision.locator('summary').click();
@@ -132,7 +133,7 @@ test.describe('Battle lobby and remote play', () => {
         await expect(playerPage.locator('.turn-group[data-turn="1"]')).toBeVisible();
         await expect(
             playerPage.locator('.event-decision', {
-                hasText: `chosen by ${TEST_USER.username}`,
+                hasText: chosenBy(TEST_USER.username),
             })
         ).toBeVisible();
 

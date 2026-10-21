@@ -23,7 +23,8 @@ from battle.tests.rulings_words import with_fixed_words
 from battle.tests.test_classic_adaptation import snapshot as classic_snapshot
 from battle.tests.test_persistence import classic_game
 from battle.views import battle_payload, pending_payload
-from common.test_helpers import BaseTestCase
+from battle.wording import words
+from common.test_helpers import BaseTestCase, says, sentence_parts
 
 
 def classic_wizard_battle(dm, *, seed: int = 11) -> Battle:
@@ -198,7 +199,9 @@ class ClassicTurnTest(BaseTestCase):
             if battle.status == Battle.STATUS_FINISHED:
                 break
         self.assertEqual(battle.status, Battle.STATUS_FINISHED)
-        victory = battle.events.filter(message__contains="stands victorious").first()
+        victory = battle.events.filter(
+            message__contains=sentence_parts(words().services.victorious)[0]
+        ).first()
         self.assertIsNotNone(victory)
         assert victory is not None
         self.assertEqual(victory.turn, battle.turn_number)
@@ -379,7 +382,11 @@ class ClassicVictoryTest(BaseTestCase):
         battle = self._lone_survivor_battle(self.create_dm())
         battle, events = advance_turn(battle.pk)
         self.assertEqual(battle.status, Battle.STATUS_FINISHED)
-        victory = [event for event in events if "stands victorious" in event.message]
+        victory = [
+            event
+            for event in events
+            if says(event.message, words().services.victorious)
+        ]
         self.assertEqual(len(victory), 1)
 
     def test_the_victory_line_carries_the_next_free_sequence(self):
@@ -388,7 +395,9 @@ class ClassicVictoryTest(BaseTestCase):
         sequences = sorted(event.sequence for event in events)
         self.assertEqual(sequences, list(range(len(sequences))))
         victory = next(
-            event for event in events if "stands victorious" in event.message
+            event
+            for event in events
+            if says(event.message, words().services.victorious)
         )
         self.assertEqual(victory.sequence, max(sequences))
 

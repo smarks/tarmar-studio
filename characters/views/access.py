@@ -24,9 +24,8 @@ from django.shortcuts import get_object_or_404
 from common.helpers import _can_edit_object, _json_error, _permission_denied
 
 from ..models import Character
+from ..refusal_words import refusal_words
 from ..services import CharacterChangeError
-
-CHARACTER_NOT_FOUND_MESSAGE = "Character not found"
 
 
 def locked_character_or_404(pk: int, *, is_deleted: bool = False) -> Character:
@@ -87,7 +86,7 @@ def edit_denied(request: HttpRequest, character: Character) -> JsonResponse | No
 
 def character_not_found_json() -> JsonResponse:
     """The JSON 404 the fetch-only endpoints answer a missing character with."""
-    return _json_error(CHARACTER_NOT_FOUND_MESSAGE, status=404)
+    return _json_error(refusal_words().views_access.not_found, status=404)
 
 
 class ChangeRefused(Exception):
@@ -141,4 +140,4 @@ def answer_change(
     except Character.DoesNotExist:
         if json_not_found:
             return character_not_found_json()
-        raise Http404(CHARACTER_NOT_FOUND_MESSAGE) from None
+        raise Http404(refusal_words().views_access.not_found) from None

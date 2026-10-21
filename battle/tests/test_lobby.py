@@ -15,7 +15,13 @@ from battle.services import (
     set_seat_ready,
     start_battle,
 )
-from common.test_helpers import BaseTestCase, create_character
+from battle.wording import words
+from common.test_helpers import BaseTestCase, create_character, says
+
+
+def open_seat(number: int) -> str:
+    """An unclaimed seat's name, in the configured words (#136)."""
+    return words().services.open_seat.format(number=number)
 
 
 def open_battle(
@@ -53,7 +59,7 @@ class OpenBattleCreationTest(BaseTestCase):
         self.assertEqual(seats.count(), 2)
         self.assertEqual(
             list(seats.values_list("display_name", flat=True)),
-            ["Open seat 1", "Open seat 2"],
+            [open_seat(1), open_seat(2)],
         )
 
     def test_generated_roster_rows_carry_snapshots(self):
@@ -87,7 +93,7 @@ class SeatClaimTest(BaseTestCase):
         self.assertFalse(seat.is_ready)
         self.assertEqual(seat.snapshot_json["combatant_id"], seat.pk)
         self.assertEqual(seat.snapshot_json["archetype"], "archer")
-        self.assertNotEqual(seat.display_name, "Open seat 1")
+        self.assertNotEqual(seat.display_name, open_seat(1))
 
     def test_claim_with_own_character(self):
         character = create_character(self.player, name="Brannor")
@@ -165,7 +171,7 @@ class SeatClaimTest(BaseTestCase):
         self.assertIsNone(seat.player)
         self.assertIsNone(seat.character)
         self.assertEqual(seat.snapshot_json, {})
-        self.assertEqual(seat.display_name, "Open seat 1")
+        self.assertEqual(seat.display_name, open_seat(1))
 
     def test_only_the_holder_or_a_dm_releases(self):
         claim_seat(self.battle.pk, self.seat.pk, self.player, archetype="archer")
@@ -388,7 +394,9 @@ class ClassicLobbyTest(BaseTestCase):
         decision = battle.events.filter(
             event_type="decision", actor=seat.display_name
         ).get()
-        self.assertIn(f"chosen by {self.player.username}", decision.message)
+        self.assertTrue(
+            says(decision.message, words().services.chosen_by, self.player.username)
+        )
 
     def test_a_classic_lobby_restarts_to_its_crossed_roster(self):
         """Restart rewinds to the frozen classic state, not to the lobby."""
@@ -453,7 +461,9 @@ class RemotePlayerTurnTest(BaseTestCase):
         decision = battle.events.filter(
             event_type="decision", actor=seat.display_name
         ).get()
-        self.assertIn(f"chosen by {self.player.username}", decision.message)
+        self.assertTrue(
+            says(decision.message, words().services.chosen_by, self.player.username)
+        )
         self.assertEqual(decision.payload["chosen"]["letter"], chosen["letter"])
         self.assertTrue(decision.payload["candidates"])
 

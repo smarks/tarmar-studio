@@ -38,7 +38,12 @@ SHIPPED = Path(settings.BASE_DIR) / "config" / "battle-refusals.toml"
 #: The calls whose string arguments a player reads, by module. A literal
 #: passed to one of them is a refusal written in code (issue #97).
 REFUSING_CALLS = {
-    "battle/services.py": {"BattleRefusal", "DraftFieldError", "StalePools"},
+    "battle/services.py": {
+        "BattleRefusal",
+        "BattleInLobby",
+        "DraftFieldError",
+        "StalePools",
+    },
     "battle/views.py": {
         "BattleRefusal",
         "_json_error",

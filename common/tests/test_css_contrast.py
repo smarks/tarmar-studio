@@ -1476,3 +1476,127 @@ class TextInsideAModifierStandsOnTheModifiersGroundTest(SimpleTestCase):
                 self.assertEqual(measured[selector].background, muted.strip())
                 self.assertTrue(measured[selector].passes)
         self.assertIn(".choice-btn:hover .choice-key", measured)
+
+
+class TheInkFollowsTheComponentsDescendantRuleTest(SimpleTestCase):
+    """A descendant inside a modifier shows the component's descendant ink (#135).
+
+    ``ink_for`` looked a selector's ink up by its last compound only, so
+    ``.row.dropped .weight``, which paints its own ground, was measured with
+    ``body``'s ink rather than the ``.row .weight`` ink a browser applies
+    inside the dropped row: a false failure when the component's ink passes
+    and ``body``'s does not, and a false pass the other way round.
+    """
+
+    SHEET = (
+        "body{background:#000;color:#eee}\n"
+        ".row{background:#fff;color:#111}\n"
+        ".row .weight{color:#555}\n"
+        ".row.dropped{background:#333}\n"
+        ".row.dropped .weight{background:#444}\n"
+    )
+
+    def measured(self, selector: str) -> set[tuple[str, str]]:
+        """Every (ink, ground) pairing any audit reports for ``selector``."""
+        audits = (
+            audit_theme,
+            audit_text_on_ground,
+            audit_faded,
+            audit_modified_descendants,
+            audit_conditionals,
+        )
+        return {
+            (pairing.foreground, pairing.background)
+            for audit in audits
+            for pairing in audit(self.SHEET, "", "tarmar")
+            if pairing.selector == selector
+        }
+
+    def test_the_text_in_the_dropped_row_is_one_pairing_555_on_444(self):
+        self.assertEqual(self.measured(".row.dropped .weight"), {("#555", "#444")})
+
+    def test_no_pairing_borrows_the_bodys_ink(self):
+        for pairing in audit_theme(self.SHEET, "", "tarmar"):
+            if pairing.selector != "body":
+                with self.subTest(selector=pairing.selector):
+                    self.assertNotEqual(pairing.foreground, "#eee")
+
+    def test_a_faded_descendant_rule_reaches_the_modifier_too(self):
+        """Its opacity is read the same way as its ink."""
+        sheet = self.SHEET + ".row .weight{opacity:.5}\n"
+        (pairing,) = [
+            pairing
+            for pairing in audit_theme(sheet, "", "tarmar")
+            if pairing.selector == ".row.dropped .weight"
+        ]
+        self.assertEqual(pairing.opacity, 0.5)
+
+    def test_a_state_under_a_modifier_keeps_its_own_ground_and_ink(self):
+        """``.row .x:hover`` applies inside the dropped row too: the state rule
+        is read with only the ancestors widened, never its own state dropped."""
+        sheet = (
+            self.SHEET
+            + ".row .x{background:#fee2e2;color:#b71e1e}\n"
+            + ".row .x:hover{background:#fecaca;color:#7f1d1d}\n"
+        )
+        measured = {
+            pairing.selector: pairing
+            for pairing in audit_modified_descendants(sheet, "", "tarmar")
+        }
+        hovered = measured[".row.dropped .x:hover"]
+        self.assertEqual(
+            (hovered.foreground, hovered.background), ("#7f1d1d", "#fecaca")
+        )
+
+    def test_a_rule_that_only_sets_full_opacity_is_still_measured(self):
+        """``opacity: 1`` fades nothing, so audit_faded reads no such rule; the
+        walk measures the text it holds, as a browser shows it (#135 review)."""
+        for modifier in (".row.dropped", ".row:hover"):
+            with self.subTest(modifier=modifier):
+                sheet = (
+                    "body{background:#000;color:#eee}\n"
+                    ".row{background:#fff;color:#111}\n"
+                    ".row .weight{color:#555}\n"
+                    f"{modifier}{{background:#333}}\n"
+                    f"{modifier} .weight{{opacity:1}}\n"
+                )
+                unreadable = [
+                    pairing
+                    for pairing in failures(sheet, "", "tarmar")
+                    if pairing.selector == f"{modifier} .weight"
+                ]
+                self.assertEqual(
+                    [(p.foreground, p.background) for p in unreadable],
+                    [("#555", "#333")],
+                )
+
+    def test_the_rule_keeping_more_of_the_selector_wins(self):
+        """``.a .c.d.e`` (four classes) outranks ``.a.b .c`` (three) for
+        ``.a.b .c.d.e``, as in a browser (#135 review)."""
+        sheet = (
+            "body{background:#fff;color:#000}\n"
+            ".a.b .c{color:#999}\n"
+            ".a .c.d.e{color:#111}\n"
+            ".a.b .c.d.e{background:#fff}\n"
+        )
+        (pairing,) = [
+            pairing
+            for pairing in audit_theme(sheet, "", "tarmar")
+            if pairing.selector == ".a.b .c.d.e"
+        ]
+        self.assertEqual(pairing.foreground, "#111")
+
+    def test_a_state_in_an_ancestor_is_kept_when_another_class_is_dropped(self):
+        """``.row:hover.x .y`` widens to ``.row:hover .y`` with its colon, not
+        to ``.rowhover .y`` (#135 review)."""
+        sheet = (
+            "body{background:#fff;color:#000}\n"
+            ".row:hover .y{color:#222}\n"
+            ".row:hover.x .y{background:#fff}\n"
+        )
+        (pairing,) = [
+            pairing
+            for pairing in audit_theme(sheet, "", "tarmar")
+            if pairing.selector == ".row:hover.x .y"
+        ]
+        self.assertEqual(pairing.foreground, "#222")

@@ -17,9 +17,11 @@ from django.test import SimpleTestCase
 from django.urls import reverse
 from django.utils.html import escape
 
+from common.refusal_words import refusal_words as common_words
 from common.test_helpers import (
     CANON_EXPECTATIONS,
     BaseTestCase,
+    sentence_parts,
     skip_unless_canon_expects,
 )
 from reference.paths import DEFAULT_CANON_DIR, GM_TOOLS_DIR, PathOutsideRoot
@@ -331,7 +333,9 @@ class RollerViewFlowTests(BaseTestCase):
         response = self.client.get(self.url("job-generator"), {"seed": "lucky"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "notice notice-error")
-        self.assertContains(response, "Seed must be a whole number")
+        self.assertContains(
+            response, escape(sentence_parts(common_words().seeds.not_whole_number)[0])
+        )
         self.assertContains(response, 'value="lucky"')
         self.assertNotContains(response, 'id="table-roll-result"')
 

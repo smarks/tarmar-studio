@@ -23,8 +23,6 @@ from battle.models import Battle
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
 from battle.refusal_words import refusal_words
 from battle.services import (
-    WITHHELD_NOT_GAME_MASTER,
-    WITHHELD_OTHER_PLAYERS,
     StalePools,
     advance_turn,
     claim_seat,
@@ -40,10 +38,11 @@ from battle.services import (
     withheld_characters,
 )
 from battle.tests.fixed_refusals import with_fixed_refusals
+from battle.wording import words
 from characters import services as character_services
 from characters.models import Character
 from characters.services import FightReport
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, says, sentence_parts
 from gm.models import GMSession
 
 #: Enough turns for a one-on-one fight to be decided.
@@ -604,9 +603,9 @@ class StalePoolsTest(BaseTestCase):
         self.assertEqual(stale_pools(battle), [])
         note = battle.events.order_by("-sequence").first()
         assert note is not None
-        self.assertIn("took the pools from the character records", note.message)
+        self.assertTrue(says(note.message, words().services.pools_taken))
         # Nobody owes anything here, so the line says nothing of a debt.
-        self.assertNotIn("owed", note.message)
+        self.assertNotIn(sentence_parts(words().services.figure_owed)[0], note.message)
         advance_turn(battle.pk)
 
     @with_fixed_refusals
@@ -963,11 +962,12 @@ class DemotedMakerStopsWritingTest(BaseTestCase):
             (0, 0, True),
         )
         self.assertEqual(
-            withheld_characters(battle), {self.theirs.pk: WITHHELD_NOT_GAME_MASTER}
+            withheld_characters(battle),
+            {self.theirs.pk: words().services.withheld_not_game_master},
         )
         notes = battle.events.filter(payload__records_withheld=self.theirs.pk)
         self.assertEqual(notes.count(), 1, "said once, however many turns")
-        self.assertIn("no longer written to their record", notes.get().message)
+        self.assertTrue(says(notes.get().message, words().services.records_withheld))
         self.assertEqual(stale_pools(battle), [], "a withheld record is never stale")
 
     def test_a_session_fight_keeps_writing_his_own_character_only(self):
@@ -982,7 +982,8 @@ class DemotedMakerStopsWritingTest(BaseTestCase):
         self.demote()
 
         self.assertEqual(
-            withheld_characters(battle), {self.theirs.pk: WITHHELD_OTHER_PLAYERS}
+            withheld_characters(battle),
+            {self.theirs.pk: words().services.withheld_other_players},
         )
         battle = self.play(battle)
 

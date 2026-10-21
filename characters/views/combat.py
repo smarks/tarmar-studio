@@ -13,7 +13,7 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import (
     _json_error,
     _parse_json_body,
@@ -30,6 +30,7 @@ from .characters import _log_character_event, sheet_repaint
 @login_required
 @require_POST
 @rate_limit("resolve_attack", max_requests=60, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_resolve_attack(request, pk):
     """Resolve one d20 attack from the sheet's Attack Resolution panel (issue #101).
 

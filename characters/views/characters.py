@@ -32,7 +32,7 @@ from battle.magic_rules import magic_schools
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from common.audit import audit_logger
 from common.breadcrumbs import BreadcrumbMixin, step, trail
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import (
     _can_edit_object,
     _json_error,
@@ -59,9 +59,9 @@ from ..constants import (
     MAX_EQUIPMENT_MODIFIER,
     MAX_EQUIPMENT_QUANTITY,
     MAX_EQUIPMENT_WEIGHT_LBS,
-    UNNAMED_CHARACTER,
     name_within_rule,
     too_long,
+    unnamed_character,
 )
 from ..dice import build_point_buy_character_stats, roll_all_character_stats
 from ..equipment import ITEM_CATEGORIES, get_item
@@ -459,7 +459,7 @@ def _creation_name(
             # An account name may hold "@" or "+", which the name rule
             # refuses; the fallback keeps what it accepts, so the character's
             # own export can be imported (issue #870).
-            return name_within_rule(account_name, fallback=UNNAMED_CHARACTER), None
+            return name_within_rule(account_name, fallback=unnamed_character()), None
         return None, NAME_REQUIRED_MESSAGE
     try:
         return str(Character.clean_field_value("name", typed)), None
@@ -695,6 +695,7 @@ CHARACTER_IMPORT_MAX_BYTES = 256 * 1024
 @login_required
 @require_POST
 @rate_limit("character_import", max_requests=10, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_import(request):
     """Import a character from a JSON export.
 
@@ -1250,6 +1251,7 @@ class CharacterEditView(
 @login_required
 @require_POST
 @rate_limit("delete_character", max_requests=20, window_seconds=60)
+@internal_errors_logged()
 def delete_character(request, pk):
     """Soft delete a character (can be restored by admin/DM)."""
     # Lock the row for the read-modify-write so a concurrent equipment/skill
@@ -1294,6 +1296,7 @@ def _looks_like_pk(candidate: object) -> bool:
 @login_required
 @require_POST
 @rate_limit("bulk_delete", max_requests=5, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def bulk_delete_characters(request):
     """Soft delete multiple characters at once."""
     data, err = _parse_json_body(request)
@@ -1350,6 +1353,7 @@ def bulk_delete_characters(request):
 @login_required
 @require_POST
 @rate_limit("restore_character", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def restore_character(request, pk):
     """Restore a soft-deleted character: its owner, or a DM/admin (any).
 
@@ -1380,6 +1384,7 @@ def restore_character(request, pk):
 @login_required
 @require_POST
 @rate_limit("set_visibility", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_set_visibility(request, pk):
     """Owner/DM-only: flip a character between private and public (#273).
 
@@ -1418,6 +1423,7 @@ def character_set_visibility(request, pk):
 @login_required
 @require_POST
 @rate_limit("roll_fatigue", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_roll_fatigue(request, pk):
     """Roll the character's 2d6 Fatigue roll from the editor (issue #636).
 
@@ -1467,6 +1473,7 @@ def character_roll_fatigue(request, pk):
 @login_required
 @require_POST
 @rate_limit("dismiss_import_notice", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_dismiss_import_notice(request, pk):
     """Clear the notice a player's import left on the sheet (issue #744).
 
@@ -1491,6 +1498,7 @@ def character_dismiss_import_notice(request, pk):
 @login_required
 @require_POST
 @rate_limit("rule_literacy", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_rule_literacy(request, pk):
     """Record a Game Master's literacy ruling from the editor (issue #743).
 
@@ -1533,6 +1541,7 @@ def character_rule_literacy(request, pk):
 @login_required
 @require_POST
 @rate_limit("roll_literacy", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_roll_literacy(request, pk):
     """Roll the character's 3d6 literacy check from the editor (issue #741).
 
@@ -1569,6 +1578,7 @@ def character_roll_literacy(request, pk):
 @login_required
 @require_POST
 @rate_limit("roll_sheet", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_roll(request, pk, kind: str) -> HttpResponse:
     """Make one of the sheet's rolls: attributes, appearance, a blank height
     or weight (#941), provenance, wealth, or a Game Master's coin reroll
@@ -1609,6 +1619,7 @@ def character_roll(request, pk, kind: str) -> HttpResponse:
 @login_required
 @require_POST
 @rate_limit("mark_dead", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_mark_dead(request, pk):
     """DM-only: mark a character dead outside the experience-term flow."""
     if not request.user.can_manage_users:
@@ -1658,6 +1669,7 @@ def character_mark_dead(request, pk):
 @login_required
 @require_POST
 @rate_limit("revive_character", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_revive(request, pk):
     """DM-only: undo a mark-dead. Clears the recorded cause of death."""
     if not request.user.can_manage_users:
@@ -1700,6 +1712,7 @@ def _pool_value(data: Mapping, key: str) -> int | None:
 @login_required
 @require_POST
 @rate_limit("set_pools", max_requests=60, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_set_pools(request, pk):
     """Set current Fatigue, Body, Mana and/or the mana owed from the sheet.
 
@@ -2085,6 +2098,7 @@ def _build_field_update_response(
 @login_required
 @require_POST
 @rate_limit("character_update", max_requests=60, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_update_field(request, pk):
     """Update a single character field via AJAX."""
     data, err = _parse_json_body(request)

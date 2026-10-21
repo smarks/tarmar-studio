@@ -25,7 +25,12 @@ from characters.import_service import (
     validate_import_payload,
 )
 from characters.models import Character
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import (
+    BaseTestCase,
+    create_character,
+    limit_refusal_parts,
+    too_long_refusal,
+)
 
 
 class SheetTextLimitsTest(BaseTestCase):
@@ -100,7 +105,9 @@ class SheetTextLimitsTest(BaseTestCase):
             with self.subTest(name):
                 response = self.post(name, body)
                 self.assertNotIn(
-                    "characters or fewer", response.content.decode(), response.content
+                    limit_refusal_parts()[-1],
+                    response.content.decode(),
+                    response.content,
                 )
 
     def test_a_held_name_past_the_limit_can_still_be_renamed(self):
@@ -178,7 +185,7 @@ class DeathCauseLimitTest(BaseTestCase):
 
         with self.assertRaisesMessage(
             services.CharacterChangeError,
-            f"Cause must be {MAX_DEATH_CAUSE_LENGTH} characters or fewer",
+            too_long_refusal("Cause", MAX_DEATH_CAUSE_LENGTH),
         ):
             services.apply_death(character, "c" * (MAX_DEATH_CAUSE_LENGTH + 1))
         self.assertTrue(character.is_alive)
@@ -213,7 +220,7 @@ class ImportTextLimitsTest(BaseTestCase):
 
         with self.assertRaisesMessage(
             CharacterImportError,
-            f"Skill name must be {MAX_SKILL_NAME_LENGTH} characters or fewer",
+            too_long_refusal("Skill name", MAX_SKILL_NAME_LENGTH),
         ):
             self.import_as_game_master(document)
 
@@ -223,7 +230,7 @@ class ImportTextLimitsTest(BaseTestCase):
 
         with self.assertRaisesMessage(
             CharacterImportError,
-            f"Skill name must be {MAX_SKILL_NAME_LENGTH} characters or fewer",
+            too_long_refusal("Skill name", MAX_SKILL_NAME_LENGTH),
         ):
             self.import_as_game_master(self.payload(skills={padded: 3}))
 

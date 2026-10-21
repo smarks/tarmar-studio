@@ -10,13 +10,9 @@ from unittest.mock import patch
 from characters import services
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import Character
-from characters.purse import (
-    CUSTOM_COMBAT_ITEM_REFUSAL,
-    CUSTOM_ITEM_MORE_REFUSAL,
-    CUSTOM_ITEM_PRICE_REFUSAL,
-    GAME_MASTER_GIFT,
-)
-from common.test_helpers import BaseTestCase, create_character
+from characters.purse import format_purse, given_by_game_master
+from characters.refusal_words import refusal_words as characters_words
+from common.test_helpers import BaseTestCase, create_character, says, sentence_parts
 
 from .engine import MODE_AIDE, MODE_PLAY
 from .models import (
@@ -46,6 +42,11 @@ from .turn_engine.policy import (
     TurnPolicy,
 )
 from .turn_engine.state import refusal_lines, settled_refusals
+
+
+def not_enough_coin() -> str:
+    """The fixed opening of the purse's refusal, in the configured words."""
+    return sentence_parts(characters_words().purse.not_enough)[0]
 
 
 def plan(*actions: dict) -> str:
@@ -505,7 +506,7 @@ class PlayerActionsTest(ExecutorTestCase):
         )
         bought, refused = outcome.results
         self.assertTrue(bought.ran)
-        self.assertIn("Not enough coin", refused.error)
+        self.assertTrue(says(refused.error, characters_words().purse.not_enough))
 
     def test_a_players_stated_scores_are_refused_and_nobody_is_created(self):
         outcome, yielded, model, _turn = self.play(
@@ -1350,8 +1351,9 @@ class RefusalsReachTheNextTurnTest(ExecutorTestCase):
         rejected = [event for event in yielded if event.kind == events.PLAN_REJECTED]
         self.assertTrue(rejected, "the repeat should have been rejected")
         errors = " ".join(rejected[0].payload["errors"])
-        self.assertIn("already refused in this session", errors)
-        self.assertIn("plan roll_attributes", errors)
+        said = refusal_words().repeated_refusal
+        self.assertTrue(says(errors, said.already_refused))
+        self.assertIn(said.instead_record_attributes, errors)
         # And the second try, inside the same turn, did the work.
         self.assertEqual(len(model.requests), 3, "plan, replan, narrate")
         wren = self.session.attached_characters().get()
@@ -1810,7 +1812,7 @@ class GameMasterRecordsTest(ExecutorTestCase):
         result = self.run_one(action="set_coin", change=-500)
 
         self.assertFalse(result.ran)
-        self.assertIn("Not enough coin", result.error)
+        self.assertTrue(says(result.error, characters_words().purse.not_enough))
         self.assertEqual(self.gorn.purse, 100)
 
     def test_a_stated_fatigue_roll_is_recorded(self):
@@ -2259,17 +2261,27 @@ class PlayersBuyCustomItemsInChatTest(_CustomItemCase):
             (ring["item_id"], ring["name"], ring["quantity"], ring["cost"]),
             ("custom", "Heirloom ring", 2, 15.0),
         )
-        self.assertIn("paid 30 gp (2 × Heirloom ring)", self.wren.history[-1]["new"])
+        purse = characters_words().purse
+        self.assertIn(
+            purse.paid.format(
+                coin="30",
+                reason=purse.quantity_of.format(quantity=2, name="Heirloom ring"),
+                purse=format_purse(self.wren),
+            ),
+            self.wren.history[-1]["new"],
+        )
 
     def test_a_price_the_purse_cannot_pay_is_refused(self):
         result, event = self.add(item="Silver crown", price=500)
 
-        self.assert_refused_writing_nothing(result, event, "Not enough coin")
+        self.assert_refused_writing_nothing(result, event, not_enough_coin())
 
     def test_an_item_with_no_price_is_refused_not_given(self):
         result, event = self.add(item="Vane's key")
 
-        self.assert_refused_writing_nothing(result, event, CUSTOM_ITEM_PRICE_REFUSAL)
+        self.assert_refused_writing_nothing(
+            result, event, characters_words().purse.custom_item_price
+        )
 
     def test_combat_numbers_are_refused_whatever_the_price(self):
         for fields in _COMBAT_ITEMS:
@@ -2277,7 +2289,7 @@ class PlayersBuyCustomItemsInChatTest(_CustomItemCase):
                 result, event = self.add(price=1, **fields)
 
                 self.assert_refused_writing_nothing(
-                    result, event, CUSTOM_COMBAT_ITEM_REFUSAL
+                    result, event, characters_words().purse.custom_combat_item
                 )
 
     def test_more_of_a_carried_item_costs_its_stored_cost_not_the_stated_one(self):
@@ -2297,14 +2309,20 @@ class PlayersBuyCustomItemsInChatTest(_CustomItemCase):
 
                 if purse_after is None:
                     self.assert_refused_writing_nothing(
-                        result, event, "Not enough coin", equipment=[crown]
+                        result, event, not_enough_coin(), equipment=[crown]
                     )
                     continue
                 self.assertTrue(result.ran, result.error)
                 self.assertEqual(self.wren.purse, purse_after)
                 self.assertEqual(self.wren.equipment[0]["quantity"], 6)
+                purse = characters_words().purse
+                paid = purse.paid.format(
+                    coin="50",
+                    reason=purse.quantity_of.format(quantity=5, name="Silver crown"),
+                    purse=format_purse(self.wren),
+                )
                 self.assertIn(
-                    "now carrying 6 × Silver crown; paid 50 gp (5 × Silver crown)",
+                    f"now carrying 6 × Silver crown; {paid}",
                     self.wren.history[-1]["new"],
                 )
 
@@ -2320,7 +2338,10 @@ class PlayersBuyCustomItemsInChatTest(_CustomItemCase):
                 result, event = self.add(item="Vane's key", quantity=3, price=20)
 
                 self.assert_refused_writing_nothing(
-                    result, event, CUSTOM_ITEM_MORE_REFUSAL, equipment=[carried]
+                    result,
+                    event,
+                    characters_words().purse.custom_item_more,
+                    equipment=[carried],
                 )
 
     def test_a_catalog_item_is_bought_at_the_catalogs_price(self):
@@ -2343,7 +2364,7 @@ class GameMasterGivesCustomItemsInChatTest(_CustomItemCase):
     def assert_given(self, result, name: str) -> dict:
         self.assertTrue(result.ran, result.error)
         self.assertEqual(self.wren.purse, Decimal(100))
-        self.assertIn(f"1 × {name} {GAME_MASTER_GIFT}", self.wren.history[-1]["new"])
+        self.assertIn(given_by_game_master(1, name), self.wren.history[-1]["new"])
         (item,) = self.wren.equipment
         self.assertEqual((item["item_id"], item["name"]), ("custom", name))
         return item
@@ -2389,7 +2410,7 @@ class GameMasterGivesCustomItemsInChatTest(_CustomItemCase):
         self.assertTrue(result.ran, result.error)
         self.assertEqual(self.wren.equipment, [{"name": "Vane's key", "quantity": 3}])
         self.assertIn(
-            f"now carrying 3 × Vane's key; 2 × Vane's key {GAME_MASTER_GIFT}",
+            f"now carrying 3 × Vane's key; {given_by_game_master(2, "Vane's key")}",
             self.wren.history[-1]["new"],
         )
 

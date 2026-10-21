@@ -14,6 +14,7 @@ const {
     test, expect, loginAs, TEST_ADMIN, createNamedCharacter, searchPicker,
 } = require('./fixtures');
 const { uniqueStamp } = require('./unique-name');
+const { battleLineParts } = require('./rulings');
 
 test.describe('Battle teams', () => {
     test('DM imports a party as a team and fights to a team victory', async ({ adminPage }) => {
@@ -112,9 +113,11 @@ test.describe('Battle teams', () => {
         // and the victory line names the team, not a lone fighter.
         await adminPage.click('#advance-turn');
         await expect(adminPage.locator('#battle-status')).toHaveText('Finished');
-        await expect(adminPage.locator('#battle-log')).toContainText(
-            `${partyName} stands victorious`
-        );
+        const log = adminPage.locator('#battle-log');
+        await expect(log).toContainText(partyName);
+        for (const part of battleLineParts('services', 'team_victorious')) {
+            await expect(log).toContainText(part);
+        }
         await expect(adminPage.locator('#advance-turn')).toBeDisabled();
     });
 });

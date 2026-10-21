@@ -89,6 +89,8 @@ destination_not_marked = "{option} cannot move {name} to hex {hex}: pick one of 
 # {option} above, for an option with no name.
 unnamed_option = "That option"
 name_taken = "Another combatant already has that name"
+# Advancing a battle whose seats are still being claimed.
+still_in_lobby = "This battle is still in its lobby"
 
 [views]
 # Who may run a battle.
@@ -96,16 +98,12 @@ control_denied = "Only this battle's DM or the person who made it can do that"
 foes_belong_to_game_master = "This fight came from a Games Master session: its foes belong to the Game Master, so only a Game Master can restart it or change who decides"
 combatant_control_denied = "Only this battle's DM, the person who made it, or the combatant's own player can do that"
 start_denied = "Only this battle's DM or the person who made it can start it"
-# What a request hears when it fails for a reason that is not a rule refusing it.
-request_failed = "That could not be done because of an error on the server. It has been logged; reload the page and try again."
 
 # The setup page's terms and muster.
-seed_not_whole_number = "Seed must be a whole number"
 seed_out_of_range = "Seed must be between 0 and {highest}"
 unknown_rules_profile = "Unknown rules profile"
 draft_gone = "This battle has already started, or its setup was discarded"
 unknown_setup_field = "Unknown setup field"
-numeric_character_id = "A numeric character_id is required"
 numeric_entry_index = "A numeric entry index is required"
 numeric_party_id = "A numeric party_id is required"
 

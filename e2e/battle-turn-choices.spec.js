@@ -14,6 +14,7 @@
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { uniqueName } = require('./unique-name');
+const { chosenBy } = require('./rulings');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -115,7 +116,7 @@ test.describe('Choosing a turn by hand', () => {
         await panel.locator('.turn-confirm').click();
 
         await expect(page.locator('.battle-event.event-decision', {
-            hasText: `${chooser} chooses ATTACK (j): chosen by`,
+            hasText: `${chooser} chooses ATTACK (j): ${chosenBy()}`,
         })).toContainText(`Strike ${target}:`);
         // And the engine swings at that foe: the chooser's attack line
         // names it (the engine's "<attacker> attacks <defender> with ...").

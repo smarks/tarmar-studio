@@ -17,6 +17,7 @@ from battle.models import Battle, BattleEvent
 from battle.policy import choose_option
 from battle.services import advance_turn, create_battle, set_hth_agreement
 from battle.wording import game_master_name, words
+from common.helpers import SCRIPT_CALLER_HEADERS
 from common.test_helpers import BaseTestCase
 
 from .rulings_words import with_fixed_words
@@ -344,12 +345,12 @@ class AgreementEndpointTest(BaseTestCase):
         response = self.client.post(
             self.url,
             {"scope": "battle", "agreed": "true", "next": "/tarmar/gm/"},
-            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            headers=SCRIPT_CALLER_HEADERS,
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["rulings"]["hth_agreement"]["whole_battle"])
         refused = self.client.post(
-            self.url, {"scope": "everyone"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+            self.url, {"scope": "everyone"}, headers=SCRIPT_CALLER_HEADERS
         )
         self.assertEqual(refused.status_code, 400)
         self.assertEqual(refused.json()["error"], words().hth_agreement.refuse_scope)
@@ -360,7 +361,7 @@ class AgreementEndpointTest(BaseTestCase):
         response = self.client.post(
             self.url,
             {"scope": "battle", "agreed": "true"},
-            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            headers=SCRIPT_CALLER_HEADERS,
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(

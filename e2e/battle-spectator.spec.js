@@ -15,6 +15,7 @@ const {
     createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
 const { uniqueName } = require('./unique-name');
+const { chosenBy } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 
 test.describe('Battle spectators', () => {
@@ -101,7 +102,7 @@ test.describe('Battle spectators', () => {
         await expect(watcherPage.locator('.turn-group[data-turn="1"]'))
             .toBeVisible();
         await expect(watcherPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toBeVisible();
         await expect(watcherPage.locator('#advance-turn')).toHaveCount(0);
         await expect(watcherPage.locator('#turn-panel .turn-option'))

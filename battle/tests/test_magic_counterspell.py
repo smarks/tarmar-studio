@@ -30,7 +30,8 @@ from battle.services import (
     set_combatant_control_mode,
 )
 from battle.viewmodel import tarmar_view
-from common.test_helpers import BaseTestCase
+from battle.wording import words
+from common.test_helpers import BaseTestCase, says
 
 from .magic_fixtures import COUNTER_RULES, seated_rules
 from .rulings_words import with_fixed_words
@@ -190,7 +191,7 @@ class CounterMenuTest(BaseTestCase):
             if event.payload["chosen"].get("letter") == COUNTER_OPTION
         ]
         self.assertEqual(chosen[0]["counter_mana"], 2)
-        self.assertTrue(chosen[0]["rationale"].startswith("chosen by"))
+        self.assertTrue(says(chosen[0]["rationale"], words().services.chosen_by))
         (declared,) = status_events(battle, "counter_declared")
         self.assertEqual(declared.payload["caster"], self.foe.pk)
         self.assertEqual(declared.payload["mana"], 2)

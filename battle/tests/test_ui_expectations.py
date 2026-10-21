@@ -16,6 +16,9 @@ from battle.persistence import CLASSIC_PROFILE
 from battle.refusal_words import refusal_words
 from battle.services import claim_seat, create_battle, set_seat_ready, start_battle
 from battle.views import seat_summaries
+from battle.wording import words
+from common.helpers import SCRIPT_CALLER_HEADERS
+from common.test_helpers import sentence_parts
 
 from .test_lobby_views import LobbyViewTestMixin
 
@@ -80,7 +83,7 @@ class LobbyRefusalTest(LobbyViewTestMixin):
         response = self.client.post(
             reverse("battle:control", args=[battle.pk]),
             {"control_mode": "manual"},
-            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            headers=SCRIPT_CALLER_HEADERS,
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn(refusal_words().views.control_denied, response.json()["error"])
@@ -330,7 +333,7 @@ class SeatControlCopyTest(LobbyViewTestMixin):
         self.login_as(self.dm)
         response = self.client.get(reverse("battle:detail", args=[battle.pk]))
         self.assertNotContains(response, "the AI fights this one")
-        self.assertContains(response, "Manual — played by")
+        self.assertContains(response, sentence_parts(words().control.manual_line)[0])
 
     def test_an_automatic_battle_says_so_in_the_lede(self):
         battle = self.open_battle(count=2)
@@ -344,4 +347,5 @@ class SeatControlCopyTest(LobbyViewTestMixin):
         self.login_as(self.dm)
         response = self.client.get(reverse("battle:detail", args=[battle.pk]))
         self.assertContains(response, "lobby-seat-control")
-        self.assertContains(response, "Automatic — the AI plays it")
+        said = words().control
+        self.assertContains(response, said.automatic_line.format(ai=said.ai_owner))

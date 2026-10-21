@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from .refusal_words import refusal_words
 from .refusals import BattleRefusal
+from .wording import words
 
 #: The AI decides this combatant's action.
 AUTOMATIC = "automatic"
@@ -58,12 +59,6 @@ COMBATANT_MODE_CHOICES = [
 
 MODES = {AUTOMATIC, MANUAL}
 COMBATANT_MODES = MODES | {INHERIT}
-
-#: What the AI is called in a log line or a roster card. One spelling.
-AI_OWNER = "the AI"
-#: What a guest owner is called where a username would go. Guests have no
-#: name to print, and #305 established this spelling for the seat lists.
-GUEST_OWNER = "guest"
 
 
 def clean_mode(value) -> str:
@@ -123,7 +118,7 @@ def seat_holder_label(combatant) -> str:
     # Held, by an account (named) or else by a guest. The caller selects
     # ``player`` related where it matters; a guest's seat has none to fetch.
     holder = combatant.player
-    return holder.username if holder is not None else GUEST_OWNER
+    return holder.username if holder is not None else words().control.guest_owner
 
 
 def owner_label(battle, combatant) -> str:
@@ -138,14 +133,14 @@ def owner_label(battle, combatant) -> str:
         return seated
     if battle.created_by_id is not None:
         return battle.created_by.username
-    return GUEST_OWNER
+    return words().control.guest_owner
 
 
 def controller_label(battle, combatant) -> str:
     """Who decides for this combatant right now — a person, or the AI."""
     if is_manual(battle, combatant):
         return owner_label(battle, combatant)
-    return AI_OWNER
+    return words().control.ai_owner
 
 
 def mode_line(battle, combatant) -> str:
@@ -155,23 +150,34 @@ def mode_line(battle, combatant) -> str:
     browser only shows it, so the sentence lives here rather than in
     ``battle.js``.
     """
+    said = words().control
     if is_manual(battle, combatant):
-        return f"Manual — played by {owner_label(battle, combatant)}"
-    return f"Automatic — {AI_OWNER} plays it"
+        return said.manual_line.format(owner=owner_label(battle, combatant))
+    return said.automatic_line.format(ai=said.ai_owner)
+
+
+def own_manual_line() -> str:
+    """The roster card's line for the viewer's own manual figure (issue #136).
+
+    ``manual_line`` with the viewer named as ``[control] you``: the page
+    shows it in place of :func:`mode_line` where the viewer is the one asked.
+    """
+    said = words().control
+    return said.manual_line.format(owner=said.you)
+
+
+def mode_word(mode: str) -> str:
+    """How a log line names ``mode``, one of :data:`MODES`."""
+    said = words().control
+    return said.automatic if mode == AUTOMATIC else said.manual
 
 
 def battle_change_message(mode: str, *, applied_to_all: bool) -> str:
     """The log line for a change to the battle's own mode."""
-    named = "the AI" if mode == AUTOMATIC else "their owners"
-    if applied_to_all:
-        return (
-            f"Control: every combatant now follows the battle — {mode}, "
-            f"decided by {named}"
-        )
-    return (
-        f"Control: the battle's default is now {mode} — combatants without "
-        f"a mode of their own are decided by {named}"
-    )
+    said = words().control
+    named = said.ai_owner if mode == AUTOMATIC else said.their_owners
+    line = said.every_combatant_follows if applied_to_all else said.battle_default
+    return line.format(mode=mode_word(mode), decided_by=named)
 
 
 def combatant_change_message(battle, combatant, mode: str) -> str:
@@ -182,13 +188,15 @@ def combatant_change_message(battle, combatant, mode: str) -> str:
     decision — and explaining the next decision is the whole reason this
     goes in the log.
     """
+    said = words().control
     name = combatant.display_name
     decided_by = controller_label(battle, combatant)
     if mode == INHERIT:
-        return (
-            f"Control: {name} follows the battle again "
-            f"({effective_mode(battle, combatant)}) — decided by {decided_by}"
+        return said.follows_again.format(
+            name=name,
+            mode=mode_word(effective_mode(battle, combatant)),
+            decided_by=decided_by,
         )
     if mode == MANUAL:
-        return f"Control: {name} is now played by hand — decided by {decided_by}"
-    return f"Control: {name} now hands its decisions to {AI_OWNER}"
+        return said.played_by_hand.format(name=name, decided_by=decided_by)
+    return said.hands_to_ai.format(name=name, ai=said.ai_owner)

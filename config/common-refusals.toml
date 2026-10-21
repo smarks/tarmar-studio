@@ -1,0 +1,31 @@
+# The words every app answers a request in alike: when the server fails rather
+# than a rule refusing it (issues #113, #139), and the refusals every app gives
+# the same way (issue #136). One table per module.
+#
+# Read once at startup (common.refusal_words.load_refusal_words); a missing key,
+# an unknown key or a {name} a sentence may not use stops the server there
+# rather than in front of a player. COMMON_REFUSAL_WORDS_FILE names another
+# file. Change the wording freely; changing a sentence never changes who is
+# refused.
+
+[decorators]
+# What a JSON endpoint's caller hears when the server fails: the battle, the
+# character sheet, the Games Master page, parties and accounts alike.
+# The error's own text stays in the log, with its traceback.
+request_failed = "That could not be done because of an error on the server. It has been logged; reload the page and try again."
+
+[text_limits]
+# A free-text field past its limit, on every page and in the Games Master chat
+# (issue #928). {label} names the field ("Name", "The recap"), {limit} is its
+# number of characters.
+too_long = "{label} must be {limit} characters or fewer"
+
+[seeds]
+# A seed typed or carried in a link that is not a whole number; {text} is what
+# was given.
+not_whole_number = "Seed must be a whole number, not “{text}”."
+
+[requests]
+# A request naming a character by anything but its number: the battle setup's
+# muster and seats, and a party's Add Members.
+numeric_character_id = "A numeric character_id is required"

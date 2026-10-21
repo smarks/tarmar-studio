@@ -26,11 +26,16 @@ from battle.services import (
 )
 from bestiary.models import Beast
 from characters.models import Character
+from common.refusal_words import refusal_words as common_refusal_words
 from common.services.ollama_client import (
     STRUCTURED_OUTPUT_UNAVAILABLE_STATUS,
     StreamDeadlinePassed,
 )
-from common.test_helpers import BaseTestCase, create_character, logged_exception
+from common.test_helpers import (
+    BaseTestCase,
+    assert_failure_answered_in_json,
+    create_character,
+)
 from common.test_helpers import make_beast as shared_make_beast
 
 from . import battle_report, fight
@@ -61,6 +66,7 @@ from .fight import (
 )
 from .models import GMSession, GMTurnRecord
 from .refusal_words import refusal_words
+from .refusal_words import refusal_words as gm_words
 from .retrieval import BATTLE_KIND, is_battle_message, is_hidden_message
 from .testing import game_master_sets_the_foes_asked_for, gm_replies
 from .turn_record import running_turn_for
@@ -1045,20 +1051,21 @@ class BattleReportTest(BaseTestCase):
     def test_the_verdict_line_is_the_engines_or_a_plain_fallback(self):
         battle = Battle.objects.get(pk=self.battle.pk)
         self.assertEqual(closing_line(battle), "The battle ended (setup)")
+        wolf = battle.combatants.get(display_name="Gray Wolf")
         battle.events.create(
             turn=1,
             phase=6,
             sequence=500,
             event_type="info",
             actor="Foes",
-            payload={"winner_team": "Foes", "winners": [1]},
+            payload={"winner_team": "Foes", "winners": [wolf.pk]},
             message="Foes stands victorious — Gray Wolf left on the field",
         )
         # A session fight's side is named in words that agree with it
-        # (issue #785); this asserted the engine's "Foes stands" as written.
+        # (issue #785), built from the victory's record (#136).
         self.assertEqual(
             closing_line(battle),
-            "The foes stand victorious — Gray Wolf left on the field",
+            gm_words().battle_report.foes_victorious.format(names="Gray Wolf"),
         )
 
     def test_a_restart_voids_the_earlier_log_and_refiles(self):
@@ -1386,21 +1393,20 @@ class FightTakesTheTurnClaimTest(BaseTestCase):
 
     def test_a_fight_that_fails_releases_the_claim(self):
         secret = "board broke reading /srv/tarmar/.env DB_PASSWORD=hunter2"
-        with (
-            patch("gm.views.start_fight", side_effect=RuntimeError(secret)),
-            self.assertLogs("django.request", "ERROR") as logs,
-            self.assertRaises(RuntimeError),
-        ):
-            self._fight()
+        with patch("gm.views.start_fight", side_effect=RuntimeError(secret)):
+            # The page hears the fixed sentence as JSON, and the error is
+            # logged with its traceback (#13, #139).
+            assert_failure_answered_in_json(
+                self, self._fight, logger_name="gm.views", secret=secret
+            )
 
         record = GMTurnRecord.objects.get(session=self.session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        # The record is read back to the player by gm:turn, so it holds the
-        # fixed sentence; Django logs the traceback of what was raised (#13).
-        self.assertEqual(record.error, refusal_words().views.server_error)
+        # The record is read back to the player by gm:turn, so it says what
+        # the page was told: one failure, one sentence.
+        self.assertEqual(record.error, common_refusal_words().decorators.request_failed)
         state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
         self.assertNotIn("hunter2", state.content.decode())
-        self.assertIn(secret, str(logged_exception(logs.records[0])))
 
     def test_a_retry_after_a_fight_still_knows_its_message_was_answered(self):
         """The #515 guard reads past a fight: a fight answers no message."""

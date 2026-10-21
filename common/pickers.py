@@ -38,6 +38,11 @@ from common.pagination import PAGE_SIZE
 #: The longest query a picker searches by; the rest of a longer one is ignored.
 PICKER_QUERY_MAX_LENGTH = 100
 
+#: Why a picker endpoint answers 404 for a kind it does not serve. Django's 404
+#: page never shows it, with DEBUG off (issue #136): it is for whoever reads the
+#: debug page, not a player.
+NO_SUCH_PICKER = "No such picker"
+
 #: The query string parameters a picker's endpoint reads.
 QUERY_PARAMETER = "q"
 PAGE_PARAMETER = "page"

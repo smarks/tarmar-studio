@@ -12,7 +12,8 @@ wrong, and finished once on whichever path the turn leaves by.
 import hashlib
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,6 +25,7 @@ from django.utils import timezone
 
 from characters.services import record_entry_into_play
 from common.context_processors import git_info
+from common.refusal_words import refusal_words as common_refusal_words
 
 from .models import GMPromptSnapshot, GMTurnRecord
 from .turn_engine.policy import CAMPAIGN_ACTIONS
@@ -332,6 +334,35 @@ def running_turn_for(user: Any, session_id: int) -> GMTurnRecord | None:
         .order_by("-started_at", "-pk")
         .first()
     )
+
+
+@contextmanager
+def released_on_failure(recorder: TurnRecorder) -> Iterator[None]:
+    """Release a claimed turn when its request fails before answering (#139).
+
+    A claim (:func:`claim_turn`) holds the session's one turn until the
+    record is finished. A failure the view does not answer itself -- a
+    ``RuntimeError`` from the rules lookup, the session, the fight -- is
+    raised on to ``common.decorators.internal_errors_logged``, which logs it
+    and answers the page; on its way out this finishes the record as an
+    error in the sentence the page is answered in, so the session is free
+    for the next message rather than refused until the claim goes stale. A
+    record the view already finished is left as it is.
+
+    Args:
+        recorder: The claimed turn.
+
+    Yields:
+        Nothing; the view's work runs inside.
+    """
+    try:
+        yield
+    except Exception:
+        recorder.finish(
+            GMTurnRecord.OUTCOME_ERROR,
+            error=common_refusal_words().decorators.request_failed,
+        )
+        raise
 
 
 def claim_turn(recorder: TurnRecorder) -> GMTurnRecord | None:

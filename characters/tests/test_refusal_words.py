@@ -12,6 +12,7 @@ is refused, so both sides are checked under the fixed words too.
 """
 
 import ast
+from decimal import Decimal
 from pathlib import Path
 
 from django.conf import settings
@@ -20,6 +21,8 @@ from django.test import SimpleTestCase
 from django.urls import reverse
 
 from characters import services
+from characters.constants import unnamed_character
+from characters.purse import PurseError, format_purse, given_by_game_master, move_coin
 from characters.refusal_words import load_refusal_words
 from characters.services import CharacterChangeError
 from characters.skill_checks import skill_check
@@ -28,7 +31,7 @@ from characters.tests.test_skill_checks import FacesRoller
 from characters.views.characters import skill_check_options_context
 from characters.views.mechanics import GAME_MASTER_CALL_NOTE
 from common.test_helpers import BaseTestCase, create_character
-from common.tests.refusal_scan import fixed_words, literal_refusals
+from common.tests.refusal_scan import fixed_words, literal_refusals, literal_returns
 
 ROOT = Path(settings.BASE_DIR)
 
@@ -77,6 +80,43 @@ class ShippedRefusalWordsTest(SimpleTestCase):
 
 
 class NothingWrittenInCodeTest(SimpleTestCase):
+    def test_the_purse_and_the_constants_write_no_sentence_of_their_own(self):
+        """The purse's lines and refusals, the point-buy note, the unnamed
+        character and a missing one are configuration (#136)."""
+        self.assertEqual(
+            literal_refusals(
+                ROOT / "characters/purse.py", {"PurseError", "too_long", "move_coin"}
+            ),
+            [],
+        )
+        self.assertEqual(
+            literal_returns(
+                ROOT / "characters/purse.py",
+                {
+                    "format_purse",
+                    "move_coin",
+                    "purchase_before_wealth_note",
+                    "given_by_game_master",
+                    "charge_for_catalog_item",
+                    "charge_for_custom_item",
+                },
+            ),
+            [],
+        )
+        self.assertEqual(
+            literal_returns(
+                ROOT / "characters/constants.py",
+                {"too_long", "point_buy_budget_note", "unnamed_character"},
+            ),
+            [],
+        )
+        self.assertEqual(
+            literal_refusals(
+                ROOT / "characters/views/access.py", {"_json_error", "Http404"}
+            ),
+            [],
+        )
+
     def test_no_field_reason_is_a_literal(self):
         self.assertEqual(
             literal_refusals(
@@ -142,6 +182,21 @@ class TheWordsFollowTheConfigurationTest(BaseTestCase):
         super().setUp()
         self.player = self.create_user(username="words-player")
         self.game_master = self.create_dm(username="words-gm")
+
+    def test_the_purse_prints_and_refuses_in_the_configured_words(self):
+        """The purse's line, its refusal and a gift read the configuration
+        (#136); who is refused is unchanged."""
+        character = create_character(self.player, name="Wren")
+        line = move_coin(character, Decimal(5), reason="a find")
+        self.assertEqual(line, f"purse.received 5 {format_purse(character)} a find")
+        self.assertTrue(format_purse(character).startswith("purse."))
+        with self.assertRaisesMessage(PurseError, "purse.not_enough "):
+            move_coin(character, Decimal(-1_000_000), reason="a castle")
+        self.assertEqual(
+            given_by_game_master(2, "Rope"),
+            "purse.given_by_game_master purse.quantity_of Rope 2",
+        )
+        self.assertEqual(unnamed_character(), "constants.unnamed_character")
 
     def test_a_field_reason_is_the_configured_one(self):
         self.assertEqual(

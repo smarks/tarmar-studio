@@ -16,6 +16,7 @@ from datetime import timedelta
 
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import escape
 
 from battle.models import BattleDraft
 from battle.tests.test_lobby import open_battle
@@ -30,6 +31,7 @@ from common.pickers import (
 from common.test_helpers import BaseTestCase, create_character
 from gm.models import GMSession
 from parties.models import Party, PartyMembership
+from parties.refusal_words import refusal_words as parties_words
 
 #: One page and then some, so a row can sit on page 2.
 MORE_THAN_A_PAGE = PAGE_SIZE + 5
@@ -399,7 +401,11 @@ class DisbandedPartiesAreOfferedNowhereTest(BaseTestCase):
             {"party_id": self.disbanded.pk},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "Broken Company was disbanded", status_code=400)
+        self.assertContains(
+            response,
+            escape(parties_words().models.disbanded.format(party="Broken Company")),
+            status_code=400,
+        )
         self.draft.refresh_from_db()
         self.assertEqual(self.draft.roster_json, [])
 
@@ -425,7 +431,10 @@ class DisbandedPartiesAreOfferedNowhereTest(BaseTestCase):
         response = self.client.get(
             reverse("hooks:generate"), {"party": self.disbanded.pk, "seed": "9"}
         )
-        self.assertContains(response, "Broken Company was disbanded")
+        self.assertContains(
+            response,
+            escape(parties_words().models.disbanded.format(party="Broken Company")),
+        )
         self.assertNotContains(response, 'id="hook-result"')
         # Nor is it pinned into the select as the party chosen.
         self.assertEqual(list(response.context["party_picker"].pinned), [])
