@@ -2,7 +2,8 @@
  * The turn menu's words, read from the running settings (#90).
  *
  * The menu's sentences are configuration (config/battle-rulings.toml's
- * [turn_menu], [tarmar_menu] and [classic_menu] tables, loaded into
+ * [turn_menu], [tarmar_menu] and [classic_menu] tables, and the cast stage's
+ * rows in [cast_stage] (#145), loaded into
  * settings.BATTLE_RULINGS_WORDING at startup): Spencer edits them with no
  * Python and no spec, so the specs read them rather than typing a sentence
  * here. A spec matches a line as a pattern built from the sentences the menu
@@ -20,17 +21,19 @@ let readWords = null;
 
 /**
  * The menu's tables: the words both profiles use, a Tarmar figure's own, a
- * classic figure's own, and the turn panel's own around them (#94). Read through the Django shell on the first call
+ * classic figure's own, the turn panel's own around them (#94), and the cast
+ * stage's rows (#145). Read through the Django shell on the first call
  * only: the settings load the words once at startup, so they cannot change
  * under a running suite.
- * @returns {{shared: Object<string, string>, tarmar: Object<string, string>, classic: Object<string, string>, panel: Object<string, string>}}
+ * @returns {{shared: Object<string, string>, tarmar: Object<string, string>, classic: Object<string, string>, panel: Object<string, string>, stage: Object<string, string>}}
  */
 function menuWords() {
     if (readWords === null) {
         const {
             turn_menu: shared, tarmar_menu: tarmar, classic_menu: classic, turn_panel: panel,
+            cast_stage: stage,
         } = rulingWords();
-        readWords = { shared, tarmar, classic, panel };
+        readWords = { shared, tarmar, classic, panel, stage };
     }
     return readWords;
 }

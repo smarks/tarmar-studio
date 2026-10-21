@@ -1102,9 +1102,11 @@ if (typeof module !== 'undefined' && module.exports) {
     /**
      * The empty pool a stage falls back to when the server published no
      * magic for the awaited caster — a wizard's hand is never guessed at.
+     * The pool is named as the server names the battle's (``pool_label``,
+     * the configured words, #145): Mana for Tarmar, ST for classic.
      */
-    function emptyMagic() {
-        return { pool_label: 'Mana', pool: 0, max_pool: 0, spells: [] };
+    function emptyMagic(pending) {
+        return { pool_label: pending.pool_label, pool: 0, max_pool: 0, spells: [] };
     }
 
     /**
@@ -1374,7 +1376,7 @@ if (typeof module !== 'undefined' && module.exports) {
         stage.setAttribute('role', 'group');
         stage.setAttribute('aria-label', filledWords(words.spells_group));
 
-        const magic = pending.magic || emptyMagic();
+        const magic = pending.magic || emptyMagic(pending);
         const pool = document.createElement('p');
         pool.className = 'turn-cast-pool';
         // Mana borrowed and not paid back (tarmar-engine #28), as published.
@@ -1674,9 +1676,17 @@ if (typeof module !== 'undefined' && module.exports) {
             if (candidate.anchor_target != null) {
                 option.classList.add('turn-option-anchor');
             }
-            option.addEventListener('click', () => {
-                if (opts.onSelect) { opts.onSelect(index); }
-            });
+            // An option the rules refuse to carry out here (review of #146):
+            // drawn with the server's line saying so, and not selectable; the
+            // server refuses it too if it is sent anyway.
+            if (candidate.refused) {
+                option.disabled = true;
+                option.classList.add('is-refused');
+            } else {
+                option.addEventListener('click', () => {
+                    if (opts.onSelect) { opts.onSelect(index); }
+                });
+            }
             menu.appendChild(option);
         });
 
@@ -1687,7 +1697,7 @@ if (typeof module !== 'undefined' && module.exports) {
         });
 
         if (castable) {
-            const magic = pending.magic || emptyMagic();
+            const magic = pending.magic || emptyMagic(pending);
             // Casts, not spells: the classic profile offers the same spell
             // at each figure it could be aimed at, and the stage lists one
             // row per offer, so counting spells would undercount the stage.

@@ -133,6 +133,7 @@ from .services import (
     set_magic_bounds_lifted,
     set_seat_ready,
     stale_pools,
+    stale_pools_refusal,
     start_battle,
     start_draft,
     take_seat,
@@ -1256,6 +1257,7 @@ def pending_payload(battle, actor: Actor) -> dict | None:
     # being asked. ``holds_seat`` alone would show them a prompt addressed
     # to nobody.
     is_you = decides_for(actor, battle, seat)
+    profile = profiles.for_battle(battle)
     payload = {
         "combatant_id": seat.pk,
         "turn": pending.get("turn"),
@@ -1264,10 +1266,11 @@ def pending_payload(battle, actor: Actor) -> dict | None:
         "is_you": is_you,
         "candidates": [],
         "magic": None,
+        # The pool's name for a stage with no caster's payload (#145 review).
+        "pool_label": profile.pool_label(),
     }
     if is_you or commands_foes(actor, battle):
         payload["candidates"] = pending.get("candidates", [])
-        profile = profiles.for_battle(battle)
         payload["magic"] = profile.caster_magic(
             profile.load(battle.state_json), seat.pk
         )
@@ -1303,9 +1306,7 @@ def advance_control(battle, actor: Actor) -> dict | None:
             "label": "Pools changed on the records",
             "enabled": False,
             "waiting_on": "",
-            "stale": refusal_words().services.stale_pools.format(
-                names=", ".join(moved)
-            ),
+            "stale": stale_pools_refusal(moved),
             "resnapshot_url": (
                 reverse("battle:resnapshot", args=[battle.pk]) if actor.is_dm else ""
             ),

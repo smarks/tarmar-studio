@@ -1496,6 +1496,33 @@ describe('renderTurnPanel (#250)', () => {
         expect(toggle.getAttribute('aria-pressed')).toBe('false');
     });
 
+    test('an option the rules refuse here is drawn, with its line, and cannot be picked', () => {
+        // Review of #146: the classic engine's menu can offer an option its
+        // own verbs refuse; the server marks it ``refused`` and words it.
+        const pending = describedPending();
+        pending.candidates[2] = Object.assign({}, pending.candidates[2], {
+            letter: 'change_weapons', name: 'CHANGE WEAPONS', ai_choice: false,
+            plain: 'classic_menu.cannot_carry_out turn_menu.change_to Small bow',
+            refused: true,
+        });
+        const panel = panelNode();
+        const onSelect = jest.fn();
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,
+            selectedIndex: null, onSelect,
+        });
+        const options = panel.querySelectorAll('.turn-option');
+        expect(options[2].disabled).toBe(true);
+        expect(options[2].classList.contains('is-refused')).toBe(true);
+        expect(options[2].querySelector('.turn-option-plain').textContent)
+            .toBe('classic_menu.cannot_carry_out turn_menu.change_to Small bow');
+        options[2].click();
+        expect(onSelect).not.toHaveBeenCalled();
+        // The others are as they were.
+        expect(options[0].disabled).toBe(false);
+        options[0].click();
+        expect(onSelect).toHaveBeenCalledWith(0);
+    });
+
     test('the scoring switch shows every row its score and working', () => {
         const panel = panelNode();
         const onToggleScoring = jest.fn();
@@ -2385,6 +2412,22 @@ describe('the wizard cast flow (#250)', () => {
         battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null });
         expect(panel.querySelector('.turn-option-cast')).toBeNull();
         expect(panel.querySelectorAll('.turn-option')).toHaveLength(1);
+    });
+
+    test('a cast with no caster payload names the pool as the server does', () => {
+        // Review of #145: the fallback named its pool 'Mana' in code, wrong
+        // for a classic wizard; it reads the pending payload's configured
+        // ``pool_label`` now.
+        const panel = panelNode();
+        const pending = castingPending({ magic: null, pool_label: 'cast_stage.strength_pool' });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,
+            selectedIndex: null, castOpen: true,
+        });
+        expect(panel.querySelector('.turn-option-cast').textContent)
+            .toContain('turn_panel.pool 0 0 cast_stage.strength_pool');
+        expect(panel.querySelector('.turn-cast-pool').textContent)
+            .toContain('cast_stage.strength_pool');
+        expect(panel.textContent).not.toContain('Mana');
     });
 
     test('a caster with no castable spell this turn gets no cast group', () => {

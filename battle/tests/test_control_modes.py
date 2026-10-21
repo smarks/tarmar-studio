@@ -815,65 +815,82 @@ class GuestRunsAManualBattleTest(BaseTestCase):
 class RefusedGrappleReachesThePlayersLogTest(BaseTestCase):
     """A player's grapple that cannot happen still writes a line (#686).
 
-    The player-facing half of the defect. ``policy`` puts ATTEMPT HTH on
-    the menu whenever the actor is engaged with an adjacent enemy, without
-    asking whether that enemy is already in somebody else's grip, and
-    ``_human_decider`` serves that menu as the player's legal choices. Up
-    to tarmar-engine v0.9.3 the engine then refused the attempt in Phase 5
-    with a bare ``return``: the player saw their combatant's Forecast line
-    and no outcome at all for the turn.
+    The player-facing half of the defect. Up to tarmar-engine v0.9.3 the
+    engine refused an ATTEMPT HTH at an enemy already in somebody's grip in
+    Phase 5 with a bare ``return``: the player saw their combatant's Forecast
+    line and no outcome at all for the turn. Since v0.9.20 (engine #60) the
+    menu leaves that attempt out, so the refusal is reached the way it still
+    can be: two figures choose to grapple the same free enemy, and whichever
+    grips second finds it already held (#153).
     """
+
+    def board(self, seed: int, *, held: bool) -> tuple[Battle, int, int, int]:
+        """Three figures in reach of each other, the grabber seated manual.
+
+        Args:
+            seed: The battle's seed.
+            held: Whether the target starts in the rival's grip; otherwise the
+                rival is seated manual too, to choose its own attempt.
+
+        Returns:
+            The battle and the grabber's, target's and rival's ids.
+        """
+        battle = create_battle(self.dm, name=f"Refused grip {seed}", count=3, seed=seed)
+        state = BattleState.from_dict(battle.state_json)
+        grabber, target, rival = state.combatants
+        grabber.position, target.position = (0, 0), (1, 0)
+        rival.position = (1, 0) if held else (1, -1)
+        if held:
+            rival.grappling = target.combatant_id
+            target.grappled_by = rival.combatant_id
+        # An "Entering Hand-to-Hand" condition, or o is not offered at all
+        # (tarmar-engine 0.9.5, #823): the target is the slower figure.
+        target.movement_modifier = (
+            min(grabber.movement_modifier, rival.movement_modifier) - 1
+        )
+        battle.state_json = dump_state(state)
+        battle.save(update_fields=["state_json"])
+        set_combatant_control_mode(battle.pk, grabber.combatant_id, control.MANUAL)
+        if not held:
+            set_combatant_control_mode(battle.pk, rival.combatant_id, control.MANUAL)
+        return battle, grabber.combatant_id, target.combatant_id, rival.combatant_id
 
     def setUp(self):
         super().setUp()
         self.dm = self.create_dm()
-        self.battle = create_battle(self.dm, name="Refused grip", count=3, seed=4242)
-        state = BattleState.from_dict(self.battle.state_json)
-        grabber, target, rival = state.combatants
-        # All three in reach, with the target already in the rival's grip.
-        grabber.position = (0, 0)
-        target.position = (1, 0)
-        rival.position = (1, 0)
-        rival.grappling = target.combatant_id
-        target.grappled_by = rival.combatant_id
-        # An "Entering Hand-to-Hand" condition, or o is not offered at all
-        # (tarmar-engine 0.9.5, #823): the target is the slower figure.
-        target.movement_modifier = grabber.movement_modifier - 1
-        self.grabber_id = grabber.combatant_id
-        self.target_name = target.name
-        self.grabber_name = grabber.name
-        self.battle.state_json = dump_state(state)
-        self.battle.save(update_fields=["state_json"])
-        set_combatant_control_mode(self.battle.pk, self.grabber_id, control.MANUAL)
 
-    def test_the_menu_still_offers_the_attempt(self):
-        """Pinned because the refusal only matters while the option is
-        offered: the menu does not check the target's hold, which is why
-        the engine has to say something when it turns the attempt down."""
-        battle, _events = advance_turn(self.battle.pk)
-        self.assertEqual(battle.pending_input_json["combatant_id"], self.grabber_id)
-        letters = {
-            candidate["letter"] for candidate in battle.pending_input_json["candidates"]
-        }
-        self.assertIn("o", letters)
+    def test_the_menu_leaves_out_an_enemy_already_held(self):
+        """tarmar-engine #60, v0.9.20: the attempt the engine would refuse is
+        no longer offered (it was, and this test pinned it)."""
+        battle, grabber_id, target_id, _rival_id = self.board(4242, held=True)
+        battle, _events = advance_turn(battle.pk)
+        self.assertEqual(battle.pending_input_json["combatant_id"], grabber_id)
+        self.assertNotIn(
+            ("o", target_id),
+            {
+                (candidate["letter"], candidate["target_id"])
+                for candidate in battle.pending_input_json["candidates"]
+            },
+        )
 
     def test_the_refusal_is_written_to_the_battle_log(self):
-        battle, _events = advance_turn(self.battle.pk)
-        attempt = next(
-            candidate
-            for candidate in battle.pending_input_json["candidates"]
-            if candidate["letter"] == "o"
-        )
-        record_player_action(
-            battle.pk,
-            self.dm,
-            combatant_id=battle.pending_input_json["combatant_id"],
-            turn=battle.pending_input_json["turn"],
-            letter="o",
-            target_id=attempt["target_id"],
-            spell_key="",
-        )
+        """Both choose to grapple the free target; the one that grips second
+        is refused, in the log, for the target is held by then. Seed 4201 is
+        one whose first grip takes hold."""
+        battle, grabber_id, target_id, rival_id = self.board(4201, held=False)
         battle, _events = advance_turn(battle.pk)
+        for _seat in range(2):
+            pending = battle.pending_input_json
+            self.assertIn(pending["combatant_id"], (grabber_id, rival_id))
+            battle, _events = record_player_action(
+                battle.pk,
+                self.dm,
+                combatant_id=pending["combatant_id"],
+                turn=pending["turn"],
+                letter="o",
+                target_id=target_id,
+                spell_key="",
+            )
         refusals = [
             event
             for event in BattleEvent.objects.filter(battle=battle, event_type="info")
@@ -881,8 +898,18 @@ class RefusedGrappleReachesThePlayersLogTest(BaseTestCase):
         ]
         self.assertEqual(len(refusals), 1)
         self.assertEqual(refusals[0].payload["grapple_refused"], "target_held")
-        self.assertIn(self.target_name, refusals[0].message)
-        self.assertIn(self.grabber_name, refusals[0].message)
+        self.assertEqual(refusals[0].payload["target"], target_id)
+        names = {
+            seat.pk: seat.display_name
+            for seat in battle.combatants.filter(
+                pk__in=(grabber_id, target_id, rival_id)
+            )
+        }
+        self.assertIn(names[target_id], refusals[0].message)
+        self.assertTrue(
+            names[grabber_id] in refusals[0].message
+            or names[rival_id] in refusals[0].message
+        )
 
 
 # ------------------------------------------------- the choice names its pause

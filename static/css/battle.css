@@ -876,6 +876,18 @@
     outline-offset: 2px;
 }
 
+/* An option the rules refuse to carry out here (review of #146): shown with
+   its line, not selectable. */
+.turn-option:disabled {
+    cursor: not-allowed;
+    background: var(--colour-surface-warm);
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-option:hover:disabled {
+    border-color: var(--colour-border-breadcrumb-link);
+}
+
 .turn-option[aria-pressed="true"] {
     border-color: var(--colour-accent-gold);
     box-shadow: inset 0 0 0 1px var(--colour-accent-gold);

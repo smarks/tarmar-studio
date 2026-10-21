@@ -89,6 +89,7 @@ class ServicesWords:
     no_pending_menu: str = sentence()
     not_your_combatant: str = sentence()
     option_not_on_menu: str = sentence()
+    option_cannot_be_carried_out: str = sentence("option")
     destination_not_marked: str = sentence("option", "name", "hex")
     unnamed_option: str = sentence()
     name_taken: str = sentence()

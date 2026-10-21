@@ -127,7 +127,7 @@ class TarmarMenuWords:
 
 @dataclass(frozen=True)
 class ClassicMenuWords:
-    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90)."""
+    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90, #146)."""
 
     move_word: str = sentence()
     no_foe_in_reach: str = sentence("reason", "weapon", required=("reason",))
@@ -156,6 +156,12 @@ class ClassicMenuWords:
     crawl: str = sentence("hexes")
     disengage: str = sentence()
     hth_attack: str = sentence("aimed", "grapple")
+    shift_grapple: str = sentence("struck", "grapple")
+    then_grapple: str = sentence("line", "struck", "grapple", required=("line",))
+    no_attack: str = sentence("line", "reason", required=("line", "reason"))
+    no_foe_struck: str = sentence("weapon")
+    cannot_carry_out: str = sentence("line", required=("line",))
+    no_grapple: str = sentence()
     cast_cost: str = sentence("strength")
     go_prone: str = sentence()
     kneel: str = sentence()
@@ -262,6 +268,44 @@ class MagicBoundsWords:
 
 
 @dataclass(frozen=True)
+class CastStageWords:
+    """The cast stage's rows, both profiles (#145): each spell's name, its
+    cost, its chance, and why it cannot be cast when it cannot."""
+
+    row_at: str = sentence("spell", "target", required=("spell", "target"))
+    mana_pool: str = sentence()
+    mana_cost: str = sentence("school", "level")
+    renews: str = sentence()
+    nothing_to_aim_at: str = sentence()
+    no_kind_of_magic: str = sentence()
+    past_channel: str = sentence("level", "limit")
+    mana_short: str = sentence("level", "mana")
+    mana_borrowable: str = sentence("level", "mana", "shortfall")
+    mana_chance: str = sentence(
+        "chance", "attribute", "floor", "aim", required=("floor", "aim")
+    )
+    under_fumble_floor: str = sentence("floor")
+    dex_to_land: str = sentence()
+    less_injury: str = sentence("attribute", "injury", required=("attribute",))
+    less_off_balance: str = sentence(
+        "attribute", "off_balance", required=("attribute",)
+    )
+    less_both: str = sentence(
+        "attribute", "injury", "off_balance", required=("attribute",)
+    )
+    strength_pool: str = sentence()
+    strength_cost: str = sentence("kind", "strength")
+    nothing_to_cast_at: str = sentence()
+    strength_short: str = sentence("needed", "strength")
+    strength_chance: str = sentence("chance", "needed", "range", required=("range",))
+    before_range: str = sentence()
+    missile_spell: str = sentence()
+    thrown_spell: str = sentence()
+    creation_spell: str = sentence()
+    special_spell: str = sentence()
+
+
+@dataclass(frozen=True)
 class RulingsWording:
     """The whole file: one table per ruling, and the words they share."""
 
@@ -272,6 +316,7 @@ class RulingsWording:
     turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
+    cast_stage: CastStageWords
 
 
 def load_rulings_wording(path: Path) -> RulingsWording:

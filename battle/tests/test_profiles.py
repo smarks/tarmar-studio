@@ -19,9 +19,10 @@ from battle.classic_adaptation import classic_side, classic_state
 from battle.models import Battle, BattleCombatant, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
 from battle.services import advance_turn, create_battle, rename_combatant
+from battle.tests.rulings_words import with_fixed_words
 from battle.tests.test_classic_adaptation import snapshot as classic_snapshot
 from battle.tests.test_persistence import classic_game
-from battle.views import battle_payload
+from battle.views import battle_payload, pending_payload
 from common.test_helpers import BaseTestCase
 
 
@@ -297,6 +298,7 @@ class ClassicRosterTest(BaseTestCase):
         )
 
 
+@with_fixed_words
 class ClassicCastStageTest(BaseTestCase):
     def test_a_classic_fighter_still_draws_no_cast_stage(self):
         # The honest absence a non-caster has always had, kept: a fighter
@@ -321,9 +323,28 @@ class ClassicCastStageTest(BaseTestCase):
         wizard = next(one for one in state.figures if one.spells_known)
         magic = adapter.caster_magic(state, int(wizard.uid))
         assert magic is not None
-        self.assertEqual(magic["pool_label"], "ST")
+        self.assertEqual(magic["pool_label"], "cast_stage.strength_pool")
+        # The profile's own name for it, for a stage with no payload (#145).
+        self.assertEqual(adapter.pool_label(), "cast_stage.strength_pool")
         self.assertNotIn("mana", magic)
         self.assertTrue(magic["spells"])
+
+    def test_a_classic_battle_s_pending_names_its_pool_st(self):
+        """The pending payload carries the profile's pool name beside the
+        magic, for a stage with none to read (review of #145)."""
+        dm = self.create_dm()
+        battle = classic_wizard_battle(dm)
+        wizard = battle.combatants.get(display_name="Wynn")
+        battle.status = Battle.STATUS_AWAITING
+        battle.pending_input_json = {
+            "combatant_id": wizard.pk,
+            "turn": 1,
+            "candidates": [],
+        }
+        battle.save()
+        pending = pending_payload(battle, Actor(user=dm, guest_key=""))
+        assert pending is not None
+        self.assertEqual(pending["pool_label"], "cast_stage.strength_pool")
 
 
 class QuarantineTest(BaseTestCase):
