@@ -1147,11 +1147,7 @@ def seat_summaries(battle, actor: Actor) -> list[dict]:
                 "is_open_seat": combatant.is_open_seat,
                 "kind": kind,
                 "is_saved_character": combatant.is_saved_character,
-                "player": (
-                    combatant.player.username
-                    if combatant.player_id
-                    else ("guest" if combatant.guest_key else "")
-                ),
+                "player": control.seat_holder_label(combatant),
                 "is_you": actor.holds_seat(combatant),
                 "is_ready": combatant.is_ready,
                 # Empty = free-for-all. A seat's team survives its claim
@@ -1254,11 +1250,7 @@ def pending_payload(battle, actor: Actor) -> dict | None:
         "combatant_id": seat.pk,
         "turn": pending.get("turn"),
         "display_name": seat.display_name,
-        "player": (
-            seat.player.username
-            if seat.player_id
-            else ("guest" if seat.guest_key else "")
-        ),
+        "player": control.seat_holder_label(seat),
         "is_you": is_you,
         "candidates": [],
         "magic": None,

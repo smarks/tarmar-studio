@@ -113,14 +113,17 @@ def seat_holder_label(combatant) -> str:
     Empty means nobody is sitting in it — which is not the same as nobody
     owning it (see :func:`owner_label`).
     """
-    if combatant.player_id is not None:
-        # ``player`` may be deferred or the relation unfetched; the caller
-        # selects it related where it matters, and the id alone is enough
-        # to know somebody is there.
-        return combatant.player.username
-    if combatant.guest_key:
-        return GUEST_OWNER
-    return ""
+    # Imported here, not at the top: battle.models imports this module for
+    # its mode constants, and battle.access imports battle.models, so a
+    # module-level import would be a cycle.
+    from .access import seat_is_held
+
+    if not seat_is_held(combatant):
+        return ""
+    # Held, by an account (named) or else by a guest. The caller selects
+    # ``player`` related where it matters; a guest's seat has none to fetch.
+    holder = combatant.player
+    return holder.username if holder is not None else GUEST_OWNER
 
 
 def owner_label(battle, combatant) -> str:
