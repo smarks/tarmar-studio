@@ -20,6 +20,8 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
+const { battleLine, battleLineParts } = require('./rulings');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
 /**
@@ -43,7 +45,7 @@ async function openWhoDecides(page) {
 
 test.describe('Battle control modes', () => {
     test('an automatic battle plays with nothing but Advance clicks', async ({ adminPage }) => {
-        const battleName = `E2E Automatic ${Date.now()}`;
+        const battleName = uniqueName('E2E Automatic');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 2,
@@ -75,7 +77,7 @@ test.describe('Battle control modes', () => {
     });
 
     test('a mixed battle stops at the manual figure and names it', async ({ adminPage }) => {
-        const battleName = `E2E Mixed ${Date.now()}`;
+        const battleName = uniqueName('E2E Mixed');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 3,
@@ -98,8 +100,9 @@ test.describe('Battle control modes', () => {
             .toContainText('1 combatant');
         // The change is in the log, where a reader can find out why this
         // figure is about to behave differently.
-        await expect(adminPage.locator('.event-status').last())
-            .toContainText('played by hand');
+        for (const part of battleLineParts('control', 'played_by_hand')) {
+            await expect(adminPage.locator('.event-status').last()).toContainText(part);
+        }
 
         // One press runs the AI figures and stops at the manual one.
         await adminPage.click('#advance-turn');
@@ -132,7 +135,7 @@ test.describe('Battle control modes', () => {
     });
 
     test('handing the awaited figure to the AI unsticks the battle', async ({ adminPage }) => {
-        const battleName = `E2E Handback ${Date.now()}`;
+        const battleName = uniqueName('E2E Handback');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 2,
@@ -162,12 +165,15 @@ test.describe('Battle control modes', () => {
         // The pause is gone and the button works again — no reload trick,
         // no wedged battle.
         await expect(adminPage.locator('#advance-turn')).toBeEnabled();
-        await expect(adminPage.locator('.event-status').last())
-            .toContainText('hands its decisions to the AI');
+        const handed = adminPage.locator('.event-status').last();
+        await expect(handed).toContainText(battleLine('control', 'ai_owner'));
+        for (const part of battleLineParts('control', 'hands_to_ai')) {
+            await expect(handed).toContainText(part);
+        }
     });
 
     test('set every combatant to follow the battle clears the overrides', async ({ adminPage }) => {
-        const battleName = `E2E SetAll ${Date.now()}`;
+        const battleName = uniqueName('E2E SetAll');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 3,

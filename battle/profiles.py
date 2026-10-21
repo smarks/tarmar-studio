@@ -53,6 +53,7 @@ from .engine.engine import run_turn as run_tarmar_turn
 from .engine.state import BattleState
 from .magic_rules import magic_rules
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
+from .wording import words
 
 #: A classic figure's ``uid`` is its ``BattleCombatant`` row's pk as a string.
 #: The engine identifies figures by uid and this app by row pk; rather than
@@ -200,6 +201,12 @@ class BattleProfile:
         """The cast stage's payload for this combatant, or ``None``."""
         raise NotImplementedError
 
+    def pool_label(self) -> str:
+        """The name of the pool a caster spends, in the cast stage's words
+        (``[cast_stage]``, #145): what the stage says when it has no caster's
+        payload to read the name from."""
+        raise NotImplementedError
+
 
 class TarmarProfile(BattleProfile):
     """The six-phase Tarmar profile — every battle this app has ever run."""
@@ -290,6 +297,9 @@ class TarmarProfile(BattleProfile):
         # The ruling as it stands now, not as the last turn left it (#37).
         magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
         return caster_magic(state, combatant_id)
+
+    def pool_label(self) -> str:
+        return words().cast_stage.mana_pool
 
 
 class ClassicProfile(BattleProfile):
@@ -514,6 +524,10 @@ class ClassicProfile(BattleProfile):
         from .classic_adaptation import classic_caster_magic
 
         return classic_caster_magic(state, combatant_id)
+
+    def pool_label(self) -> str:
+        # ST, the pool that also holds a classic wizard's hit points (#263).
+        return words().cast_stage.strength_pool
 
 
 #: Every profile this app can run, by the name a battle row records.

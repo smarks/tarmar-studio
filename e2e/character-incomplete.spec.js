@@ -8,6 +8,7 @@
  */
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { loadedEquipment } = require('./equipment-rules');
 
@@ -37,8 +38,8 @@ print('CHARACTER', Character.objects.create(user=user, name='${name}', **fields)
 }
 
 test.describe('Incomplete characters (#571)', () => {
-    test('the list and the sheet mark what the character still needs', async ({ page }, testInfo) => {
-        const name = `Half Built ${testInfo.workerIndex}${Date.now()}`;
+    test('the list and the sheet mark what the character still needs', async ({ page }) => {
+        const name = uniqueName('Half Built');
         const characterId = seedIncompleteCharacter(name);
 
         await loginAs(page, TEST_USER);
@@ -58,10 +59,10 @@ test.describe('Incomplete characters (#571)', () => {
         expect(refused.status()).toBe(409);
     });
 
-    test('the sheet states no combat or movement number, and offers no attack form (#630)', async ({ page }, testInfo) => {
+    test('the sheet states no combat or movement number, and offers no attack form (#630)', async ({ page }) => {
         // A dagger in hand: the attack panel's form used to render, and the
         // endpoint behind it used to resolve the swing, off a DEX of 0.
-        const name = `Bare Handed ${testInfo.workerIndex}${Date.now()}`;
+        const name = uniqueName('Bare Handed');
         const characterId = seedIncompleteCharacter(name, {
             equipment: "[{'item_id': 'dagger', 'quantity': 1, 'in_pack': False}]",
         });
@@ -85,10 +86,10 @@ test.describe('Incomplete characters (#571)', () => {
         await expect(page.locator('#attack-incomplete')).toContainText('needs attributes');
     });
 
-    test('the Fatigue roll can be made from the editor (#636)', async ({ page }, testInfo) => {
+    test('the Fatigue roll can be made from the editor (#636)', async ({ page }) => {
         // The attributes are in and the roll is not: the sheet named that
         // blocking state and offered no control for it.
-        const name = `Unrolled ${testInfo.workerIndex}${Date.now()}`;
+        const name = uniqueName('Unrolled');
         const characterId = seedIncompleteCharacter(name, {
             fields: 'strength=12, dexterity=12, intelligence=12, wisdom=12, '
                 + 'constitution=12, charisma=12, fatigue_roll=None',
@@ -113,10 +114,10 @@ test.describe('Incomplete characters (#571)', () => {
         await expect(page.locator('#fatigue-roll')).toHaveText(rolled);
     });
 
-    test('the injury readout says it is not known yet, and fills in when the last part is recorded (#639)', async ({ page }, testInfo) => {
+    test('the injury readout says it is not known yet, and fills in when the last part is recorded (#639)', async ({ page }) => {
         // One attribute short of whole, and it is CON, which the pools and so
         // the breakpoints are built from: a single edit crosses the line.
-        const name = `Unhurt ${testInfo.workerIndex}${Date.now()}`;
+        const name = uniqueName('Unhurt');
         const characterId = seedIncompleteCharacter(name, {
             fields: 'strength=12, dexterity=12, intelligence=12, wisdom=12, '
                 + 'constitution=None, charisma=12, fatigue_roll=7',

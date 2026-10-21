@@ -14,26 +14,26 @@
 const {
     test, expect, loginAs, logout, createNamedCharacter, seedCharacterFromExport, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { pinDice } = require('./dice');
 const { loadedSkillRules, nextAgingChange } = require('./skill-rules');
 
 /**
  * Create a character for this test and leave the page on its editor.
  * @param {import('@playwright/test').Page} page
- * @param {import('@playwright/test').TestInfo} testInfo
  * @param {string} label - A word for the name, so a failure names the test.
  * @returns {Promise<string>} the character's name
  */
-async function seedCharacterOnItsEditor(page, testInfo, label) {
-    const name = `${label} ${testInfo.workerIndex}${Date.now()}`;
+async function seedCharacterOnItsEditor(page, label) {
+    const name = uniqueName(label);
     await loginAs(page, TEST_USER);
     await createNamedCharacter(page, name);
     return name;
 }
 
 test.describe('Character Edit Page', () => {
-    test('the list links each character to its own editor', async ({ page }, testInfo) => {
-        const name = await seedCharacterOnItsEditor(page, testInfo, 'Linked');
+    test('the list links each character to its own editor', async ({ page }) => {
+        const name = await seedCharacterOnItsEditor(page, 'Linked');
         await page.goto('/tarmar/characters/');
 
         await page.locator('tr', { hasText: name }).getByRole('link', { name }).click();
@@ -42,8 +42,8 @@ test.describe('Character Edit Page', () => {
         await expect(page.locator('h1 input')).toHaveValue(name);
     });
 
-    test('character name field is editable', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('character name field is editable', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Name input should exist and be editable
         const nameInput = page.locator('input[name="name"], [data-field="name"] input');
@@ -52,8 +52,8 @@ test.describe('Character Edit Page', () => {
 });
 
 test.describe('Auto-save Functionality', () => {
-    test('field shows saving state on blur', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('field shows saving state on blur', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Find an autosave input
         const autosaveInput = page.locator('.autosave').first();
@@ -72,8 +72,8 @@ test.describe('Auto-save Functionality', () => {
         await expect(container).toHaveClass(/saved|error/, { timeout: 5000 });
     });
 
-    test('successful save shows green border', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('successful save shows green border', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Find the name field which should be autosave
         const nameField = page.locator('[data-field="name"]');
@@ -94,8 +94,8 @@ test.describe('Auto-save Functionality', () => {
         await nameInput.blur();
     });
 
-    test('Enter key triggers save', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('Enter key triggers save', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         const nameField = page.locator('[data-field="name"]');
         await expect(nameField).toBeVisible();
@@ -115,8 +115,8 @@ test.describe('Auto-save Functionality', () => {
         await nameInput.press('Enter');
     });
 
-    test('validation error surfaces inline next to the field', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('validation error surfaces inline next to the field', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         const nameField = page.locator('[data-field="name"]');
         await expect(nameField).toBeVisible();
@@ -146,8 +146,8 @@ test.describe('Auto-save Functionality', () => {
 });
 
 test.describe('Character Stats Display', () => {
-    test('displays character attributes', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('displays character attributes', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Scoped to the header cell: a bare `text=STR` also matches every
         // ancestor that contains it, which is a strict-mode violation. The
@@ -160,8 +160,8 @@ test.describe('Character Stats Display', () => {
         await expect(strengthHeading).toBeVisible();
     });
 
-    test('displays character status', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('displays character status', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Should have some status-related element. The status badge itself:
         // a bare [class*="status"] also matched the session picker's status
@@ -175,8 +175,8 @@ test.describe('Character Stats Display', () => {
 });
 
 test.describe('Navigation', () => {
-    test('back to characters list works', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('back to characters list works', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Click Characters in menu
         await page.locator('#menuToggle').click();
@@ -186,8 +186,8 @@ test.describe('Navigation', () => {
         await expect(page).toHaveURL(/\/characters\/$/);
     });
 
-    test('menu shows Character Editor as active on edit page', async ({ page }, testInfo) => {
-        await seedCharacterOnItsEditor(page, testInfo, 'Edited');
+    test('menu shows Character Editor as active on edit page', async ({ page }) => {
+        await seedCharacterOnItsEditor(page, 'Edited');
 
         // Open menu
         await page.locator('#menuToggle').click();

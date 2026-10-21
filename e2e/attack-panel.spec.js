@@ -17,9 +17,11 @@
 const {
     test, expect, loginAs, seedCharacterFromExport, TEST_USER,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const {
     loadedEquipment, group, item, targetNumber: serverTargetNumber,
 } = require('./equipment-rules');
+const { attackLogLine } = require('./dice-log');
 
 // A saber behind a backpack, so the panel's weapon select
 // has to filter the non-weapon out AND the surviving option's value has to be
@@ -140,6 +142,15 @@ test.describe('Attack Resolution panel', () => {
         await expect(breakdownValue(page, 'Attack roll')).toContainText(`vs ${targetNumber}`);
         await expect(page.locator('#attack-outcome')).not.toBeEmpty();
         await expect(page.locator('#attack-dice-log li').first()).toContainText(`vs TN ${targetNumber}`);
+        // The d20 joins the character's dice log on this page (#147).
+        // The face is the response's own (data.attack.attack_roll.die), read
+        // off the page as the panel printed it.
+        const attackLine = await page.locator('#attack-dice-log li').first().textContent();
+        const face = Number(attackLine.match(/^attack \S+: (\d+) /)[1]);
+        await expect(page.locator('#dice-log')).toBeVisible();
+        await expect(page.locator('#dice-log-text')).toContainText(
+            attackLogLine('Saber', 'ATTACK_TO_HIT_PART', 'D20_DICE', face)
+        );
 
         // The roll's own outcome is whatever the die gave; what matters is
         // that the same outcome is what got written to the log.
@@ -214,7 +225,7 @@ test.describe('Attack Resolution panel', () => {
             ...ATTACK_CHARACTER,
             data: {
                 ...ATTACK_CHARACTER.data,
-                name: `Archer ${Date.now()}`,
+                name: uniqueName('Archer'),
                 skills: { archery: 6 },
                 equipment: [
                     { item_id: missile.id, quantity: 1 },

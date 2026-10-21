@@ -12,12 +12,13 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 const NOTHING_RECORDED = 'could not work out what to record';
 
 test.describe('GM chat — a plan with nothing to say for an optional field', () => {
-    test('both actions still run, and the turn records them', async ({ adminPage: page }, testInfo) => {
-        const stamp = `${testInfo.workerIndex}${Date.now()}`;
+    test('both actions still run, and the turn records them', async ({ adminPage: page }) => {
+        const stamp = uniqueStamp();
         const name = `Vane${stamp}`;
 
         await page.goto('/tarmar/gm/');

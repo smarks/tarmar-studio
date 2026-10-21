@@ -24,6 +24,7 @@ may reach Django.
 # the existing hooks are untouched.
 import random  # noqa: F401
 import re
+from collections.abc import Iterable
 
 from common.rolling import Roller, RollRecord, parse_dice_specification
 
@@ -36,6 +37,11 @@ from .skill_rules import skill_rules
 # draws from the module-global ``random`` (see ``common.rolling.Roller``).
 _DEFAULT_ROLLER = Roller()
 
+#: The plain dice the logged helpers below throw, named once so the log says
+#: what was thrown (issue #147).
+D6_DICE = "1d6"
+D20_DICE = "1d20"
+
 
 def roll_d6(roller: Roller | None = None) -> int:
     """Roll a single d6.
@@ -44,12 +50,12 @@ def roll_d6(roller: Roller | None = None) -> int:
         roller: Roll through this roller instead of the module default. A
             seeded one makes the result reproducible (see the module note).
     """
-    return (roller or _DEFAULT_ROLLER).roll("1d6", purpose="d6").total
+    return (roller or _DEFAULT_ROLLER).roll(D6_DICE, purpose="d6").total
 
 
 def roll_d20():
     """Roll a single d20."""
-    return _DEFAULT_ROLLER.roll("1d20", purpose="d20").total
+    return _DEFAULT_ROLLER.roll(D20_DICE, purpose="d20").total
 
 
 def roll_d100(roller: Roller | None = None) -> int:
@@ -110,14 +116,14 @@ def roll_d6_logged(roller: Roller | None = None) -> tuple[int, str]:
         roller: Roll through this roller instead of the module default.
     """
     result = roll_d6(roller)
-    log = f"1d6: {result}"
-    return result, log
+    return result, dice_log_text(D6_DICE, [result], result)
 
 
 def roll_d20_logged():
-    """Roll a single d20 and return (result, log_entry)."""
+    """Roll a single d20 and return (result, log_entry), the log in
+    :func:`dice_log_text`'s shape (``"1d20: [17] = 17"``, issue #147)."""
     result = roll_d20()
-    return result, f"d20: {result}"
+    return result, dice_log_text(D20_DICE, [result], result)
 
 
 # The project's single dice-notation parser (issues #105 and #175) now lives
@@ -192,9 +198,7 @@ def roll_expression_logged(expression):
     caller needs them alongside the total.
     """
     rolls, total = roll_expression(expression)
-    dice = ", ".join(str(roll) for roll in rolls)
-    log = f"{expression.strip().lower()}: [{dice}] = {total}"
-    return rolls, total, log
+    return rolls, total, dice_log_text(expression.strip().lower(), rolls, total)
 
 
 def roll_demon_die():
@@ -322,21 +326,98 @@ def calculate_final_weight_lbs(roll_str, strength):
     return total_stones * weight.pounds_per_stone
 
 
+#: What the dice log calls the Fatigue roll: at creation, on the Games
+#: Master's roster and on the sheet (issue #147).
+FATIGUE_LOG_LABEL = "Fatigue"
+#: The labels of the sheet's other rolls the dice log keeps (issue #147),
+#: each a shape :meth:`str.format` fills: the literacy roll, a skill check
+#: (``skill``), an attribute check (``attribute``) and each die of a sheet
+#: attack (``weapon``, and ``part``: one of the parts below, or the damage
+#: roll's own label).
+LITERACY_LOG_LABEL = "Literacy"
+SKILL_CHECK_LOG_LABEL = "Skill check ({skill})"
+ATTRIBUTE_CHECK_LOG_LABEL = "Attribute check ({attribute})"
+ATTACK_LOG_LABEL = "Attack with {weapon}, {part}"
+ATTACK_TO_HIT_PART = "to hit"
+ATTACK_CONFIRM_PART = "confirm"
+ATTACK_FUMBLE_PART = "fumble"
+
+#: The dice-log words a bought score is recorded with (issue #748): at
+#: creation under the attribute's short label ("STR: point-buy = 14") and on
+#: the sheet under its field name ("strength: point-buy = 14 (typed on the
+#: sheet)"). :func:`point_buy_log_line` writes them and
+#: :func:`is_point_buy_log_line` reads them.
+POINT_BUY_LOG_MARKER = "point-buy = "
+_POINT_BUY_LOG_OPENINGS = tuple(
+    f"{name}: {POINT_BUY_LOG_MARKER}".lower()
+    for field_name, short_label in CORE_ATTRIBUTE_FIELDS
+    for name in (field_name, short_label)
+)
+
+
+def point_buy_log_line(name: str, value: int) -> str:
+    """The dice-log line recording a bought score.
+
+    Args:
+        name: The attribute's field name or its short label.
+        value: The score bought.
+    """
+    return f"{name}: {POINT_BUY_LOG_MARKER}{value}"
+
+
+def is_point_buy_log_line(line: str) -> bool:
+    """Whether a dice-log line records a bought score.
+
+    Only a line that opens with an attribute's field name or short label and
+    the marker counts: a skill check's line carries the skill's name (issue
+    #147), and a Maker Skill's craft is the player's own words, so the marker
+    anywhere else in a line means nothing.
+
+    Args:
+        line: One line of a character's dice log.
+    """
+    return line.lower().startswith(_POINT_BUY_LOG_OPENINGS)
+
+
+def dice_log_line(label: str, dice: str) -> str:
+    """One labelled roll as the dice log keeps it: ``"Fatigue: 2d6: [3, 4] = 7"``.
+
+    Args:
+        label: What the roll was, e.g. :data:`FATIGUE_LOG_LABEL`.
+        dice: The dice in :func:`dice_log_text`'s shape.
+    """
+    return f"{label}: {dice}"
+
+
+def dice_log_text(specification: str, faces: Iterable[int], total: int) -> str:
+    """One roll as the dice log keeps it: ``"2d6: [3, 4] = 7"``.
+
+    The shape every ``_logged`` helper here writes, the sheet's rolls append
+    after their label (``"Fatigue: 2d6: [3, 4] = 7"``, issue #147) and
+    :data:`DICE_IN_TEXT` reads back.
+
+    Args:
+        specification: The dice rolled, e.g. ``"2d6"`` or ``"1d8+1"``.
+        faces: Every face thrown, in order.
+        total: What they came to, any modifier included.
+    """
+    faces_text = ", ".join(str(face) for face in faces)
+    return f"{specification}: [{faces_text}] = {total}"
+
+
 def roll_dice_logged(
     specification: str, roller: Roller | None = None
 ) -> tuple[int, str]:
     """Roll a dice specification and return (total, log_entry).
 
-    The log reads ``"2d6: [3, 4] = 7"``, the shape every ``_logged`` helper
-    here writes and :data:`DICE_IN_TEXT` reads back.
+    The log is :func:`dice_log_text`'s, e.g. ``"2d6: [3, 4] = 7"``.
 
     Args:
         specification: ``NdS`` or ``NdS±M``, as the canon's rules state it.
         roller: Roll through this roller instead of the module default.
     """
     record = (roller or _DEFAULT_ROLLER).roll(specification, purpose=specification)
-    faces = ", ".join(str(face) for face in record.faces)
-    return record.total, f"{specification}: [{faces}] = {record.total}"
+    return record.total, dice_log_text(specification, record.faces, record.total)
 
 
 def roll_fatigue_logged(roller: Roller | None = None) -> tuple[int, str]:
@@ -613,7 +694,7 @@ def roll_secondary_character_stats(roller: Roller | None = None):
 
     fatigue_value, fatigue_log = roll_fatigue_logged(roller)
     stats["fatigue_roll"] = fatigue_value
-    log_entries.append(f"Fatigue: {fatigue_log}")
+    log_entries.append(dice_log_line(FATIGUE_LOG_LABEL, fatigue_log))
 
     provenance_class, provenance_detail, provenance_log = roll_provenance_logged(roller)
     log_entries.append(provenance_log)
@@ -697,7 +778,7 @@ def build_point_buy_character_stats(attributes):
         value = attributes[field_name]
         stats[field_name] = value
         spent += value
-        log_entries.append(f"{label}: point-buy = {value}")
+        log_entries.append(point_buy_log_line(label, value))
 
     # Only an admin or DM reaches here off budget (issue #299). The dice log is
     # where that belongs: a character built outside the 65 points should say so

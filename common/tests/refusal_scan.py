@@ -37,7 +37,14 @@ def fixed_words(node: ast.expr, constants: set[str]) -> bool:
         constants: The module's top-level string constants.
     """
     if isinstance(node, ast.Constant):
-        return isinstance(node.value, str) and bool(node.value)
+        # Punctuation alone (the full stop a note is closed with) is not
+        # words a reader could want changed; a letter makes it words (#136).
+        return isinstance(node.value, str) and any(
+            character.isalpha() for character in node.value
+        )
+    if isinstance(node, ast.IfExp):
+        # ``said.a if many else "…"``: either branch can be what is read.
+        return fixed_words(node.body, constants) or fixed_words(node.orelse, constants)
     if isinstance(node, ast.JoinedStr):
         return True
     if isinstance(node, ast.Name):
@@ -92,3 +99,30 @@ def literal_refusals(
             if fixed_words(argument, constants)
         )
     return found
+
+
+def literal_returns(module: Path, functions: set[str]) -> list[str]:
+    """Each ``return`` in ``functions`` of ``module`` whose words are fixed.
+
+    For the functions that build a line the page or the log shows and return
+    it, rather than hand it to a refusing call (issue #136).
+
+    Args:
+        module: The source file.
+        functions: The names of the functions to read.
+
+    Returns:
+        ``"<file>:<line>"`` for each one; empty when every line they return
+        reads its words from configuration.
+    """
+    tree = ast.parse(module.read_text(encoding="utf-8"))
+    constants = _module_strings(tree)
+    return [
+        f"{module.name}:{node.lineno}"
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef) and function.name in functions
+        for node in ast.walk(function)
+        if isinstance(node, ast.Return)
+        and node.value is not None
+        and fixed_words(node.value, constants)
+    ]

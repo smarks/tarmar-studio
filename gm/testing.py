@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from django.test import override_settings
 
-from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, unnamed_character
 from characters.models import Character
 from common.wording import fixed_wording
 
@@ -58,7 +58,7 @@ def add_character(
     label = label or str(values.get(LABEL_KEY) or "")
     defaults = draft_defaults()
     fields = {field: values.get(field, defaults[field]) for field in DRAFT_FIELDS}
-    fields["name"] = fields["name"] or label or "Unnamed character"
+    fields["name"] = fields["name"] or label or unnamed_character()
     character = Character.objects.create(user=session.user, **fields)
     session.characters.add(character)
     SessionCharacter.objects.create(

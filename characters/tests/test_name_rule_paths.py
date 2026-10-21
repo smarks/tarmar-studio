@@ -18,8 +18,8 @@ from character_export.export_utils import generate_character_json
 from characters import services
 from characters.constants import (
     CHARACTER_NAME_PATTERN,
-    UNNAMED_CHARACTER,
     name_within_rule,
+    unnamed_character,
 )
 from characters.import_service import validate_import_payload
 from characters.models import Character
@@ -51,8 +51,8 @@ class NameWithinRuleTest(BaseTestCase):
 
     def test_nothing_left_is_the_fallback(self):
         self.assertEqual(
-            name_within_rule("!!! ,,, @@@", fallback=UNNAMED_CHARACTER),
-            UNNAMED_CHARACTER,
+            name_within_rule("!!! ,,, @@@", fallback=unnamed_character()),
+            unnamed_character(),
         )
 
     def test_a_long_text_is_capped_and_still_a_name(self):
@@ -107,7 +107,7 @@ class ChatNamesTest(BaseTestCase):
 
     def test_a_label_with_nothing_the_rule_accepts_is_unnamed(self):
         character = roster.start_character(self.session, "???")
-        self.assertEqual(character.name, UNNAMED_CHARACTER)
+        self.assertEqual(character.name, unnamed_character())
 
     def test_a_rename_is_held_to_the_rule_on_the_service_too(self):
         character = create_character(self.owner, name="Aldwin")

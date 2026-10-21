@@ -16,7 +16,9 @@
  */
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN, chooseToAttach } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { runDjangoShell, readDjangoShell } = require('./django');
+const { refusal, refusalFixedParts } = require('./refusals');
 
 /** A character for ``owner`` whose first turn on the board is their last. */
 function seedDyingCharacter(owner, name) {
@@ -119,7 +121,7 @@ test.describe('GM session — the chat reads back as it was played', () => {
 
 test.describe('GM session — a fight on the board', () => {
     test('is named from its sides and says how it ended, in the pane and the chat (#831, #785)', async ({ page }, testInfo) => {
-        const name = `Dain ${testInfo.workerIndex}-${Date.now() % 100000}`;
+        const name = uniqueName('Dain');
         seedDyingCharacter(TEST_ADMIN.username, name);
         await loginAs(page, TEST_ADMIN);
         await page.goto('/tarmar/gm/');
@@ -146,7 +148,8 @@ test.describe('GM session — a fight on the board', () => {
         // Told at once, without a message from the player or a reload.
         const verdict = page.locator('#gm-battle-verdict');
         await expect(verdict).toBeVisible();
-        await expect(verdict).toContainText('The fight is over: The foes stand victorious');
+        const foesWon = refusalFixedParts('gm', 'battle_report', 'foes_victorious')[0];
+        await expect(verdict).toContainText(`${refusal('gm', 'battle_report', 'fight_over')}: ${foesWon}`);
         await expect(verdict).toContainText(`${name}: dead`);
         await expect(verdict).not.toContainText('Foes stands');
         const notice = page.locator('#messages .message.notice[data-battle-verdict]');
@@ -160,7 +163,7 @@ test.describe('GM session — a fight on the board', () => {
         await page.reload();
         await expect(page.locator('#messages .message.notice[data-battle-verdict]')).toHaveCount(1);
         await page.click('#gm-panel-tab-battle');
-        await expect(page.locator('#gm-battle-verdict')).toContainText('The foes stand victorious');
+        await expect(page.locator('#gm-battle-verdict')).toContainText(foesWon);
     });
 });
 
@@ -211,6 +214,9 @@ run_actions(session, {'action': 'record_npc', 'name': 'Brannoc', 'where': 'the w
         await expect(rulings).toHaveCount(1);
         await expect(rulings.first()).toContainText('critical hits: a natural 20 just crits');
         await expect(rulings.first()).toContainText(`Set by hand by ${TEST_ADMIN.username}`);
+        // The refetch has landed and the add form is free again: a hold left
+        // on its key would keep it disabled (#142).
+        await expect(campaign.locator('#gm-add-ruling button[type="submit"]')).toBeEnabled();
 
         // A wrong "where", corrected.
         const brannoc = campaign.locator('li[data-entity-id]', { hasText: 'Brannoc' });
@@ -306,7 +312,7 @@ test.describe('GM session — a correction being typed survives a turn (#16)', (
     }
 
     function seedThreads(texts) {
-        return seedSession(TEST_ADMIN.username, `Correct mid-turn E2E ${Date.now()}`, texts
+        return seedSession(TEST_ADMIN.username, uniqueName('Correct mid-turn E2E'), texts
             .map((text) => `run_actions(session, {'action': 'open_thread', 'text': ${JSON.stringify(text)}})`)
             .join('\n'));
     }

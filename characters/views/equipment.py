@@ -14,7 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_POST
 
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import (
     _json_error,
     _parse_json_body,
@@ -238,6 +238,7 @@ def _change_equipment(
 
 
 @login_required
+@internal_errors_logged(json_only=True)
 def equipment_catalog(request):
     """Return the loaded canon's equipment catalog for the UI picker."""
     return JsonResponse(catalog_by_group())
@@ -246,6 +247,7 @@ def equipment_catalog(request):
 @login_required
 @require_POST
 @rate_limit("equipment_add", max_requests=60, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def equipment_add(request, pk):
     """Add an item from the catalog or a custom item to character's equipment."""
     data, err = _parse_json_body(request)
@@ -321,6 +323,7 @@ def equipment_add(request, pk):
 @login_required
 @require_POST
 @rate_limit("equipment_update", max_requests=120, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def equipment_update(request, pk):
     """Update an equipment item (quantity, in_pack, notes, modifiers)."""
     data, err = _parse_json_body(request)
@@ -485,6 +488,7 @@ def equipment_update(request, pk):
 @login_required
 @require_POST
 @rate_limit("equipment_remove", max_requests=60, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def equipment_remove(request, pk):
     """Remove an equipment item by index."""
     data, err = _parse_json_body(request)
@@ -517,6 +521,7 @@ def equipment_remove(request, pk):
 @login_required
 @require_POST
 @rate_limit("equipment_bulk_remove", max_requests=20, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def equipment_bulk_remove(request, pk):
     """Remove multiple equipment items by index in a single round-trip."""
     data, err = _parse_json_body(request)
@@ -559,6 +564,7 @@ def equipment_bulk_remove(request, pk):
 @login_required
 @require_POST
 @rate_limit("equipment_toggle", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def equipment_toggle_pack(request, pk):
     """Toggle pack dropped status."""
 

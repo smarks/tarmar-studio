@@ -58,11 +58,13 @@ from typing import TYPE_CHECKING
 
 from . import policy
 from .engine.state import CombatantState, WeaponState
+from .wording import words
 
 if TYPE_CHECKING:
     # Types only: the classic subpackage stays out of every import chain
     # until a function that needs it runs.
     from tarmar_engine.classic.figure import Figure, SideLabel
+    from tarmar_engine.classic.spells import Spell
 
 #: The studio armour tier a classic armour stands in for. The studio grades
 #: armour in four tiers; classic lists six pieces. Cloth and half-plate have
@@ -529,15 +531,16 @@ def classic_state(snapshots: list[CombatantState], *, seed: int):
     return state, roster
 
 
-#: The printed name of each classic spell-type code (``Spell.type``, the
+#: The cast stage's word (``config/battle-rulings.toml``'s ``[cast_stage]``,
+#: #145) for each classic spell-type code (``Spell.type``, the
 #: "(M)/(T)/(C)/(S)" tag after a spell's name in the Spell Table), for the
 #: cost line the cast stage prints. The codes are
 #: :data:`tarmar_engine.classic.spells.MISSILE` and its siblings.
-CLASSIC_SPELL_TYPES = {
-    "M": "Missile",
-    "T": "Thrown",
-    "C": "Creation",
-    "S": "Special",
+CLASSIC_SPELL_TYPE_WORDS = {
+    "M": "missile_spell",
+    "T": "thrown_spell",
+    "C": "creation_spell",
+    "S": "special_spell",
 }
 
 #: 3d6 totals above this are an automatic miss whatever the caster's adjDX
@@ -607,28 +610,29 @@ def classic_caster_magic(state, combatant_id: int) -> dict | None:
                 # layer aims at nobody. Re-deriving which would be a second
                 # opinion about ``spell_targets``, so the row says the one
                 # thing that is true in every case.
-                reason = "nothing this spell can be cast at"
+                reason = words().cast_stage.nothing_to_cast_at
             else:
                 needed = (
                     spell.st_cost
                     if spell.variable_st
                     else min(spell_cost_for(spell, one.strength) for one in targets)
                 )
-                reason = f"needs {needed} ST, {figure.current_st} left"
+                reason = words().cast_stage.strength_short.format(
+                    needed=needed, strength=figure.current_st
+                )
         rows.append(
             {
                 "key": spell_id,
                 "target_id": None,
                 "name": spell.name,
-                "cost": f"{CLASSIC_SPELL_TYPES.get(spell.type, spell.type)}"
-                f" — {spell.st_cost} ST",
+                "cost": _classic_cast_cost(spell, spell.st_cost),
                 "note": "",
                 "castable": False,
                 "reason": reason,
             }
         )
     return {
-        "pool_label": "ST",
+        "pool_label": words().cast_stage.strength_pool,
         "pool": figure.current_st,
         "max_pool": figure.strength,
         "spells": rows,
@@ -638,8 +642,17 @@ def classic_caster_magic(state, combatant_id: int) -> dict | None:
 def cast_row_name(spell_name: str, target_name: str) -> str:
     """ "Magic Fist → Bram": a cast stage row for a spell aimed at one of
     several figures, in either profile, so the rows for its targets are told
-    apart."""
-    return f"{spell_name} → {target_name}"
+    apart (the words are ``[cast_stage]``'s, #145)."""
+    return words().cast_stage.row_at.format(spell=spell_name, target=target_name)
+
+
+def _classic_cast_cost(spell: Spell, strength: int) -> str:
+    """ "Missile — 3 ST": what a classic cast of ``spell`` costs, its kind
+    named in the cast stage's words, or by its code for a kind they lack."""
+    stage = words().cast_stage
+    word = CLASSIC_SPELL_TYPE_WORDS.get(spell.type)
+    kind = getattr(stage, word) if word is not None else spell.type
+    return stage.strength_cost.format(kind=kind, strength=strength)
 
 
 def _classic_cast_row(state, figure, spell, target, spent: int) -> dict:
@@ -657,13 +670,16 @@ def _classic_cast_row(state, figure, spell, target, spent: int) -> dict:
     at_self = target.uid == figure.uid
     needed = state.rules.spell_to_hit_number(figure)
     chance = policy.three_d6_at_most(min(needed, CLASSIC_CAST_CEILING))
-    range_note = "" if at_self else ", before the range to aim"
+    stage = words().cast_stage
+    range_note = "" if at_self else stage.before_range
     return {
         "key": spell.id,
         "target_id": target.uid,
         "name": spell.name if at_self else cast_row_name(spell.name, target.name),
-        "cost": f"{CLASSIC_SPELL_TYPES.get(spell.type, spell.type)} — {spent} ST",
-        "note": f"{chance:.0%} on 3d6 ≤ adjDX {needed}{range_note}",
+        "cost": _classic_cast_cost(spell, spent),
+        "note": stage.strength_chance.format(
+            chance=f"{chance:.0%}", needed=needed, range=range_note
+        ),
         "castable": True,
         "reason": "",
     }

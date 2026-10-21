@@ -19,6 +19,7 @@
 const {
     test, expect, loginAs, createCharacter, TEST_USER,
 } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { refusal } = require('./refusals');
 const { runDjangoShell } = require('./django');
 
@@ -93,8 +94,8 @@ async function send(page, message) {
 }
 
 test.describe('GM chat — a character built in chat rolls its background', () => {
-    test('the pane and the sheet show a rolled background and the Origin skill', async ({ page }, testInfo) => {
-        const name = `Wren${testInfo.workerIndex}${Date.now()}`;
+    test('the pane and the sheet show a rolled background and the Origin skill', async ({ page }) => {
+        const name = `Wren${uniqueStamp()}`;
         await loginAs(page, TEST_USER);
 
         const draft = await rollUp(page, name);
@@ -111,8 +112,8 @@ test.describe('GM chat — a character built in chat rolls its background', () =
         await expect(page.locator('#origin-not-rolled')).toBeHidden();
     });
 
-    test('an Origin the player states is recorded as a choice, not rolled (#970)', async ({ page }, testInfo) => {
-        const name = `Ysolde${testInfo.workerIndex}${Date.now()}`;
+    test('an Origin the player states is recorded as a choice, not rolled (#970)', async ({ page }) => {
+        const name = `Ysolde${uniqueStamp()}`;
         await loginAs(page, TEST_USER);
         await page.goto('/tarmar/gm/');
         await page.click('#gm-panel-tab-characters');
@@ -135,8 +136,8 @@ test.describe('GM chat — a character built in chat rolls its background', () =
         await expectOriginSkill(page.locator('#skills-list'), 'Village');
     });
 
-    test("a player's second roll is refused and the background stands", async ({ page }, testInfo) => {
-        const name = `Tamsin${testInfo.workerIndex}${Date.now()}`;
+    test("a player's second roll is refused and the background stands", async ({ page }) => {
+        const name = `Tamsin${uniqueStamp()}`;
         await loginAs(page, TEST_USER);
         const draft = await rollUp(page, name);
         const { background, wealth } = await paneBackground(draft);
@@ -151,8 +152,8 @@ test.describe('GM chat — a character built in chat rolls its background', () =
         await expect(wealth).toHaveText(before[1]);
     });
 
-    test("a Game Master's reroll runs, and the pane and the sheet follow it", async ({ adminPage: page }, testInfo) => {
-        const name = `Gorn${testInfo.workerIndex}${Date.now()}`;
+    test("a Game Master's reroll runs, and the pane and the sheet follow it", async ({ adminPage: page }) => {
+        const name = `Gorn${uniqueStamp()}`;
         const draft = await rollUp(page, name);
         await paneBackground(draft);
 

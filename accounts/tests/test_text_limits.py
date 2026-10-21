@@ -28,7 +28,11 @@ from accounts.forms import EmailChangeForm
 from accounts.models import User
 from accounts.text_limits import ACCOUNT_TEXT_LIMITS, password_minimum
 from accounts.views import EMAIL_FIELD_REFUSAL
-from common.test_helpers import TEST_PASSWORD, BaseTestCase
+from common.test_helpers import (
+    TEST_PASSWORD,
+    BaseTestCase,
+    too_long_refusal,
+)
 
 #: Limits no template would carry by chance.
 ODD_LIMITS = {
@@ -320,7 +324,9 @@ class RegistrationRefusalsTest(BaseTestCase):
         limit = ACCOUNT_TEXT_LIMITS["username"]
         refused = self.register("u" * (limit + 1))
         self.assertEqual(refused.status_code, 200)
-        self.assertContains(refused, f"Username must be {limit} characters or fewer")
+        # Registration's username refusal is the auth library's own sentence
+        # (tarmar_auth.forms), not this app's configured one.
+        self.assertContains(refused, f"Username must be {limit} characters or fewer.")
         self.assertEqual(self.register("u" * limit).status_code, 302)
 
     def test_the_password_minimum(self):
@@ -505,9 +511,7 @@ class PasswordResetRefusalsTest(BaseTestCase):
             ):
                 response = self.set_password("Lb4" + "x" * (limit - 2))
                 self.assertEqual(response.status_code, 200)
-                self.assertContains(
-                    response, f"Password must be {limit} characters or fewer"
-                )
+                self.assertContains(response, too_long_refusal("Password", limit))
                 self.user.refresh_from_db()
                 self.assertTrue(self.user.check_password(TEST_PASSWORD))
 

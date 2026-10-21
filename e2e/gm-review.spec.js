@@ -10,6 +10,7 @@
 
 const { execSync } = require('child_process');
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 function djangoShell(script) {
     return execSync(`uv run python manage.py shell -c "${script.replace(/"/g, '\\"')}"`, {
@@ -99,7 +100,7 @@ print('REVIEWS', pending.pk, done.pk, session.pk)
 
 test.describe('GM reviews list', () => {
     test('lists a waiting and a finished review, and a row opens its review', async ({ page }) => {
-        const tag = `t${Date.now()}`;
+        const tag = `t${uniqueStamp()}`;
         const output = djangoShell(seedReviewsFor(TEST_ADMIN.username, tag));
         const [, pendingId, doneId, sessionId] = output.match(/REVIEWS (\d+) (\d+) (\d+)/);
         await loginAs(page, TEST_ADMIN);
@@ -132,7 +133,7 @@ test.describe('GM reviews list', () => {
     });
 
     test('a waiting review\'s row updates itself once Claude claims it', async ({ page }) => {
-        const tag = `w${Date.now()}`;
+        const tag = `w${uniqueStamp()}`;
         const output = djangoShell(seedReviewsFor(TEST_ADMIN.username, tag));
         const [, pendingId] = output.match(/REVIEWS (\d+) (\d+) (\d+)/);
         await page.clock.install();

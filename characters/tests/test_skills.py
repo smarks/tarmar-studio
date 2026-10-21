@@ -10,6 +10,7 @@ import time
 from django.test import TestCase
 
 from characters.models import Character
+from characters.refusal_words import refusal_words
 from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
@@ -1589,7 +1590,9 @@ class SkillsViewsTest(BaseTestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["error"], "Character not found")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views_access.not_found
+        )
 
     def test_allocate_skill_point_missing_character_is_json_404(self):
         """The skill-point endpoint answers a missing character the same way."""
@@ -1600,7 +1603,9 @@ class SkillsViewsTest(BaseTestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["error"], "Character not found")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views_access.not_found
+        )
 
     def test_add_experience_term_with_special_skills(self):
         """Adding term applies special skills like attribute bonuses."""

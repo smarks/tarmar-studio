@@ -10,6 +10,7 @@
 
 const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_ADMIN } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 /** A Game Master's manual fight, paused on a choice he makes. */
@@ -42,10 +43,10 @@ Battle.objects.filter(pk=battle.pk).update(state_json=state)
 }
 
 test.describe('Battle page — an internal failure under a choice', () => {
-    test('is reported in the fixed sentence, not as a bare status (#113)', async ({ page }, testInfo) => {
-        const name = `E2E internal ${testInfo.workerIndex}x${Date.now() % 100000}`;
+    test('is reported in the fixed sentence, not as a bare status (#113)', async ({ page }) => {
+        const name = uniqueName('E2E internal');
         const battleId = seedPausedManualFight(name);
-        const message = refusal('battle', 'views', 'request_failed');
+        const message = refusal('common', 'decorators', 'request_failed');
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/battles/${battleId}/`);
         const panel = page.locator('#turn-panel');

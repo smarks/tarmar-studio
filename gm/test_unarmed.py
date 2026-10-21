@@ -5,9 +5,16 @@ offers the gear step creation lacked; both stay while they are true.
 """
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle.models import Battle
-from battle.services import bare_handed_figures, bare_handed_line, unarmed_attached_line
+from battle.services import (
+    bare_handed_figures,
+    bare_handed_line,
+    unarmed_attached_line,
+    unarmed_line,
+)
+from battle.wording import words
 from characters.models import carries_a_weapon
 from common.test_helpers import BaseTestCase, create_character
 from gm.testing import game_master_sets_the_foes_asked_for
@@ -41,12 +48,16 @@ class UnarmedNoticeTest(BaseTestCase):
     def test_before_the_fight_the_attached_are_named(self) -> None:
         self.assertEqual(
             unarmed_notice(self.session),
-            "Bare carries no weapon and would fight bare-handed. Buy gear on the "
-            "character's sheet before the fight.",
+            words().services.unarmed_attached.format(unarmed=unarmed_line(["Bare"])),
         )
         self.armed.equipment = []
         self.armed.save()
-        self.assertIn("Bare, Armed carry no weapon", unarmed_notice(self.session))
+        self.assertEqual(
+            unarmed_notice(self.session),
+            words().services.unarmed_attached.format(
+                unarmed=unarmed_line(["Bare", "Armed"])
+            ),
+        )
 
     def test_during_the_fight_the_bare_handed_figures_are_named(self) -> None:
         # A player's own session: the foes are the Game Master's to set (#841);
@@ -60,11 +71,11 @@ class UnarmedNoticeTest(BaseTestCase):
         state = self.client.get(f"/tarmar/battles/{battle.pk}/state/").json()
         self.assertEqual(
             state["bare_handed"],
-            "Bare is on the board with no weapon, fighting bare-handed.",
+            words().services.bare_handed_one.format(names="Bare"),
         )
         self.assertEqual(
             unarmed_notice(self.session),
-            "Bare is on the board with no weapon, fighting bare-handed.",
+            words().services.bare_handed_one.format(names="Bare"),
         )
         # Once it is over the board names nobody, and the tab's line goes
         # back to who is attached.
@@ -72,14 +83,17 @@ class UnarmedNoticeTest(BaseTestCase):
         self.session.refresh_from_db()
         assert self.session.battle is not None
         self.assertEqual(bare_handed_figures(self.session.battle), [])
-        self.assertTrue(unarmed_notice(self.session).startswith("Bare carries"))
+        attached = words().services.unarmed_attached.format(
+            unarmed=unarmed_line(["Bare"])
+        )
+        self.assertEqual(unarmed_notice(self.session), attached)
         # The board's payload carries the same line once the fight is over,
         # so the tab has the warning before the next Fight (second review).
         self.assertEqual(
             bare_handed_line(self.session.battle), unarmed_notice(self.session)
         )
         state = self.client.get(f"/tarmar/battles/{battle.pk}/state/").json()
-        self.assertTrue(state["bare_handed"].startswith("Bare carries no weapon"))
+        self.assertEqual(state["bare_handed"], attached)
         self.assertFalse(state["live"])
 
     def test_nobody_unarmed_and_no_session_say_nothing(self) -> None:
@@ -99,7 +113,12 @@ class UnarmedNoticeTest(BaseTestCase):
             reverse("gm:chat") + f"?session={self.session.pk}"
         ).content.decode()
         self.assertIn('id="gm-panel-unarmed"', html)
-        self.assertIn("Bare carries no weapon", html)
+        self.assertIn(
+            escape(
+                words().services.unarmed_attached.format(unarmed=unarmed_line(["Bare"]))
+            ),
+            html,
+        )
 
 
 class SheetGearStepTest(BaseTestCase):
@@ -119,7 +138,7 @@ class SheetGearStepTest(BaseTestCase):
     def test_a_character_with_no_weapon_is_offered_the_gear_step(self) -> None:
         html = self.sheet()
         self.assertIn('id="gear-step"', html)
-        self.assertIn("Bare carries no weapon and would fight bare-handed.", html)
+        self.assertIn(escape(unarmed_line(["Bare"])), html)
         self.assertIn('<a href="#equipment">Buy gear in Equipment</a>', html)
 
     def test_buying_a_weapon_repaints_it_away(self) -> None:

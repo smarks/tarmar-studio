@@ -11,6 +11,7 @@ from battle.models import Battle, BattleEvent
 from battle.profiles import for_battle
 from battle.refusal_words import refusal_words
 from battle.services import restart_battle, take_seat, withdraw_from_fight
+from battle.wording import words
 from common.test_helpers import BaseTestCase, create_character
 
 from .fight import start_fight
@@ -182,8 +183,7 @@ class WithdrawMidFightTest(BaseTestCase):
         )
         self.assertEqual(
             line.message,
-            "Aldwin leaves the fight: alice, who owns the character, withdrew "
-            "them from the session",
+            words().services.leaves_fight.format(name="Aldwin", owner="alice"),
         )
 
         # The fight goes on without him, to its end, and writes nothing more.

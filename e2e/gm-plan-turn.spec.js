@@ -10,10 +10,11 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 test.describe('GM chat — the plan turn engine', () => {
-    test('twins with stated 18s are exactly two characters in the live panel', async ({ adminPage: page }, testInfo) => {
-        const stamp = `${testInfo.workerIndex}${Date.now()}`;
+    test('twins with stated 18s are exactly two characters in the live panel', async ({ adminPage: page }) => {
+        const stamp = uniqueStamp();
         const brother = `Twain${stamp}`;
         const sister = `Thread${stamp}`;
 

@@ -195,12 +195,23 @@ const SETUP_ARCHETYPES = [
  * after another, not at once: a battle another worker deletes (or makes)
  * meanwhile shifts every later row by one, so a row can move across the
  * page boundary between reads and be missed.
+ *
+ * A row found is the only one of that name: a second context that opens the
+ * battle from here (a player joining a lobby) must land on the battle this
+ * spec made. Two workers' battles of one name once sent both players to the
+ * same seat, and the failures read as lobby timeouts (issues #141, #143).
+ * Only the page where the first match turns up is checked, so two such
+ * battles either side of a page boundary would pass: the names being unique
+ * since #141 is the fix, and this check is the safety net.
  */
 async function battleRowOnList(page, battleName, listUrl = '/tarmar/battles/') {
     await page.goto(listUrl);
     const row = page.locator('tbody tr', { hasText: battleName });
     for (;;) {
-        if (await row.count() > 0) { return row; }
+        if (await row.count() > 0) {
+            await expect(row, `one battle on the list is named "${battleName}"`).toHaveCount(1);
+            return row;
+        }
         const next = page.locator('.pagination a[rel="next"]');
         if (await next.count() === 0) { return row; }
         await Promise.all([page.waitForNavigation(), next.click()]);

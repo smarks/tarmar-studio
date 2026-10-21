@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 from django.utils.html import escape
 
+from common.helpers import SCRIPT_CALLER_HEADERS
 from common.test_helpers import BaseTestCase, create_character
 
 from .engine import (
@@ -471,7 +472,7 @@ class ModeSwitchedInPlaceTest(BaseTestCase):
         self.login_as(self.dm)
 
     def _switch(self, data: dict):
-        return self.client.post(MODE_URL, data, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        return self.client.post(MODE_URL, data, headers=SCRIPT_CALLER_HEADERS)
 
     def test_it_answers_with_the_mode_it_stored(self):
         session = GMSession.objects.create(name="Quest", user=self.dm, mode=MODE_AIDE)

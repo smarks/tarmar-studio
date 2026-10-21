@@ -16,9 +16,10 @@
 const { test, expect, submitPassphrase, loginAs } = require('./fixtures');
 const { readDjangoJson, runDjangoShell } = require('./django');
 const { startCoverage, stopCoverage } = require('./coverage');
+const { uniqueStamp } = require('./unique-name');
 
 const WORKER = Number(process.env.TEST_PARALLEL_INDEX || 0);
-const ACCOUNT_PREFIX = `seat60-w${WORKER}r`;
+const ACCOUNT_PREFIX = `seat60-p${WORKER}-`;
 // The widths the walkthrough measured the overflow at, and the two below
 // them where the old take button stuck out further still (50 px at 1024).
 const VIEWPORTS = [
@@ -34,10 +35,9 @@ const TAKE_LABEL = 'Take this seat (owner absent)';
  * Seed a Game Master and a newcomer with two characters: one in the
  * newcomer's own battle, nobody in its seat; one in the Game Master's
  * battle, seated to its owner and then taken by the Game Master.
- * @param {import('@playwright/test').TestInfo} testInfo
  */
-function seed(testInfo) {
-    const stamp = `${ACCOUNT_PREFIX}${testInfo.repeatEachIndex}t${Date.now() % 1000000}`;
+function seed() {
+    const stamp = `${ACCOUNT_PREFIX}${uniqueStamp()}`;
     const master = { username: `${stamp}-gm`, password: 'seat60-master-pass' };
     const owner = { username: `${stamp}-new`, password: 'seat60-owner-pass' };
     const seeded = readDjangoJson(`
@@ -102,7 +102,7 @@ users.delete()
     });
 
     test('the owner is offered their seat back only when someone else holds it, and each hand-off fits its card', async ({ page, browser }, testInfo) => {
-        const run = seed(testInfo);
+        const run = seed();
         await loginAs(page, run.owner);
 
         // The newcomer's own battle: nobody else sits in Wren's seat.

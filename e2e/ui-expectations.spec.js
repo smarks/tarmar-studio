@@ -15,6 +15,8 @@ const {
     test, expect, TEST_USER, TEST_ADMIN, loginAs, submitPassphrase,
     createBattleViaSetup, battleRowOnList, chooseToAttach,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
+const { battleLineParts } = require('./rulings');
 const { startCoverage } = require('./coverage');
 
 /** A second, fully separate browser context signed in as the plain player. */
@@ -45,7 +47,7 @@ test.describe('Battles are reachable and manageable (#339)', () => {
 
     test('a refused claim lands back on the muster with the reason', async ({ adminPage, browser }) => {
         test.setTimeout(120000);
-        const battleName = `E2E Refusal ${Date.now()}`;
+        const battleName = uniqueName('E2E Refusal');
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 1, seed: 51, playerSeats: 1,
         });
@@ -89,7 +91,7 @@ test.describe('Battles are reachable and manageable (#339)', () => {
 
     test('a seated player hands their figure to the AI mid-battle', async ({ adminPage, browser }) => {
         test.setTimeout(120000);
-        const battleName = `E2E Handover ${Date.now()}`;
+        const battleName = uniqueName('E2E Handover');
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 1, seed: 52, playerSeats: 1,
         });
@@ -126,14 +128,16 @@ test.describe('Battles are reachable and manageable (#339)', () => {
 
         await expect(page.locator('#battle-my-control .control-combatant-line'))
             .toContainText('Automatic');
-        await expect(page.locator('#battle-log')).toContainText('hands its decisions');
+        for (const part of battleLineParts('control', 'hands_to_ai')) {
+            await expect(page.locator('#battle-log')).toContainText(part);
+        }
 
         await context.close();
     });
 
     test('the DM frees a seat its holder walked away from', async ({ adminPage, browser }) => {
         test.setTimeout(120000);
-        const battleName = `E2E Release ${Date.now()}`;
+        const battleName = uniqueName('E2E Release');
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 1, seed: 53, playerSeats: 1,
         });
@@ -161,7 +165,7 @@ test.describe('Battles are reachable and manageable (#339)', () => {
 
     test('a battle is deleted, listed under Deleted, and restored', async ({ adminPage }) => {
         test.setTimeout(120000);
-        const battleName = `E2E Delete ${Date.now()}`;
+        const battleName = uniqueName('E2E Delete');
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 54 });
         const battleUrl = adminPage.url();
 

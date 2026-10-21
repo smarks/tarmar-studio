@@ -164,10 +164,16 @@ def add_ruling(session: GMSession, user: Any, topic: Any, text: Any) -> HandEdit
     """Record a house rule by hand; one on the same topic is retired by it."""
     _require_game_master(user)
     topic = _clean_text(
-        topic, label="The topic", limit=TableRuling.MAX_TOPIC_CHARS, required=True
+        topic,
+        label=refusal_words().hand_records.label_topic,
+        limit=TableRuling.MAX_TOPIC_CHARS,
+        required=True,
     )
     text = _clean_text(
-        text, label="The rule", limit=TableRuling.MAX_RULE_CHARS, required=True
+        text,
+        label=refusal_words().hand_records.label_rule,
+        limit=TableRuling.MAX_RULE_CHARS,
+        required=True,
     )
     with transaction.atomic():
         note = _run_ruling_action(
@@ -201,10 +207,16 @@ def edit_ruling(
     with transaction.atomic():
         old = _ruling(session, ruling_id)
         topic = _clean_text(
-            topic, label="The topic", limit=TableRuling.MAX_TOPIC_CHARS, required=True
+            topic,
+            label=refusal_words().hand_records.label_topic,
+            limit=TableRuling.MAX_TOPIC_CHARS,
+            required=True,
         )
         text = _clean_text(
-            text, label="The rule", limit=TableRuling.MAX_RULE_CHARS, required=True
+            text,
+            label=refusal_words().hand_records.label_rule,
+            limit=TableRuling.MAX_RULE_CHARS,
+            required=True,
         )
         if not TableRuling.same_topic(old.topic, topic):
             _run_ruling_action(
@@ -226,7 +238,10 @@ def edit_ruling(
             after={"topic": new.topic, "text": new.text},
         )
     return HandEdit(
-        edit, f"Ruling {old.pk} corrected; it is ruling {new.pk} now: {new.text}"
+        edit,
+        refusal_words().hand_records.ruling_corrected.format(
+            old=old.pk, new=new.pk, text=new.text
+        ),
     )
 
 
@@ -256,10 +271,12 @@ ENTITY_FIELDS = ("name", "where", "wants", "condition", "notes")
 
 
 def _entity_values(values: dict[str, Any]) -> dict[str, str]:
+    # Each field is named by its ``label_<field>`` key (issue #136).
+    words = refusal_words().hand_records
     cleaned = {
         "name": _clean_text(
             values.get("name"),
-            label="The name",
+            label=words.label_name,
             limit=SceneEntity.MAX_NAME_CHARS,
             required=True,
         )
@@ -267,7 +284,7 @@ def _entity_values(values: dict[str, Any]) -> dict[str, str]:
     for field in ENTITY_FIELDS[1:]:
         cleaned[field] = _clean_text(
             values.get(field),
-            label=f"The {field}",
+            label=getattr(words, f"label_{field}"),
             limit=SceneEntity.MAX_DETAIL_CHARS,
             required=False,
         )
@@ -351,8 +368,13 @@ def save_entity(
             before=before,
             after=_entity_snapshot(entity),
         )
-    verb = "Recorded" if change == GMRecordEdit.ADDED else "Corrected"
-    return HandEdit(edit, f"{verb} {entity.line.removeprefix('- ')}")
+    words = refusal_words().hand_records
+    done = (
+        words.entity_recorded
+        if change == GMRecordEdit.ADDED
+        else words.entity_corrected
+    )
+    return HandEdit(edit, done.format(line=entity.line.removeprefix("- ")))
 
 
 def remove_entity(session: GMSession, user: Any, entity_id: Any) -> HandEdit:
@@ -373,7 +395,9 @@ def remove_entity(session: GMSession, user: Any, entity_id: Any) -> HandEdit:
             before=before,
             after={},
         )
-    return HandEdit(edit, f"Removed {before['name']}")
+    return HandEdit(
+        edit, refusal_words().hand_records.entity_removed.format(name=before["name"])
+    )
 
 
 # -- threads (issue #790) -----------------------------------------------------
@@ -392,9 +416,12 @@ def _thread(session: GMSession, thread_id: Any) -> StoryThread:
         raise HandEditError(refusal_words().hand_records.no_such_thread) from None
 
 
-def _thread_text(value: Any, label: str = "The thread", required: bool = True) -> str:
+def _thread_text(value: Any, label: str | None = None, required: bool = True) -> str:
     return _clean_text(
-        value, label=label, limit=StoryThread.MAX_TEXT_CHARS, required=required
+        value,
+        label=label or refusal_words().hand_records.label_thread,
+        limit=StoryThread.MAX_TEXT_CHARS,
+        required=required,
     )
 
 
@@ -437,7 +464,12 @@ def open_thread(session: GMSession, user: Any, text: Any) -> HandEdit:
             before={},
             after=_thread_snapshot(thread),
         )
-    return HandEdit(edit, f"Opened thread {thread.pk}: {thread.text}")
+    return HandEdit(
+        edit,
+        refusal_words().hand_records.thread_opened.format(
+            thread=thread.pk, text=thread.text
+        ),
+    )
 
 
 def edit_thread(session: GMSession, user: Any, thread_id: Any, text: Any) -> HandEdit:
@@ -449,7 +481,12 @@ def edit_thread(session: GMSession, user: Any, thread_id: Any, text: Any) -> Han
         thread.text = cleaned
 
     thread, edit = _change_thread(session, user, thread_id, GMRecordEdit.EDITED, apply)
-    return HandEdit(edit, f"Corrected thread {thread.pk}: {thread.text}")
+    return HandEdit(
+        edit,
+        refusal_words().hand_records.thread_corrected.format(
+            thread=thread.pk, text=thread.text
+        ),
+    )
 
 
 def resolve_thread(
@@ -457,7 +494,11 @@ def resolve_thread(
 ) -> HandEdit:
     """Close an open thread by hand, with how it ended if given."""
     _require_game_master(user)
-    cleaned = _thread_text(resolution, label="How it ended", required=False)
+    cleaned = _thread_text(
+        resolution,
+        label=refusal_words().hand_records.label_resolution,
+        required=False,
+    )
 
     def apply(thread: StoryThread) -> None:
         if thread.resolved:
@@ -473,7 +514,12 @@ def resolve_thread(
     thread, edit = _change_thread(
         session, user, thread_id, GMRecordEdit.RESOLVED, apply
     )
-    return HandEdit(edit, f"Closed thread {thread.pk}: {thread.text}")
+    return HandEdit(
+        edit,
+        refusal_words().hand_records.thread_closed.format(
+            thread=thread.pk, text=thread.text
+        ),
+    )
 
 
 def reopen_thread(session: GMSession, user: Any, thread_id: Any) -> HandEdit:
@@ -492,7 +538,12 @@ def reopen_thread(session: GMSession, user: Any, thread_id: Any) -> HandEdit:
     thread, edit = _change_thread(
         session, user, thread_id, GMRecordEdit.REOPENED, apply
     )
-    return HandEdit(edit, f"Reopened thread {thread.pk}: {thread.text}")
+    return HandEdit(
+        edit,
+        refusal_words().hand_records.thread_reopened.format(
+            thread=thread.pk, text=thread.text
+        ),
+    )
 
 
 # -- the fold's recap (issue #791) --------------------------------------------
@@ -507,7 +558,11 @@ def correct_recap(session: GMSession, user: Any, text: Any) -> HandEdit:
     """
     _require_game_master(user)
     cleaned = _clean_text(
-        text, label="The recap", limit=MAX_SUMMARY_CHARS, required=True, lines=True
+        text,
+        label=refusal_words().hand_records.label_recap,
+        limit=MAX_SUMMARY_CHARS,
+        required=True,
+        lines=True,
     )
     with transaction.atomic():
         # The lock a turn's claim takes (gm.turn_record.claim_turn), so no
@@ -538,7 +593,7 @@ def correct_recap(session: GMSession, user: Any, text: Any) -> HandEdit:
             after={"summary": cleaned, "summary_covers": locked.summary_covers},
         )
     session.summary = cleaned
-    return HandEdit(edit, "Recap corrected")
+    return HandEdit(edit, refusal_words().hand_records.recap_corrected)
 
 
 def latest_hand_edits(session: GMSession | None) -> dict[tuple[str, int | None], str]:

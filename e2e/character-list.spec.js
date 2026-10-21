@@ -14,6 +14,7 @@
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell, runDjangoShell } = require('./django');
 const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 
@@ -25,12 +26,11 @@ const ghostOwnerFor = (testInfo) => specAccount('ghostowner', 'ghostowner-pass-9
  * Create a character owned by whoever this page is signed in as, and land
  * back on the character list with its row present.
  * @param {import('@playwright/test').Page} page
- * @param {import('@playwright/test').TestInfo} testInfo
  * @param {string} label - A word for the name, so a failure names the test.
  * @returns {Promise<string>} the character's name
  */
-async function seedListedCharacter(page, testInfo, label) {
-    const name = `${label} ${testInfo.workerIndex}${Date.now()}`;
+async function seedListedCharacter(page, label) {
+    const name = uniqueName(label);
     await createNamedCharacter(page, name);
     await page.goto('/tarmar/characters/');
     await expect(page.locator('.character-table')).toBeVisible();
@@ -49,14 +49,14 @@ test.describe('Character List Page', () => {
         await expect(page.locator('a:has-text("Create New Character")')).toBeVisible();
     });
 
-    test('bulk actions bar is visible when characters exist', async ({ page }, testInfo) => {
-        await seedListedCharacter(page, testInfo, 'Bulk Bar');
+    test('bulk actions bar is visible when characters exist', async ({ page }) => {
+        await seedListedCharacter(page, 'Bulk Bar');
 
         await expect(page.locator('#bulk-actions')).toBeVisible();
     });
 
-    test('delete button is disabled when no characters selected', async ({ page }, testInfo) => {
-        await seedListedCharacter(page, testInfo, 'Nothing Picked');
+    test('delete button is disabled when no characters selected', async ({ page }) => {
+        await seedListedCharacter(page, 'Nothing Picked');
 
         await expect(page.locator('#delete-selected-btn')).toBeDisabled();
     });
@@ -68,8 +68,8 @@ test.describe('Character Selection', () => {
         await page.goto('/tarmar/characters/');
     });
 
-    test('selecting checkbox enables delete button', async ({ page }, testInfo) => {
-        await seedListedCharacter(page, testInfo, 'Picked');
+    test('selecting checkbox enables delete button', async ({ page }) => {
+        await seedListedCharacter(page, 'Picked');
 
         const deleteBtn = page.locator('#delete-selected-btn');
         await expect(deleteBtn).toBeDisabled();
@@ -81,8 +81,8 @@ test.describe('Character Selection', () => {
         await expect(deleteBtn).toBeEnabled();
     });
 
-    test('select-all checkbox selects all characters', async ({ page }, testInfo) => {
-        await seedListedCharacter(page, testInfo, 'All Picked');
+    test('select-all checkbox selects all characters', async ({ page }) => {
+        await seedListedCharacter(page, 'All Picked');
         const checkboxCount = await page.locator('.character-checkbox').count();
         expect(checkboxCount).toBeGreaterThan(0);
 
@@ -100,8 +100,8 @@ test.describe('Character Selection', () => {
         expect(parseInt(countText)).toBe(checkboxCount);
     });
 
-    test('deselecting all disables delete button', async ({ page }, testInfo) => {
-        await seedListedCharacter(page, testInfo, 'Unpicked');
+    test('deselecting all disables delete button', async ({ page }) => {
+        await seedListedCharacter(page, 'Unpicked');
 
         // Select all
         await page.locator('#select-all').check();
@@ -124,18 +124,18 @@ test.describe('Character Delete - csrfToken Accessibility', () => {
      * its own: base.html carries the token in a meta tag and api.js's
      * csrfToken() reads it, so what the handlers reach for is that function.
      */
-    test('delete button onclick can access csrfToken', async ({ page }, testInfo) => {
+    test('delete button onclick can access csrfToken', async ({ page }) => {
         await loginAs(page, TEST_USER);
-        await seedListedCharacter(page, testInfo, 'Token Reader');
+        await seedListedCharacter(page, 'Token Reader');
 
         // Verify csrfToken() is published in global scope
         const csrfTokenDefined = await page.evaluate(() => typeof csrfToken === 'function');
         expect(csrfTokenDefined).toBe(true);
     });
 
-    test('per-row delete button can access csrfToken', async ({ page }, testInfo) => {
+    test('per-row delete button can access csrfToken', async ({ page }) => {
         await loginAs(page, TEST_USER);
-        await seedListedCharacter(page, testInfo, 'Row Token');
+        await seedListedCharacter(page, 'Row Token');
 
         // Since #338 item 19 the button carries its {% url %}-rendered
         // endpoint in data-delete-url, and character-management.js reads
@@ -155,14 +155,14 @@ test.describe('Character Delete - csrfToken Accessibility', () => {
         expect(canAccessToken).toBe(true);
     });
 
-    test('clicking delete asks in the page, naming the character', async ({ page }, testInfo) => {
+    test('clicking delete asks in the page, naming the character', async ({ page }) => {
         // This used to register page.on('dialog') and put both of its
         // expect() calls inside that handler. Since #190 the app confirms
         // through an in-page .notice-confirm panel, so no native dialog is
         // ever raised, the handler never fired, and the body held no
         // assertion outside it: a test that could only pass (issue #642).
         await loginAs(page, TEST_USER);
-        const name = await seedListedCharacter(page, testInfo, 'Asked About');
+        const name = await seedListedCharacter(page, 'Asked About');
 
         await page.locator('tr', { hasText: name })
             .locator('button.delete-btn.action-btn').click();
@@ -252,9 +252,9 @@ test.describe('Manager Character List', () => {
         await expect(filterDropdown).toBeVisible();
     });
 
-    test('manager can see owner column', async ({ page }, testInfo) => {
+    test('manager can see owner column', async ({ page }) => {
         await loginAs(page, TEST_ADMIN);
-        await seedListedCharacter(page, testInfo, 'Owned');
+        await seedListedCharacter(page, 'Owned');
 
         // Should have Owner column header
         const ownerHeader = page.locator('th:has-text("Owner")');
@@ -316,8 +316,8 @@ test.describe('Inline confirmation (issue #190)', () => {
         await page.goto('/tarmar/characters/');
     });
 
-    test('asking to delete opens a panel in the page, not a modal', async ({ page }, testInfo) => {
-        const name = await seedListedCharacter(page, testInfo, 'In Page');
+    test('asking to delete opens a panel in the page, not a modal', async ({ page }) => {
+        const name = await seedListedCharacter(page, 'In Page');
 
         await page.locator('tr', { hasText: name })
             .locator('button.delete-btn.action-btn').click();

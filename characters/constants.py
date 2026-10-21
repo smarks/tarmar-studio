@@ -56,6 +56,11 @@ CHARACTER_ATTRIBUTE_FIELDS: tuple[str, ...] = tuple(
     field_name for field_name, _short_name in CORE_ATTRIBUTE_FIELDS
 )
 
+# What the provenance roll writes: the social class and the row's detail. One
+# rule and one reason cover both, so the sheet states the reason once, under
+# the pair (issue #138), as it does for the six attributes (#84).
+PROVENANCE_FIELDS: tuple[str, ...] = ("provenance_class", "provenance_detail")
+
 
 def point_buy_budget_note(spent: int) -> str | None:
     """How far a bought set of attributes sits off the point budget.
@@ -77,11 +82,11 @@ def point_buy_budget_note(spent: int) -> str | None:
     budget = character_rules().attributes.point_buy.total
     if spent == budget:
         return None
-    direction = "over" if spent > budget else "under"
-    return (
-        f"Point-buy total: {spent} — {abs(spent - budget)} "
-        f"{direction} the {budget}-point budget."
-    )
+    from .refusal_words import refusal_words
+
+    words = refusal_words().constants
+    note = words.point_buy_over if spent > budget else words.point_buy_under
+    return note.format(spent=spent, off=abs(spent - budget), budget=budget)
 
 
 # Injury thresholds. Both pools take -2 to all rolls from 5 down to 1 -- a flat
@@ -168,12 +173,23 @@ def too_long(label: str, text: str, limit: int) -> str:
     """
     if len(text) <= limit:
         return ""
-    return f"{label} must be {limit} characters or fewer"
+    # Deferred, as the settings are: gm.engine's import chain reaches this
+    # module and stays free of Django.
+    from common.refusal_words import refusal_words
+
+    return refusal_words().text_limits.too_long.format(label=label, limit=limit)
 
 
-#: The name a character takes when nothing gives it one (the Games Master
-#: chat's unnamed character, a blank account name; issue #870).
-UNNAMED_CHARACTER = "Unnamed character"
+def unnamed_character() -> str:
+    """The name a character takes when nothing gives it one (issue #870).
+
+    The Games Master chat's unnamed character, a blank account name; the words
+    are ``[constants] unnamed_character`` (config/characters-refusals.toml).
+    """
+    from .refusal_words import refusal_words
+
+    return refusal_words().constants.unnamed_character
+
 
 # Control characters (C0 and C1) plus the Unicode line/paragraph separators.
 # Used on the free-text fields CHARACTER_NAME_PATTERN does not cover -- equipment

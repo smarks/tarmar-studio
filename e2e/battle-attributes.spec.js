@@ -17,11 +17,12 @@ const {
     test, expect, TEST_WATCHER, loginAs, submitPassphrase,
     createBattleViaSetup,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 
 test.describe('Combatant attributes on the battle page', () => {
     test('a DM opens a panel, plays a turn, and it is still open', async ({ adminPage }) => {
-        const battleName = `E2E Attributes ${Date.now()}`;
+        const battleName = uniqueName('E2E Attributes');
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 2, seed: 42,
         });
@@ -65,7 +66,7 @@ test.describe('Combatant attributes on the battle page', () => {
     });
 
     test('selecting a figure on the map opens that combatant panel', async ({ adminPage }) => {
-        const battleName = `E2E Attributes Map ${Date.now()}`;
+        const battleName = uniqueName('E2E Attributes Map');
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 2, seed: 7,
         });
@@ -86,7 +87,7 @@ test.describe('Combatant attributes on the battle page', () => {
     });
 
     test('a spectator has no panel to open', async ({ adminPage, browser }, testInfo) => {
-        const battleName = `E2E Attributes Watched ${Date.now()}`;
+        const battleName = uniqueName('E2E Attributes Watched');
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 2, seed: 11,
         });

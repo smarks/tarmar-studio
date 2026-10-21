@@ -19,6 +19,7 @@
 const {
     test, expect, loginAs, createCharacter, TEST_USER, TEST_ADMIN, TEST_WATCHER,
 } = require('./fixtures');
+const { uniqueName, uniqueStamp } = require('./unique-name');
 const { runDjangoShell } = require('./django');
 
 const CREATE_URL = '/tarmar/characters/create/';
@@ -31,15 +32,6 @@ const VIEWPORTS = [
     { name: 'laptop', width: 1024, height: 768 },
     { name: 'phone', width: 390, height: 844 },
 ];
-
-/**
- * A name nobody else's run will use.
- * @param {string} prefix
- * @param {import('@playwright/test').TestInfo} testInfo
- */
-function uniqueName(prefix, testInfo) {
-    return `${prefix} ${testInfo.workerIndex}${Date.now()}`;
-}
 
 /**
  * Visit `url` at each width, check nothing scrolls sideways, and keep a
@@ -81,7 +73,7 @@ test.describe('the creation page asks for a name (#786)', () => {
         await expect(page).toHaveURL(new RegExp(`${CREATE_URL}$`));
         expect(await page.locator('#roll-name').evaluate((input) => input.validity.valueMissing)).toBe(true);
 
-        const name = uniqueName('Named', testInfo);
+        const name = uniqueName('Named');
         await page.fill('#roll-name', name);
         await page.click('button:has-text("Roll a New Character")');
 
@@ -177,7 +169,7 @@ test.describe('the journal shows the player what is theirs (#827, #924, #952)', 
         test.setTimeout(90000);
         await loginAs(page, TEST_USER);
         // Long enough to wrap at 390px, where the button must keep its column.
-        const name = uniqueName('Home of the Northern Marches', testInfo);
+        const name = uniqueName('Home of the Northern Marches');
         await createCharacter(page, name);
         const sheetPath = new URL(page.url()).pathname;
 
@@ -219,10 +211,10 @@ test.describe('the sheet takes the character to the Game Master (#828)', () => {
         runDjangoShell(
             'from django.contrib.auth import get_user_model; from gm.models import GMSession; '
             + `GMSession.objects.create(user=get_user_model().objects.get(username="${TEST_USER.username}"), `
-            + `name="Roll up Ysolde${testInfo.workerIndex}${Date.now()}. She grew up in a village by the sea")`
+            + `name="Roll up Ysolde${uniqueStamp()}. She grew up in a village by the sea")`
         );
         await loginAs(page, TEST_USER);
-        const first = uniqueName('Sheet', testInfo);
+        const first = uniqueName('Sheet');
         await createCharacter(page, first);
         const firstSheet = page.url();
 
@@ -244,7 +236,7 @@ test.describe('the sheet takes the character to the Game Master (#828)', () => {
         ).toContainText('(already playing here)');
 
         // A second character joins the chosen session rather than a new one.
-        const second = uniqueName('Sheet Two', testInfo);
+        const second = uniqueName('Sheet Two');
         await createCharacter(page, second);
         await page.getByLabel(`Take ${second} to`).selectOption(sessionId);
         await page.getByRole('button', { name: 'Play with the Game Master' }).click();

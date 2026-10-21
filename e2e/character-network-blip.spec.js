@@ -16,6 +16,7 @@
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 /** The pk of a character of this worker's admin, by name. */
@@ -29,13 +30,16 @@ print('CHARACTER', Character.objects.get(name='${name}').pk)
     return match[1];
 }
 
-test('a blip on the visibility toggle puts the checkbox back and says so', async ({ page }, testInfo) => {
-    const name = `Blip ${testInfo.workerIndex}${Date.now()}`;
+test('a blip on the visibility toggle puts the checkbox back and says so', async ({ page }) => {
+    const name = uniqueName('Blip');
     await loginAs(page, TEST_USER);
     await createNamedCharacter(page, name);
 
     await page.route('**/set-visibility/', (route) => route.abort('failed'));
-    await page.locator('#visibility-toggle').check();
+    // A click, not check(): the abort lands at once, and the page puts the
+    // box back before check() can see it changed (issue #137). What the box
+    // ends on is asserted below.
+    await page.locator('#visibility-toggle').click();
 
     await expect(page.locator('.notice')).toContainText('Network error');
     // The badge is what the server last confirmed; the box agrees with it again.
@@ -49,8 +53,8 @@ test('a blip on the visibility toggle puts the checkbox back and says so', async
     await expect(page.locator('#visibility-badge')).toHaveText('Public');
 });
 
-test('a blip on Mark Dead leaves the button usable', async ({ page }, testInfo) => {
-    const name = `Blip Dead ${testInfo.workerIndex}${Date.now()}`;
+test('a blip on Mark Dead leaves the button usable', async ({ page }) => {
+    const name = uniqueName('Blip Dead');
     await loginAs(page, TEST_ADMIN);
     await createNamedCharacter(page, name);
     const characterId = characterIdByName(name);

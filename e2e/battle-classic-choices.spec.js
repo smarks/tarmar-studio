@@ -9,6 +9,8 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
+const { chosenBy } = require('./rulings');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -41,7 +43,7 @@ print("NAMES", json.dumps([figure.name for figure in game.figures]))
 test.describe('Choosing a classic turn by hand', () => {
     test('each option reads as a choice, and the scoring is behind the switch', async ({ adminPage: page }) => {
         await createBattleViaSetup(page, {
-            name: `E2E Classic Choices ${Date.now()}`,
+            name: uniqueName('E2E Classic Choices'),
             fighters: 2,
             seed: 890,
             controlMode: 'manual',
@@ -121,6 +123,6 @@ test.describe('Choosing a classic turn by hand', () => {
             await expect(waitingOn).not.toContainText(`Waiting on ${chooser}'s move`);
         }
         await expect(page.locator('#battle-turn')).toHaveText('1');
-        await expect(page.locator('.event-decision', { hasText: 'chosen by' })).toHaveCount(2);
+        await expect(page.locator('.event-decision', { hasText: chosenBy() })).toHaveCount(2);
     });
 });

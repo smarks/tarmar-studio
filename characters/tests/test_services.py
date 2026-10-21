@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied
 from characters import services
 from characters.dice import DICE_IN_TEXT
 from characters.models import Character
+from characters.purse import given_by_game_master
 from characters.refusal_words import refusal_words
 from characters.services import CharacterChangeError
 from characters.skills import normalize_skill_name
@@ -203,7 +204,8 @@ class LockedCallsTest(BaseTestCase):
             ],
         )
         self.assertEqual(
-            result.note, "now carrying 3 × Rope; 2 × Rope given by a Game Master"
+            result.note,
+            f"now carrying 3 × Rope; {given_by_game_master(2, 'Rope')}",
         )
 
     def test_add_equipment_refuses_nothing(self):

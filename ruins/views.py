@@ -40,6 +40,11 @@ from .table_rolls import (
 
 logger = logging.getLogger(__name__)
 
+#: Why a table roller answers 404: a page it does not roll, or one the canon
+#: lacks. Django's 404 page never shows it with DEBUG off (issue #136); it is
+#: for the debug page.
+NO_TABLE_ROLLER = "No table roller for “{slug}”"
+
 
 class GeneratorFormView(BreadcrumbMixin, DMToolsAccessMixin, TemplateView):
     """The ruin and hook generator pages' shared form handling."""
@@ -238,7 +243,7 @@ class RollTablePageView(GeneratorFormView):
     def get(self, request, *args, **kwargs):
         slug = kwargs["page"]
         if slug not in TABLE_PAGE_SLUGS:
-            raise Http404(f"No table roller for “{slug}”")
+            raise Http404(NO_TABLE_ROLLER.format(slug=slug))
         raw_seed = request.GET.get("seed", "").strip()
         try:
             page = load_table_page(slug)
@@ -247,7 +252,7 @@ class RollTablePageView(GeneratorFormView):
             # symlink out of the GM-tools directory: the roller has nothing it
             # may roll, which is a missing page, not a server fault.
             logger.warning("Table roller for “%s”: %s", slug, missing)
-            raise Http404(f"No table roller for “{slug}”") from missing
+            raise Http404(NO_TABLE_ROLLER.format(slug=slug)) from missing
         form_state = {"page": page, "form_seed": raw_seed}
         try:
             seed = parse_seed(raw_seed)

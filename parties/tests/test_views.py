@@ -4,6 +4,7 @@ withdraw powers as HTTP, and the visibility-aware roster rendering."""
 import json
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from common.test_helpers import (
     TEST_PASSWORD,
@@ -12,6 +13,7 @@ from common.test_helpers import (
     mark_gate_passed,
 )
 from parties.models import Party, PartyMembership
+from parties.refusal_words import refusal_words as parties_words
 
 
 class PartyViewTestCase(BaseTestCase):
@@ -332,7 +334,15 @@ class AddMemberTest(PartyViewTestCase):
         self.login(self.party_owner)
         response = self.post_add(self.public_char.pk)
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "already in this party", status_code=400)
+        self.assertContains(
+            response,
+            escape(
+                parties_words().views.already_in_party.format(
+                    name=self.public_char.name
+                )
+            ),
+            status_code=400,
+        )
         self.assertEqual(self.party.memberships.count(), 1)
 
     def test_non_numeric_character_id_is_a_400(self):

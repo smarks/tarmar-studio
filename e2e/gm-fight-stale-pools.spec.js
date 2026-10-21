@@ -10,7 +10,9 @@
  */
 
 const { refusal } = require('./refusals');
+const { battleLineParts } = require('./rulings');
 const { test, expect, loginAs, TEST_ADMIN } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 /** Heal a character on the record, as a Game Master's sheet would. */
@@ -81,7 +83,7 @@ print('BATTLE', battle.pk, 'CHARACTER', character.pk)
 
 test.describe('Battle page — a fight whose records moved under it', () => {
     test('says so, holds the turn, and the Game Master takes the pools from the records', async ({ page }, testInfo) => {
-        const name = `Aldo${testInfo.workerIndex}x${Date.now() % 100000}`;
+        const name = `Aldo${uniqueStamp()}`;
         const { battleId, characterId } = seedHurtFight(name);
         heal(characterId);
         await loginAs(page, TEST_ADMIN);
@@ -104,11 +106,13 @@ test.describe('Battle page — a fight whose records moved under it', () => {
         await page.waitForURL(new RegExp(`/tarmar/battles/${battleId}/$`));
         await expect(page.locator('#battle-stale-pools')).toHaveCount(0);
         await expect(page.locator('#advance-turn')).toBeEnabled();
-        await expect(page.locator('#battle-log')).toContainText('took the pools from the character records');
+        await expect(page.locator('#battle-log')).toContainText(
+            battleLineParts('services', 'pools_taken')[0]
+        );
     });
 
-    test('a page open when the records move gets the notice and the control from the refusal', async ({ page }, testInfo) => {
-        const name = `Alda${testInfo.workerIndex}x${Date.now() % 100000}`;
+    test('a page open when the records move gets the notice and the control from the refusal', async ({ page }) => {
+        const name = `Alda${uniqueStamp()}`;
         const { battleId, characterId } = seedHurtFight(name);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/battles/${battleId}/`);
@@ -127,8 +131,8 @@ test.describe('Battle page — a fight whose records moved under it', () => {
         await expect(page.locator('#advance-turn')).toBeEnabled();
     });
 
-    test('a choice made when the records moved gets the notice and the control from its refusal (#112)', async ({ page }, testInfo) => {
-        const name = `Aldc${testInfo.workerIndex}x${Date.now() % 100000}`;
+    test('a choice made when the records moved gets the notice and the control from its refusal (#112)', async ({ page }) => {
+        const name = `Aldc${uniqueStamp()}`;
         const { battleId, characterId } = seedPausedManualFight(name);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/battles/${battleId}/`);

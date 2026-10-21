@@ -8,6 +8,7 @@
  */
 
 const { test, expect, loginAs } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell, runDjangoShell } = require('./django');
 const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 
@@ -50,7 +51,7 @@ test.afterAll(({}, testInfo) => {
 
 test('a player restores their own deleted character from the list', async ({ page }, testInfo) => {
     const player = restorerFor(testInfo);
-    const name = `Restore Own ${Date.now()}`;
+    const name = uniqueName('Restore Own');
     const characterId = seedDeletedCharacter(player, name);
     await loginAs(page, player);
 

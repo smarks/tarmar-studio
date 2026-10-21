@@ -26,7 +26,9 @@ from battle.services import (
     create_battle,
     restart_battle,
 )
-from common.test_helpers import BaseTestCase
+from battle.tests.rulings_words import with_shipped_words
+from battle.wording import words
+from common.test_helpers import BaseTestCase, sentence_parts
 from common.test_helpers import make_beast as shared_make_beast
 
 # Strong but barely damaging, so two of them can grind to a stalemate.
@@ -214,6 +216,7 @@ class TeamStalemateTest(BaseTestCase):
         self.assertEqual(battle.status, Battle.STATUS_STALEMATE)
 
 
+@with_shipped_words
 class GoldenSeedsStillFinishTest(BaseTestCase):
     """Normal battles never trip the window — event streams byte-identical.
 
@@ -271,10 +274,21 @@ class GoldenSeedsStillFinishTest(BaseTestCase):
         # Redfen, ending 5 hex(es) from its start". Nobody enters
         # hand-to-hand, so the break-away scoring (engine #38) never comes up,
         # and Yaria still wins at 37.
+        #
+        # Re-pinned for tarmar-engine v0.9.20 (#153; engine #56, #57). No die
+        # changed and Yaria still wins at 37, in 824 lines. One decision
+        # changed: turn 8's, where Harar Redfen, now pricing a strike in close
+        # with the natural 20's extra damage, strikes Ulfan Ashvale in close
+        # (HTH ATTACK, t) rather than Yaria Hawkridge (ATTACK, j); the d20
+        # shows 2 and misses either way, so its roll and action lines change
+        # and nothing after them does. The other 38 changed lines are
+        # forecasts: a hurt figure's now read "to hit less 1 injury" with the
+        # bonus and P(hit) of the penalised roll, and turn 9's Dorra Redfen
+        # forecasts her shot at Harar from the side he turned to on turn 8.
         self.assertEqual(battle.turn_number, 37)
         self.assertEqual(
             stream_hash(battle),
-            "a84e5094f0abfeafc8725df0d46b651ef63b7bd13af8f51fbf49d167b428d37e",
+            "e245f0dbde03a26ca3863a28886e23609d97134b09bc15faa095a25b28ecb82c",
         )
 
     def test_classic_golden_seed_unchanged(self):
@@ -359,7 +373,8 @@ class RestartKeepsCrossingNotesTest(BaseTestCase):
         self.assertTrue(notes)
         self.assertTrue(
             BattleEvent.objects.filter(
-                battle_id=self.battle.pk, message__startswith="Re-armed"
+                battle_id=self.battle.pk,
+                message__startswith=sentence_parts(words().services.re_armed)[0],
             ).exists()
         )
 

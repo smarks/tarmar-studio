@@ -13,10 +13,11 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 test.describe('GM chat — characters are records from the first change', () => {
-    test('twins are two characters, in the pane and the list', async ({ adminPage: page }, testInfo) => {
-        const stamp = `${testInfo.workerIndex}${Date.now()}`;
+    test('twins are two characters, in the pane and the list', async ({ adminPage: page }) => {
+        const stamp = uniqueStamp();
         const brother = `Twain${stamp}`;
         const sister = `Sister${stamp}`;
 
@@ -49,8 +50,8 @@ test.describe('GM chat — characters are records from the first change', () => 
         await expect(page.getByText(`${brother}.1`)).toHaveCount(0);
     });
 
-    test('the Characters tab shows them during the turn, without a reload', async ({ adminPage: page }, testInfo) => {
-        const stamp = `${testInfo.workerIndex}${Date.now()}`;
+    test('the Characters tab shows them during the turn, without a reload', async ({ adminPage: page }) => {
+        const stamp = uniqueStamp();
         const brother = `Live${stamp}`;
         const sister = `Wren${stamp}`;
 

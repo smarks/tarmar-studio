@@ -30,7 +30,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_POST
 
 from accounts.models import User
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import _parse_json_body, whole_number
 
 from .. import services
@@ -106,6 +106,7 @@ def _change(
 @login_required
 @require_POST
 @rate_limit("weapon_skill", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_record_weapon_skill(request: HttpRequest, pk: int) -> HttpResponse:
     """Tie a Weapon skill to the weapon it was taken for (issue #753)."""
     is_game_master = request.user.can_manage_users
@@ -129,6 +130,7 @@ GAME_MASTER_CALL_NOTE = "game_master_call_note"
 @login_required
 @require_POST
 @rate_limit("skill_check", max_requests=60, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_skill_check(request: HttpRequest, pk: int) -> HttpResponse:
     """Roll one skill check and keep it in the history (issue #756)."""
     is_game_master = request.user.can_manage_users
@@ -172,6 +174,7 @@ def character_skill_check(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 @rate_limit("move_coin", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_move_coin(request: HttpRequest, pk: int) -> HttpResponse:
     """A Game Master gives or takes coin (issue #757)."""
     is_game_master = request.user.can_manage_users
@@ -204,6 +207,7 @@ def character_move_coin(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 @rate_limit("learn_spell", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_learn_spell(request: HttpRequest, pk: int) -> HttpResponse:
     """Put skill points into a spell (issue #774)."""
     is_game_master = request.user.can_manage_users
@@ -223,6 +227,7 @@ def character_learn_spell(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 @rate_limit("choose_school", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_choose_school(request: HttpRequest, pk: int) -> HttpResponse:
     """Choose the school of magic the school roll opened (issue #18)."""
     is_game_master = request.user.can_manage_users
@@ -242,6 +247,7 @@ CAST_HISTORY_FIELD = "spell_cast"
 @login_required
 @require_POST
 @rate_limit("cast_spell", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_cast_spell(request: HttpRequest, pk: int) -> HttpResponse:
     """Cast a spell outside a battle and keep it in the history (issue #18).
 
@@ -282,6 +288,7 @@ def character_cast_spell(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 @rate_limit("grant_mana", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_grant_mana(request: HttpRequest, pk: int) -> HttpResponse:
     """A Game Master grants mana (issue #774)."""
     is_game_master = request.user.can_manage_users
@@ -304,6 +311,7 @@ def character_grant_mana(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 @rate_limit("survival_save", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_roll_survival_save(request: HttpRequest, pk: int) -> HttpResponse:
     """Roll a dying character's survival save off the board (issue #839).
 

@@ -25,6 +25,20 @@ const STATUS_CHOICES = {
     stalemate: 'Stalemate',
 };
 
+// The stale-pools notice as views.advance_control and _stale_pools.html
+// render it: the stale state's key in data-record, and a form whose CSRF
+// token Django masks afresh on every render (#134). ``nextPath`` is the path
+// of the endpoint that rendered it, which battle.js points back at the page.
+function staleNotice(record, csrfToken, nextPath = '/tarmar/battles/1/state/') {
+    return `<p id="battle-stale-pools" data-record='${record}'>Aldwin moved.</p>`
+        + '<form method="post" action="/tarmar/battles/1/resnapshot/">'
+        + `<input type="hidden" name="csrfmiddlewaretoken" value="${csrfToken}">`
+        + `<input type="hidden" name="next" value="${nextPath}">`
+        + '<button id="resnapshot-pools">Take the pools from the records</button></form>';
+}
+
+const ALDWIN_STALE = '{"moved": ["Aldwin"], "resnapshot_url": "/tarmar/battles/1/resnapshot/"}';
+
 /**
  * One combatant as the server's view model describes it (battle/viewmodel.py):
  * position and footprint in axial cells, facing as the step to the faced hex,
@@ -513,9 +527,7 @@ describe('initBattlePage', () => {
             json: async () => ({
                 error: "Aldwin: the record's pools have changed",
                 advance: { label: 'Pools changed on the records', enabled: false },
-                stale_html: '<p id="battle-stale-pools">Aldwin: the record changed.</p>'
-                    + '<form><input type="hidden" name="next" value="/tarmar/battles/1/advance/">'
-                    + '<button id="resnapshot-pools">Take the pools from the records</button></form>',
+                stale_html: staleNotice(ALDWIN_STALE, 'a-token', '/tarmar/battles/1/advance/'),
             }),
         });
         require('../api.js');
@@ -552,7 +564,7 @@ describe('initBattlePage', () => {
         });
         require('../api.js');
         global.fetch = jest.fn().mockResolvedValue(
-            respond('<p id="battle-stale-pools">Aldwin moved.</p>')
+            respond(staleNotice(ALDWIN_STALE, 'a-token', '/tarmar/battles/1/advance/'))
         );
 
         document.getElementById('advance-turn').click();
@@ -1496,6 +1508,33 @@ describe('renderTurnPanel (#250)', () => {
         expect(toggle.getAttribute('aria-pressed')).toBe('false');
     });
 
+    test('an option the rules refuse here is drawn, with its line, and cannot be picked', () => {
+        // Review of #146: the classic engine's menu can offer an option its
+        // own verbs refuse; the server marks it ``refused`` and words it.
+        const pending = describedPending();
+        pending.candidates[2] = Object.assign({}, pending.candidates[2], {
+            letter: 'change_weapons', name: 'CHANGE WEAPONS', ai_choice: false,
+            plain: 'classic_menu.cannot_carry_out turn_menu.change_to Small bow',
+            refused: true,
+        });
+        const panel = panelNode();
+        const onSelect = jest.fn();
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,
+            selectedIndex: null, onSelect,
+        });
+        const options = panel.querySelectorAll('.turn-option');
+        expect(options[2].disabled).toBe(true);
+        expect(options[2].classList.contains('is-refused')).toBe(true);
+        expect(options[2].querySelector('.turn-option-plain').textContent)
+            .toBe('classic_menu.cannot_carry_out turn_menu.change_to Small bow');
+        options[2].click();
+        expect(onSelect).not.toHaveBeenCalled();
+        // The others are as they were.
+        expect(options[0].disabled).toBe(false);
+        options[0].click();
+        expect(onSelect).toHaveBeenCalledWith(0);
+    });
+
     test('the scoring switch shows every row its score and working', () => {
         const panel = panelNode();
         const onToggleScoring = jest.fn();
@@ -1729,9 +1768,7 @@ describe('turn panel wiring on the battle page (#250)', () => {
         );
         battle.initBattlePage();
         refuseStale(
-            '<p id="battle-stale-pools">Aldwin: the record changed.</p>'
-            + '<form><input type="hidden" name="next" value="/tarmar/battles/1/act/">'
-            + '<button id="resnapshot-pools">Take the pools from the records</button></form>',
+            staleNotice(ALDWIN_STALE, 'a-token', '/tarmar/battles/1/act/'),
             { label: 'Pools changed on the records', enabled: false }
         );
 
@@ -1957,7 +1994,7 @@ describe('a submitted choice names its pause (#644)', () => {
             // Nothing else about the battle changed: status, turn and events
             // are as the page has them.
             global.fetch = jest.fn().mockResolvedValue(
-                poll('<p id="battle-stale-pools">Aldwin moved.</p>')
+                poll(staleNotice(ALDWIN_STALE, 'a-token'))
             );
 
             await jest.advanceTimersByTimeAsync(2100);
@@ -1968,6 +2005,91 @@ describe('a submitted choice names its pause (#644)', () => {
             global.fetch = jest.fn().mockResolvedValue(poll(''));
             await jest.advanceTimersByTimeAsync(2100);
             expect(document.getElementById('battle-stale-pools')).toBeNull();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    function mountStaleGameMasterPage(record) {
+        const pending = {
+            combatant_id: 4, turn: 3, display_name: 'Duel 2 Archer',
+            player: 'playeruser', is_you: false, candidates: [],
+        };
+        mountAwaitingPage(pending, 'data-is-dm="true"');
+        document.body.insertAdjacentHTML(
+            'beforeend',
+            `<div id="battle-stale-slot">${staleNotice(record, 'first-token')}</div>`
+            + '<script id="battle-status-labels" type="application/json">'
+            + `${JSON.stringify(STATUS_CHOICES)}</script>`
+        );
+        battle.initBattlePage();
+        return (staleHtml, turn = 0) => ({
+            ok: true,
+            json: async () => ({
+                status: 'awaiting', turn,
+                view: sampleState([sampleCombatant()]),
+                events: [], turns_html: [], seats: [], pending,
+                advance: { label: 'Pools changed on the records', enabled: false },
+                stale_html: staleHtml,
+            }),
+        });
+    }
+
+    test('polls with the same stale state leave the Game Master\'s control in place (#134)', async () => {
+        jest.useFakeTimers();
+        try {
+            const poll = mountStaleGameMasterPage(ALDWIN_STALE);
+            const control = document.getElementById('resnapshot-pools');
+            const token = () => document.querySelector(
+                '#battle-stale-slot input[name="csrfmiddlewaretoken"]'
+            ).value;
+
+            // Only the token differs, as it does between any two renders.
+            global.fetch = jest.fn().mockResolvedValue(
+                poll(staleNotice(ALDWIN_STALE, 'second-token'))
+            );
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(global.fetch).toHaveBeenCalled();
+            expect(document.getElementById('resnapshot-pools')).toBe(control);
+            // The kept form takes the newest token, which a sign-in elsewhere
+            // may have turned over, and still returns to this page.
+            expect(token()).toBe('second-token');
+            expect(document.querySelector('#battle-stale-slot input[name="next"]').value)
+                .toBe(`${window.location.pathname}${window.location.search}`);
+
+            // A poll that changed something else is applied, and the notice
+            // is still left alone.
+            global.fetch = jest.fn().mockResolvedValue(
+                poll(staleNotice(ALDWIN_STALE, 'third-token'), 1)
+            );
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(document.getElementById('battle-turn').textContent).toBe('1');
+            expect(document.getElementById('resnapshot-pools')).toBe(control);
+            expect(token()).toBe('third-token');
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a poll whose stale state changed replaces the notice and its control (#134)', async () => {
+        jest.useFakeTimers();
+        try {
+            const poll = mountStaleGameMasterPage(ALDWIN_STALE);
+            const control = document.getElementById('resnapshot-pools');
+            const bothStale = '{"moved": ["Aldwin", "Brynn"], '
+                + '"resnapshot_url": "/tarmar/battles/1/resnapshot/"}';
+
+            global.fetch = jest.fn().mockResolvedValue(
+                poll(staleNotice(bothStale, 'second-token'))
+            );
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(document.getElementById('battle-stale-pools').dataset.record)
+                .toBe(bothStale);
+            expect(document.getElementById('resnapshot-pools')).not.toBe(control);
+            // Back to the page it is on, never the poll endpoint.
+            expect(document.querySelector('#battle-stale-slot input[name="next"]').value)
+                .toBe(`${window.location.pathname}${window.location.search}`);
         } finally {
             jest.useRealTimers();
         }
@@ -2385,6 +2507,22 @@ describe('the wizard cast flow (#250)', () => {
         battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null });
         expect(panel.querySelector('.turn-option-cast')).toBeNull();
         expect(panel.querySelectorAll('.turn-option')).toHaveLength(1);
+    });
+
+    test('a cast with no caster payload names the pool as the server does', () => {
+        // Review of #145: the fallback named its pool 'Mana' in code, wrong
+        // for a classic wizard; it reads the pending payload's configured
+        // ``pool_label`` now.
+        const panel = panelNode();
+        const pending = castingPending({ magic: null, pool_label: 'cast_stage.strength_pool' });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,
+            selectedIndex: null, castOpen: true,
+        });
+        expect(panel.querySelector('.turn-option-cast').textContent)
+            .toContain('turn_panel.pool 0 0 cast_stage.strength_pool');
+        expect(panel.querySelector('.turn-cast-pool').textContent)
+            .toContain('cast_stage.strength_pool');
+        expect(panel.textContent).not.toContain('Mana');
     });
 
     test('a caster with no castable spell this turn gets no cast group', () => {
@@ -3378,11 +3516,12 @@ describe('control modes', () => {
             { 1: seat({
                 effective_control_mode: 'manual',
                 control_line: 'Manual — played by spencer',
+                own_control_line: 'the server says you play it',
                 you_decide: true,
             }) }
         );
         expect(roster.querySelector('.combatant-controller').textContent)
-            .toBe('Manual — played by you');
+            .toBe('the server says you play it');
     });
 
     test('an automatic combatant says the AI plays it', () => {

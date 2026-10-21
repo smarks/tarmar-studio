@@ -12,10 +12,13 @@
 
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
+    escaped,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
+const { chosenBy } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { readDjangoShell } = require('./django');
-const { menuWords } = require('./turn-menu');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 const { openTheWizardsStage } = require('./wizard-stage');
 
 /**
@@ -76,10 +79,12 @@ print("AI_PICK " + json.dumps(pick))
  */
 function theRecordedCast(battleId) {
     const output = readDjangoShell(`
-import json
+import json, string
 from battle.models import BattleEvent
+from battle.wording import words
+credit = next(text for text, *_ in string.Formatter().parse(words().services.chosen_by) if text.strip())
 decision = BattleEvent.objects.filter(
-    battle_id=${battleId}, event_type="decision", message__contains="chosen by"
+    battle_id=${battleId}, event_type="decision", message__contains=credit.strip()
 ).get()
 chosen = decision.payload["chosen"]
 print("CHOSEN " + json.dumps({"spell_key": chosen["spell_key"], "target_id": chosen["target_id"]}))
@@ -90,7 +95,7 @@ print("CHOSEN " + json.dumps({"spell_key": chosen["spell_key"], "target_id": cho
 test.describe('Wizard cast flow', () => {
     test('a seated wizard declares, inspects, stands down, then casts', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);
-        const battleName = `E2E Cast ${Date.now()}`;
+        const battleName = uniqueName('E2E Cast');
 
         // A battle with one AI opponent and one seat for the wizard.
         await createBattleViaSetup(adminPage, {
@@ -130,7 +135,7 @@ test.describe('Wizard cast flow', () => {
         await expect(castOption).toBeVisible({ timeout: 15000 });
         await expect(castOption).toHaveCount(1);
         await expect(castOption).toContainText(menuWords().panel.cast_option);
-        await expect(castOption).toContainText('Mana');
+        await expect(castOption).toContainText(menuWords().stage.mana_pool);
         await expect(playerPage.locator('#turn-panel .turn-cast-stage'))
             .toHaveCount(0);
 
@@ -164,7 +169,7 @@ test.describe('Wizard cast flow', () => {
         // The turn completes and the log credits the player's cast.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         const decision = playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         });
         await expect(decision).toBeVisible();
         await expect(decision).toContainText(spellName);
@@ -184,7 +189,7 @@ test.describe('Wizard cast flow', () => {
         let battleId = 0;
         let foes = [];
         const playerPage = await openTheWizardsStage(
-            adminPage, browser, `E2E Cast two foes ${Date.now()}`, {
+            adminPage, browser, uniqueName('E2E Cast two foes'), {
                 fighters: 2,
                 beforeTurn: (id) => {
                     battleId = id;
@@ -196,13 +201,21 @@ test.describe('Wizard cast flow', () => {
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
         await expect(stage).toBeVisible();
 
-        // One Fire Missile row per foe, each naming its own, nearest first.
+        // One Fire Missile row per foe, each naming its own, nearest first,
+        // in the configured words (#145).
+        const rowAt = (spell, target) => menuLine(menuWords().stage.row_at, {
+            spell: escaped(spell), target: escaped(target),
+        });
         const missileRows = stage.locator('.turn-spell', {
-            has: playerPage.locator('.turn-spell-name', { hasText: /^Fire Missile → / }),
+            has: playerPage.locator('.turn-spell-name', {
+                hasText: new RegExp(`^${sentencePattern(menuWords().stage.row_at, {
+                    spell: escaped('Fire Missile'),
+                })}$`),
+            }),
         });
         await expect(missileRows.locator('.turn-spell-name')).toHaveText([
-            `Fire Missile → ${near.name}`,
-            `Fire Missile → ${far.name}`,
+            rowAt('Fire Missile', near.name),
+            rowAt('Fire Missile', far.name),
         ]);
 
         // The AI's own pick, as the server marked it, is a cast at the near
@@ -216,7 +229,7 @@ test.describe('Wizard cast flow', () => {
         });
         await expect(tagged).toHaveCount(1);
         await expect(tagged.locator('.turn-spell-name'))
-            .toHaveText(`${aiPick.spell_name} → ${near.name}`);
+            .toHaveText(rowAt(aiPick.spell_name, near.name));
         await expect(missileRows.locator('.turn-option-ai-pick')).toHaveCount(0);
 
         // Cast at the far foe.
@@ -225,7 +238,7 @@ test.describe('Wizard cast flow', () => {
         await playerPage.click('#turn-panel .turn-confirm');
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         const decision = playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         });
         await expect(decision).toContainText('Fire Missile');
         await expect(decision).toContainText(`on ${far.name}`);

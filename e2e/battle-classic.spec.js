@@ -15,11 +15,13 @@
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
+const { chosenBy, ownManualLine } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 
 test.describe('Classic-profile battle', () => {
     test('create as classic, watch it, advance a turn, log survives reload', async ({ adminPage }) => {
-        const battleName = `E2E Classic ${Date.now()}`;
+        const battleName = uniqueName('E2E Classic');
 
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: 2, seed: 4242,
@@ -78,7 +80,7 @@ test.describe('Classic-profile battle', () => {
         // policy offers it a spell, the turn loop carries the declaration
         // into the combat phase, and the cast reaches the log.
         test.setTimeout(120000);
-        const battleName = `E2E Classic Wizard ${Date.now()}`;
+        const battleName = uniqueName('E2E Classic Wizard');
 
         await createBattleViaSetup(adminPage, {
             name: battleName, fighters: ['wizard', 'wizard'], seed: 9119,
@@ -118,7 +120,7 @@ test.describe('Classic-profile battle', () => {
         // character included) into classic figures, and the paused turn
         // offers that player a classic menu whose choice is theirs.
         test.setTimeout(120000);
-        const battleName = `E2E Classic Lobby ${Date.now()}`;
+        const battleName = uniqueName('E2E Classic Lobby');
 
         // The DM opens a classic battle with one AI fighter and one seat.
         await createBattleViaSetup(adminPage, {
@@ -169,7 +171,7 @@ test.describe('Classic-profile battle', () => {
         // The player's page lands on the started battle, their figure theirs.
         await expect(playerPage.locator('#battle-arena'))
             .toBeVisible({ timeout: 15000 });
-        await expect(playerPage.locator('.combatant-card', { hasText: 'Played by you' }))
+        await expect(playerPage.locator('.combatant-card', { hasText: ownManualLine() }))
             .toBeVisible();
 
         // The DM advances: the turn reaches the seated figure and parks.
@@ -189,14 +191,14 @@ test.describe('Classic-profile battle', () => {
         // The classic turn completes and the decision is credited to them.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         await expect(playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toBeVisible();
 
         // And it is in the database, not the browser: a reload rebuilds it.
         await playerPage.reload();
         await expect(playerPage.locator('.turn-group[data-turn="1"]')).toBeVisible();
         await expect(playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toBeVisible();
 
         await stopCoverage(playerPage, `${testInfo.title} (player context)`);
@@ -206,7 +208,7 @@ test.describe('Classic-profile battle', () => {
     test('a Tarmar battle still paints its own arena and both pools', async ({ adminPage }) => {
         // The other half of one renderer serving two profiles: the canonical
         // surface is unchanged by the neutral view model.
-        const battleName = `E2E Tarmar ${Date.now()}`;
+        const battleName = uniqueName('E2E Tarmar');
 
         await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 77 });
 

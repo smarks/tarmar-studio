@@ -22,7 +22,7 @@ from common.test_helpers import BaseTestCase, create_character
 from common.tests.refusal_scan import fixed_words, literal_refusals
 
 from .engine import MODE_AIDE, MODE_PLAY
-from .hand_records import HandEditError, open_thread
+from .hand_records import HandEditError, open_thread, reopen_thread, resolve_thread
 from .models import GMEvent, GMSession, GMTurnRecord
 from .refusal_words import GmRefusalWords, PolicyWords, load_refusal_words
 from .test_turn_engine_executor import ExecutorTestCase, plan
@@ -35,6 +35,7 @@ from .turn_engine.policy import (
     REFUSAL_REASON,
     SETTLED_REASONS,
     TurnPolicy,
+    already_refused_error,
 )
 from .turn_engine.state import settled_refusals
 
@@ -43,7 +44,14 @@ SAME_WORDS = "that is not for this table"
 
 #: The calls whose arguments a player reads, by module.
 REFUSING_CALLS = {
-    "gm/hand_records.py": {"HandEditError"},
+    # The field labels and length refusals of the hand edits (#136).
+    "gm/hand_records.py": {
+        "HandEditError",
+        "HandEdit",
+        "_clean_text",
+        "_thread_text",
+        "too_long",
+    },
     "gm/views.py": {
         "_json_error",
         "HttpResponseBadRequest",
@@ -159,6 +167,39 @@ class RefusalsFollowTheConfigurationTest(BaseTestCase):
         own = GMSession.objects.create(user=self.game_master, name="Crypt")
         done = open_thread(own, self.game_master, "a debt")
         self.assertIn("a debt", done.message)
+
+    def test_a_hand_edit_names_its_field_and_reports_in_the_configured_words(
+        self,
+    ):
+        """The field labels and the messages a kept edit shows are the
+        configuration's (#136)."""
+        own = GMSession.objects.create(user=self.game_master, name="Crypt")
+        with self.assertRaisesMessage(
+            HandEditError, "hand_records.needed hand_records.label_thread"
+        ):
+            open_thread(own, self.game_master, "")
+        done = open_thread(own, self.game_master, "a debt")
+        thread = own.threads.get()
+        self.assertEqual(done.message, f"hand_records.thread_opened a debt {thread.pk}")
+        resolve_thread(own, self.game_master, thread.pk, "paid")
+        self.assertEqual(
+            reopen_thread(own, self.game_master, thread.pk).message,
+            f"hand_records.thread_reopened a debt {thread.pk}",
+        )
+
+    def test_a_repeated_refusal_is_told_to_the_model_in_the_configured_words(
+        self,
+    ):
+        self.assertEqual(
+            already_refused_error("record_attributes", "the reason"),
+            "repeated_refusal.with_remedy repeated_refusal.instead_record_attributes "
+            "repeated_refusal.already_refused record_attributes the reason",
+        )
+        self.assertEqual(
+            already_refused_error("revive_character", "the reason"),
+            "repeated_refusal.something_else "
+            "repeated_refusal.already_refused revive_character the reason",
+        )
 
     def test_a_plan_policy_refuses_in_the_configured_words(self):
         player = TurnPolicy.for_turn(MODE_PLAY, is_game_master=False)

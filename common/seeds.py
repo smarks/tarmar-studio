@@ -2,10 +2,11 @@
 
 The ruin, hook and encounter generators put their seed in the URL, and a
 battle draft stores one, so the same seed always rebuilds the same result.
-Each used to parse and roll seeds its own way (issue #337). The pages still
-word their own refusals; what they share is here.
+Each used to parse and roll seeds its own way (issue #337); what they share is
+here, the refusal of a seed that is not a number among it (issue #136).
 
-Free of Django, so any module can import it.
+Importing it needs no Django, so any module can; the refusal's words are read
+from the settings only when a seed is refused.
 """
 
 import secrets
@@ -36,7 +37,13 @@ def parse_seed(raw: object) -> int | None:
     try:
         return int(text)
     except ValueError:
-        raise InvalidSeed(f"Seed must be a whole number, not “{text}”.") from None
+        # Imported here so importing this module stays free of Django; the
+        # words are configuration (``[seeds]``, config/common-refusals.toml).
+        from common.refusal_words import refusal_words
+
+        raise InvalidSeed(
+            refusal_words().seeds.not_whole_number.format(text=text)
+        ) from None
 
 
 def roll_seed() -> int:

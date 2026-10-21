@@ -24,11 +24,19 @@ aged scores everywhere except the creation-time checks.
 from dataclasses import dataclass
 
 from .constants import CHARACTER_ATTRIBUTE_FIELDS
-from .dice import Roller, roll_dice_faces, roll_dice_logged
+from .dice import (
+    ATTRIBUTE_CHECK_LOG_LABEL,
+    SKILL_CHECK_LOG_LABEL,
+    Roller,
+    dice_log_line,
+    dice_log_text,
+    roll_dice_faces,
+    roll_dice_logged,
+)
 from .models import Character
 from .refusal_words import game_master_call_note
 from .rules import DiceRollRules, character_rules, game_master_origins_in_words
-from .services import CharacterChangeError
+from .services import CharacterChangeError, append_dice_log
 from .skill_rules import skill_rules
 from .skills import (
     SPECIALISED_SKILLS,
@@ -297,8 +305,12 @@ def skill_check(
     difficulty and reads the result (coordinator's ruling on the #756
     review, marked for Spencer).
 
+    The dice the server rolls go into the character's dice log (issue
+    #147), saved with the history line by the caller; a total a Game
+    Master states from his table is in the history only.
+
     Args:
-        character: The character; not changed.
+        character: The character; only its dice log changes.
         skill_name: A stored (normalised) skill name: one the character has,
             or a glossary skill rolled untrained.
         difficulty: The Game Master's difficulty, or None.
@@ -372,6 +384,13 @@ def skill_check(
         dice_total = stated_total
     else:
         faces, dice_total = roll_dice_faces(rules.dice, roller)
+        append_dice_log(
+            character,
+            dice_log_line(
+                SKILL_CHECK_LOG_LABEL.format(skill=skill_name),
+                dice_log_text(rules.dice, faces, dice_total),
+            ),
+        )
 
     if skill_name in SPECIALISED_SKILLS:
         # A check on the bare Maker Skill or Knowledge reads the chosen part
@@ -520,10 +539,11 @@ def attribute_check(
     only a Game Master states a total rolled at his table, sets a
     situational modifier on the target (#953, as only he sets a skill
     check's difficulty) or calls a check for an unconscious character, each
-    named on the line. The dead roll nothing.
+    named on the line. The dead roll nothing. The dice the server rolls go
+    into the character's dice log (issue #147), as a skill check's do.
 
     Args:
-        character: The character; not changed.
+        character: The character; only its dice log changes.
         attribute: One of
             :data:`characters.constants.CHARACTER_ATTRIBUTE_FIELDS`, written
             in full.
@@ -572,6 +592,10 @@ def attribute_check(
         dice = f"{rules.dice} stated by a Game Master = {stated_total}"
     else:
         dice_total, dice = roll_dice_logged(rules.dice, roller)
+        append_dice_log(
+            character,
+            dice_log_line(ATTRIBUTE_CHECK_LOG_LABEL.format(attribute=attribute), dice),
+        )
     return AttributeCheck(
         attribute=attribute,
         attribute_score=score,

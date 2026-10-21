@@ -28,10 +28,12 @@ const {
     test, expect, loginAs, TEST_USER, TEST_ADMIN, createBattleViaSetup, postAsGameMaster,
     characterIdFromUrl, seedCharacterFromExport, submitPassphrase,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage } = require('./coverage');
 const { pinDice } = require('./dice');
+const { diceLogLine } = require('./dice-log');
 const { runDjangoShell } = require('./django');
-const { refusal, gameMasterCallNote } = require('./refusals');
+const { refusal, refusalFixedParts, gameMasterCallNote } = require('./refusals');
 const { loadedSkillRules } = require('./skill-rules');
 const { item, sheetValues } = require('./equipment-rules');
 const { catalogSpells, lastStoryCast, schoolRowForPercentile } = require('./magic-rules');
@@ -181,7 +183,7 @@ function breakdownValue(page, label) {
 test.describe('Sheet mechanics', () => {
     test('#753: the Weapon skill is tied once and priced by the record', async ({ page }) => {
         await loginAs(page, TEST_USER);
-        await importCharacter(page, `Tier ${Date.now()}`);
+        await importCharacter(page, uniqueName('Tier'));
 
         await expect(page.locator('#attack-skill')).toHaveCount(0);
         await page.locator('#attack-resolve-btn').click();
@@ -206,7 +208,7 @@ test.describe('Sheet mechanics', () => {
 
     test('#756: a skill check rolls on the server and is kept in the history', async ({ page }) => {
         await loginAs(page, TEST_USER);
-        await importCharacter(page, `Sneak ${Date.now()}`);
+        await importCharacter(page, uniqueName('Sneak'));
 
         await page.locator('#skill-check-skill').selectOption('stealth');
         // The difficulty is the Game Master's to set; a player is not offered
@@ -219,9 +221,18 @@ test.describe('Sheet mechanics', () => {
         // DEX 16 is +3 and Stealth II is +2; no difficulty, so no outcome,
         // only a natural named if the dice made one.
         await expect(result).toContainText(/^stealth: 2d6 \[\d, \d\] = \d+ \+3 DEX \(16\) \+2 level = \d+( \(natural (12|2)\))?$/);
+        // The dice join the character's dice log on this page (#147), the
+        // same faces the line shows.
+        const [, faces, diceTotal] = (await result.textContent()).match(/2d6 \[(\d, \d)\] = (\d+)/);
+        const logged = diceLogLine(
+            'SKILL_CHECK_LOG_LABEL', { skill: 'stealth' }, '2d6', faces.split(', ').map(Number), Number(diceTotal),
+        );
+        await expect(page.locator('#dice-log')).toBeVisible();
+        await expect(page.locator('#dice-log-text')).toContainText(logged);
 
         await page.reload();
         await expect(page.locator('#recent-changes')).toContainText('stealth check: 2d6');
+        await expect(page.locator('#dice-log-text')).toContainText(logged);
     });
 
     test('#70: the check rolls the canon\'s dice and its natural success succeeds', async ({ page }) => {
@@ -231,7 +242,7 @@ test.describe('Sheet mechanics', () => {
         const { skill_check: check } = loadedSkillRules();
         const [skill] = check.governed_skills;
         await loginAs(page, TEST_ADMIN);
-        await seedCharacterFromExport(page, TEST_ADMIN, mechanicsCharacter(`Natural ${Date.now()}`));
+        await seedCharacterFromExport(page, TEST_ADMIN, mechanicsCharacter(uniqueName('Natural')));
 
         await pinDice(page, '**/skill-check/', check.natural_success_seed);
         await page.locator('#skill-check-skill').selectOption(skill);
@@ -255,7 +266,7 @@ test.describe('Sheet mechanics', () => {
         // answer; the sheet's script holds no copy of them.
         await loginAs(page, TEST_ADMIN);
         const characterId = await seedCharacterFromExport(
-            page, TEST_ADMIN, mechanicsCharacter(`Unread ${Date.now()}`)
+            page, TEST_ADMIN, mechanicsCharacter(uniqueName('Unread'))
         );
         runDjangoShell(
             'from characters.models import Character; '
@@ -282,7 +293,7 @@ test.describe('Sheet mechanics', () => {
         const leftOver = Math.round(mail * 10) / 100;
         const purse = sword + mail + leftOver;
         await loginAs(page, TEST_USER);
-        await importCharacter(page, `Buyer ${Date.now()}`);
+        await importCharacter(page, uniqueName('Buyer'));
         await setPurse(page, browser, purse);
 
         await page.locator('#equipment-category').selectOption('weapons');
@@ -300,7 +311,9 @@ test.describe('Sheet mechanics', () => {
         await page.locator('#equipment-category').selectOption('armor');
         await page.locator('#equipment-item').selectOption('chainmail');
         await page.locator('#add-equipment-btn').click();
-        await expect(page.locator('.notice .notice-text').first()).toContainText('Not enough coin');
+        await expect(page.locator('.notice .notice-text').first()).toContainText(
+            refusalFixedParts('characters', 'purse', 'not_enough')[0]
+        );
 
         // Removing an item returns nothing (the #757 review ruling).
         const swordRow = page.locator('.equipment-row', { hasText: 'Broadsword' });
@@ -312,7 +325,7 @@ test.describe('Sheet mechanics', () => {
     });
 
     test('#774/#755/#18: a spell of the rolled school is learned, on the sheet and seated in battle', async ({ page, browser }) => {
-        const name = `Own Caster ${Date.now()}`;
+        const name = uniqueName('Own Caster');
         await loginAs(page, TEST_USER);
         await importCharacter(page, name);
 
@@ -349,7 +362,7 @@ test.describe('Sheet mechanics', () => {
         await expect(page.locator('#free-points')).toHaveText('1');
 
         await createBattleViaSetup(page, {
-            name: `E2E Own Caster ${Date.now()}`,
+            name: uniqueName('E2E Own Caster'),
             fighters: 1,
             seed: 5,
             characterNames: [name],
@@ -362,7 +375,7 @@ test.describe('Sheet mechanics', () => {
     });
 
     test('#18: a spell is cast in the story from the sheet, by a player and a Game Master', async ({ page, browser }) => {
-        const name = `Story Caster ${Date.now()}`;
+        const name = uniqueName('Story Caster');
         await loginAs(page, TEST_USER);
         await importCharacter(page, name);
         const characterId = characterIdFromUrl(page);

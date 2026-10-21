@@ -14,7 +14,9 @@
  */
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
+const { refusalFixedParts } = require('./refusals');
 
 const PAGE_SIZE = 50;
 const TURNS = PAGE_SIZE + 2;
@@ -38,8 +40,8 @@ print('SESSION', session.pk)
 }
 
 test.describe('GM page — a long session, a page at a time (#972)', () => {
-    test('the latest turns show; Show earlier loads the page above in place', async ({ page }, testInfo) => {
-        const sessionId = seedLongSession(`${testInfo.workerIndex}-${Date.now()}`);
+    test('the latest turns show; Show earlier loads the page above in place', async ({ page }) => {
+        const sessionId = seedLongSession(uniqueStamp());
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
 
@@ -84,8 +86,8 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
         await expect(control).toContainText('3 earlier turns not shown.');
     });
 
-    test('the Campaign tab lists the latest resolved threads and loads the rest', async ({ page }, testInfo) => {
-        const sessionId = seedLongSession(`threads-${testInfo.workerIndex}-${Date.now()}`);
+    test('the Campaign tab lists the latest resolved threads and loads the rest', async ({ page }) => {
+        const sessionId = seedLongSession(`threads-${uniqueStamp()}`);
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
         await page.click('#gm-panel-tab-campaign');
@@ -104,9 +106,9 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
         await expect(resolved.locator('[data-earlier]')).toHaveCount(0);
     });
 
-    test('Reopen on a thread from an earlier page leaves the loaded pages in place (#982)', async ({ page }, testInfo) => {
+    test('Reopen on a thread from an earlier page leaves the loaded pages in place (#982)', async ({ page }) => {
         // Reopen is a Game Master's control.
-        const sessionId = seedLongSession(`reopen-${testInfo.workerIndex}-${Date.now()}`, TEST_ADMIN);
+        const sessionId = seedLongSession(`reopen-${uniqueStamp()}`, TEST_ADMIN);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
         await page.click('#gm-panel-tab-campaign');
@@ -127,7 +129,9 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
         // The change is saved and shown: the thread is open again, so it has
         // left the resolved list. Every other thread loaded stays, the
         // earlier page among them, and the list is still open.
-        await expect(page.locator('#gm-panel-campaign-status')).toContainText('Reopened thread');
+        await expect(page.locator('#gm-panel-campaign-status')).toContainText(
+            refusalFixedParts('gm', 'hand_records', 'thread_reopened')[0]
+        );
         await expect(page.locator('#gm-campaign-threads-group')).toContainText('Settled matter 1');
         await expect(resolved.locator('summary')).toHaveText(`${TURNS - 1} resolved`);
         await expect(names).toHaveCount(TURNS - 1);
@@ -137,8 +141,8 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
         await expect(resolved.locator('[data-earlier]')).toHaveCount(0);
     });
 
-    test('an earlier page that lands after a turn refetched the tab is still shown (#14)', async ({ page }, testInfo) => {
-        const sessionId = seedLongSession(`race-${testInfo.workerIndex}-${Date.now()}`);
+    test('an earlier page that lands after a turn refetched the tab is still shown (#14)', async ({ page }) => {
+        const sessionId = seedLongSession(`race-${uniqueStamp()}`);
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
         await page.click('#gm-panel-tab-campaign');

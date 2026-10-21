@@ -61,8 +61,12 @@ from .turn_engine.messages import plan_message, planning_rules
 from .turn_engine.policy import TurnPolicy
 
 #: Each section built from the rules, by its builder, and the SHA-256 of its
-#: text under the default canon's rules. ``section_core`` and
-#: ``section_dm_authority`` are byte for byte what they were before #68; the
+#: text under the default canon's rules. ``section_dm_authority`` is byte for
+#: byte what it was before #68, and ``section_core`` was until #150 (it was
+#: da9031c648b4d17c88cd8a9cc964febf405f610c7162879660ea90f09033d464): its
+#: attributes line no longer gives WIS "Anchor rolls during Runaway" by hand,
+#: and ends instead on both Anchor rolls from the canon's ``runaway`` (the
+#: caster's 3d6 ≤ WIS, a third-party mage's 2d10 ≤ INT in the default). The
 #: other four changed where the data could not reproduce the old prose (each
 #: track's XP a year and the label "Hunter/Gatherer", the weapon, armour and
 #: shield lists, Heavy encumbrance's "or slow", the plan examples' track).
@@ -71,7 +75,7 @@ from .turn_engine.policy import TurnPolicy
 #: which canon is loaded. Its built bodies are pinned as text instead, below.
 DEFAULT_SECTION_HASHES: dict[Callable[[], str], str] = {
     engine.section_core: (
-        "da9031c648b4d17c88cd8a9cc964febf405f610c7162879660ea90f09033d464"
+        "ad05e5ac1ffb07566b07d9ffb66fdaadb3ca1fd0ecb721a4b961bc7e4d15c50e"
     ),
     engine.section_character_creation: (
         "db4206fb59b14f980abee3e499b4a0a2dc01b10d9d74691cccf3191e72d84932"
@@ -101,7 +105,9 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "13 or more fails whatever the attribute: 13: bad fumble (spell fails, "
             "mana lost); 14: catastrophic (spell fails, mana lost) — triggers "
             "Runaway; 15-18: fumble (spell fails, mana kept).",
-            "Invest extra mana for greater effect. No more than 3 mana may be "
+            "Invest extra mana for greater effect. The push's bonus: +1 to the "
+            "spell's rolled damage for each mana pushed. Only a spell that rolls "
+            "damage can be pushed. No more than 3 mana may be "
             "pushed. Control Roll: 3d6 ≤ INT − (spell "
             "cost + mana pushed). Fail by 1-4: Slip (spell takes effect without the "
             "push's bonus). Fail by 5+: Surge, a Runaway (spell fails). Natural 18: "
@@ -224,7 +230,11 @@ UNLIKE_EITHER_CANONS_MAGIC_RULES = replace(
             ),
         ),
         automatic_runaway_totals=frozenset({16, 2}),
-        effect_bonus_per_mana_by_kind={SpellEffectKind.DAMAGE: 1},
+        effect_bonus_per_mana_by_kind={
+            SpellEffectKind.DAMAGE: 2,
+            SpellEffectKind.HEALING: 3,
+        },
+        spell_effect_bonus_per_mana={"fire_missile": 4},
     ),
     channel=ChannelRules(
         derivations={
@@ -270,7 +280,7 @@ OTHER_END_MAGIC_RULES = replace(
         penalty_per_mana=0,
         base_cost_counts_as_invested=False,
         automatic_runaway_totals=frozenset(),
-        effect_bonus_per_mana_by_kind={SpellEffectKind.DAMAGE: 1},
+        effect_bonus_per_mana_by_kind={},
         failure_bands=(
             ControlBand(
                 key="runaway",
@@ -398,6 +408,15 @@ class DefaultCanonTextTest(SimpleTestCase):
         for heading, body in DEFAULT_MAGIC_BODIES.items():
             with self.subTest(heading=heading):
                 self.assertEqual(magic_body(heading), body)
+
+    def test_the_core_section_names_both_anchor_rolls(self) -> None:
+        """#150: the caster's Anchor roll is WIS and a helper's INT, not WIS."""
+        self.assertIn(
+            "survival saves. During a Runaway the caster's Anchor roll is 3d6 ≤ WIS "
+            "and a third-party mage's is 2d10 ≤ INT.\n",
+            engine.section_core(),
+        )
+        self.assertNotIn("Anchor rolls during Runaway", engine.section_core())
 
     def test_the_plan_calls_rules_line_is_the_pinned_text(self) -> None:
         self.assertEqual(
@@ -733,7 +752,9 @@ class InventedRulesTest(SimpleTestCase):
             [
                 "The attribute alone judges a casting roll: no natural total fails on "
                 "its own, a failed cast keeps its mana, and no cast starts a Runaway.",
-                "Invest extra mana for greater effect. No more than 2 mana may be "
+                "Invest extra mana for greater effect. The push's bonus: +1 to the "
+                "spell's rolled damage for each mana pushed. Only a spell that "
+                "rolls damage can be pushed. No more than 2 mana may be "
                 "pushed. Control Roll: 3d6 ≤ INT − (mana "
                 "pushed). Fail by 1-2: Waver (spell takes effect without the push's "
                 "bonus). Fail by 3+: Bolt, a Runaway (spell fails).",
@@ -754,19 +775,78 @@ class InventedRulesTest(SimpleTestCase):
             body = magic_body(PUSH)
         self.assertEqual(
             body,
-            "Invest extra mana for greater effect. Control Roll: 2d8 ≤ WIS − 2 × "
-            "(spell cost + mana pushed). Fail by 1: Flicker (spell takes effect with "
+            "Invest extra mana for greater effect. The push's bonus, for each mana "
+            "pushed: +2 to its rolled damage, +3 to its rolled healing. Fire "
+            "Missile: +4 for each mana pushed, whatever its kind's bonus. Only a "
+            "spell that rolls damage or healing can be pushed. Control Roll: 2d8 ≤ "
+            "WIS − 2 × (spell cost + mana pushed). Fail by 1: Flicker (spell takes effect with "
             "the push's bonus). Fail by 2-4: Stagger (spell takes effect without the "
             "push's bonus). Fail by 5-8: Fizzle (spell fails). Fail by 9+: Wild "
             "surge, a Runaway (spell fails). Natural 2 or 16: always Wild surge, a "
             "Runaway.",
         )
 
+    def test_the_core_section_takes_the_anchor_rolls_from_the_rules(self) -> None:
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            core = engine.section_core()
+        self.assertIn(
+            "During a Runaway the caster's Anchor roll is 2d8 ≤ INT and a third-party "
+            "mage's is 2d10 ≤ WIS.",
+            core,
+        )
+
+    def test_one_anchor_roll_for_both_is_said_once(self) -> None:
+        rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
+        assert rules.runaway is not None
+        alike = replace(
+            rules,
+            runaway=replace(rules.runaway, helper_anchor=rules.runaway.self_anchor),
+        )
+        with seated_rules(alike):
+            core = engine.section_core()
+        self.assertIn(
+            "During a Runaway an Anchor roll is 2d8 ≤ INT, the caster's or a "
+            "third-party mage's.",
+            core,
+        )
+
+    def test_no_runaway_rules_no_anchor_roll_in_the_core(self) -> None:
+        with seated_rules(replace(UNLIKE_EITHER_CANONS_MAGIC_RULES, runaway=None)):
+            core = engine.section_core()
+        self.assertNotIn("Anchor", core)
+        self.assertIn("survival saves.\nSecondary: ", core)
+
+    def test_a_named_spell_whose_kind_takes_no_bonus_may_be_pushed(self) -> None:
+        rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
+        assert rules.push is not None
+        for by_kind, closing in (
+            (
+                {SpellEffectKind.DAMAGE: 1},
+                "Only a spell that rolls damage, or one named above, can be pushed.",
+            ),
+            ({}, "Only a spell named above can be pushed."),
+        ):
+            healing_named = replace(
+                rules,
+                push=replace(
+                    rules.push,
+                    effect_bonus_per_mana_by_kind=by_kind,
+                    spell_effect_bonus_per_mana={"heal": 2},
+                ),
+            )
+            with self.subTest(by_kind=by_kind), seated_rules(healing_named):
+                body = magic_body(PUSH)
+                self.assertIn(
+                    f"Heal: +2 for each mana pushed, whatever its kind's bonus. "
+                    f"{closing} Control Roll: ",
+                    body,
+                )
+
     def test_a_push_with_no_cap_states_none(self) -> None:
         with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
             body = magic_body(PUSH)
         self.assertNotIn("No more than", body)
-        self.assertIn("Invest extra mana for greater effect. Control Roll: ", body)
+        self.assertIn(" can be pushed. Control Roll: ", body)
 
     def test_a_push_with_no_runaway_band_starts_no_runaway_in_escalation(
         self,
@@ -902,8 +982,8 @@ class InventedRulesTest(SimpleTestCase):
         self.assertEqual(
             bodies,
             {
-                PUSH: "Invest extra mana for greater effect. Control Roll: 3d6 ≤ INT. "
-                "Fail by 1+: Runaway (spell fails).",
+                # Nothing takes a push bonus, so no Control Roll follows one.
+                PUSH: engine.NOTHING_PUSHABLE_SENTENCE,
                 RUNAWAY: "The spell feeds on the caster: each turn it drains mana "
                 "equal to the original casting cost and its effect grows "
                 "unpredictably (GM decides). At 0 mana the caster falls unconscious "

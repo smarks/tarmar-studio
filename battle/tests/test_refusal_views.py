@@ -29,6 +29,8 @@ from battle.models import Battle, BattleDraft
 from battle.refusal_words import refusal_words
 from battle.refusals import BattleRefusal
 from battle.services import advance_turn, create_battle
+from common.helpers import SCRIPT_CALLER_HEADERS
+from common.refusal_words import refusal_words as common_refusal_words
 from common.test_helpers import BaseTestCase, logged_exception
 
 #: An internal check's text, as the issue quoted it: ids and state, not words
@@ -235,7 +237,8 @@ class BattleViewRefusalTest(BaseTestCase):
         self.assertIn(INTERNAL_TEXT, str(logged_exception(logged)))
         if endpoint.answers_json:
             self.assertEqual(
-                response.json()["error"], refusal_words().views.request_failed
+                response.json()["error"],
+                common_refusal_words().decorators.request_failed,
             )
 
     def test_what_django_answers_itself_is_left_to_django(self):
@@ -301,7 +304,7 @@ class BattleViewRefusalTest(BaseTestCase):
                     response = self.post(
                         endpoint,
                         BattleDraft.DoesNotExist(),
-                        headers={"X-Requested-With": "XMLHttpRequest"},
+                        headers=SCRIPT_CALLER_HEADERS,
                     )
 
                 self.assertEqual(response.status_code, 404)
@@ -319,7 +322,9 @@ class BattleViewRefusalTest(BaseTestCase):
             response = self.client.get(reverse("battle:state", args=[self.battle.pk]))
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
+        self.assertEqual(
+            response.json()["error"], common_refusal_words().decorators.request_failed
+        )
         self.assertNotIn("4242", response.content.decode())
         self.assertIn(INTERNAL_TEXT, str(logged_exception(logs.records[0])))
 
@@ -370,7 +375,9 @@ class BattleViewRefusalTest(BaseTestCase):
         ):
             response = self._post_choice(battle, choice)
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
+        self.assertEqual(
+            response.json()["error"], common_refusal_words().decorators.request_failed
+        )
         return response, logged_exception(logs.records[0])
 
     def test_an_engine_error_on_a_players_choice_stays_in_the_log(self):

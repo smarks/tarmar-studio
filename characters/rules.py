@@ -81,9 +81,19 @@ What the values mean, and what else is refused:
 - ``defaults``: the row of each table a character holds until it is rolled
   or set (issue #66): a label of ``social_class``, of the detail table that
   label names, of ``location`` and of ``wealth``. A default that names no
-  row is refused. Nothing in studio's code names a row of these tables;
-  the ``Character`` model's defaults and the Games Master's blank draft read
-  this block.
+  row is refused. The ``Character`` model's defaults and the Games Master's
+  blank draft read this block.
+
+No studio code names a row of these tables: whatever is shown, refused or
+decided by a row reads it here. The default rows come from ``defaults``; the
+origins left to the Game Master and the ones with a check from
+:attr:`LocationTable.game_master_origins` and
+:attr:`LocationTable.checked_origins`, which the Games Master's prompt and
+refusals (issue #128) and the sheet's help and refusals (issue #151) name
+them through; what each origin grants from its row. A comment or docstring
+that quotes a row ("Consult GM", "Village") quotes the public pages' canon as
+an example. A Rich character's "Consult GM" coin is wealth.md's phrase for a
+coin the table leaves null, not a row's label.
 
 Dice are ``NdS`` or ``NdS±M`` in ``common.rolling``'s standard form (no
 spaces, a lower-case ``d``, no leading zeros, no ``+0``); the lowest and

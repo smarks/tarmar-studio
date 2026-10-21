@@ -43,6 +43,15 @@
     }
 
     /**
+     * The header that marks a request as the page's script rather than a
+     * plain form post. ``common.helpers.wants_json`` reads it, so an endpoint
+     * that serves both answers a script in JSON, a server failure included
+     * (issues #89, #139). Named once here: a fetch that needs it spreads this
+     * in, or asks postWithCsrf for it with ``scripted``.
+     */
+    const SCRIPT_CALLER_HEADERS = Object.freeze({ 'X-Requested-With': 'XMLHttpRequest' });
+
+    /**
      * POST with Django's CSRF header attached.
      *
      * Returns the raw Response, not parsed JSON: callers need the response
@@ -56,13 +65,17 @@
      *   sent as JSON; a FormData is passed through untouched so the browser
      *   can set its own multipart Content-Type (with the boundary) — setting
      *   one here would corrupt the upload.
+     * @param {{scripted?: boolean}} [how] - ``scripted`` adds
+     *   SCRIPT_CALLER_HEADERS, for an endpoint that also serves a form post
+     *   and must know a bodyless post came from script (issue #139).
      * @returns {Promise<Response>}
      */
-    async function postWithCsrf(url, csrfToken, body = null) {
+    async function postWithCsrf(url, csrfToken, body = null, { scripted = false } = {}) {
         const options = {
             method: 'POST',
             headers: {
-                'X-CSRFToken': csrfToken
+                'X-CSRFToken': csrfToken,
+                ...(scripted ? SCRIPT_CALLER_HEADERS : {})
             }
         };
         if (body !== null) {
@@ -219,6 +232,98 @@
     function putCaret(field, caret) {
         if (!caret) { return; }
         field.setSelectionRange(caret.start, caret.end, caret.direction);
+    }
+
+    /**
+     * The requests on their way, by the key of the control that sent them.
+     *
+     * Held here, by a key that names what the control changes, rather than
+     * on the control: a panel's refetch replaces its forms and buttons while
+     * a request is out, and a press on the fresh control used to send a
+     * second one -- a Luck spend (issue #105), a hand-made record or a new
+     * session (issue #142). One press sends one request.
+     */
+    const heldRequests = new Set();
+
+    /**
+     * Whether a request sent under ``key`` is still on its way.
+     * @param {string} key
+     * @returns {boolean}
+     */
+    function requestHeld(key) {
+        return heldRequests.has(key);
+    }
+
+    /**
+     * Run ``work`` as the one request under ``key``, and say whether it ran.
+     *
+     * A second call while the first is out does nothing and answers false.
+     * ``repaint`` is called once the key is held and again once it is freed,
+     * so the page paints its controls from :func:`requestHeld`.
+     *
+     * @param {string} key - What the request changes, as one string.
+     * @param {Function} work - Sends the request; its answer is returned.
+     * @param {Function} [repaint] - Paints the page's held controls.
+     * @returns {Promise<*>} ``work``'s answer, or false when one was out.
+     */
+    async function holdRequest(key, work, repaint) {
+        if (heldRequests.has(key)) return false;
+        heldRequests.add(key);
+        if (repaint) repaint();
+        try {
+            return await work();
+        } finally {
+            heldRequests.delete(key);
+            if (repaint) repaint();
+        }
+    }
+
+    /**
+     * Where a held button keeps the state the server rendered it in, so
+     * freeing it puts that back rather than switching it on (as
+     * battle-setup.js's guard keeps its renderedDisabled).
+     */
+    const RENDERED_DISABLED = 'renderedDisabled';
+
+    /**
+     * Hold ``control`` (a button or a field) while its request is out, or
+     * free it to the state it was rendered in.
+     * @param {HTMLButtonElement|HTMLInputElement} control
+     * @param {boolean} held
+     */
+    function paintHeldControl(control, held) {
+        const kept = RENDERED_DISABLED in control.dataset;
+        if (held) {
+            if (!kept) control.dataset[RENDERED_DISABLED] = String(control.disabled);
+            control.disabled = true;
+        } else if (kept) {
+            control.disabled = control.dataset[RENDERED_DISABLED] === 'true';
+            delete control.dataset[RENDERED_DISABLED];
+        }
+    }
+
+    /**
+     * The buttons ``form`` is submitted with: each button with no type or
+     * with type "submit", as a browser counts them (issue #142's review).
+     * @param {HTMLFormElement} form
+     * @returns {HTMLButtonElement[]}
+     */
+    function submitButtonsOf(form) {
+        return Array.from(form.querySelectorAll('button:not([type]), button[type="submit"]'));
+    }
+
+    /**
+     * Set the state ``control`` is drawn in from the page's state: at once,
+     * or, while a request holds it, as the state it is freed to.
+     * @param {HTMLButtonElement|HTMLInputElement} control
+     * @param {boolean} disabled
+     */
+    function setRenderedDisabled(control, disabled) {
+        if (RENDERED_DISABLED in control.dataset) {
+            control.dataset[RENDERED_DISABLED] = String(disabled);
+        } else {
+            control.disabled = disabled;
+        }
     }
 
     /**
@@ -437,6 +542,7 @@
     root.showFieldError = showFieldError;
     root.clearFieldError = clearFieldError;
     root.FIELD_NETWORK_ERROR = FIELD_NETWORK_ERROR;
+    root.SCRIPT_CALLER_HEADERS = SCRIPT_CALLER_HEADERS;
     root.postWithCsrf = postWithCsrf;
     root.postJson = postJson;
     root.postForSuccess = postForSuccess;
@@ -445,6 +551,11 @@
     root.putCaret = putCaret;
     root.elementByFocusKey = elementByFocusKey;
     root.formatSigned = formatSigned;
+    root.requestHeld = requestHeld;
+    root.holdRequest = holdRequest;
+    root.paintHeldControl = paintHeldControl;
+    root.setRenderedDisabled = setRenderedDisabled;
+    root.submitButtonsOf = submitButtonsOf;
     root.uiNotify = uiNotify;
     root.uiConfirm = uiConfirm;
     root.uiPrompt = uiPrompt;
@@ -456,7 +567,8 @@
     // Export for testing (Node.js environment)
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
-            csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
+            csrfToken, SCRIPT_CALLER_HEADERS, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
+            requestHeld, holdRequest, paintHeldControl, setRenderedDisabled, submitButtonsOf,
             uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation, filledWords, appendFilledWords,
             showFieldError, clearFieldError, FIELD_NETWORK_ERROR
         };

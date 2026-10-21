@@ -13,6 +13,7 @@ from battle.services import (
     create_battle,
     take_seat,
 )
+from common.refusal_words import refusal_words as common_refusal_words
 from common.test_helpers import BaseTestCase, create_character, logged_exception
 
 
@@ -190,7 +191,9 @@ class BattleAdvanceTest(BaseTestCase):
         response, records = self._advance_failing_with(self.battle, secret)
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
+        self.assertEqual(
+            response.json()["error"], common_refusal_words().decorators.request_failed
+        )
         self.assertNotIn("hunter2", response.content.decode())
         self.assertNotIn("RuntimeError", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
@@ -205,7 +208,9 @@ class BattleAdvanceTest(BaseTestCase):
         response, records = self._advance_failing_with(own_battle, secret)
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
+        self.assertEqual(
+            response.json()["error"], common_refusal_words().decorators.request_failed
+        )
         self.assertNotIn("secret_token", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
 
@@ -219,7 +224,7 @@ class BattleAdvanceTest(BaseTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            response.json(), {"error": "This battle is still in its lobby"}
+            response.json(), {"error": refusal_words().services.still_in_lobby}
         )
 
     def test_advance_requires_post(self):

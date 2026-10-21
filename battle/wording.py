@@ -2,7 +2,9 @@
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
 headings and buttons, the battle-log lines, the refusals and the turn menu's
-lines (#90) live in ``config/battle-rulings.toml``, which Spencer edits with no
+lines (#90), and the battle log's other lines, the roster's notes and who
+decides for a figure (#136) live in ``config/battle-rulings.toml``, which
+Spencer edits with no
 Python, read once at startup into ``settings.BATTLE_RULINGS_WORDING`` by
 :func:`load_rulings_wording`. A missing or unknown key, a value that is not
 text, and a ``{name}`` a sentence may not use all stop the server then, not in
@@ -127,7 +129,7 @@ class TarmarMenuWords:
 
 @dataclass(frozen=True)
 class ClassicMenuWords:
-    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90)."""
+    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90, #146)."""
 
     move_word: str = sentence()
     no_foe_in_reach: str = sentence("reason", "weapon", required=("reason",))
@@ -156,6 +158,12 @@ class ClassicMenuWords:
     crawl: str = sentence("hexes")
     disengage: str = sentence()
     hth_attack: str = sentence("aimed", "grapple")
+    shift_grapple: str = sentence("struck", "grapple")
+    then_grapple: str = sentence("line", "struck", "grapple", required=("line",))
+    no_attack: str = sentence("line", "reason", required=("line", "reason"))
+    no_foe_struck: str = sentence("weapon")
+    cannot_carry_out: str = sentence("line", required=("line",))
+    no_grapple: str = sentence()
     cast_cost: str = sentence("strength")
     go_prone: str = sentence()
     kneel: str = sentence()
@@ -262,6 +270,101 @@ class MagicBoundsWords:
 
 
 @dataclass(frozen=True)
+class CastStageWords:
+    """The cast stage's rows, both profiles (#145): each spell's name, its
+    cost, its chance, and why it cannot be cast when it cannot."""
+
+    row_at: str = sentence("spell", "target", required=("spell", "target"))
+    mana_pool: str = sentence()
+    mana_cost: str = sentence("school", "level")
+    renews: str = sentence()
+    nothing_to_aim_at: str = sentence()
+    no_kind_of_magic: str = sentence()
+    past_channel: str = sentence("level", "limit")
+    mana_short: str = sentence("level", "mana")
+    mana_borrowable: str = sentence("level", "mana", "shortfall")
+    mana_chance: str = sentence(
+        "chance", "attribute", "floor", "aim", required=("floor", "aim")
+    )
+    under_fumble_floor: str = sentence("floor")
+    dex_to_land: str = sentence()
+    less_injury: str = sentence("attribute", "injury", required=("attribute",))
+    less_off_balance: str = sentence(
+        "attribute", "off_balance", required=("attribute",)
+    )
+    less_both: str = sentence(
+        "attribute", "injury", "off_balance", required=("attribute",)
+    )
+    strength_pool: str = sentence()
+    strength_cost: str = sentence("kind", "strength")
+    nothing_to_cast_at: str = sentence()
+    strength_short: str = sentence("needed", "strength")
+    strength_chance: str = sentence("chance", "needed", "range", required=("range",))
+    before_range: str = sentence()
+    missile_spell: str = sentence()
+    thrown_spell: str = sentence()
+    creation_spell: str = sentence()
+    special_spell: str = sentence()
+
+
+@dataclass(frozen=True)
+class ServicesWords:
+    """``battle.services``'s words that are not refusals (issue #136): the
+    battle log's lines and the notes a fight's roster and seats carry. A cast
+    option's cost is ``[cast_stage] mana_cost`` (#145)."""
+
+    records_withheld: str = sentence("name", "reason", required=("reason",))
+    withheld_other_players: str = sentence()
+    withheld_not_game_master: str = sentence()
+    a_character: str = sentence()
+    pools_taken: str = sentence("pools", required=("pools",))
+    figure_pools: str = sentence(
+        "name", "fatigue_was", "fatigue", "body_was", "body", "mana_was", "mana"
+    )
+    figure_owed: str = sentence("owed_was", "owed")
+    stays_dead: str = sentence("names", required=("names",))
+    stay_dead: str = sentence("names", required=("names",))
+    stays_off: str = sentence("names", required=("names",))
+    stay_off: str = sentence("names", required=("names",))
+    seat_taken: str = sentence("game_master", "name", "owner")
+    seat_returned: str = sentence("name", "owner")
+    leaves_fight: str = sentence("name", "owner")
+    team_victorious: str = sentence("team", "names")
+    victorious: str = sentence("name")
+    stalemate: str = sentence("turns", "names")
+    re_armed: str = sentence("names", required=("names",))
+    no_spell_crosses: str = sentence("names", required=("names",))
+    reach_no_spell: str = sentence("names", required=("names",))
+    unarmed_one: str = sentence("names", required=("names",))
+    unarmed: str = sentence("names", required=("names",))
+    unarmed_attached: str = sentence("unarmed", required=("unarmed",))
+    bare_handed_one: str = sentence("names", required=("names",))
+    bare_handed: str = sentence("names", required=("names",))
+    chosen_by: str = sentence("owner", "rationale", required=("rationale",))
+    open_seat: str = sentence("number")
+
+
+@dataclass(frozen=True)
+class ControlWords:
+    """``battle.control``'s words (issue #136): who decides for a figure, the
+    roster card's line about it, and the log line a change of mode writes."""
+
+    ai_owner: str = sentence()
+    guest_owner: str = sentence()
+    you: str = sentence()
+    their_owners: str = sentence()
+    automatic: str = sentence()
+    manual: str = sentence()
+    manual_line: str = sentence("owner")
+    automatic_line: str = sentence("ai")
+    every_combatant_follows: str = sentence("mode", "decided_by")
+    battle_default: str = sentence("mode", "decided_by")
+    follows_again: str = sentence("name", "mode", "decided_by")
+    played_by_hand: str = sentence("name", "decided_by")
+    hands_to_ai: str = sentence("name", "ai")
+
+
+@dataclass(frozen=True)
 class RulingsWording:
     """The whole file: one table per ruling, and the words they share."""
 
@@ -272,6 +375,9 @@ class RulingsWording:
     turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
+    cast_stage: CastStageWords
+    services: ServicesWords
+    control: ControlWords
 
 
 def load_rulings_wording(path: Path) -> RulingsWording:

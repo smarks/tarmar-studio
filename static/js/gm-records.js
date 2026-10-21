@@ -16,7 +16,12 @@
  *
  * The server decides who may (gm/hand_records.py): these controls are only
  * drawn for a Game Master, and a request from anyone else is refused.
- * postWithCsrf/csrfToken/uiConfirm come from api.js.
+ * One press sends one request (issue #142): each control's request is held
+ * under a key naming its endpoint, its change and its record
+ * (data-draft-key on a form, data-focus-key on a button), which the
+ * Campaign tab's refetch does not replace, and its button stays held until
+ * the answer lands, on the fresh control too.
+ * postWithCsrf/csrfToken/uiConfirm/holdRequest come from api.js.
  */
 if (typeof module !== 'undefined' && module.exports) {
   require('./api.js');
@@ -91,7 +96,58 @@ if (typeof module !== 'undefined' && module.exports) {
     setLine(CAMPAIGN_LINES.statusId, `${data.message} ${data.set_by ? `(${data.set_by})` : ''}`.trim());
   }
 
+  /** Every hand control: the forms and the record buttons. */
+  const HAND_CONTROLS = '.gm-hand-form, .gm-hand-action';
+
+  /**
+   * The key a control's request is held under (issue #142): its endpoint
+   * (which names the session), its change and the record it names -- the
+   * same on the control a refetch puts in its place. The recap's form,
+   * which no refetch replaces, has its id.
+   * @param {HTMLElement} control - A `.gm-hand-form` or `.gm-hand-action`.
+   * @returns {string}
+   */
+  function heldKey(control) {
+    const { url, change, draftKey, focusKey } = control.dataset;
+    const record = draftKey || focusKey || control.id;
+    if (!record) {
+      // Every such control would share one key and hold the others.
+      throw new Error('a hand control names no record (data-draft-key, data-focus-key or id)');
+    }
+    return `${url} ${change} ${record}`;
+  }
+
+  /** The buttons a control is pressed with: a form's submit, or the button. */
+  function pressedBy(control) {
+    return control.matches('form') ? root.submitButtonsOf(control) : [control];
+  }
+
+  /**
+   * Hold every hand control in ``scope`` whose request is on its way, and
+   * free the rest to the state they were rendered in. gm-panel-characters.js
+   * calls this on each tab it fetches again.
+   * @param {ParentNode} scope
+   */
+  function paintHeld(scope) {
+    scope.querySelectorAll(HAND_CONTROLS).forEach((control) => {
+      const held = root.requestHeld(heldKey(control));
+      pressedBy(control).forEach((button) => root.paintHeldControl(button, held));
+    });
+  }
+
+  function paintPageHeld() {
+    paintHeld(root.document);
+  }
+
   async function submitForm(form) {
+    return root.holdRequest(heldKey(form), () => sendForm(form), paintPageHeld);
+  }
+
+  async function pressButton(button) {
+    return root.holdRequest(heldKey(button), () => sendButton(button), paintPageHeld);
+  }
+
+  async function sendForm(form) {
     const body = { ...formFields(form), change: form.dataset.change };
     if (form.id === 'gm-fold-recap-form') {
       const data = await send(form.dataset.url, body, {
@@ -114,7 +170,7 @@ if (typeof module !== 'undefined' && module.exports) {
     return true;
   }
 
-  async function pressButton(button) {
+  async function sendButton(button) {
     if (button.dataset.confirm && root.uiConfirm) {
       const sure = await root.uiConfirm(button.dataset.confirm);
       if (!sure) return false;
@@ -143,7 +199,7 @@ if (typeof module !== 'undefined' && module.exports) {
     });
   }
 
-  const api = { submitForm, pressButton, init };
+  const api = { submitForm, pressButton, paintHeld, init };
   root.gmRecords = api;
 
   if (typeof module !== 'undefined' && module.exports) {

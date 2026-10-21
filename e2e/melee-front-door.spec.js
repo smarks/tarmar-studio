@@ -13,6 +13,7 @@ const {
     test, expect, TEST_USER, createBattleViaSetup, loginAs, passGateOnCurrentPage,
     ARENA_ORIGIN,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test.describe('The melee front door', () => {
     test('login on the arena host lands on the battle list', async ({ page }) => {
@@ -61,7 +62,7 @@ test.describe('The melee front door', () => {
         // Straight through with no other input: muster, name, start. The
         // seat is what makes the battle pause in a lobby, which is where a
         // player is told what they are joining.
-        const battleName = `E2E Arena Default ${Date.now()}`;
+        const battleName = uniqueName('E2E Arena Default');
         await createBattleViaSetup(page, {
             origin: ARENA_ORIGIN, name: battleName, fighters: 2, seed: 332,
             playerSeats: 1,

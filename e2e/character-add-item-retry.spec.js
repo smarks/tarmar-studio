@@ -12,9 +12,10 @@
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, postAsGameMaster, characterIdFromUrl,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
-test('a refused add leaves the picker as it was, and the retry is one click', async ({ page, browser }, testInfo) => {
-    const name = `Retrying ${testInfo.workerIndex}${Date.now()}`;
+test('a refused add leaves the picker as it was, and the retry is one click', async ({ page, browser }) => {
+    const name = uniqueName('Retrying');
     await loginAs(page, TEST_USER);
     await createNamedCharacter(page, name);
     // A dagger is bought (issue #757) and a rolled Rich character starts with

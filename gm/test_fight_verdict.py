@@ -20,15 +20,16 @@ from django.utils import timezone
 
 from battle.models import Battle
 from battle.services import advance_turn, restart_battle
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, says
 
 from . import summary
 from .battle_report import ending_of, fight_verdict, file_fight_verdict
 from .fight import FOE_TEAM, PARTY_TEAM, start_fight
 from .models import GMSession
+from .refusal_words import refusal_words
 from .retrieval import FIGHT_VERDICT_KIND, model_messages
 from .test_fight import play_turn
-from .testing import gm_replies
+from .testing import gm_replies, with_fixed_gm_refusals
 from .turn_engine.history import model_history
 
 CHAT_URL = "/tarmar/gm/"
@@ -82,10 +83,13 @@ class FightVerdictTest(BaseTestCase):
         text = fight_verdict(battle)
 
         assert text is not None
-        self.assertTrue(text.startswith("The fight is over: "))
+        words = refusal_words().battle_report
+        self.assertTrue(text.startswith(f"{words.fight_over}: "))
         self.assertIn("Aldwin: ", text)
-        self.assertNotIn("Foes stands", text)
-        self.assertNotIn("Party stands", text)
+        # The verdict is the session's sentence for the winning side, not the
+        # battle's own line for the team.
+        verdicts = (words.foes_victorious, words.party_victorious)
+        self.assertTrue(any(says(text, verdict) for verdict in verdicts), text)
         # Only the party's figures are listed after the verdict.
         self.assertNotIn("Gray Wolf: ", text)
 
@@ -111,7 +115,11 @@ class FightVerdictTest(BaseTestCase):
 
         answer = self.ask()
 
-        self.assertTrue(answer["verdict"].startswith("The fight is over: "))
+        self.assertTrue(
+            answer["verdict"].startswith(
+                f"{refusal_words().battle_report.fight_over}: "
+            )
+        )
         self.assertEqual(answer["battle_id"], self.battle.pk)
         self.session.refresh_from_db()
         self.assertEqual((self.session.history_json, self.session.updated_at), before)
@@ -227,8 +235,15 @@ class FightVerdictTest(BaseTestCase):
         self.assertEqual(response.status_code, 404)
 
 
+@with_fixed_gm_refusals
 class VerdictWordingTest(BaseTestCase):
-    """The side a session fight calls Foes stands with a plural verb (#785)."""
+    """The side a session fight calls Foes stands with a plural verb (#785).
+
+    Built from the victory's record, its team and the figures it left
+    standing, in the configured words -- never by matching the battle's own
+    line, whose words are configuration too (#136). The line here is written
+    as nothing the session could match.
+    """
 
     def setUp(self):
         super().setUp()
@@ -237,17 +252,21 @@ class VerdictWordingTest(BaseTestCase):
         self.session.characters.add(create_character(game_master, name="Mira"))
         self.battle = start_fight(self.session, foes_text="gray wolf", seed=3).battle
 
+    #: The battle's own line, as no configured sentence would write it.
+    LINE = "the line the battle wrote"
+
     def end_with(self, team: str) -> str:
         self.battle.status = Battle.STATUS_FINISHED
         self.battle.save(update_fields=["status"])
+        mira = self.battle.combatants.get(display_name="Mira")
         self.battle.events.create(
             turn=1,
             phase=6,
             sequence=900,
             event_type="info",
             actor=team,
-            payload={"winner_team": team, "winners": [1]},
-            message=f"{team} stands victorious — Somebody left on the field",
+            payload={"winner_team": team, "winners": [mira.pk]},
+            message=self.LINE,
         )
         text = fight_verdict(self.battle)
         assert text is not None
@@ -256,19 +275,21 @@ class VerdictWordingTest(BaseTestCase):
     def test_the_foes(self):
         self.assertTrue(
             self.end_with(FOE_TEAM).startswith(
-                "The fight is over: The foes stand victorious — Somebody left"
+                "battle_report.fight_over: battle_report.foes_victorious Mira."
             )
         )
 
     def test_the_party(self):
         self.assertTrue(
             self.end_with(PARTY_TEAM).startswith(
-                "The fight is over: The party stands victorious — Somebody left"
+                "battle_report.fight_over: battle_report.party_victorious Mira."
             )
         )
 
-    def test_any_other_team_is_the_engines_line(self):
-        self.assertIn("Red stands victorious", self.end_with("Red"))
+    def test_any_other_team_is_the_battles_line(self):
+        self.assertTrue(
+            self.end_with("Red").startswith(f"battle_report.fight_over: {self.LINE}.")
+        )
 
 
 class TheNoticeNeverReachesTheModelTest(BaseTestCase):
@@ -368,10 +389,9 @@ class VerdictAfterRestartTest(BaseTestCase):
         told = self.notices()
         self.assertEqual(len(told), 2)
         self.assertEqual(told[0], first)
-        self.assertTrue(first["content"].startswith("The fight is over: "))
-        self.assertTrue(
-            told[1]["content"].startswith("After the restart, the fight is over: ")
-        )
+        words = refusal_words().battle_report
+        self.assertTrue(first["content"].startswith(f"{words.fight_over}: "))
+        self.assertTrue(told[1]["content"].startswith(f"{words.after_restart}: "))
         self.assertNotEqual(told[0]["battle_ending"], told[1]["battle_ending"])
         self.assertEqual(told[1]["battle_ending"], ending_of(second_end))
         # The pane and the page's read-back follow the latest ending.

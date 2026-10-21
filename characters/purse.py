@@ -28,6 +28,7 @@ from typing import Any
 from .constants import MAX_COIN_REASON_LENGTH, too_long
 from .equipment import get_item
 from .models import Character
+from .refusal_words import refusal_words
 
 #: Two decimal places: the catalog prices to the Minor MU (1/100 MU).
 CENT = Decimal("0.01")
@@ -51,10 +52,6 @@ def format_coin(amount: Decimal) -> str:
     return f"{amount:.0f}" if amount == amount.to_integral_value() else f"{amount:.2f}"
 
 
-#: What the sheet says for a starting coin that is "Consult GM".
-CONSULT_GM = "Consult GM"
-
-
 def format_purse(character: Character) -> str:
     """The purse as the sheet, the export and the responses print it.
 
@@ -62,10 +59,13 @@ def format_purse(character: Character) -> str:
     (wealth.md), ``"Consult GM"``, or ``"50 gp + Consult GM"`` once coin
     has been given meanwhile.
     """
-    held = f"{format_coin(character.purse)} gp"
+    words = refusal_words().purse
+    held = words.held.format(coin=format_coin(character.purse))
     if character.starting_coin_known:
         return held
-    return CONSULT_GM if character.purse == 0 else f"{held} + {CONSULT_GM}"
+    if character.purse == 0:
+        return words.consult_gm
+    return words.held_and_unknown.format(held=held, unknown=words.consult_gm)
 
 
 def move_coin(character: Character, amount: Decimal, *, reason: str) -> str:
@@ -104,23 +104,23 @@ def move_coin(character: Character, amount: Decimal, *, reason: str) -> str:
     Raises:
         PurseError: The purse cannot cover a spend.
     """
+    words = refusal_words().purse
     amount = _money(amount)
     balance = character.purse
     if amount < 0 and balance + amount < 0:
-        unknown = (
-            ""
-            if character.starting_coin_known
-            else " (the starting coin is Consult GM until a Game Master records it)"
-        )
+        unknown = "" if character.starting_coin_known else words.starting_coin_unknown
         raise PurseError(
-            f"Not enough coin: {reason} costs {format_coin(-amount)} gp and the "
-            f"purse holds {format_coin(balance)} gp{unknown}"
+            words.not_enough.format(
+                reason=reason,
+                cost=format_coin(-amount),
+                held=format_coin(balance),
+                unknown=unknown,
+            )
         )
     character.coin_adjustment = _money(character.coin_adjustment) + amount
-    verb = "paid" if amount < 0 else "received"
-    return (
-        f"{verb} {format_coin(abs(amount))} gp ({reason}); purse "
-        f"{format_purse(character)}"
+    line = words.paid if amount < 0 else words.received
+    return line.format(
+        coin=format_coin(abs(amount)), reason=reason, purse=format_purse(character)
     )
 
 
@@ -144,17 +144,12 @@ def move_coin_for_reason(character: Character, amount: Decimal, *, reason: str) 
         PurseError: A reason past :data:`MAX_COIN_REASON_LENGTH`, or a purse
             that cannot cover a take.
     """
-    refusal = too_long("Reason", reason, MAX_COIN_REASON_LENGTH)
+    refusal = too_long(
+        refusal_words().purse.label_reason, reason, MAX_COIN_REASON_LENGTH
+    )
     if refusal:
         raise PurseError(refusal)
     return move_coin(character, amount, reason=reason)
-
-
-#: Why a player cannot buy before the wealth roll (issue #851).
-WEALTH_FIRST_REFUSAL = (
-    "Roll wealth first: nothing is bought before the starting coin is rolled, "
-    "since the roll replaces the coin a purchase would have spent"
-)
 
 
 def hold_purchase_to_wealth(character: Character, *, is_game_master: bool) -> None:
@@ -172,15 +167,7 @@ def hold_purchase_to_wealth(character: Character, *, is_game_master: bool) -> No
         PurseError: A player buying before the wealth roll.
     """
     if not is_game_master and not character.wealth_recorded:
-        raise PurseError(WEALTH_FIRST_REFUSAL)
-
-
-#: What a Game Master's purchase before the wealth roll is told (review of
-#: #851): the placeholder coin it spends is replaced by the roll.
-GAME_MASTER_BEFORE_WEALTH_NOTE = (
-    "Bought before the wealth roll, from the placeholder starting coin: the "
-    "roll replaces that coin, and this purchase stays paid for"
-)
+        raise PurseError(refusal_words().purse.wealth_first)
 
 
 def purchase_before_wealth_note(character: Character, *, is_game_master: bool) -> str:
@@ -191,7 +178,7 @@ def purchase_before_wealth_note(character: Character, *, is_game_master: bool) -
     follow the roll is no surprise.
     """
     if is_game_master and not character.wealth_recorded:
-        return GAME_MASTER_BEFORE_WEALTH_NOTE
+        return refusal_words().purse.before_wealth_note
     return ""
 
 
@@ -204,8 +191,16 @@ def catalog_price(item_id: str) -> Decimal:
     return _money(cost)
 
 
-#: How a Game Master's gift of an item reads in the history.
-GAME_MASTER_GIFT = "given by a Game Master"
+def _quantity_of(quantity: int, name: str) -> str:
+    """An item and how many, as a history line names them."""
+    return refusal_words().purse.quantity_of.format(quantity=quantity, name=name)
+
+
+def given_by_game_master(quantity: int, name: str) -> str:
+    """How a Game Master's gift of ``quantity`` of an item reads in the history."""
+    return refusal_words().purse.given_by_game_master.format(
+        item=_quantity_of(quantity, name)
+    )
 
 
 def charge_for_catalog_item(
@@ -227,34 +222,17 @@ def charge_for_catalog_item(
     """
     name = (get_item(item_id) or {}).get("name", item_id)
     if free:
-        return f"{quantity} × {name} {GAME_MASTER_GIFT}"
+        return given_by_game_master(quantity, name)
     return move_coin(
-        character, -catalog_price(item_id) * quantity, reason=f"{quantity} × {name}"
+        character,
+        -catalog_price(item_id) * quantity,
+        reason=_quantity_of(quantity, name),
     )
 
 
 #: Custom items whose numbers reach combat: a weapon's damage, armour's and a
 #: shield's Stops and DEX penalty (#845).
 CUSTOM_COMBAT_CATEGORIES: tuple[str, ...] = ("weapons", "armor", "shield")
-
-#: Why a player cannot add one (coordinator's ruling on the #757 review, #845).
-CUSTOM_COMBAT_ITEM_REFUSAL = (
-    "A custom weapon, armour or shield is a Game Master's to add: the catalog "
-    "publishes every item's numbers, and nothing lets a player invent better ones"
-)
-
-#: Why a player's Games Master session cannot add a custom item it names no
-#: price for (#927). The sheet's form always states one; a plan may not.
-CUSTOM_ITEM_PRICE_REFUSAL = (
-    "An item the catalog does not sell is bought at the price stated for it, "
-    "and none was stated; only a Game Master gives one for nothing"
-)
-
-#: Why a player cannot make more of a custom item carried at no cost: a Game
-#: Master's gift, or an item stored before items kept their cost (#927).
-CUSTOM_ITEM_MORE_REFUSAL = (
-    "This item is carried at no cost, so more of it is a Game Master's to give"
-)
 
 
 def charge_for_custom_item(
@@ -265,7 +243,7 @@ def charge_for_custom_item(
     quantity: int,
     *,
     is_game_master: bool,
-    unpriced_refusal: str = CUSTOM_ITEM_PRICE_REFUSAL,
+    unpriced_refusal: str | None = None,
 ) -> str:
     """Hold a player's custom item to the rules; a Game Master's is free.
 
@@ -283,7 +261,11 @@ def charge_for_custom_item(
         price: The price of one in MU as stated, or None when none was.
         quantity: How many.
         is_game_master: Whether a Game Master is adding it.
-        unpriced_refusal: What a player is told when ``price`` is None.
+        unpriced_refusal: What a player is told when ``price`` is None;
+            ``[purse] custom_item_price`` when not given. Why a player cannot
+            add a combat item is ``custom_combat_item`` (#845); why a
+            player's session cannot add an item it names no price for,
+            ``custom_item_price`` (#927).
 
     Returns:
         The history line: what was paid, the Game Master's gift, or ``""``
@@ -294,17 +276,18 @@ def charge_for_custom_item(
             price, a purchase before the wealth roll, or a purse that cannot
             cover it.
     """
+    words = refusal_words().purse
     if is_game_master:
-        return f"{quantity} × {name} {GAME_MASTER_GIFT}"
+        return given_by_game_master(quantity, name)
     if category in CUSTOM_COMBAT_CATEGORIES:
-        raise PurseError(CUSTOM_COMBAT_ITEM_REFUSAL)
+        raise PurseError(words.custom_combat_item)
     if price is None:
-        raise PurseError(unpriced_refusal)
+        raise PurseError(unpriced_refusal or words.custom_item_price)
     cost = _money(price) * quantity
     if cost <= 0:
         return ""
     hold_purchase_to_wealth(character, is_game_master=False)
-    return move_coin(character, -cost, reason=f"{quantity} × {name}")
+    return move_coin(character, -cost, reason=_quantity_of(quantity, name))
 
 
 def charge_for_more_of_custom_item(
@@ -345,10 +328,12 @@ def charge_for_more_of_custom_item(
     )
     return charge_for_custom_item(
         character,
-        str(item.get("name", "item")),
+        str(item.get("name", refusal_words().purse.an_item)),
         str(item.get("category", "")),
         cost if cost > 0 else None,
         quantity,
         is_game_master=is_game_master,
-        unpriced_refusal=CUSTOM_ITEM_MORE_REFUSAL,
+        # More of an item carried at no cost: a Game Master's gift, or one
+        # stored before items kept their cost (#927).
+        unpriced_refusal=refusal_words().purse.custom_item_more,
     )

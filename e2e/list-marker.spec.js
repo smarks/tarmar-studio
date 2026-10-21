@@ -16,6 +16,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { differingRows } = require('./pixels');
 
 const DESKTOP = { width: 1440, height: 2000 };
@@ -110,7 +111,7 @@ async function expectMarkerOnFirstLine(page, item, label) {
 test.describe('A list marker sits beside its item\'s first line (#61)', () => {
     test('a wrapped Forecast in the battle log, closed and opened', async ({ adminPage: page }) => {
         await page.setViewportSize(DESKTOP);
-        await createBattleViaSetup(page, { name: `E2E Markers ${Date.now()}`, fighters: 2, seed: 42 });
+        await createBattleViaSetup(page, { name: uniqueName('E2E Markers'), fighters: 2, seed: 42 });
         await page.click('#advance-turn');
         await expect(page.locator('.turn-group[data-turn="1"]')).toBeVisible();
 

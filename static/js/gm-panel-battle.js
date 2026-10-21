@@ -82,12 +82,55 @@ if (typeof module !== 'undefined' && module.exports) {
     element.hidden = true;
   }
 
-  function setBusy(busy) {
-    const button = byId('gm-fight-start');
-    const input = byId('gm-fight-foes');
-    const commandButton = byId('gm-fight-button');
-    [button, input, commandButton].forEach((element) => {
-      if (element) element.disabled = busy;
+  /** The tab's Fight form (gm/_panel_battle.html). */
+  const FIGHT_FORM_ID = 'gm-fight-form';
+  /** The form's Fight button. */
+  const FIGHT_START_ID = 'gm-fight-start';
+  /** The form's field naming the foes. */
+  const FIGHT_FOES_ID = 'gm-fight-foes';
+  /** The command bar's Fight button. */
+  const FIGHT_COMMAND_ID = 'gm-fight-button';
+  /** The controls that start a fight: the tab's form and the command bar's button. */
+  const FIGHT_CONTROL_IDS = [FIGHT_START_ID, FIGHT_FOES_ID, FIGHT_COMMAND_ID];
+
+  /**
+   * The keys this tab's requests are held under while they are on their way
+   * (api.js's holdRequest, issue #142's sweep): the tab is drawn again
+   * around them -- a board response repaints the Fight form, a restart
+   * elsewhere redraws the board -- and a held control used to come back
+   * free on the fresh copy, ready to send a second fight or ruling.
+   * @returns {string}
+   */
+  function fightKey() {
+    return `fight:${currentSessionId()}`;
+  }
+
+  /**
+   * A ruling's key: its endpoint and the button pressed, by the focus key
+   * (or id) a fresh draw of the board gives the same button.
+   * @param {HTMLFormElement} form
+   * @param {HTMLElement|null} button
+   * @returns {string}
+   */
+  function rulingKey(form, button) {
+    const named = button ? button.dataset.focusKey || button.id : form.className;
+    return `ruling:${form.action} ${named}`;
+  }
+
+  /**
+   * Hold every control in the tab whose request is on its way, and free the
+   * rest to the state they were drawn in.
+   */
+  function paintHeld() {
+    const fightHeld = root.requestHeld(fightKey());
+    FIGHT_CONTROL_IDS.forEach((id) => {
+      const control = byId(id);
+      if (control) root.paintHeldControl(control, fightHeld);
+    });
+    root.document.querySelectorAll(RULING_FORMS).forEach((form) => {
+      root.submitButtonsOf(form).forEach((button) => {
+        root.paintHeldControl(button, root.requestHeld(rulingKey(form, button)));
+      });
     });
   }
 
@@ -106,11 +149,13 @@ if (typeof module !== 'undefined' && module.exports) {
    */
   function paintFightForm(live) {
     if (typeof live !== 'boolean') return;
-    const button = byId('gm-fight-start');
-    const input = byId('gm-fight-foes');
-    if (input) input.disabled = live;
+    const button = byId(FIGHT_START_ID);
+    const input = byId(FIGHT_FOES_ID);
+    // Drawn from the fight's state, which a fight request still on its way
+    // holds over (issue #142's sweep): it is the state it is freed to.
+    if (input) root.setRenderedDisabled(input, live);
     if (button) {
-      button.disabled = live;
+      root.setRenderedDisabled(button, live);
       if (live) {
         button.title = FIGHT_UNDER_WAY;
       } else {
@@ -232,8 +277,10 @@ if (typeof module !== 'undefined' && module.exports) {
     });
     if (typeof root.applyLocalTimes === 'function') root.applyLocalTimes(section);
     if (root.battlePage) root.battlePage.initBattlePage(section);
+    // A fight or a ruling still on its way keeps the fresh control held.
+    paintHeld();
     root.gmPanelDrafts.restore(section, carried);
-    const form = byId('gm-fight-form');
+    const form = byId(FIGHT_FORM_ID);
     if (form) paintFightForm(form.dataset.live === 'true');
     const panes = root.gmPanelLayout;
     if (panes && panes.isActive()) panes.paintPopouts();
@@ -274,13 +321,26 @@ if (typeof module !== 'undefined' && module.exports) {
     const body = new FormData(form);
     if (submitter && submitter.name) body.append(submitter.name, submitter.value);
     // One post per press: the button waits until the tab is drawn from the
-    // answer, which brings a fresh one.
-    if (submitter) submitter.disabled = true;
-    try {
-      return await postAndDraw(form, body);
-    } finally {
-      if (submitter) submitter.disabled = false;
-    }
+    // answer, which brings a fresh one, and a draw while it is out (a restart
+    // elsewhere) keeps the fresh one held (issue #142's sweep).
+    // A form submitted with no button is held by the one it would be sent with.
+    const pressed = submitter || root.submitButtonsOf(form)[0] || null;
+    const focusKey = pressed && root.document.activeElement === pressed
+      ? pressed.dataset.focusKey
+      : '';
+    const recorded = await root.holdRequest(
+      rulingKey(form, pressed), () => postAndDraw(form, body), paintHeld,
+    );
+    // The fresh button was held when the draw put the focus back, and a
+    // held button takes no focus, so the draw gave it to the tab itself
+    // (gm-panel-drafts.js): it goes back on the button once it is free,
+    // unless the reader has put it somewhere else meanwhile.
+    const fresh = focusKey ? root.elementByFocusKey(root.document, focusKey) : null;
+    const active = root.document.activeElement;
+    const lost = !active || active === root.document.body || !active.isConnected
+      || active === byId(SECTION_ID);
+    if (fresh && lost) fresh.focus();
+    return recorded;
   }
 
   /** postRuling's request, and the tab drawn from it once it is recorded. */
@@ -291,7 +351,7 @@ if (typeof module !== 'undefined' && module.exports) {
         method: 'POST',
         body,
         credentials: 'same-origin',
-        headers: { 'X-CSRFToken': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+        headers: { 'X-CSRFToken': csrfToken(), ...SCRIPT_CALLER_HEADERS },
       });
       data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -320,13 +380,24 @@ if (typeof module !== 'undefined' && module.exports) {
       show('error', 'Attach a character or send a message first.');
       return false;
     }
-    const form = byId('gm-fight-form');
+    const form = byId(FIGHT_FORM_ID);
     const fightUrl = form ? form.getAttribute('data-fight-url') : '';
     if (!fightUrl) {
       show('error', 'This page has no fight endpoint.');
       return false;
     }
-    setBusy(true);
+    return root.holdRequest(fightKey(), () => sendFight(sessionId, fightUrl, foes), paintHeld);
+  }
+
+  /**
+   * startFight's request, and the board drawn from it once it is set. The
+   * controls that start a fight are held meanwhile (holdRequest).
+   * @param {number} sessionId
+   * @param {string} fightUrl
+   * @param {string} foes
+   * @returns {Promise<boolean>} true when the fight started.
+   */
+  async function sendFight(sessionId, fightUrl, foes) {
     show('status', foes ? 'Setting the board…' : 'Asking the GM who you face…');
     let response;
     try {
@@ -337,7 +408,6 @@ if (typeof module !== 'undefined' && module.exports) {
     } catch (error) {
       clear('status');
       show('error', `Request failed: ${error.message}`);
-      setBusy(false);
       return false;
     }
     let data;
@@ -348,13 +418,11 @@ if (typeof module !== 'undefined' && module.exports) {
       // outran its proxy_read_timeout with an HTML 504 (issue #936).
       clear('status');
       show('error', withoutJson(response));
-      setBusy(false);
       return false;
     }
     if (!response.ok || !data.ok) {
       clear('status');
       show('error', data.error || response.statusText);
-      setBusy(false);
       return false;
     }
     show('status', `The board is set: ${data.battle_name}. Loading…`);
@@ -367,8 +435,6 @@ if (typeof module !== 'undefined' && module.exports) {
       clear('status');
       paintFightForm(true);
     }
-    const commandButton = byId('gm-fight-button');
-    if (commandButton) commandButton.disabled = false;
     return true;
   }
 
@@ -390,7 +456,7 @@ if (typeof module !== 'undefined' && module.exports) {
    */
   async function showVerdict() {
     if (verdictAsked) return verdictAsked;
-    const form = byId('gm-fight-form');
+    const form = byId(FIGHT_FORM_ID);
     const url = form ? form.getAttribute('data-verdict-url') : '';
     const sessionId = currentSessionId();
     if (!url || !sessionId) return false;
@@ -456,9 +522,9 @@ if (typeof module !== 'undefined' && module.exports) {
     if (section) {
       section.addEventListener('submit', (event) => {
         const form = event.target;
-        if (form.id === 'gm-fight-form') {
+        if (form.id === FIGHT_FORM_ID) {
           event.preventDefault();
-          const input = byId('gm-fight-foes');
+          const input = byId(FIGHT_FOES_ID);
           startFight(input ? input.value : '');
           return;
         }
@@ -474,7 +540,7 @@ if (typeof module !== 'undefined' && module.exports) {
         });
       }
     }
-    const commandButton = byId('gm-fight-button');
+    const commandButton = byId(FIGHT_COMMAND_ID);
     if (commandButton) {
       commandButton.addEventListener('click', () => startFight(''));
     }

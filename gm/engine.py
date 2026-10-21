@@ -8,7 +8,8 @@ Every prompt sentence that states a number a canon rules file holds is built
 from the loaded rules (issue #68). The magic section is the canon's own
 ``gm-prompt/magic.md`` (issue #922) but for its Special Casting Results,
 Borrowing (issue #48), Push, Channel, Runaway and Counterspell (issue #127),
-which are built from the canon's ``magic-rules.json``.
+which are built from the canon's ``magic-rules.json``, as are the core
+section's Anchor rolls and the push's payoff (issue #150).
 Left as code, for stages 6 and 7 or because no rules file holds them yet:
 
 - the engine's own numbers: initiative 1d6, crits and fumbles, the matrix, the
@@ -34,6 +35,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
+from tarmar_engine.combat_math import with_article
 from tarmar_engine.magic import (
     CastingFailureRules,
     CastingSuccessTier,
@@ -42,8 +44,12 @@ from tarmar_engine.magic import (
     CounterspellRules,
     MagicRules,
     PushRules,
+    RollUnderRule,
     RunawayRules,
+    SpellEffectKind,
+    spell_effect_kind,
 )
+from tarmar_engine.spells import SPELLS
 
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
 from battle.magic_rules import CASTING_DICE, magic_rules, totals_in_words
@@ -361,6 +367,46 @@ SECTION_NOT_DND = (
 )
 
 
+#: The mage who is not the caster and anchors another's Runaway, as the core
+#: section and the Runaway subsection both name them (#150).
+_HELPER_MAGE = "third-party mage"
+
+
+def _roll_under(rule: RollUnderRule) -> str:
+    """A roll-under rule as the prompt writes it: "3d6 ≤ WIS" (#150).
+
+    Args:
+        rule: The rule's dice and attribute, an Anchor roll's.
+    """
+    return f"{rule.dice} ≤ {rule.attribute}"
+
+
+def _render_anchor_fragment(runaway: RunawayRules | None) -> str:
+    """The Runaway's Anchor rolls, after the attributes they read (#150).
+
+    The canon's ``runaway.self_anchor`` and ``helper_anchor``
+    (``magic-rules.json``), as the battle board rolls them: " During a
+    Runaway the caster's Anchor roll is 3d6 ≤ WIS and a third-party mage's
+    is 3d6 ≤ INT." "" when the canon has no Runaway rules.
+
+    Args:
+        runaway: The canon's Runaway rules, or ``None``.
+    """
+    if runaway is None:
+        return ""
+    own_roll = _roll_under(runaway.self_anchor)
+    helper_roll = _roll_under(runaway.helper_anchor)
+    if own_roll == helper_roll:
+        return (
+            f" During a {_RUNAWAY} an Anchor roll is {own_roll}, the caster's or "
+            f"a {_HELPER_MAGE}'s."
+        )
+    return (
+        f" During a {_RUNAWAY} the caster's Anchor roll is {own_roll} and a "
+        f"{_HELPER_MAGE}'s is {helper_roll}."
+    )
+
+
 @derived_from_rules
 @functools.cache
 def section_core() -> str:
@@ -369,7 +415,8 @@ def section_core() -> str:
     Built on first use rather than at import because its checks, modifier
     table, attribute dice, height and weight bands and Fatigue sum are the
     loaded canon's ``skill-rules.json`` (issue #70) and
-    ``character-rules.json`` (issue #68), which no module may read while it
+    ``character-rules.json`` (issue #68), and its Anchor rolls the canon's
+    ``magic-rules.json`` (issue #150), which no module may read while it
     imports. Cached, so every prompt holds the same string for the life of
     the process.
     """
@@ -387,9 +434,9 @@ def section_core() -> str:
         "STR governs weapon requirements and physical damage; DEX governs "
         "to-hit, action order, and avoiding falls; INT governs perception, "
         "learning, and most casting rolls; WIS governs insight, judgment, "
-        "persuasion, some casting rolls, and Anchor rolls during Runaway; CHR "
-        "governs influence, morale, and leadership; CON governs endurance, the "
-        "pools, and survival saves.\n"
+        "persuasion, and some casting rolls; CHR governs influence, morale, and "
+        "leadership; CON governs endurance, the pools, and survival saves."
+        f"{_render_anchor_fragment(magic_rules().runaway)}\n"
         "Secondary: Appearance (1d6: 1=pretty, 6=ugly), "
         f"{_render_height_and_weight_fragment()}\n\n"
         "### Derived Pools\n"
@@ -904,23 +951,6 @@ NO_BORROWING_SENTENCE = (
 )
 
 
-#: The letters that take "an" before a word rather than "a".
-_VOWELS = frozenset("aeiou")
-
-
-def _with_article(noun: str) -> str:
-    """A noun with its indefinite article: "a Backlash", "an Arcane surge".
-
-    Chosen from the noun's first letter, which suits the canons' labels; a
-    label opening on a silent consonant or a "you" sound would be misread.
-
-    Args:
-        noun: The noun, as the canon spells it.
-    """
-    article = "an" if noun[:1].casefold() in _VOWELS else "a"
-    return f"{article} {noun}"
-
-
 class MagicSectionError(ValueError):
     """The canon's magic section cannot take the subsections the engine builds.
 
@@ -1047,9 +1077,9 @@ def render_borrowing(rules: MagicRules) -> str:
             "always fails."
         )
     failure = borrowing.failure
-    named = _with_article(failure.label)
+    named = with_article(failure.label)
     if failure.is_runaway and failure.label.casefold() != _RUNAWAY.casefold():
-        named += f", {_with_article(_RUNAWAY)}"
+        named += f", {with_article(_RUNAWAY)}"
     sentences.append(f"A failed Debt Roll is {named}; the spell has already resolved.")
     sentences.append(
         "Mana handed back pays the Debt before it refills the pool."
@@ -1107,7 +1137,7 @@ def _named_runaway(label: str) -> str:
     """
     if label.casefold() == _RUNAWAY.casefold():
         return label
-    return f"{label}, {_with_article(_RUNAWAY)}"
+    return f"{label}, {with_article(_RUNAWAY)}"
 
 
 def _control_target(push: PushRules) -> str:
@@ -1151,12 +1181,89 @@ def _control_band_sentence(band: ControlBand) -> str:
     return f"Fail by {margins}: {label} ({effect})."
 
 
+#: The push payoff's phrases, each said in more than one of its sentences.
+_FOR_EACH_MANA_PUSHED = "for each mana pushed"
+_CAN_BE_PUSHED = "can be pushed"
+
+#: The Push subsection when the canon gives no spell's effect a push bonus:
+#: no spell takes a push, so no Control Roll follows one (#150's review).
+NOTHING_PUSHABLE_SENTENCE = (
+    f"No spell {_CAN_BE_PUSHED}: no rolled effect takes a push bonus, so there is "
+    "no Control Roll."
+)
+
+
+def _nothing_pushable(push: PushRules) -> bool:
+    """No kind of effect and no spell takes a push bonus (#150).
+
+    A spell named in ``spell_effect_bonus_per_mana`` always has a rolled
+    effect (the loader holds it to one), so it is pushable whatever its kind.
+    """
+    return (
+        not push.effect_bonus_per_mana_by_kind and not push.spell_effect_bonus_per_mana
+    )
+
+
+def _render_push_payoff(push: PushRules) -> str:
+    """What a push adds, and which spells may take one, from the canon (#150).
+
+    The canon's ``push.effect_bonus_per_mana_by_kind`` and
+    ``spell_effect_bonus_per_mana``, as the battle board adds them
+    (:meth:`~tarmar_engine.magic.PushRules.bonus_per_mana`): "The push's
+    bonus: +1 to the spell's rolled damage or healing for each mana pushed.
+    Only a spell that rolls damage or healing can be pushed." A push with
+    nothing pushable is :data:`NOTHING_PUSHABLE_SENTENCE`, not this.
+
+    Args:
+        push: The canon's Push rules, with something pushable.
+    """
+    # The engine's own order of kinds, so the words do not follow the file's.
+    kinds = [
+        (kind, push.effect_bonus_per_mana_by_kind[kind])
+        for kind in SpellEffectKind
+        if kind in push.effect_bonus_per_mana_by_kind
+    ]
+    kind_words = f" {PROMPT_OR_WORD} ".join(kind.value for kind, _bonus in kinds)
+    sentences: list[str] = []
+    if len({bonus for _kind, bonus in kinds}) == 1:
+        bonus = rules_lookup.signed(kinds[0][1])
+        sentences.append(
+            f"The push's bonus: {bonus} to the spell's rolled {kind_words} "
+            f"{_FOR_EACH_MANA_PUSHED}."
+        )
+    elif kinds:
+        each = ", ".join(
+            f"{rules_lookup.signed(bonus)} to its rolled {kind.value}"
+            for kind, bonus in kinds
+        )
+        sentences.append(f"The push's bonus, {_FOR_EACH_MANA_PUSHED}: {each}.")
+    sentences.extend(
+        f"{SPELLS[spell_key].name}: {rules_lookup.signed(bonus)} "
+        f"{_FOR_EACH_MANA_PUSHED}, whatever its kind's bonus."
+        for spell_key, bonus in sorted(push.spell_effect_bonus_per_mana.items())
+    )
+    # A spell named above whose kind takes no bonus may be pushed all the same.
+    named_beyond = any(
+        spell_effect_kind(SPELLS[spell_key]) not in push.effect_bonus_per_mana_by_kind
+        for spell_key in push.spell_effect_bonus_per_mana
+    )
+    if kinds:
+        only = f"Only a spell that rolls {kind_words}"
+        if named_beyond:
+            only += ", or one named above,"
+        sentences.append(f"{only} {_CAN_BE_PUSHED}.")
+    else:
+        sentences.append(f"Only a spell named above {_CAN_BE_PUSHED}.")
+    return " ".join(sentences)
+
+
 def render_push(rules: MagicRules) -> str:
     """The body of ``### Push (Boosting)``, from the canon's ``push`` (#127).
 
-    The Control Roll's dice, attribute and penalty, its failure bands, and the
-    natural totals that are always a Runaway (``magic-rules.json``), as the
-    battle board settles a pushed cast.
+    What a push adds and which spells may take one (#150), the Control
+    Roll's dice, attribute and penalty, its failure bands, and the natural
+    totals that are always a Runaway (``magic-rules.json``), as the battle
+    board settles a pushed cast.
 
     Args:
         rules: The canon's magic rules.
@@ -1164,7 +1271,9 @@ def render_push(rules: MagicRules) -> str:
     push = rules.push
     if push is None:
         return NO_PUSH_SENTENCE
-    sentences = ["Invest extra mana for greater effect."]
+    if _nothing_pushable(push):
+        return NOTHING_PUSHABLE_SENTENCE
+    sentences = ["Invest extra mana for greater effect.", _render_push_payoff(push)]
     if push.max_push_mana is not None:
         sentences.append(f"No more than {push.max_push_mana} mana may be pushed.")
     sentences.append(f"Control Roll: {push.control_dice} ≤ {_control_target(push)}.")
@@ -1294,8 +1403,6 @@ def render_runaway(rules: MagicRules) -> str:
             f"{bonus} to its rolled effect for each turn it ran"
         )
     pool = runaway.overflow_pool.title()
-    self_anchor = runaway.self_anchor
-    helper_anchor = runaway.helper_anchor
     helper_cost = _mana_reckoned_from_the_cost(
         runaway.helper_cost_multiplier_of_cost, 0
     )
@@ -1310,11 +1417,10 @@ def render_runaway(rules: MagicRules) -> str:
             f"effect grows unpredictably ({growth}).",
             "At 0 mana the caster falls unconscious and it drains "
             f"{pool} instead; {_runaway_death_line(runaway, pool)}.",
-            f"Anchor: the conscious caster rolls {self_anchor.dice} ≤ "
-            f"{self_anchor.attribute} each turn to regain control.",
-            f"A third-party mage may intervene by investing {helper_cost} and "
-            f"rolling {helper_anchor.dice} ≤ {helper_anchor.attribute} — "
-            f"{helper_failure}.",
+            f"Anchor: the conscious caster rolls {_roll_under(runaway.self_anchor)} "
+            "each turn to regain control.",
+            f"A {_HELPER_MAGE} may intervene by investing {helper_cost} and "
+            f"rolling {_roll_under(runaway.helper_anchor)} — {helper_failure}.",
             "Survivors often bear marks: white streaks in the hair, strange "
             "scars, a haunted look.",
         )

@@ -26,6 +26,29 @@ no_such_thread = "There is no such thread in this session"
 thread_already_resolved = "Thread {thread} is already resolved"
 thread_still_open = "Thread {thread} is still open"
 not_folded_yet = "This session has not been folded into a recap yet"
+# How not_text, needed and the length refusal name each field (issue #136).
+label_topic = "The topic"
+label_rule = "The rule"
+label_name = "The name"
+label_where = "The where"
+label_wants = "The wants"
+label_condition = "The condition"
+label_notes = "The notes"
+label_thread = "The thread"
+label_resolution = "How it ended"
+label_recap = "The recap"
+# What the pane says once a hand edit is kept. {old} and {new} are ruling
+# numbers, {thread} a thread's, {text} the record as saved, {line} a person or
+# thing as the records list it.
+ruling_corrected = "Ruling {old} corrected; it is ruling {new} now: {text}"
+entity_recorded = "Recorded {line}"
+entity_corrected = "Corrected {line}"
+entity_removed = "Removed {name}"
+thread_opened = "Opened thread {thread}: {text}"
+thread_corrected = "Corrected thread {thread}: {text}"
+thread_closed = "Closed thread {thread}: {text}"
+thread_reopened = "Reopened thread {thread}: {text}"
+recap_corrected = "Recap corrected"
 
 [policy]
 # What a player is told when a plan asks for a Game Master's action. Each of
@@ -138,3 +161,29 @@ character_id_not_id = "character_id must be a character's id"
 dead = "Character is dead"
 # {missing}: the parts of the record still to fill in, listed.
 incomplete = "Character is not complete: {missing}"
+
+[repeated_refusal]
+# What the model is told when a plan repeats a refusal already settled in the
+# session (these are written for the model, not a player). {action} is the
+# action's name, {reason} the [policy] refusal; {said} is already_refused,
+# filled, and {remedy} one of the instead_ lines.
+already_refused = "{action} was already refused in this session, because {reason}. That will not change by asking again"
+with_remedy = "{said}; {remedy}"
+something_else = "{said}; do something else instead"
+# What to do instead, where the rules offer something.
+instead_record_attributes = "plan roll_attributes: a player's scores are rolled"
+instead_rule_literacy = "plan roll_literacy where the Origin has a check"
+instead_roll_fatigue = "plan roll_fatigue with no \"value\": a player's is rolled"
+# Added to instead_rule_literacy when the canon leaves an Origin to the Game
+# Master; {origins} names them.
+instead_origins = ", or say that at {origins} the Game Master decides"
+
+# The player's notice of how a session fight ended (issues #785, #136): how it
+# opens, and the verdict for each side, which agrees with the side as the
+# battle's own line ("Foes stands victorious") does not. {names}: the figures
+# left on the field.
+[battle_report]
+fight_over = "The fight is over"
+after_restart = "After the restart, the fight is over"
+foes_victorious = "The foes stand victorious — {names} left on the field"
+party_victorious = "The party stands victorious — {names} left on the field"

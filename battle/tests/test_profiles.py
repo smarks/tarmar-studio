@@ -19,10 +19,12 @@ from battle.classic_adaptation import classic_side, classic_state
 from battle.models import Battle, BattleCombatant, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
 from battle.services import advance_turn, create_battle, rename_combatant
+from battle.tests.rulings_words import with_fixed_words
 from battle.tests.test_classic_adaptation import snapshot as classic_snapshot
 from battle.tests.test_persistence import classic_game
-from battle.views import battle_payload
-from common.test_helpers import BaseTestCase
+from battle.views import battle_payload, pending_payload
+from battle.wording import words
+from common.test_helpers import BaseTestCase, says, sentence_parts
 
 
 def classic_wizard_battle(dm, *, seed: int = 11) -> Battle:
@@ -197,7 +199,9 @@ class ClassicTurnTest(BaseTestCase):
             if battle.status == Battle.STATUS_FINISHED:
                 break
         self.assertEqual(battle.status, Battle.STATUS_FINISHED)
-        victory = battle.events.filter(message__contains="stands victorious").first()
+        victory = battle.events.filter(
+            message__contains=sentence_parts(words().services.victorious)[0]
+        ).first()
         self.assertIsNotNone(victory)
         assert victory is not None
         self.assertEqual(victory.turn, battle.turn_number)
@@ -297,6 +301,7 @@ class ClassicRosterTest(BaseTestCase):
         )
 
 
+@with_fixed_words
 class ClassicCastStageTest(BaseTestCase):
     def test_a_classic_fighter_still_draws_no_cast_stage(self):
         # The honest absence a non-caster has always had, kept: a fighter
@@ -321,9 +326,28 @@ class ClassicCastStageTest(BaseTestCase):
         wizard = next(one for one in state.figures if one.spells_known)
         magic = adapter.caster_magic(state, int(wizard.uid))
         assert magic is not None
-        self.assertEqual(magic["pool_label"], "ST")
+        self.assertEqual(magic["pool_label"], "cast_stage.strength_pool")
+        # The profile's own name for it, for a stage with no payload (#145).
+        self.assertEqual(adapter.pool_label(), "cast_stage.strength_pool")
         self.assertNotIn("mana", magic)
         self.assertTrue(magic["spells"])
+
+    def test_a_classic_battle_s_pending_names_its_pool_st(self):
+        """The pending payload carries the profile's pool name beside the
+        magic, for a stage with none to read (review of #145)."""
+        dm = self.create_dm()
+        battle = classic_wizard_battle(dm)
+        wizard = battle.combatants.get(display_name="Wynn")
+        battle.status = Battle.STATUS_AWAITING
+        battle.pending_input_json = {
+            "combatant_id": wizard.pk,
+            "turn": 1,
+            "candidates": [],
+        }
+        battle.save()
+        pending = pending_payload(battle, Actor(user=dm, guest_key=""))
+        assert pending is not None
+        self.assertEqual(pending["pool_label"], "cast_stage.strength_pool")
 
 
 class QuarantineTest(BaseTestCase):
@@ -358,7 +382,11 @@ class ClassicVictoryTest(BaseTestCase):
         battle = self._lone_survivor_battle(self.create_dm())
         battle, events = advance_turn(battle.pk)
         self.assertEqual(battle.status, Battle.STATUS_FINISHED)
-        victory = [event for event in events if "stands victorious" in event.message]
+        victory = [
+            event
+            for event in events
+            if says(event.message, words().services.victorious)
+        ]
         self.assertEqual(len(victory), 1)
 
     def test_the_victory_line_carries_the_next_free_sequence(self):
@@ -367,7 +395,9 @@ class ClassicVictoryTest(BaseTestCase):
         sequences = sorted(event.sequence for event in events)
         self.assertEqual(sequences, list(range(len(sequences))))
         victory = next(
-            event for event in events if "stands victorious" in event.message
+            event
+            for event in events
+            if says(event.message, words().services.victorious)
         )
         self.assertEqual(victory.sequence, max(sequences))
 

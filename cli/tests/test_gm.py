@@ -10,6 +10,7 @@ requiring a live Ollama connection.
 
 import json
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -342,6 +343,25 @@ class RetrievalTest(TestCase):
         printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
         self.assertIn("(3 messages,", printed)
         self.assertIn("-- 3 messages,", printed)
+
+    def test_a_saved_session_names_its_instant_with_the_offset(self):
+        """saved_at was the machine's naive clock, which names no moment once
+        the file is read in another zone (issue #144)."""
+        saves_dir = Path(self._temp.name) / "saves"
+        before = datetime.now().astimezone()
+        with (
+            patch.object(cli_gm, "SAVES_DIR", saves_dir),
+            patch("cli.gm.console.print"),
+        ):
+            saved = cli_gm.save_session("instant-test", [], "rules")
+        after = datetime.now().astimezone()
+
+        saved_at = json.loads(saved.read_text(encoding="utf-8"))["saved_at"]
+        self.assertRegex(saved_at, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
+        instant = datetime.fromisoformat(saved_at)
+        self.assertIsNotNone(instant.utcoffset())
+        self.assertLessEqual(before - timedelta(seconds=1), instant)
+        self.assertLessEqual(instant, after)
 
     def test_max_tokens_knob_reads_the_environment(self):
         self.assertEqual(cli_gm.RETRIEVAL_MAX_TOKENS, 900)

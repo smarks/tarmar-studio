@@ -21,7 +21,7 @@ and the engine reads ``free_spell_points`` as the Mana Pool. (The design doc's
 import random
 from dataclasses import dataclass
 
-from characters.constants import UNNAMED_CHARACTER, name_within_rule
+from characters.constants import name_within_rule, unnamed_character
 from characters.dice import roll_all_character_stats
 from characters.equipment import get_item
 from characters.equipment_rules import equipment_catalog, equipment_rules
@@ -503,7 +503,9 @@ def generate_character(
     # Names need not be unique (issue #571). The battle's name is free text,
     # so the row's name keeps only what the name rule accepts, capped at 100,
     # or the character's export could not be imported (issue #870).
-    name = name_within_rule(f"{battle_name} {display_name}", fallback=UNNAMED_CHARACTER)
+    name = name_within_rule(
+        f"{battle_name} {display_name}", fallback=unnamed_character()
+    )
     character = Character(
         user=user,
         name=name,

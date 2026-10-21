@@ -14,6 +14,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 // One more than the server's window, so a battle that reaches it has
 // something to hold back.
@@ -24,7 +25,7 @@ test.describe('The battle event log', () => {
         async ({ adminPage }) => {
             test.setTimeout(180000);
             await createBattleViaSetup(adminPage, {
-                name: `E2E Log window ${Date.now()}`,
+                name: uniqueName('E2E Log window'),
                 fighters: 2,
                 seed: 4242,
                 controlMode: 'automatic',

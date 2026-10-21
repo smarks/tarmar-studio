@@ -12,8 +12,10 @@ ruling under the standing rule; Spencer may overrule).
 """
 
 import json
+from unittest import mock
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle import control, profiles
 from battle.engine.state import BattleState
@@ -21,8 +23,6 @@ from battle.models import Battle
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
 from battle.refusal_words import refusal_words
 from battle.services import (
-    WITHHELD_NOT_GAME_MASTER,
-    WITHHELD_OTHER_PLAYERS,
     StalePools,
     advance_turn,
     claim_seat,
@@ -38,10 +38,11 @@ from battle.services import (
     withheld_characters,
 )
 from battle.tests.fixed_refusals import with_fixed_refusals
+from battle.wording import words
 from characters import services as character_services
 from characters.models import Character
 from characters.services import FightReport
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, says, sentence_parts
 from gm.models import GMSession
 
 #: Enough turns for a one-on-one fight to be decided.
@@ -49,6 +50,18 @@ TURN_LIMIT = 60
 
 #: Where a fight is over.
 OVER = (Battle.STATUS_FINISHED, Battle.STATUS_STALEMATE)
+
+
+def first_option_choice(pending: dict) -> dict:
+    """The act endpoint's body choosing the pending menu's first option."""
+    option = pending["candidates"][0]
+    return {
+        "combatant_id": pending["combatant_id"],
+        "turn": pending["turn"],
+        "letter": option["letter"],
+        "target_id": option.get("target_id"),
+        "spell_key": option.get("spell_key") or "",
+    }
 
 
 def tarmar_state(battle: Battle) -> BattleState:
@@ -590,9 +603,9 @@ class StalePoolsTest(BaseTestCase):
         self.assertEqual(stale_pools(battle), [])
         note = battle.events.order_by("-sequence").first()
         assert note is not None
-        self.assertIn("took the pools from the character records", note.message)
+        self.assertTrue(says(note.message, words().services.pools_taken))
         # Nobody owes anything here, so the line says nothing of a debt.
-        self.assertNotIn("owed", note.message)
+        self.assertNotIn(sentence_parts(words().services.figure_owed)[0], note.message)
         advance_turn(battle.pk)
 
     @with_fixed_refusals
@@ -742,26 +755,127 @@ class StalePoolsAnsweredAlikeTest(BaseTestCase):
 
         self.assert_refused_with_the_readout(response)
 
-    def test_a_choice_answers_with_the_readout(self):
-        pending = self.battle.pending_input_json
-        option = pending["candidates"][0]
-        choice = {
-            "combatant_id": pending["combatant_id"],
-            "turn": pending["turn"],
-            "letter": option["letter"],
-            "target_id": option.get("target_id"),
-            "spell_key": option.get("spell_key") or "",
-        }
-
-        response = self.client.post(
+    def act(self, choice: dict):
+        """Post ``choice`` to the act endpoint as the logged-in account."""
+        return self.client.post(
             reverse("battle:act", args=[self.battle.pk]),
             json.dumps(choice),
             content_type="application/json",
         )
 
+    def assert_nothing_stored_and_nothing_replays(self) -> None:
+        """The refused choice is not stored, and once the Game Master takes the
+        pools from the records the next advance pauses on the same figure
+        again rather than playing it (#133)."""
+        refused = Battle.objects.get(pk=self.battle.pk)
+        self.assertEqual(refused.turn_inputs_json, {})
+        events_before = refused.events.count()
+
+        resnapshot_pools(self.battle.pk, is_game_master=True)
+        advanced, events = advance_turn(self.battle.pk)
+
+        self.assertEqual(events, [])
+        self.assertEqual(advanced.status, Battle.STATUS_AWAITING)
+        self.assertEqual(advanced.turn_number, self.battle.turn_number)
+        self.assertEqual(
+            advanced.pending_input_json["combatant_id"],
+            self.battle.pending_input_json["combatant_id"],
+        )
+        # The take itself logs one line; no turn was played.
+        self.assertEqual(advanced.events.count(), events_before + 1)
+
+    def test_a_choice_answers_with_the_readout(self):
+        response = self.act(first_option_choice(self.battle.pending_input_json))
+
         self.assert_refused_with_the_readout(response)
         self.assertEqual(
             Battle.objects.get(pk=self.battle.pk).turn_number, self.battle.turn_number
+        )
+
+    def test_a_refused_choice_is_not_stored_and_does_not_replay(self):
+        """Issue #133: the refused choice stayed in ``turn_inputs_json``, and the
+        advance after the take played it, though nobody confirmed it again."""
+        response = self.act(first_option_choice(self.battle.pending_input_json))
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assert_nothing_stored_and_nothing_replays()
+
+    def test_a_refused_hand_off_to_the_ai_is_not_stored(self):
+        """The Game Master's other way to store a choice: handing it to the AI."""
+        pending = self.battle.pending_input_json
+
+        response = self.act(
+            {
+                "combatant_id": pending["combatant_id"],
+                "turn": pending["turn"],
+                "ai": True,
+            }
+        )
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assert_nothing_stored_and_nothing_replays()
+
+    def test_a_choice_refused_before_it_is_stored_never_resumes_the_turn(self):
+        """The refusal comes under the lock that would store the choice, so the
+        turn is never resumed and nothing is written to take back (#133)."""
+        with mock.patch("battle.services.advance_turn") as resumed:
+            response = self.act(first_option_choice(self.battle.pending_input_json))
+
+        # First, so a regression says the turn was resumed, not what the
+        # view made of a mock's answer.
+        resumed.assert_not_called()
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(Battle.objects.get(pk=self.battle.pk).turn_inputs_json, {})
+
+    def resumed_after_a_wound_elsewhere(self, before_the_advance=None):
+        """``advance_turn`` with the record wounded first: the records moving
+        between the transaction that stores a choice and the advance it
+        resumes. ``before_the_advance`` runs after the wound, before it."""
+        real_advance = advance_turn
+
+        def advance(battle_id: int):
+            Character.objects.filter(pk=self.character.pk).update(fatigue_damage=2)
+            if before_the_advance is not None:
+                before_the_advance()
+            return real_advance(battle_id)
+
+        return mock.patch("battle.services.advance_turn", side_effect=advance)
+
+    def take_the_pools(self) -> None:
+        """The Game Master takes the pools, so the choice passes its check."""
+        resnapshot_pools(self.battle.pk, is_game_master=True)
+        self.battle = Battle.objects.get(pk=self.battle.pk)
+        self.assertEqual(stale_pools(self.battle), [])
+
+    def test_a_record_moved_after_the_choice_was_stored_takes_it_back(self):
+        """The records can move between the transaction that stores the choice
+        and the advance it resumes; that refusal takes the stored choice back."""
+        self.take_the_pools()
+
+        with self.resumed_after_a_wound_elsewhere():
+            response = self.act(first_option_choice(self.battle.pending_input_json))
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assert_nothing_stored_and_nothing_replays()
+
+    def test_a_choice_stored_in_its_place_is_not_taken_back(self):
+        """Only the refused submission's own choice is taken back: one another
+        submission wrote under the same figure meanwhile is left alone."""
+        self.take_the_pools()
+        key = str(self.battle.pending_input_json["combatant_id"])
+        later = {"letter": "later submission", "target_id": None}
+
+        def a_later_submission() -> None:
+            Battle.objects.filter(pk=self.battle.pk).update(
+                turn_inputs_json={key: later}
+            )
+
+        with self.resumed_after_a_wound_elsewhere(a_later_submission):
+            response = self.act(first_option_choice(self.battle.pending_input_json))
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(
+            Battle.objects.get(pk=self.battle.pk).turn_inputs_json, {key: later}
         )
 
     def test_a_seated_player_is_refused_with_neither_readout_nor_control(self):
@@ -782,21 +896,11 @@ class StalePoolsAnsweredAlikeTest(BaseTestCase):
         battle, _events = advance_turn(battle.pk)
         self.assertEqual(battle.pending_input_json["combatant_id"], seat.pk)
         Character.objects.filter(pk=self.character.pk).update(fatigue_damage=2)
-        pending = battle.pending_input_json
-        option = pending["candidates"][0]
         self.login_as(player)
 
         refused = self.client.post(
             reverse("battle:act", args=[battle.pk]),
-            json.dumps(
-                {
-                    "combatant_id": pending["combatant_id"],
-                    "turn": pending["turn"],
-                    "letter": option["letter"],
-                    "target_id": option.get("target_id"),
-                    "spell_key": option.get("spell_key") or "",
-                }
-            ),
+            json.dumps(first_option_choice(battle.pending_input_json)),
             content_type="application/json",
         )
         taken = self.client.post(reverse("battle:resnapshot", args=[battle.pk]))
@@ -808,6 +912,8 @@ class StalePoolsAnsweredAlikeTest(BaseTestCase):
         self.assertEqual(payload["stale_html"], "")
         self.assertEqual(taken.status_code, 403)
         self.assertEqual(stale_pools(Battle.objects.get(pk=battle.pk)), ["Aldwin"])
+        # The player's refused choice is not stored either (#133).
+        self.assertEqual(Battle.objects.get(pk=battle.pk).turn_inputs_json, {})
 
 
 class DemotedMakerStopsWritingTest(BaseTestCase):
@@ -856,11 +962,12 @@ class DemotedMakerStopsWritingTest(BaseTestCase):
             (0, 0, True),
         )
         self.assertEqual(
-            withheld_characters(battle), {self.theirs.pk: WITHHELD_NOT_GAME_MASTER}
+            withheld_characters(battle),
+            {self.theirs.pk: words().services.withheld_not_game_master},
         )
         notes = battle.events.filter(payload__records_withheld=self.theirs.pk)
         self.assertEqual(notes.count(), 1, "said once, however many turns")
-        self.assertIn("no longer written to their record", notes.get().message)
+        self.assertTrue(says(notes.get().message, words().services.records_withheld))
         self.assertEqual(stale_pools(battle), [], "a withheld record is never stale")
 
     def test_a_session_fight_keeps_writing_his_own_character_only(self):
@@ -875,7 +982,8 @@ class DemotedMakerStopsWritingTest(BaseTestCase):
         self.demote()
 
         self.assertEqual(
-            withheld_characters(battle), {self.theirs.pk: WITHHELD_OTHER_PLAYERS}
+            withheld_characters(battle),
+            {self.theirs.pk: words().services.withheld_other_players},
         )
         battle = self.play(battle)
 
@@ -948,3 +1056,34 @@ class StaleNoticeOnEveryPayloadTest(BaseTestCase):
         self.assertIn('id="battle-stale-pools"', payload["stale_html"])
         self.assertIn('id="resnapshot-pools"', payload["stale_html"])
         self.assertEqual(payload["advance"]["label"], "Pools changed on the records")
+
+    def test_the_notice_carries_a_key_that_holds_still_between_polls(self):
+        """#134: the notice's HTML changes on every render, its key does not.
+
+        Django masks the form's CSRF token afresh each render, so battle.js
+        compares the notice's ``data-record`` instead of its HTML.
+        """
+        character_services.record_fight(
+            FightReport(
+                character_id=self.character.pk, fight="Elsewhere", turn=1, body_lost=5
+            )
+        )
+        Battle.objects.filter(pk=self.battle.pk).update(status=Battle.STATUS_AWAITING)
+
+        first, second = self.poll(), self.poll()
+
+        self.assertNotEqual(first["stale_html"], second["stale_html"])
+        self.assertEqual(
+            first["advance"]["stale_record"], second["advance"]["stale_record"]
+        )
+        self.assertEqual(
+            json.loads(first["advance"]["stale_record"]),
+            {
+                "moved": ["Aldwin"],
+                "resnapshot_url": reverse("battle:resnapshot", args=[self.battle.pk]),
+            },
+        )
+        self.assertIn(
+            f'data-record="{escape(first["advance"]["stale_record"])}"',
+            first["stale_html"],
+        )

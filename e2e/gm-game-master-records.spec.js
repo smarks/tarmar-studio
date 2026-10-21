@@ -10,8 +10,9 @@
  * the chip the page shows and the record the Characters pane reads.
  */
 
-const { refusal } = require('./refusals');
+const { refusal, refusalFixedParts } = require('./refusals');
 const { test, expect, loginAs, TEST_ADMIN, TEST_USER } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { loadedSkillRules } = require('./skill-rules');
 
@@ -68,10 +69,10 @@ print('REFUSALS ' + json.dumps(errors))
 }
 
 test.describe('GM chat — a Game Master records deaths, XP, coin and skill checks', () => {
-    test('a stated attribute check is held to the canon\'s dice and modifier limit (#70)', async ({ page }, testInfo) => {
+    test('a stated attribute check is held to the canon\'s dice and modifier limit (#70)', async ({ page }) => {
         // Read from the loaded canon, so this holds under either canon.
         const { attribute_check: check } = loadedSkillRules();
-        const name = `Wren${testInfo.workerIndex}x${Date.now() % 100000}`;
+        const name = `Wren${uniqueStamp()}`;
         const { sessionId } = seedSession(name);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
@@ -112,7 +113,7 @@ test.describe('GM chat — a Game Master records deaths, XP, coin and skill chec
     });
 
     test('each is a chip in the chat and a change on the record', async ({ page }, testInfo) => {
-        const name = `Gorn${testInfo.workerIndex}x${Date.now() % 100000}`;
+        const name = `Gorn${uniqueStamp()}`;
         const { sessionId, characterId } = seedSession(name);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
@@ -121,7 +122,11 @@ test.describe('GM chat — a Game Master records deaths, XP, coin and skill chec
         await expect(page.locator('.chat-messages .dice-roll').last()).toContainText('awarded 500 XP');
 
         await send(page, `Give ${name} 30 gold`);
-        await expect(page.locator('.chat-messages .dice-roll').last()).toContainText('received 30 gp');
+        const received = page.locator('.chat-messages .dice-roll').last();
+        await expect(received).toContainText('30');
+        for (const part of refusalFixedParts('characters', 'purse', 'received')) {
+            await expect(received).toContainText(part);
+        }
 
         await send(page, `Check ${name}'s stealth against 12`);
         const check = page.locator('.chat-messages .dice-roll').last();
@@ -135,11 +140,11 @@ test.describe('GM chat — a Game Master records deaths, XP, coin and skill chec
         // The record the sheet reads holds all four.
         const record = readDjangoShell(`
 from characters.models import Character
-from characters.purse import format_purse
+from characters.purse import format_coin
 c = Character.objects.get(pk=${characterId})
-print('RECORD', c.total_xp, format_purse(c), c.is_alive, c.death_cause)
+print('RECORD', c.total_xp, format_coin(c.purse), c.is_alive, c.death_cause)
 `);
-        expect(record).toContain('RECORD 500 130 gp False fell from the tower');
+        expect(record).toContain('RECORD 500 130 False fell from the tower');
 
         // The words stream before the turn is saved; Send comes back only once
         // the stream has closed, after the done frame the server sends once the
@@ -152,8 +157,8 @@ print('RECORD', c.total_xp, format_purse(c), c.is_alive, c.death_cause)
             .toContainText('fell from the tower');
     });
 
-    test('a player asking for the same records is told only the Game Master can', async ({ page }, testInfo) => {
-        const name = `Wren${testInfo.workerIndex}x${Date.now() % 100000}`;
+    test('a player asking for the same records is told only the Game Master can', async ({ page }) => {
+        const name = `Wren${uniqueStamp()}`;
         const { sessionId, characterId } = seedSession(name, TEST_USER, 'play');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);

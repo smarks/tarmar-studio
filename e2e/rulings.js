@@ -81,6 +81,68 @@ print('PAST_BY_RULING', json.dumps({'menu': past, 'log': capfirst(past)}))
 `, 'PAST_BY_RULING');
 }
 
+/**
+ * One of the battle's own lines (config/battle-rulings.toml, issue #136), as
+ * the server would write it.
+ * @param {string} table The file's table ("services", "control").
+ * @param {string} key The sentence's key in that table.
+ * @param {Object<string, string|number>} [fields] What fills its {names}.
+ * @returns {string}
+ */
+function battleLine(table, key, fields = {}) {
+    return readDjangoJson(`
+import json
+from battle.wording import words
+sentence = getattr(getattr(words(), ${JSON.stringify(table)}), ${JSON.stringify(key)})
+print('BATTLE_LINE', json.dumps(sentence.format(**json.loads(${JSON.stringify(JSON.stringify(fields))}))))
+`, 'BATTLE_LINE');
+}
+
+/**
+ * The runs of one of the battle's lines that stay the same whatever fills its
+ * {names}, for a line the spec cannot fill in full.
+ * @param {string} table
+ * @param {string} key
+ * @returns {string[]}
+ */
+function battleLineParts(table, key) {
+    return readDjangoJson(`
+import json, string
+from battle.wording import words
+sentence = getattr(getattr(words(), ${JSON.stringify(table)}), ${JSON.stringify(key)})
+parts = [text.strip() for text, _name, _spec, _conversion in string.Formatter().parse(sentence)]
+print('BATTLE_LINE_PARTS', json.dumps([part for part in parts if part]))
+`, 'BATTLE_LINE_PARTS');
+}
+
+/**
+ * How the battle log credits a player's choice (``[services] chosen_by``), up to
+ * the option's own line: "chosen by alice —" for an owner, or the words before
+ * the owner's name without one (issue #136).
+ * @param {string} [owner]
+ * @returns {string}
+ */
+function chosenBy(owner) {
+    const cut = '\u0000';
+    const filled = battleLine('services', 'chosen_by', {
+        owner: owner === undefined ? cut : owner,
+        rationale: cut,
+    });
+    return filled.split(cut)[0].trim();
+}
+
+/**
+ * The roster card's line for the viewer's own manual figure.
+ * @returns {string}
+ */
+function ownManualLine() {
+    return battleLine('control', 'manual_line', { owner: battleLine('control', 'you') });
+}
+
 module.exports = {
+    battleLine,
+    chosenBy,
+    ownManualLine,
+    battleLineParts,
     rulingWords, hthWholeBattleLogLine, magicBoundsLogLine, offeredBounds, pastByRuling,
 };
