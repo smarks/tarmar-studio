@@ -47,6 +47,7 @@ from common.gate import (  # noqa: E402
 from common.message_templates import (  # noqa: E402
     MessageTemplateError,
     message_template_from_environment,
+    require_bare_fields,
 )
 from common.public_paths import LOGIN_PATH  # noqa: E402
 from common.services import ollama_client  # noqa: E402
@@ -301,6 +302,17 @@ def _message_from_environment(name: str, default: str, *fields: str) -> str:
     """
     try:
         return message_template_from_environment(os.environ, name, default, *fields)
+    except MessageTemplateError as error:
+        raise ImproperlyConfigured(str(error)) from error
+
+
+def _page_message_from_environment(name: str, default: str, *fields: str) -> str:
+    """A message the page fills in itself (#94): as
+    :func:`_message_from_environment`, with every field a bare ``{name}``."""
+    try:
+        return require_bare_fields(
+            name, _message_from_environment(name, default, *fields)
+        )
     except MessageTemplateError as error:
         raise ImproperlyConfigured(str(error)) from error
 
@@ -666,6 +678,21 @@ GM_FIGHT_TOO_SLOW_MESSAGE = _message_from_environment(
     "The Game Master took longer than this table will wait to choose who you "
     "face, so nothing was started. It is often busy with other tables when "
     "that happens: give it a minute before you start the fight again.",
+)
+# What the Battle tab says when a fight request is answered with a page that
+# is not the app's JSON (issue #936): nginx's own 504 when its 60 s cut lands
+# before the app's 50 s fight deadline, or another error page, whose HTTP
+# status fills {status}. The page reads both from its #gm-panel-config block
+# (#94); the cut needs time outside the model's line, so a retry is invited.
+GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE = _page_message_from_environment(
+    "GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE",
+    "The server took too long to answer (HTTP 504). Try the fight again in a moment.",
+)
+GM_FIGHT_ERROR_PAGE_MESSAGE = _page_message_from_environment(
+    "GM_FIGHT_ERROR_PAGE_MESSAGE",
+    "The server answered with an error (HTTP {status}). Try the fight again in "
+    "a moment.",
+    "status",
 )
 # --- end GM turn waiting and timeout messages ---
 

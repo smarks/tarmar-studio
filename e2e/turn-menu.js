@@ -19,16 +19,18 @@ const { rulingWords } = require('./rulings');
 let readWords = null;
 
 /**
- * The menu's tables: the words both profiles use, a Tarmar figure's own and
- * a classic figure's own. Read through the Django shell on the first call
+ * The menu's tables: the words both profiles use, a Tarmar figure's own, a
+ * classic figure's own, and the turn panel's own around them (#94). Read through the Django shell on the first call
  * only: the settings load the words once at startup, so they cannot change
  * under a running suite.
- * @returns {{shared: Object<string, string>, tarmar: Object<string, string>, classic: Object<string, string>}}
+ * @returns {{shared: Object<string, string>, tarmar: Object<string, string>, classic: Object<string, string>, panel: Object<string, string>}}
  */
 function menuWords() {
     if (readWords === null) {
-        const { turn_menu: shared, tarmar_menu: tarmar, classic_menu: classic } = rulingWords();
-        readWords = { shared, tarmar, classic };
+        const {
+            turn_menu: shared, tarmar_menu: tarmar, classic_menu: classic, turn_panel: panel,
+        } = rulingWords();
+        readWords = { shared, tarmar, classic, panel };
     }
     return readWords;
 }

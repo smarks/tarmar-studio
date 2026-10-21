@@ -1338,7 +1338,7 @@ async function promptReview() {
  */
 async function sendForReview(note) {
   if (!CHAT_CONFIG.reviewUrl) {
-    uiNotify('Only a Game Master can send a session to Claude.', 'info');
+    uiNotify(filledWords(CHAT_CONFIG.reviewGameMasterOnly), 'info');
     return;
   }
   if (!sessionId) {

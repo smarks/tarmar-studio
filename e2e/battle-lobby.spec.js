@@ -14,6 +14,7 @@ const {
     test, expect, TEST_USER, TEST_WATCHER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
+const { menuWords, sentencePattern } = require('./turn-menu');
 
 test.describe('Battle lobby and remote play', () => {
     test('DM opens a lobby; a player claims, readies, and plays their turn', async ({ adminPage, browser }, testInfo) => {
@@ -98,7 +99,11 @@ test.describe('Battle lobby and remote play', () => {
         const firstOption = playerPage.locator('#turn-panel .turn-option').first();
         await expect(firstOption).toBeVisible({ timeout: 15000 });
         await expect(firstOption.locator('.turn-option-plain')).not.toBeEmpty();
-        await expect(firstOption.locator('.turn-option-cost')).toContainText('Costs');
+        // The configured words: what it costs, or that it costs nothing.
+        const { panel } = menuWords();
+        await expect(firstOption.locator('.turn-option-cost')).toHaveText(new RegExp(
+            `^(?:${sentencePattern(panel.costs)}|${sentencePattern(panel.costs_nothing)})$`
+        ));
         await playerPage.click('#turn-panel .turn-scoring-toggle');
         await expect(firstOption).toContainText('score');
         await firstOption.click();

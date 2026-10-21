@@ -83,22 +83,24 @@ test.describe('Choosing a turn by hand', () => {
             });
             await expect(aimed).toHaveCount(1);
             await expect(aimed.locator('.turn-option-plain')).toHaveText(attackLine(foe));
-            await expect(aimed.locator('.turn-option-cost')).toHaveText('Costs nothing.');
+            await expect(aimed.locator('.turn-option-cost'))
+                .toHaveText(menuLine(menuWords().panel.costs_nothing));
         }
         // One AI pick on the whole menu, and no scoring until asked for.
         await expect(panel.locator('.turn-option-ai-pick')).toHaveCount(1);
         await expect(panel.locator('.turn-option-advice')).toHaveCount(0);
 
         const scoring = panel.locator('.turn-scoring-toggle');
-        await expect(scoring).toHaveText("Show the AI's scoring");
+        await expect(scoring).toHaveText(menuLine(menuWords().panel.show_scoring));
         await scoring.click();
         await expect(panel.locator('.turn-scoring-toggle')).toHaveAttribute('aria-pressed', 'true');
-        await expect(attacks.first().locator('.turn-option-advice')).toContainText('score ');
+        await expect(attacks.first().locator('.turn-option-advice'))
+            .toHaveText(menuLine(menuWords().panel.advice));
         await expect(attacks.first().locator('.turn-option-advice')).toContainText('P(hit)');
         // The reader's choice holds across a reload, as a setting does.
         await page.reload();
         await expect(page.locator('#turn-panel .turn-scoring-toggle'))
-            .toHaveText("Hide the AI's scoring");
+            .toHaveText(menuLine(menuWords().panel.hide_scoring));
         await expect(page.locator('#turn-panel .turn-option-advice').first()).toBeVisible();
         await page.locator('#turn-panel .turn-scoring-toggle').click();
         await expect(page.locator('#turn-panel .turn-option-advice')).toHaveCount(0);

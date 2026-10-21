@@ -154,6 +154,70 @@ kneel = "Drop to one knee"
 do_nothing = "Hold where you are and do nothing this turn"
 pass_turn = "Wait: choose after the others have moved"
 
+# The turn panel's own words, around the menu's lines (issue #94): the prompt,
+# each option's cost and the AI's pick, the push, borrow and counter controls,
+# the cast stage, the hex picker and the buttons. The page fills these in
+# itself, so each {name} is a bare name. {name} is the figure choosing, shown
+# in bold; {player} the person playing it.
+[turn_panel]
+waiting = "Waiting for {name} to choose an action."
+waiting_played = "Waiting for {name} — played by {player} — to choose an action."
+# For whoever runs the battle, while another figure is awaited.
+ai_choose = "Have the AI choose for them"
+your_move = "Your move — {name}, turn {turn}. Pick one action."
+# The options' name to a screen reader.
+options_group = "Action options"
+# The tag on the option the AI would take.
+ai_pick = "AI pick"
+# The AI's scoring, behind the switch: its score and its working.
+advice = "score {score} — {rationale}"
+show_scoring = "Show the AI's scoring"
+hide_scoring = "Hide the AI's scoring"
+# {cost} is the option's cost line, from [tarmar_menu] or [classic_menu].
+costs = "Costs {cost}."
+costs_nothing = "Costs nothing."
+# The option that opens the spells.
+cast_option = "CAST SPELL"
+casts_ready_one = "1 cast ready"
+casts_ready = "{count} casts ready"
+# {count} casts only borrowing pays for.
+ready_borrowing = "{ready}, {count} by borrowing"
+# The cast option's working: {pool} is pool, {ready} the casts ready.
+cast_advice = "{pool} — {ready}"
+# The spells' name to a screen reader.
+spells_group = "Spells"
+# {pool_label} is the caster's pool's name (Mana, or ST in a classic battle).
+pool = "{pool_label} {pool} of {max_pool}"
+pool_owing = "{pool_label} {pool} of {max_pool}, owing {owed}"
+# The cast stage's first line: {pool} is pool or pool_owing.
+stage_pool = "{pool}. Pick a spell to cast."
+# A spell that cannot be cast, when the server gives no reason.
+not_castable = "not castable this turn"
+stand_down = "Don't cast — pick another action"
+push_label = "Push more mana:"
+push_label_channel = "Push more mana (Channel {channel}):"
+# The push control's first button: the cast with nothing pushed.
+push_none = "None"
+push_amount = "+{mana} mana"
+# The push control's name to a screen reader.
+push_group = "Push more mana into {spell}"
+borrow_label = "Borrow the mana you lack:"
+borrow_amount = "Borrow {borrowed} mana"
+borrow_pushed = "+{pushed} mana, borrow {borrowed}"
+borrow_group = "Borrow mana for {spell}"
+# A counter's caster when the menu names none.
+the_caster = "the caster"
+counter_label = "Counter {caster}:"
+counter_amount = "{mana} mana"
+counter_group = "Counter {caster}'s spell"
+# A pressed-again cast's note when the menu gave it no line.
+presses_again = "Presses the countered spell again"
+# The hex picker: {hex} is "(q, r)", {count} the hexes marked on the board.
+moving_to = "Moving to hex {hex}."
+pick_hex = "Pick one of the {count} marked hexes on the board to move there, or leave it and this action moves as it says."
+leave_hex = "Leave the hex unpicked"
+confirm = "Take this action"
+
 [hth_agreement]
 heading = "Hand-to-hand by agreement"
 game_master_only = "Only the Game Master running this fight marks it, or a pair in it, as hand-to-hand by agreement; players alone still need one of the rules' ways in"

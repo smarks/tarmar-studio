@@ -1334,13 +1334,20 @@ budget (`QUEUE_BLAMED_SHARE`) waiting; otherwise `GM_STREAM_TOO_SLOW_MESSAGE`.
 `/fight`'s foe call is one blocking request on a 50 s budget with no
 keep-alives to look at the line from, so its cut (`GM_FIGHT_TOO_SLOW_MESSAGE`)
 says the Game Master is often busy with other tables then and asks for a minute
-before trying again, rather than inviting a retry at once.
+before trying again, rather than inviting a retry at once. When nginx's own
+60 s cut answers first with an HTML 504, or another error page arrives, the
+Battle tab says `GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE` or
+`GM_FIGHT_ERROR_PAGE_MESSAGE` (its `{status}` the HTTP status), which reach the
+page in its `#gm-panel-config` block (#94); that cut needs time outside the
+model's line, so these do invite a retry.
 
-All five are settings with their defaults in `settings.py`, overridable from the
+All seven are settings with their defaults in `settings.py`, overridable from the
 environment (`common/message_templates.py`). Each is a `str.format` template
 filled in with whole numbers, even one with no fields, so a literal brace is
 written doubled; a template naming a field it may not use, or one a trial
-fill-in refuses (a bad format spec or conversion), stops startup.
+fill-in refuses (a bad format spec or conversion), stops startup. The two the
+page fills in itself (`filledWords` in `static/js/api.js`) must use bare
+fields only, with no format spec or conversion at all.
 
 Queue time counts against `GM_STREAM_BUDGET_SECONDS`. Leaving it out was
 weighed and refused. Each call is handed the turn's deadline as `stop_at` when

@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 from common.message_templates import (
     MessageTemplateError,
     message_template_from_environment,
+    require_bare_fields,
 )
 
 DEFAULT = "Waited {seconds}s"
@@ -84,3 +85,19 @@ class MessageTemplateFromEnvironmentTest(SimpleTestCase):
         configured = message_template_from_environment(environ, "GM_EXAMPLE", DEFAULT)
 
         self.assertEqual(configured.format(), "Held {a while}")
+
+
+class RequireBareFieldsTest(SimpleTestCase):
+    """A message the page fills in takes bare fields only (#94)."""
+
+    def test_bare_fields_and_doubled_braces_pass(self):
+        template = "HTTP {status} {{literally}}"
+        self.assertEqual(require_bare_fields("GM_EXAMPLE", template), template)
+
+    def test_a_spec_or_conversion_is_refused(self):
+        for template in ("HTTP {status:>5}", "HTTP {status!r}", "HTTP {status.real}"):
+            with (
+                self.subTest(template=template),
+                self.assertRaisesMessage(MessageTemplateError, "not a bare name"),
+            ):
+                require_bare_fields("GM_EXAMPLE", template)

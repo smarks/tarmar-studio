@@ -8,6 +8,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { menuWords, menuLine } = require('./turn-menu');
 
 /**
  * Start a two-duelist battle played by hand and stop at the first figure.
@@ -61,7 +62,7 @@ test.describe('The hex picker', () => {
         await expect(arena.locator('.arena-destination.is-chosen')).toHaveAttribute('data-hex', hex);
         const [q, r] = hex.split(',');
         await expect(panel.locator('.turn-destination-line'))
-            .toHaveText(`Moving to hex (${q}, ${r}).`);
+            .toHaveText(menuLine(menuWords().panel.moving_to, { hex: escaped(`(${q}, ${r})`) }));
 
         await panel.locator('.turn-confirm').click();
         await expect(adminPage.locator('#advance-turn')).not.toHaveText(`Waiting on ${mover}'s move`);

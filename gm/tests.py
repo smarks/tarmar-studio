@@ -506,6 +506,8 @@ class GMViewTest(BaseTestCase):
                 "mode",
                 "transcriptUrlTemplate",
                 "reviewUrl",
+                # What the page says when it has no reviewUrl (#94).
+                "reviewGameMasterOnly",
                 # Where a lost turn is asked after, and the turn still
                 # running when the page loaded (issue #515).
                 "turnUrlTemplate",

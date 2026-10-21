@@ -66,3 +66,40 @@ def message_template_from_environment(
             f"{name} is {configured!r}, which cannot be filled in: {error!r}."
         ) from error
     return configured
+
+
+def require_bare_fields(name: str, template: str) -> str:
+    """Refuse a template unless every field in it is a bare ``{name}``.
+
+    Two kinds of template need it. One the page fills in (``filledWords`` in
+    static/js/api.js, #94) reads each ``{name}`` and the doubled braces only,
+    so a format spec, a conversion, an attribute or an index would reach the
+    player as written. And a trial fill with empty or zero values passes
+    shapes the real values break on (``{by:>{name}}`` pads to a width read
+    from a name), which the battle's words refuse (battle/wording.py).
+
+    Args:
+        name: What the error names the template by: a variable, or a file,
+            table and key.
+        template: The template as configured.
+
+    Returns:
+        ``template``, unchanged.
+
+    Raises:
+        MessageTemplateError: A field carries a spec, a conversion, an
+            attribute or an index.
+    """
+    for _text, field_name, spec, conversion in string.Formatter().parse(template):
+        if field_name is None:
+            continue
+        if spec or conversion or not field_name.isidentifier():
+            written = (
+                f"{{{field_name}{'!' + conversion if conversion else ''}"
+                f"{':' + spec if spec else ''}}}"
+            )
+            raise MessageTemplateError(
+                f"{name} has a field that is not a bare name: {written}; write "
+                "{name} alone"
+            )
+    return template

@@ -10,6 +10,7 @@
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { menuWords, sentencePattern } = require('./turn-menu');
 
 test.describe('Battle simulator', () => {
     test('create, advance two turns, see rolls and decisions, survive reload', async ({ adminPage }) => {
@@ -246,7 +247,7 @@ test.describe('Battle simulator', () => {
         });
         const battleId = new URL(adminPage.url()).pathname.match(/battles\/(\d+)\//)[1];
         await adminPage.click('#advance-turn');
-        await expect(adminPage.locator('#turn-panel')).toContainText('Your move');
+        await expect(adminPage.locator('#turn-panel')).toContainText(new RegExp(sentencePattern(menuWords().panel.your_move)));
 
         const card = adminPage.locator('#battle-roster [data-combatant]').first();
         const combatantId = await card.getAttribute('data-combatant');

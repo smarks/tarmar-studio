@@ -15,6 +15,10 @@ function setUpDom({ sessionId = null, withForm = true, withBattle = false } = {}
         attachUrl: '/tarmar/gm/characters/attach/',
         detachUrl: '/tarmar/gm/characters/detach/',
         sessionId,
+        // The server's error-page messages (#94), under fixed words: the
+        // tests prove which one is said and what fills it, not its wording.
+        fightTimeoutMessage: 'GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE',
+        fightErrorPageMessage: 'GM_FIGHT_ERROR_PAGE_MESSAGE {status}',
     });
     document.body.innerHTML = `
         <script id="gm-panel-config" type="application/json">${config}<\/script>
@@ -160,9 +164,7 @@ describe('startFight', () => {
         expect(await panelBattle.startFight('wolf')).toBe(false);
         const error = document.getElementById('gm-panel-battle-error');
         expect(error.hidden).toBe(false);
-        expect(error.textContent).toBe(
-            'The server took too long to answer (HTTP 504). Try the fight again in a moment.',
-        );
+        expect(error.textContent).toBe('GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE');
         expect(document.getElementById('gm-panel-battle-status').hidden).toBe(true);
         expect(document.getElementById('gm-fight-start').disabled).toBe(false);
         expect(pageNavigation.go).not.toHaveBeenCalled();
@@ -178,9 +180,8 @@ describe('startFight', () => {
             json: () => Promise.reject(new SyntaxError('Unexpected token <')),
         }));
         expect(await panelBattle.startFight('wolf')).toBe(false);
-        expect(document.getElementById('gm-panel-battle-error').textContent).toBe(
-            'The server answered with an error (HTTP 502). Try the fight again in a moment.',
-        );
+        expect(document.getElementById('gm-panel-battle-error').textContent)
+            .toBe('GM_FIGHT_ERROR_PAGE_MESSAGE 502');
     });
 
     test('a page without the fight form cannot post', async () => {

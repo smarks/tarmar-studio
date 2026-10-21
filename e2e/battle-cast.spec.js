@@ -14,6 +14,7 @@ const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
+const { menuWords } = require('./turn-menu');
 
 test.describe('Wizard cast flow', () => {
     test('a seated wizard declares, inspects, stands down, then casts', async ({ adminPage, browser }, testInfo) => {
@@ -57,7 +58,7 @@ test.describe('Wizard cast flow', () => {
         const castOption = playerPage.locator('#turn-panel .turn-option-cast');
         await expect(castOption).toBeVisible({ timeout: 15000 });
         await expect(castOption).toHaveCount(1);
-        await expect(castOption).toContainText('CAST SPELL');
+        await expect(castOption).toContainText(menuWords().panel.cast_option);
         await expect(castOption).toContainText('Mana');
         await expect(playerPage.locator('#turn-panel .turn-cast-stage'))
             .toHaveCount(0);

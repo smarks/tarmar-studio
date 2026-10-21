@@ -36,7 +36,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from itertools import groupby
 
@@ -1421,6 +1421,10 @@ MAGIC_BOUNDS_PANEL_ID = "battle-magic-bounds"
 HTH_AGREEMENT_CONTEXT = "hth_agreement"
 MAGIC_BOUNDS_CONTEXT = "magic_bounds"
 
+#: The arena context's name for the turn panel's words (#94), which
+#: battle/_arena.html renders as #battle-turn-panel-words.
+TURN_PANEL_WORDS_CONTEXT = "turn_panel_words"
+
 
 def ruling_panels_html(
     battle, actor: Actor, request: HttpRequest | None
@@ -1561,6 +1565,10 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
         "can_control": can_control(actor, battle),
         "seats": seat_summaries(battle, actor),
         "pending": pending_payload(battle, actor),
+        # The turn panel's own words (#94): config/battle-rulings.toml's
+        # [turn_panel], once per page, since they cannot change while the
+        # server runs, so battle.js prints no wording of its own.
+        TURN_PANEL_WORDS_CONTEXT: asdict(words().turn_panel),
         "advance": advance_control(battle, actor),
         HTH_AGREEMENT_CONTEXT: hth_agreement_panel(battle, actor),
         MAGIC_BOUNDS_CONTEXT: magic_bounds_panel(battle, actor),

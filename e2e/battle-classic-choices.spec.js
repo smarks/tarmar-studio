@@ -87,18 +87,20 @@ test.describe('Choosing a classic turn by hand', () => {
                     .join('|')})`,
             })
         );
-        await expect(attack.locator('.turn-option-cost')).toHaveText('Costs nothing.');
+        await expect(attack.locator('.turn-option-cost'))
+            .toHaveText(menuLine(menuWords().panel.costs_nothing));
         await expect(panel.locator('.turn-option-ai-pick')).toHaveCount(1);
 
         // The switch shows the classic policy's working, and holds on reload.
         const scoring = panel.locator('.turn-scoring-toggle');
-        await expect(scoring).toHaveText("Show the AI's scoring");
+        await expect(scoring).toHaveText(menuLine(menuWords().panel.show_scoring));
         await scoring.click();
         await expect(panel.locator('.turn-option-advice')).toHaveCount(count);
-        await expect(panel.locator('.turn-option-advice').first()).toContainText('score ');
+        await expect(panel.locator('.turn-option-advice').first())
+            .toHaveText(menuLine(menuWords().panel.advice));
         await page.reload();
         await expect(page.locator('#turn-panel .turn-scoring-toggle'))
-            .toHaveText("Hide the AI's scoring");
+            .toHaveText(menuLine(menuWords().panel.hide_scoring));
         await page.locator('#turn-panel .turn-scoring-toggle').click();
 
         // The choices still play: each figure picks ATTACK, the turn runs,

@@ -284,13 +284,20 @@ test.describe('Pushing mana into a cast', () => {
         const amounts = missileGroup.locator('.turn-push-amount');
         // The default canon caps a push at three mana, and the wizard has
         // the mana for all three.
-        await expect(amounts).toHaveText(['None', '+1 mana', '+2 mana', '+3 mana']);
+        const { panel, tarmar } = menuWords();
+        await expect(amounts).toHaveText([
+            menuLine(panel.push_none),
+            ...[1, 2, 3].map((mana) => menuLine(panel.push_amount, { mana: String(mana) })),
+        ]);
         await expect(amounts.first()).toHaveAttribute('aria-pressed', 'true');
 
         await amounts.nth(2).click();
         await expect(amounts.nth(2)).toHaveAttribute('aria-pressed', 'true');
-        await expect(missileGroup.locator('.turn-push-cost'))
-            .toContainText('3 mana (1 and 2 pushed)');
+        await expect(missileGroup.locator('.turn-push-cost')).toHaveText(
+            menuLine(panel.costs, {
+                cost: sentencePattern(tarmar.push_cost, { total: '3', level: '1', pushed: '2' }),
+            })
+        );
         await playerPage.click('#turn-panel .turn-confirm');
 
         // The turn ran: the player's pushed cast, its Control Roll against
@@ -317,7 +324,15 @@ test.describe('Pushing mana into a cast', () => {
             { beforeTurn: emptyTheWizardsPool }
         );
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
-        await expect(stage.locator('.turn-cast-pool')).toContainText('Mana 0 of');
+        // The configured words, the pool named as the server names it.
+        const pool = { pool_label: 'Mana', pool: '0' };
+        await expect(stage.locator('.turn-cast-pool')).toHaveText(menuLine(
+            menuWords().panel.stage_pool,
+            {
+                pool: `(?:${sentencePattern(menuWords().panel.pool, pool)}`
+                    + `|${sentencePattern(menuWords().panel.pool_owing, pool)})`,
+            }
+        ));
 
         // Fire Missile has no plain cast with an empty pool: its row is
         // disabled with the server's reason, and its borrowing control lists
@@ -329,15 +344,16 @@ test.describe('Pushing mana into a cast', () => {
         await expect(missileGroup.locator('.turn-spell-note'))
             .toContainText('borrow the 1 it lacks');
         const copies = missileGroup.locator('.turn-borrow-amount');
+        const { panel } = menuWords();
+        const borrowOne = menuLine(panel.borrow_amount, { borrowed: '1' });
         if (defaultCanon) {
             // The default canon: no Channel, a debt cap of four, a push cap
             // of three.
-            await expect(copies).toHaveText([
-                'Borrow 1 mana', '+1 mana, borrow 2', '+2 mana, borrow 3',
-                '+3 mana, borrow 4',
-            ]);
+            await expect(copies).toHaveText([borrowOne, ...[1, 2, 3].map((pushed) => menuLine(
+                panel.borrow_pushed, { pushed: String(pushed), borrowed: String(pushed + 1) }
+            ))]);
         } else {
-            await expect(copies).toHaveText(['Borrow 1 mana']);
+            await expect(copies).toHaveText([borrowOne]);
         }
         await expect(copies.first()).toHaveAttribute('aria-pressed', 'false');
 
@@ -534,8 +550,13 @@ test.describe('Pushing mana into a cast', () => {
                     // The AI never counters: no commitment is its pick.
                     await expect(control.locator('.turn-option-ai-pick')).toHaveCount(0);
                     const amounts = control.locator('.turn-counter-amount');
-                    const texts = await amounts.allTextContents();
-                    const mana = texts.map((text) => Number(text.replace(' mana', '')));
+                    // Each button names its commitment in the configured
+                    // words, and carries it as data-counter-mana.
+                    const mana = (await amounts.evaluateAll((buttons) => buttons
+                        .map((button) => button.dataset.counterMana))).map(Number);
+                    await expect(amounts).toHaveText(mana.map((amount) => menuLine(
+                        menuWords().panel.counter_amount, { mana: String(amount) }
+                    )));
                     // One button per mana from the least the canon allows.
                     expect(mana).toEqual(mana.map((_amount, index) => mana[0] + index));
                     await expect(amounts.first()).toHaveAttribute('aria-pressed', 'false');

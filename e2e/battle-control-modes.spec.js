@@ -20,6 +20,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { menuWords, sentencePattern } = require('./turn-menu');
 
 /**
  * Open the per-combatant disclosure so its rows can be driven.
@@ -117,7 +118,7 @@ test.describe('Battle control modes', () => {
         // commits, with the AI figures' decisions in the same log.
         const panel = adminPage.locator('#turn-panel');
         await expect(panel).toBeVisible();
-        await expect(panel).toContainText('Your move');
+        await expect(panel).toContainText(new RegExp(sentencePattern(menuWords().panel.your_move)));
         await panel.locator('.turn-option').first().click();
         await panel.locator('.turn-confirm').click();
 

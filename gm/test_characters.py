@@ -10,6 +10,8 @@ import json
 import re
 from unittest.mock import patch
 
+from django.test import override_settings
+
 from common.test_helpers import BaseTestCase, create_character
 
 from .character_sheet import CharacterSheet
@@ -411,6 +413,9 @@ class GMChatPagePanelTest(BaseTestCase):
                 "charactersPanelUrlTemplate",
                 # The Campaign tab refetches the same way (issue #579).
                 "campaignPanelUrlTemplate",
+                # The Battle tab's error-page messages (#94).
+                "fightTimeoutMessage",
+                "fightErrorPageMessage",
             },
         )
         self.assertEqual(
@@ -424,6 +429,21 @@ class GMChatPagePanelTest(BaseTestCase):
             self.client.get(f"/tarmar/gm/?session={self.session.pk}")
         )
         self.assertEqual(config["sessionId"], self.session.pk)
+
+    @override_settings(
+        GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE="GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE",
+        GM_FIGHT_ERROR_PAGE_MESSAGE="GM_FIGHT_ERROR_PAGE_MESSAGE {status}",
+    )
+    def test_the_battle_tab_says_the_configured_error_page_messages(self):
+        """gm-panel-battle.js writes no wording of its own for an error page
+        (#94): it reads both messages, as configured, from this block."""
+        config = self._panel_config(self.client.get("/tarmar/gm/"))
+        self.assertEqual(
+            config["fightTimeoutMessage"], "GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE"
+        )
+        self.assertEqual(
+            config["fightErrorPageMessage"], "GM_FIGHT_ERROR_PAGE_MESSAGE {status}"
+        )
 
     def test_picker_lists_only_the_users_living_unattached_characters(self):
         create_character(self.user, name="Bran")

@@ -28,6 +28,8 @@ from typing import Any, get_type_hints
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+from common.message_templates import MessageTemplateError, require_bare_fields
+
 #: The field metadata key naming the placeholders a sentence may use.
 PLACEHOLDERS = "placeholders"
 
@@ -185,6 +187,54 @@ class ClassicMenuWords:
 
 
 @dataclass(frozen=True)
+class TurnPanelWords:
+    """The turn panel's own words, around the server's lines (#94): the
+    prompt, each option's cost and the AI's pick, the push, borrow and counter
+    controls, the cast stage, the hex picker and the buttons."""
+
+    waiting: str = _sentence("name", required=("name",))
+    waiting_played: str = _sentence("name", "player", required=("name",))
+    ai_choose: str = _sentence()
+    your_move: str = _sentence("name", "turn", required=("name",))
+    options_group: str = _sentence()
+    ai_pick: str = _sentence()
+    advice: str = _sentence("score", "rationale", required=("rationale",))
+    show_scoring: str = _sentence()
+    hide_scoring: str = _sentence()
+    costs: str = _sentence("cost", required=("cost",))
+    costs_nothing: str = _sentence()
+    cast_option: str = _sentence()
+    casts_ready_one: str = _sentence()
+    casts_ready: str = _sentence("count")
+    ready_borrowing: str = _sentence("ready", "count", required=("ready",))
+    cast_advice: str = _sentence("pool", "ready", required=("pool", "ready"))
+    spells_group: str = _sentence()
+    pool: str = _sentence("pool_label", "pool", "max_pool")
+    pool_owing: str = _sentence("pool_label", "pool", "max_pool", "owed")
+    stage_pool: str = _sentence("pool", required=("pool",))
+    not_castable: str = _sentence()
+    stand_down: str = _sentence()
+    push_label: str = _sentence()
+    push_label_channel: str = _sentence("channel")
+    push_none: str = _sentence()
+    push_amount: str = _sentence("mana")
+    push_group: str = _sentence("spell")
+    borrow_label: str = _sentence()
+    borrow_amount: str = _sentence("borrowed")
+    borrow_pushed: str = _sentence("pushed", "borrowed")
+    borrow_group: str = _sentence("spell")
+    the_caster: str = _sentence()
+    counter_label: str = _sentence("caster")
+    counter_amount: str = _sentence("mana")
+    counter_group: str = _sentence("caster")
+    presses_again: str = _sentence()
+    moving_to: str = _sentence("hex")
+    pick_hex: str = _sentence("count")
+    leave_hex: str = _sentence()
+    confirm: str = _sentence()
+
+
+@dataclass(frozen=True)
 class HthAgreementWords:
     """The HTH-by-agreement ruling's words (#867)."""
 
@@ -242,6 +292,7 @@ class RulingsWording:
     turn_menu: TurnMenuWords
     tarmar_menu: TarmarMenuWords
     classic_menu: ClassicMenuWords
+    turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
 
@@ -273,18 +324,12 @@ def _table(path: Path, name: str, raw: Any, words_type: type) -> Any:
                 f"{where} {key} cannot be filled ({error!r}); it may use only "
                 f"{sorted(allowed)}"
             ) from error
-        # An empty trial value fills shapes the real ones break on ("{by:>{name}}"
-        # pads to a width read from a name), so each field must be a bare name:
-        # no format spec, no conversion, no attribute or index.
-        for _text, field_name, spec, conversion in string.Formatter().parse(value):
-            if field_name is None:
-                continue
-            if spec or conversion or "." in field_name or "[" in field_name:
-                raise ImproperlyConfigured(
-                    f"{where} {key} has a field that is not a bare name: "
-                    f"{{{field_name}{'!' + conversion if conversion else ''}"
-                    f"{':' + spec if spec else ''}}}; write {{name}} alone"
-                )
+        # An empty trial value fills shapes the real ones break on, and the
+        # page fills some of these itself (#94): each field is a bare name.
+        try:
+            require_bare_fields(f"{where} {key}", value)
+        except MessageTemplateError as error:
+            raise ImproperlyConfigured(str(error)) from error
         used = {
             field_name
             for _text, field_name, _spec, _conversion in string.Formatter().parse(value)
