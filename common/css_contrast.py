@@ -65,6 +65,29 @@ ink and ground of the component it modifies. The opacity of a selector is the
 nearest rule that names it, its ``.a.b`` falling back to ``.a``, the same way
 its ink is found.
 
+A modifier carries its component's descendants onto whatever it paints (issue
+#91). ``.equipment-row .item-equipped`` is written for the row, applies inside
+``.equipment-row.in-pack.pack-dropped`` as well, and there stands on the
+dropped row's grey, not on the row's white. So every descendant rule of a
+component is measured again inside each modifier of it that paints a ground
+or fades -- a compound with a class more (``.row.dropped``) or a state
+(``.row:hover``) -- under the modifier's name and on the modifier's ground.
+An ancestor named in a selector is read the same way: ``.row:hover .name``
+stands on the hover ground, and ``.row.dropped .name`` on the row's ground when
+the modifier paints none of its own. A rule that clears its ground
+(``background: none`` or ``transparent``) paints nothing, and a modifier
+that clears it does not borrow the component's ground.
+
+The walk from a modifier to its component is as flat as the rest. It drops
+trailing classes from the last compound only: ``.row.in-pack.dropped`` that
+paints nothing tries ``.row.in-pack`` and then ``.row``, never ``.row.dropped``,
+and source order between those rules is not read. The modifiers of a
+component are found the same way, so a modifier written with its classes in
+another order (``.dropped.row``) is not seen as one. A descendant's ink is its
+own rule's colour or the page's: colour inherited from a modifier that sets
+only ``color`` is not carried down to the text inside it. No live sheet relies
+on any of these today.
+
 Only opaque ``#rgb``/``#rrggbb`` colours participate. ``transparent``,
 ``currentColor``, gradients and ``rgba()`` are skipped rather than guessed at:
 a wrong guess here would either mask a real failure or invent a false one.
@@ -72,6 +95,7 @@ a wrong guess here would either mask a real failure or invent a false one.
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,6 +121,14 @@ _OPACITY = re.compile(r"(\d*\.?\d+)(%?)(?:\s*!\s*important)?", re.IGNORECASE)
 # The property that fades an element and all it holds. ``fill-opacity`` and
 # ``stroke-opacity`` fade one SVG paint and are not read.
 OPACITY_PROPERTY = "opacity"
+# A ground a rule clears rather than paints: the element shows what is behind
+# it, so the ground a modifier inherits from its component stops here.
+# ``background-color: none`` is invalid CSS a browser ignores, so only the
+# shorthand may say ``none``.
+_CLEARED_GROUND = {
+    "background": re.compile(r"(?:none|transparent)(?:\s*!\s*important)?", re.I),
+    "background-color": re.compile(r"transparent(?:\s*!\s*important)?", re.I),
+}
 # An at-rule whose body holds rules, up to and including its opening brace.
 _CONDITIONAL_AT_RULE = re.compile(r"@(?:media|supports)[^{}]*\{")
 
@@ -338,6 +370,34 @@ def _is_layer_rule(selector: str) -> bool:
     )
 
 
+def _ancestors(selector: str, modified_by: tuple[int, str] | None = None) -> list[str]:
+    """The ancestors a selector names, outermost first, states kept.
+
+    ``.row:hover .cell .name`` names ``.row:hover`` and ``.row:hover .cell``;
+    a combinator is not an ancestor. ``modified_by`` puts a modifier in place
+    of the first ``depth`` parts, so ``.row .name`` read inside
+    ``.row.dropped`` names ``.row.dropped`` (issue #91).
+
+    Args:
+        selector: The text's selector, resting or stated.
+        modified_by: ``(how many parts the modifier replaces, the modifier)``.
+
+    Returns:
+        Each ancestor's prefix of the selector, as :func:`_stated_form`
+        spells it.
+    """
+    parts = _stated_form(selector).split()
+    ancestors = []
+    for depth in range(1, len(parts)):
+        if parts[depth - 1] in _COMBINATORS:
+            continue
+        if modified_by and modified_by[0] == depth:
+            ancestors.append(modified_by[1])
+        else:
+            ancestors.append(" ".join(parts[:depth]))
+    return ancestors
+
+
 @dataclass(frozen=True)
 class PaintedColours:
     """What a set of sheets paints, with the state layer kept off the resting one.
@@ -355,6 +415,10 @@ class PaintedColours:
         state_foregrounds: ``".x:hover"`` to the text colour that state sets.
         resting_opacities: Component to the opacity it sets at rest (issue #49).
         state_opacities: ``".x:hover"`` to the opacity that state sets.
+        resting_cleared: Components whose ground a rule clears, with
+            ``background: none`` or ``transparent``: they paint nothing, and
+            a modifier of theirs does not borrow its component's ground.
+        state_cleared: ``".x:hover"`` selectors that clear their ground.
     """
 
     resting_backgrounds: dict[str, str]
@@ -363,6 +427,8 @@ class PaintedColours:
     state_foregrounds: dict[str, str]
     resting_opacities: dict[str, float] = field(default_factory=dict)
     state_opacities: dict[str, float] = field(default_factory=dict)
+    resting_cleared: set[str] = field(default_factory=set)
+    state_cleared: set[str] = field(default_factory=set)
 
     @property
     def page_ground(self) -> str:
@@ -435,16 +501,59 @@ class PaintedColours:
             return self.state_opacities[stated]
         return self.opacity_for(_base_form(stated))
 
+    def sets_ink(self, selector: str) -> bool:
+        """Whether a rule written for exactly this selector sets a text colour."""
+        foregrounds = (
+            self.state_foregrounds
+            if _is_layer_rule(selector)
+            else self.resting_foregrounds
+        )
+        return selector in foregrounds
+
     def ground_of(self, component: str) -> str | None:
         """The ground a component paints, following its base rules, or None.
 
         ``.combatant-card.is-down`` is the card, so it stands on the ground
-        ``.combatant-card`` paints even though no rule gives it one.
+        ``.combatant-card`` paints even though no rule gives it one -- unless
+        the modifier clears it (``background: none``), which stops the walk.
         """
-        for candidate in _generalisations(component):
-            if candidate in self.resting_backgrounds:
-                return self.resting_backgrounds[candidate]
+        return self.own_ground(component)
+
+    def own_ground(self, selector: str, fallback: str | None = None) -> str | None:
+        """The ground a selector's element paints itself, or None.
+
+        A state's own ground first, then the component's resting ground
+        through its base rules (:meth:`ground_of`). The first rule that says
+        anything about the ground decides: a colour is the answer, and a
+        cleared ground (``background: none``) is None, so a quiet button
+        does not stand on the loud one's fill (issue #91).
+
+        Args:
+            selector: A selector, resting or stated.
+            fallback: A less specific rule for the same element, read only
+                when nothing for ``selector`` mentions the ground:
+                ``.row .weight`` behind ``.row.dropped .weight``.
+
+        Returns:
+            An opaque colour, or None when the element paints nothing.
+        """
+        for candidates in (selector, fallback):
+            if candidates is None:
+                continue
+            for backgrounds, cleared, candidate in self._ground_rules(candidates):
+                if candidate in backgrounds:
+                    return backgrounds[candidate]
+                if candidate in cleared:
+                    return None
         return None
+
+    def _ground_rules(self, selector: str):
+        """Where a selector's ground may be set, most specific first."""
+        if _is_layer_rule(selector):
+            yield self.state_backgrounds, self.state_cleared, selector
+            selector = _base_form(selector)
+        for candidate in _generalisations(selector):
+            yield self.resting_backgrounds, self.resting_cleared, candidate
 
     def fade(
         self,
@@ -452,7 +561,8 @@ class PaintedColours:
         foreground: str,
         background: str,
         paints_ground: bool,
-        faded_by: tuple[int, str] | None = None,
+        modified_by: tuple[int, str] | None = None,
+        leaf_opacity: float | None = None,
     ) -> tuple[str, str, str, float]:
         """The colours a reader sees once every fade on a selector is applied.
 
@@ -472,35 +582,30 @@ class PaintedColours:
             paints_ground: Whether that ground is the selector's own, and so
                 fades with it, rather than an ancestor's, which fades with
                 the ancestor.
-            faded_by: A modifier standing in for one of the selector's
+            modified_by: A modifier standing in for one of the selector's
                 ancestors, as ``(how many parts of the selector it replaces,
                 the modifier)``: text inside ``.card`` seen as text inside
-                ``.card.is-down``, which fades it. Its opacity and ground
-                replace that ancestor's.
+                ``.card.is-down``, which fades it, or inside ``.card:hover``,
+                which repaints it. Its opacity and ground replace that
+                ancestor's (issues #49, #91).
+            leaf_opacity: The selector's own opacity, when a more specific
+                rule than the selector sets it; else read from the sheets.
 
         Returns:
             The foreground and background as seen, the unfaded ground the text
             stands on, and the product of every opacity on the way. When
             nothing fades: the inputs unchanged, and 1.0.
         """
-        parts = _base_form(selector).split()
-        leaf_opacity = (
-            self.opacity_in_state(selector)
-            if _is_layer_rule(selector)
-            else self.opacity_for(selector)
-        )
-        ancestors = []
-        for depth in range(1, len(parts)):
-            if parts[depth - 1] in _COMBINATORS:
-                continue
-            prefix = " ".join(parts[:depth])
-            if faded_by and faded_by[0] == depth:
-                prefix = faded_by[1]
-                ancestors.append((self.ground_of(prefix), self.opacity_for(prefix)))
-            else:
-                ancestors.append(
-                    (self.resting_backgrounds.get(prefix), self.opacity_for(prefix))
-                )
+        if leaf_opacity is None:
+            leaf_opacity = (
+                self.opacity_in_state(selector)
+                if _is_layer_rule(selector)
+                else self.opacity_for(selector)
+            )
+        ancestors = [
+            self.ancestor_paint(ancestor)
+            for ancestor in _ancestors(selector, modified_by)
+        ]
         total = leaf_opacity
         for _, opacity in ancestors:
             total *= opacity
@@ -533,29 +638,59 @@ class PaintedColours:
             total,
         )
 
-    def ground_under(self, selector: str) -> str:
+    def ancestor_paint(self, ancestor: str) -> tuple[str | None, float]:
+        """The ground an ancestor named in a selector paints, and its opacity.
+
+        An ancestor in a state (``.row:hover`` in ``.row:hover .name``)
+        paints its state ground if it has one and its resting ground
+        otherwise. A modifier (``.row.dropped``) paints its own ground if it
+        has one and the component's otherwise, the way :meth:`ground_of`
+        reads it (issue #91).
+
+        Args:
+            ancestor: A prefix of a selector, as :func:`_stated_form` spells it.
+
+        Returns:
+            The ground, or None when nothing the ancestor is paints one, and
+            the opacity it renders at.
+        """
+        if _is_layer_rule(ancestor):
+            return self.own_ground(ancestor), self.opacity_in_state(ancestor)
+        return self.own_ground(ancestor), self.opacity_for(ancestor)
+
+    def ground_under(
+        self, selector: str, modified_by: tuple[int, str] | None = None
+    ) -> str:
         """The ground a text colour lands on when it paints none of its own.
 
-        The nearest ancestor named in the selector that paints a resting
-        ground, falling back to the page's. A state's ground is its own if it
-        paints one, else the component's resting ground, else this.
+        The nearest ancestor named in the selector that paints a ground, read
+        by :meth:`ancestor_paint`, falling back to the page's. A state's
+        ground is its own if it paints one, else the component's resting
+        ground, else this.
 
         Args:
             selector: The text's selector, resting or stated.
+            modified_by: A modifier standing in for one of its ancestors, as
+                :meth:`fade` takes it.
 
         Returns:
             An opaque ``#rrggbb`` colour.
         """
-        parts = _base_form(selector).split()
-        for depth in range(len(parts) - 1, 0, -1):
-            ancestor = " ".join(parts[:depth])
-            if ancestor in self.resting_backgrounds:
-                return self.resting_backgrounds[ancestor]
+        for ancestor in reversed(_ancestors(selector, modified_by)):
+            ground, _ = self.ancestor_paint(ancestor)
+            if ground:
+                return ground
         return self.page_ground
 
 
+@functools.lru_cache(maxsize=64)
 def _painted(base_css: str, theme_css: str) -> PaintedColours:
     """Read every colour the sheets paint, resting rules apart from state rules.
+
+    Remembered per pair of sheets: every audit reads the same sheets, and
+    :func:`audit_conditionals` reads them again under each block, so parsing
+    them once a pair is most of what the whole audit costs (issue #91). The
+    maps are never written to once built.
 
     Args:
         base_css: The site-wide sheet.
@@ -575,11 +710,20 @@ def _painted(base_css: str, theme_css: str) -> PaintedColours:
         foregrounds = (
             painted.state_foregrounds if stated else painted.resting_foregrounds
         )
-        for property_name in ("background", "background-color"):
-            if property_name in declarations:
-                colour = _colour(_resolve(declarations[property_name], variables))
+        cleared = painted.state_cleared if stated else painted.resting_cleared
+        # In the order the rule writes them: the later of ``background`` and
+        # ``background-color`` decides the ground, as it does in a browser.
+        for property_name, written in declarations.items():
+            clears = _CLEARED_GROUND.get(property_name)
+            if clears is not None:
+                value = _resolve(written, variables)
+                colour = _colour(value)
                 if colour:
                     backgrounds[key] = colour
+                    cleared.discard(key)
+                elif clears.fullmatch(value.strip()):
+                    backgrounds.pop(key, None)
+                    cleared.add(key)
         if "color" in declarations:
             colour = _colour(_resolve(declarations["color"], variables))
             if colour:
@@ -637,7 +781,12 @@ def _generalisations(selector: str):
 
 
 def _declarations(block: str) -> dict[str, str]:
-    """Property to value for one rule body, last declaration winning."""
+    """Property to value for one rule body, last declaration winning.
+
+    Each property sits where its last declaration is written, so a caller
+    reading two properties that set the same thing (``background`` and
+    ``background-color``) meets them in the order that decides between them.
+    """
     result: dict[str, str] = {}
     for piece in block.split(";"):
         if ":" not in piece:
@@ -646,6 +795,7 @@ def _declarations(block: str) -> dict[str, str]:
         name = name.strip().lower()
         if name.startswith("--") or not name:
             continue
+        result.pop(name, None)
         result[name] = value.strip()
     return result
 
@@ -813,16 +963,17 @@ def _pairing(
     background: str,
     *,
     paints_ground: bool,
-    faded_by: tuple[int, str] | None = None,
+    modified_by: tuple[int, str] | None = None,
     reported_as: str | None = None,
+    leaf_opacity: float | None = None,
 ) -> Pairing:
     """One pairing, measured on what a reader sees after every fade (issue #49).
 
     ``reported_as`` names the pairing when it differs from the selector that is
-    measured: a descendant seen inside a faded modifier (``faded_by``).
+    measured: a descendant seen inside a modifier (``modified_by``).
     """
     seen_foreground, seen_background, stands_on, opacity = painted.fade(
-        selector, foreground, background, paints_ground, faded_by
+        selector, foreground, background, paints_ground, modified_by, leaf_opacity
     )
     return Pairing(
         theme=theme_name,
@@ -890,8 +1041,9 @@ def audit_text_on_ground(
             continue
         # A state that paints no ground of its own stands on the component's
         # resting ground when there is one, and on the inherited ground
-        # otherwise.
-        component_ground = painted.resting_backgrounds.get(_base_form(selector))
+        # otherwise; a modifier that sets only a colour stands on its
+        # component's ground unless it clears it.
+        component_ground = painted.own_ground(selector)
         pairings.append(
             _pairing(
                 painted,
@@ -919,11 +1071,9 @@ def audit_faded(
     and all, by those two.
 
     The text a faded modifier holds is the rest of the failure: the rename
-    note on the downed card, not the card. A rule written for the component
-    (``.equipment-row .item-weight``) applies inside its modifier
-    (``.equipment-row.in-pack.pack-dropped``) too, and there it is faded with
-    it, so each such descendant is measured again under the modifier's name
-    (``.equipment-row.in-pack.pack-dropped .item-weight``).
+    note on the downed card, not the card. That is measured by
+    :func:`audit_modified_descendants`, with the text inside every other
+    modifier.
 
     Args:
         base_css: The site-wide sheet.
@@ -956,7 +1106,7 @@ def audit_faded(
         foreground = (
             painted.ink_in_state(selector) if stated else painted.ink_for(selector)
         )
-        component_ground = painted.ground_of(_base_form(selector))
+        component_ground = painted.own_ground(selector)
         pairings.append(
             _pairing(
                 painted,
@@ -967,13 +1117,46 @@ def audit_faded(
                 paints_ground=component_ground is not None,
             )
         )
-    pairings.extend(_faded_descendants(painted, theme_name))
     return sorted(pairings, key=lambda pairing: pairing.ratio)
 
 
-def _faded_descendants(painted: PaintedColours, theme_name: str) -> list[Pairing]:
-    """Each descendant rule of a component, seen inside its faded modifier."""
-    painted_selectors = sorted(
+def audit_modified_descendants(
+    base_css: str, theme_css: str = "", theme_name: str = "tarmar"
+) -> list[Pairing]:
+    """Every descendant rule of a component, seen inside each of its modifiers.
+
+    A rule written for the component (``.equipment-row .item-equipped``)
+    applies inside every modifier of it too (``.equipment-row.in-pack.
+    pack-dropped``), and there it stands on what the modifier paints. A
+    modifier that fades takes the text with it (issue #49); a modifier that
+    repaints the ground moves the ground out from under it, and the audit
+    measured the descendant on the component's ground only, so the equipped
+    label's 4.50:1 on the dropped row's grey was looked at by nobody (issue
+    #91). Each descendant is measured again under the modifier's name
+    (``.equipment-row.in-pack.pack-dropped .item-equipped``), on the ground
+    the modifier paints and through its fade, and the ground it was measured
+    on is the one reported.
+
+    A modifier is a rule that paints a ground or fades: a compound with a
+    class more than its component (``.row.dropped`` modifies ``.row``), or a
+    state of the component (``.row:hover`` modifies ``.row``). A descendant
+    the sheets also write under the modifier's own name with a text colour of
+    its own is that rule's to measure, since its colour wins in a browser. One
+    that sets only a ground or an opacity under that name still shows the
+    component's ink, so it is measured here with that rule's ground and
+    opacity in place of the component's.
+
+    Args:
+        base_css: The site-wide sheet.
+        theme_css: The theme's override sheet, or "" for the default theme.
+        theme_name: Name reported in each pairing.
+
+    Returns:
+        One :class:`Pairing` per descendant rule and modifier of its
+        component, worst first.
+    """
+    painted = _painted(base_css, theme_css)
+    named = (
         set(painted.resting_backgrounds)
         | set(painted.resting_foregrounds)
         | set(painted.resting_opacities)
@@ -981,40 +1164,87 @@ def _faded_descendants(painted: PaintedColours, theme_name: str) -> list[Pairing
         | set(painted.state_foregrounds)
         | set(painted.state_opacities)
     )
-    pairings = []
-    for modifier, opacity in sorted(painted.resting_opacities.items()):
-        if opacity >= 1 or _exempt(modifier):
-            continue
-        for component in list(_generalisations(modifier))[1:]:
+    descendants_of: dict[str, list[str]] = {}
+    for descendant in sorted(named):
+        parts = descendant.split()
+        for depth in range(1, len(parts)):
+            descendants_of.setdefault(" ".join(parts[:depth]), []).append(descendant)
+
+    pairings: dict[str, Pairing] = {}
+    for modifier, components in _modifiers(painted):
+        for component in components:
             depth = len(component.split())
-            for descendant in painted_selectors:
+            for descendant in descendants_of.get(component, []):
                 parts = descendant.split()
-                if len(parts) <= depth or " ".join(parts[:depth]) != component:
+                reported_as = " ".join([modifier, *parts[depth:]])
+                if painted.sets_ink(reported_as) or _exempt(descendant):
                     continue
-                if _exempt(descendant):
-                    continue
-                stated = _is_layer_rule(descendant)
-                own_grounds = (
-                    painted.state_backgrounds if stated else painted.resting_backgrounds
+                pairing = _descendant_pairing(
+                    painted, theme_name, descendant, (depth, modifier), reported_as
                 )
-                own_ground = own_grounds.get(descendant) or painted.ground_of(
-                    _base_form(descendant)
-                )
-                pairings.append(
-                    _pairing(
-                        painted,
-                        theme_name,
-                        descendant,
-                        painted.ink_in_state(descendant)
-                        if stated
-                        else painted.ink_for(descendant),
-                        own_ground or painted.ground_under(descendant),
-                        paints_ground=own_ground is not None,
-                        faded_by=(depth, modifier),
-                        reported_as=" ".join([modifier, *parts[depth:]]),
-                    )
-                )
-    return pairings
+                pairings.setdefault(str(pairing), pairing)
+    return sorted(pairings.values(), key=lambda pairing: pairing.ratio)
+
+
+def _modifiers(painted: PaintedColours) -> list[tuple[str, list[str]]]:
+    """Each rule that paints a ground or fades, with the components it modifies.
+
+    ``.row.in-pack.dropped`` modifies ``.row.in-pack`` and ``.row``;
+    ``.row.dropped:hover`` modifies ``.row.dropped`` and ``.row``. A
+    pseudo-element is a box of its own and holds no descendants, and an
+    exempt rule (a disabled control) is not measured.
+    """
+    resting = set(painted.resting_backgrounds) | {
+        selector
+        for selector, opacity in painted.resting_opacities.items()
+        if opacity < 1
+    }
+    stated = set(painted.state_backgrounds) | {
+        selector for selector, opacity in painted.state_opacities.items() if opacity < 1
+    }
+    found = []
+    for modifier in sorted(resting):
+        components = list(_generalisations(modifier))[1:]
+        if components and not _exempt(modifier):
+            found.append((modifier, components))
+    for modifier in sorted(stated):
+        if _PSEUDO_ELEMENT.search(modifier) or _exempt(modifier):
+            continue
+        found.append((modifier, list(_generalisations(_base_form(modifier)))))
+    return found
+
+
+def _descendant_pairing(
+    painted: PaintedColours,
+    theme_name: str,
+    descendant: str,
+    modified_by: tuple[int, str],
+    reported_as: str,
+) -> Pairing:
+    """One descendant rule measured inside a modifier standing in for an ancestor.
+
+    A rule the sheets write under the reported name (``.row.dropped .weight``)
+    that sets a ground or an opacity, and no colour, supplies those in place
+    of the descendant's own.
+    """
+    stated = _is_layer_rule(descendant)
+    own_ground = painted.own_ground(reported_as, fallback=descendant)
+    own_opacities = (
+        painted.state_opacities
+        if _is_layer_rule(reported_as)
+        else painted.resting_opacities
+    )
+    return _pairing(
+        painted,
+        theme_name,
+        descendant,
+        painted.ink_in_state(descendant) if stated else painted.ink_for(descendant),
+        own_ground or painted.ground_under(descendant, modified_by),
+        paints_ground=own_ground is not None,
+        modified_by=modified_by,
+        reported_as=reported_as,
+        leaf_opacity=own_opacities.get(reported_as),
+    )
 
 
 def audit_conditionals(
@@ -1055,6 +1285,7 @@ def audit_conditionals(
         for pairing in audit_theme(unconditional, "", theme_name)
         + audit_text_on_ground(unconditional, "", theme_name)
         + audit_faded(unconditional, "", theme_name)
+        + audit_modified_descendants(unconditional, "", theme_name)
     }
     pairings: list[Pairing] = []
     for block in conditional_layers(base_css, theme_css):
@@ -1063,6 +1294,7 @@ def audit_conditionals(
             audit_theme(unconditional, block.css, layer_name)
             + audit_text_on_ground(unconditional, block.css, layer_name)
             + audit_faded(unconditional, block.css, layer_name)
+            + audit_modified_descendants(unconditional, block.css, layer_name)
         ):
             colours = (pairing.foreground, pairing.background, pairing.opacity)
             if outside_any_block.get(pairing.selector) != colours:
@@ -1078,6 +1310,7 @@ def failures(
         audit_theme(base_css, theme_css, theme_name)
         + audit_text_on_ground(base_css, theme_css, theme_name)
         + audit_faded(base_css, theme_css, theme_name)
+        + audit_modified_descendants(base_css, theme_css, theme_name)
         + audit_conditionals(base_css, theme_css, theme_name)
     )
     return [pairing for pairing in audited if not pairing.passes]
