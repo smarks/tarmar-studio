@@ -721,6 +721,70 @@ class ChatPageBattleTabTest(BaseTestCase):
         self.assertContains(response, 'id="battle-arena"')
         self.assertNotContains(response, 'id="gm-fight-start" disabled')
 
+    def test_the_tab_alone_is_rendered_for_drawing_it_again(self):
+        """gm:battle_panel renders the page's partial, from the page's context (#89).
+
+        The page asks for it when the board changes under it, rather than
+        reloading, which threw away the earlier turns the reader had loaded.
+        """
+        battle = start_fight(self.session, foes_text="gray wolf").battle
+        page = self.client.get(f"/tarmar/gm/?session={self.session.pk}")
+
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertTemplateUsed(response, "gm/_panel_battle.html")
+        self.assertTemplateNotUsed(response, "gm/chat.html")
+        for key in ("panel_battle", "battle_live", "panel_verdict", "can_control"):
+            with self.subTest(key=key):
+                self.assertEqual(response.context[key], page.context[key])
+        self.assertEqual(response.context["active_session"], self.session)
+        self.assertContains(response, 'id="gm-panel-battle"')
+        self.assertContains(response, f'data-popout-url="/tarmar/battles/{battle.pk}/"')
+        self.assertContains(response, 'data-live="true"')
+        self.assertContains(response, 'id="battle-arena"')
+        self.assertContains(response, 'id="gm-fight-start" disabled')
+
+    def test_the_tab_rendered_alone_says_when_the_fight_is_over(self):
+        battle = start_fight(self.session, foes_text="gray wolf").battle
+        Battle.objects.filter(pk=battle.pk).update(status=Battle.STATUS_FINISHED)
+
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertContains(response, 'data-live="false"')
+        self.assertNotContains(response, 'id="gm-fight-start" disabled')
+
+    def test_the_tab_rendered_alone_with_no_fight_offers_the_form(self):
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertContains(response, 'id="gm-battle-empty"')
+        self.assertContains(response, 'data-popout-empty="')
+        self.assertNotIn("view_json", response.context)
+
+    def test_only_the_owner_reads_the_tab(self):
+        self.logout()
+        self.login_as(self.create_user(username="stranger"))
+
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_tab_is_only_read(self):
+        response = self.client.post(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_the_page_tells_the_tab_where_to_ask(self):
+        response = self.client.get(f"/tarmar/gm/?session={self.session.pk}")
+
+        self.assertEqual(
+            response.context["panel_config"]["battlePanelUrlTemplate"],
+            "/tarmar/gm/sessions/{session_id}/battle/",
+        )
+        self.assertEqual(
+            response.context["chat_config"]["historyUrlTemplate"],
+            "/tarmar/gm/sessions/{session_id}/history/",
+        )
+
     def test_battle_entries_are_hidden_from_the_transcript(self):
         battle = start_fight(self.session, foes_text="gray wolf").battle
         self.session.refresh_from_db()

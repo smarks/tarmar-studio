@@ -278,7 +278,8 @@ class WithdrawMidFightTest(BaseTestCase):
         self.login_as(self.game_master)
         page = self.client.get(reverse("gm:chat") + f"?session={self.session.pk}")
         html = page.content.decode()
-        self.assertIn('<div class="message assistant notice">', html)
+        # Each entry names its turn since #89, so the match stops at the class.
+        self.assertIn('<div class="message assistant notice" data-history-turn=', html)
         self.assertIn(line, html)
 
     def test_a_finished_fight_is_left_as_it_ended(self) -> None:

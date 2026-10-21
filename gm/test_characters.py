@@ -411,6 +411,8 @@ class GMChatPagePanelTest(BaseTestCase):
                 "charactersPanelUrlTemplate",
                 # The Campaign tab refetches the same way (issue #579).
                 "campaignPanelUrlTemplate",
+                # The Battle tab is drawn again in place (issue #89).
+                "battlePanelUrlTemplate",
             },
         )
         self.assertEqual(

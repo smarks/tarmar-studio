@@ -3756,3 +3756,139 @@ describe('stopping the page polls (#25)', () => {
         }
     });
 });
+
+/**
+ * A battle that went back under the page (#9, #89): a restart made elsewhere.
+ * The arena's poll announces it on the arena; a page that can draw the arena
+ * again in place (the GM chat's Battle tab) cancels the announcement and does,
+ * and only a page where nothing cancels it reloads.
+ */
+describe('a battle that went back under the page (#89)', () => {
+    /** An arena in `holder`, on turn 3, polling as a player's page does. */
+    function mountArenaOnTurnThree(holder) {
+        holder.innerHTML = `
+            <strong id="battle-status">Awaiting players</strong>
+            <span id="battle-turn">3</span>
+            <div id="battle-roster"></div>
+            <svg id="battle-arena"></svg>
+            <div id="battle-log"></div>
+            <div id="turn-panel" hidden
+                 data-act-url="/tarmar/battles/1/act/"
+                 data-state-url="/tarmar/battles/1/state/"></div>
+            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+            <script id="battle-seats" type="application/json">[]</script>
+            <script id="battle-pending" type="application/json">null</script>
+        `;
+        battle.initBattlePage(holder);
+        require('../api.js');
+    }
+
+    /** The state endpoint answering with the battle back at its start. */
+    function answerRestarted() {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: 'paused', turn: 0, view: sampleState([sampleCombatant()]),
+                events: [], seats: [], pending: null,
+            }),
+        });
+    }
+
+    test('a page where nothing draws the arena again reloads', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<main id="page"></main>';
+            mountArenaOnTurnThree(document.getElementById('page'));
+            answerRestarted();
+            const heard = jest.fn();
+            document.addEventListener(battle.REWOUND_EVENT, heard);
+
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(heard).toHaveBeenCalledTimes(1);
+            expect(heard.mock.calls[0][0].target.id).toBe('battle-arena');
+            expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
+            document.removeEventListener(battle.REWOUND_EVENT, heard);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a page that draws it again in place cancels the reload', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<section id="gm-panel-battle"></section>';
+            const tab = document.getElementById('gm-panel-battle');
+            mountArenaOnTurnThree(tab);
+            answerRestarted();
+            const drawAgain = jest.fn((event) => event.preventDefault());
+            tab.addEventListener(battle.REWOUND_EVENT, drawAgain);
+
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(drawAgain).toHaveBeenCalledTimes(1);
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+            expect(pageNavigation.go).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('an answer that lands after the arena was drawn again reloads nothing', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<section id="gm-panel-battle"></section>';
+            const tab = document.getElementById('gm-panel-battle');
+            mountArenaOnTurnThree(tab);
+            let answer;
+            global.fetch = jest.fn(() => new Promise((resolve) => { answer = resolve; }));
+            const heard = jest.fn();
+            document.addEventListener(battle.REWOUND_EVENT, heard);
+
+            // The tick's request goes out; the tab is drawn again meanwhile.
+            await jest.advanceTimersByTimeAsync(2100);
+            tab.replaceChildren();
+            answer({
+                ok: true,
+                json: async () => ({
+                    status: 'paused', turn: 0, view: sampleState([sampleCombatant()]),
+                    events: [], seats: [], pending: null,
+                }),
+            });
+            await jest.advanceTimersByTimeAsync(6100);
+
+            expect(heard).not.toHaveBeenCalled();
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+            document.removeEventListener(battle.REWOUND_EVENT, heard);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('an arena drawn again in its place stops its poll', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<section id="gm-panel-battle"></section>';
+            const tab = document.getElementById('gm-panel-battle');
+            mountArenaOnTurnThree(tab);
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({
+                    status: 'awaiting', turn: 3, view: sampleState([sampleCombatant()]),
+                    events: [], seats: [], pending: null,
+                }),
+            });
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+
+            // The tab's contents drawn again: this arena is off the page.
+            tab.replaceChildren();
+            await jest.advanceTimersByTimeAsync(6100);
+
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+});

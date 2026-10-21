@@ -14,7 +14,7 @@
  */
 
 const { test, expect, loginAs } = require('./fixtures');
-const { runDjangoShell } = require('./django');
+const { runDjangoShell, readDjangoShell } = require('./django');
 const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 
 /** This worker's and this repeat's own account (issue #889). */
@@ -74,6 +74,41 @@ test.describe('GM chat — a turn outlives its page', () => {
         await expect(messages).toContainText('I search the crypt slowly');
         await expect(page).toHaveURL(/session=\d+/);
         await expect(running).toBeHidden();
+    });
+
+    test('a session page that comes back to its turn shows the reply in place (#89)', async ({ page }) => {
+        const output = readDjangoShell(`
+from django.contrib.auth import get_user_model
+from gm.models import GMSession
+user = get_user_model().objects.get(username=${JSON.stringify(KEEPER.username)})
+session = GMSession.objects.create(
+    user=user, name='The crypt',
+    history=[{'role': 'user', 'content': 'I light a torch.'},
+             {'role': 'assistant', 'content': 'The torch catches.'}],
+)
+print('SESSION', session.pk)
+`);
+        const sessionId = output.match(/SESSION (\d+)/)[1];
+        await loginAs(page, KEEPER);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+        await page.fill('#user-input', 'I search the crypt slowly');
+        await page.click('#send-btn');
+        await expect(page.locator('.message.assistant').last()).toContainText('The fake Game Master considers it.');
+
+        // The page comes back while the turn runs; from here on it must not
+        // load again: the reply is put in place, not reloaded into view.
+        await page.reload();
+        await page.evaluate(() => { window.issue89NotReloaded = true; });
+        const running = page.locator('#gm-turn-running');
+        await expect(running).toBeVisible();
+
+        const messages = page.locator('#messages');
+        await expect(messages).toContainText('The crypt is quiet, and nothing stirs.', { timeout: 30000 });
+        await expect(messages).toContainText('The torch catches.');
+        await expect(running).toBeHidden();
+        await expect(page.locator('#send-btn')).toBeEnabled();
+        expect(await page.evaluate(() => window.issue89NotReloaded === true)).toBe(true);
+        expect(new URL(page.url()).searchParams.get('session')).toBe(sessionId);
     });
 
     test('closing the page mid-turn and coming back finds the reply in the history', async ({ page, context }) => {

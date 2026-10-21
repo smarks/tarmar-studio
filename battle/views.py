@@ -43,7 +43,7 @@ from itertools import groupby
 from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
 from django.db.models import BooleanField, Count, Exists, Max, OuterRef, Q, Value
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -62,6 +62,7 @@ from common.helpers import (
     _parse_json_body,
     column_length,
     request_theme,
+    wants_json,
     whole_number,
 )
 from common.mixins import ActivePageMixin
@@ -218,19 +219,6 @@ def _control_denied(actor: Actor, battle: Battle) -> JsonResponse | None:
     return _json_error(CONTROL_DENIED_MESSAGE, status=403)
 
 
-def _wants_json(request) -> bool:
-    """True for an XHR caller, false for a plain form post.
-
-    The control endpoints serve both: the battle page posts forms (the panel
-    renders from stored state, so a reload is the whole update), while the
-    same endpoints answer in the battle payload shape for anything driving
-    them from script.
-    """
-    return request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
-        request.content_type or ""
-    ).startswith("application/json")
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -261,7 +249,7 @@ def _internal_errors_logged(
             try:
                 return view(request, *args, **kwargs)
             except ValueError:
-                if not (json_only or _wants_json(request)):
+                if not (json_only or wants_json(request)):
                     raise
                 logger.exception("Battle endpoint %s failed", request.path)
                 return _json_error(BATTLE_REQUEST_FAILED_MESSAGE, status=500)
@@ -1844,9 +1832,32 @@ def _refuse(request, battle: Battle, message: str, *, status: int = 400):
     form post gets the page back with the reason on it, and an XHR caller
     keeps the JSON error shape it parses (#339, item 2).
     """
-    if _wants_json(request):
+    if wants_json(request):
         return _json_error(message, status=status)
     return _detail_with_error(request, battle, message, status=status)
+
+
+def _sent_json(request: HttpRequest) -> bool:
+    """Whether a control post's body is JSON, rather than a form's fields."""
+    return (request.content_type or "").startswith("application/json")
+
+
+def _posted_fields(
+    request: HttpRequest,
+) -> tuple[QueryDict | dict, JsonResponse | None]:
+    """The fields a control post carries, read the way it sent them.
+
+    How the body is read follows what was sent, and how the post is answered
+    follows who asks (``wants_json``): the battle page's scripts send JSON,
+    and the GM chat's Battle tab posts the board's own ruling forms as a
+    script caller (issue #89), fields and all, to be answered in JSON
+    rather than with a redirect that reloads the chat.
+
+    Returns:
+        ``(fields, None)``, or ``({}, error_response)`` for a JSON body that
+        is not an object.
+    """
+    return _parse_json_body(request) if _sent_json(request) else (request.POST, None)
 
 
 def _back_or_detail(request, battle: Battle):
@@ -1911,9 +1922,7 @@ def battle_control(request, pk):
         return _refuse(request, battle, CONTROL_DENIED_MESSAGE, status=403)
     if not commands_foes(actor, battle):
         return _refuse(request, battle, FOES_BELONG_TO_GAME_MASTER, status=403)
-    data, err = (
-        _parse_json_body(request) if _wants_json(request) else (request.POST, None)
-    )
+    data, err = _posted_fields(request)
     if err:
         return err
     try:
@@ -1924,7 +1933,7 @@ def battle_control(request, pk):
         )
     except BattleRefusal as mode_error:
         return _refuse(request, battle, str(mode_error))
-    if _wants_json(request):
+    if wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return redirect("battle:detail", pk=battle.pk)
 
@@ -1945,9 +1954,7 @@ def battle_hth_agreement(request, pk):
     hth_words = words().hth_agreement
     if not runs_the_seats(battle, actor.user):
         return _refuse(request, battle, hth_words.game_master_only, status=403)
-    data, err = (
-        _parse_json_body(request) if _wants_json(request) else (request.POST, None)
-    )
+    data, err = _posted_fields(request)
     if err:
         return err
     scope = str(data.get("scope") or "")
@@ -1969,7 +1976,7 @@ def battle_hth_agreement(request, pk):
         )
     except BattleRefusal as ruling_error:
         return _refuse(request, battle, str(ruling_error))
-    if _wants_json(request):
+    if wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return _back_or_detail(request, battle)
 
@@ -1991,7 +1998,7 @@ def battle_magic_bounds(request, pk):
     bounds_words = words().magic_bounds
     if not runs_the_seats(battle, actor.user):
         return _refuse(request, battle, bounds_words.game_master_only, status=403)
-    if _wants_json(request):
+    if _sent_json(request):
         data, err = _parse_json_body(request)
         if err:
             return err
@@ -2015,7 +2022,7 @@ def battle_magic_bounds(request, pk):
         )
     except BattleRefusal as ruling_error:
         return _refuse(request, battle, str(ruling_error))
-    if _wants_json(request):
+    if wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return _back_or_detail(request, battle)
 
@@ -2048,9 +2055,7 @@ def combatant_control(request, pk, combatant_id):
             "combatant's own player can do that",
             status=403,
         )
-    data, err = (
-        _parse_json_body(request) if _wants_json(request) else (request.POST, None)
-    )
+    data, err = _posted_fields(request)
     if err:
         return err
     try:
@@ -2059,7 +2064,7 @@ def combatant_control(request, pk, combatant_id):
         )
     except BattleRefusal as mode_error:
         return _refuse(request, battle, str(mode_error))
-    if _wants_json(request):
+    if wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return redirect("battle:detail", pk=battle.pk)
 
@@ -2170,7 +2175,7 @@ def battle_resnapshot(request, pk):
         battle = resnapshot_pools(battle.pk, is_game_master=actor.is_dm)
     except BattleRefusal as refusal:
         return _refuse(request, battle, str(refusal))
-    if _wants_json(request):
+    if wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return _back_or_detail(request, battle)
 

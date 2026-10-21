@@ -336,6 +336,12 @@ if (typeof module !== 'undefined' && module.exports) {
                 root.picker.loadPage(fresh, pickerView.page, pickerView.direction);
               }
             }
+            // The pane's pop-out control opens the sheet on the page now,
+            // and says there is none to open once the last is detached: it
+            // is painted from the tab's contents, which a reload repainted
+            // and an in-place change must too (issue #89's sweep).
+            const panes = root.gmPanelLayout;
+            if (panes && panes.isActive()) panes.paintPopouts();
             replaced = true;
           }
         }

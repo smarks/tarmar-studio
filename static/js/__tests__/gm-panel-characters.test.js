@@ -401,6 +401,20 @@ describe('live refresh (issue #571)', () => {
         expect(section.querySelector('#gm-draft-ledger').textContent).toContain('needs Fatigue roll');
     });
 
+    test('a refetched tab has the pane chrome painted again (#89 sweep)', async () => {
+        // The pop-out control reads the sheets on the page; a reload painted
+        // it again, and the in-place refetch (#15) left it as it was.
+        setUpDom({ sessionId: 5, live: true });
+        global.fetch.mockReturnValue(htmlResponse(FRAGMENT));
+        window.gmPanelLayout = { isActive: () => true, paintPopouts: jest.fn() };
+        loadTab();
+
+        await panelCharacters.refreshPanel();
+
+        expect(window.gmPanelLayout.paintPopouts).toHaveBeenCalledTimes(1);
+        delete window.gmPanelLayout;
+    });
+
     test('the done frame refetches it too, for the session now in the URL', async () => {
         setUpDom({ live: true });
         window.history.replaceState(null, '', '?session=8');

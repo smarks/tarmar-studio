@@ -1784,10 +1784,30 @@ if (typeof module !== 'undefined' && module.exports) {
     // fetches with a later test's mock (#25). stopPagePolls is for them.
     const pagePolls = new Set();
 
-    /** Run `poll` every POLL_INTERVAL_MS until stopPagePolls. */
+    /**
+     * Run `poll` every POLL_INTERVAL_MS until stopPagePolls or stopPagePoll.
+     * @returns {number} the poll's id, for stopPagePoll
+     */
     function startPagePoll(poll) {
-        pagePolls.add(setInterval(poll, POLL_INTERVAL_MS));
+        const id = setInterval(poll, POLL_INTERVAL_MS);
+        pagePolls.add(id);
+        return id;
     }
+
+    /** Stop the one poll `id` names. */
+    function stopPagePoll(id) {
+        clearInterval(id);
+        pagePolls.delete(id);
+    }
+
+    /**
+     * What an arena's poll announces, on the arena, when the battle has gone
+     * back under it: a restart made elsewhere (#9). Cancellable: a page that
+     * can draw the arena again in place (the GM chat's Battle tab, #89)
+     * cancels it and does, so the rest of that page stays as it is; a page
+     * where nothing cancels it reloads for the server's clean slate.
+     */
+    const REWOUND_EVENT = 'battle-rewound';
 
     /** Stop every poll this script has started. */
     function stopPagePolls() {
@@ -2251,10 +2271,16 @@ if (typeof module !== 'undefined' && module.exports) {
          * Follow the battle from the poll endpoint while someone else can
          * move it: players follow the whole battle; the DM only needs the
          * poll while a player's choice is being awaited. A turn counter or
-         * sequence going backwards means a restart happened elsewhere —
-         * reload for the clean server-rendered slate.
+         * sequence going backwards means a restart happened elsewhere: the
+         * page shows the clean server-rendered slate, in place where it can
+         * (REWOUND_EVENT). An arena the page has since drawn again in its
+         * place stops polling: the arena that replaced it polls for itself.
          */
         async function pollOnce() {
+            if (!arena.isConnected) {
+                stopPagePoll(pollId);
+                return;
+            }
             const shouldPoll = !TERMINAL_STATUSES.includes(currentStatus)
                 && (!isDm || currentStatus === 'awaiting');
             if (!panel || !shouldPoll) { return; }
@@ -2269,12 +2295,22 @@ if (typeof module !== 'undefined' && module.exports) {
             }
             if (!response.ok) { return; }
             const data = await response.json();
+            // Drawn again in its place while this was on its way: the answer
+            // is the new arena's to read, and a rewind seen here would reach
+            // no page that draws in place, and reload it (#89).
+            if (!arena.isConnected) {
+                stopPagePoll(pollId);
+                return;
+            }
             // Something newer was applied while this was in flight: drop
             // it, and let the next tick ask again.
             if (appliedCount !== appliedWhenAsked) { return; }
             const nextSequence = (data.view.next_sequence || 1) - 1;
             if (data.turn < currentTurn || nextSequence < lastSequence) {
-                pageNavigation.reload();
+                const rewound = new CustomEvent(
+                    REWOUND_EVENT, { bubbles: true, cancelable: true }
+                );
+                if (arena.dispatchEvent(rewound)) { pageNavigation.reload(); }
                 return;
             }
             const changed = data.status !== currentStatus
@@ -2318,8 +2354,11 @@ if (typeof module !== 'undefined' && module.exports) {
         ) || currentStatus;
         currentTurn = Number(turnLabel.textContent) || 0;
         renderPanel();
+        // The poll's id, so an arena drawn again in this one's place stops
+        // this one's poll (#89).
+        let pollId = null;
         if (panel && panel.dataset.stateUrl) {
-            startPagePoll(pollOnce);
+            pollId = startPagePoll(pollOnce);
         }
 
         if (button) {
@@ -2486,7 +2525,8 @@ if (typeof module !== 'undefined' && module.exports) {
             initBattlePage,
             initLobbyPage,
             stopPagePolls,
+            REWOUND_EVENT,
         };
     }
-    root.battlePage = { initBattlePage, initLobbyPage };
+    root.battlePage = { initBattlePage, initLobbyPage, REWOUND_EVENT };
 }(typeof window !== 'undefined' ? window : globalThis));

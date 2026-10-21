@@ -498,6 +498,28 @@ describe('pop-out', () => {
         );
     });
 
+    test('a tab drawn again in place has its control painted, and the focus stays (#89)', () => {
+        setUpDom({ battleUrl: null });
+        load();
+        layout.openPane('battle');
+        layout.openPane('characters');
+        const control = titleButton('battle', 'gm-pane-popout');
+        expect(control.disabled).toBe(true);
+        const typing = document.createElement('textarea');
+        document.getElementById('gm-panel-characters').append(typing);
+        typing.focus();
+
+        // A fight drawn into the tab: it has a page to open now.
+        const battle = document.getElementById('gm-panel-battle');
+        battle.setAttribute('data-popout-url', '/tarmar/battle/4/');
+        battle.removeAttribute('data-popout-empty');
+        layout.paintPopouts();
+
+        expect(control.disabled).toBe(false);
+        expect(control.title).toBe('Open Battle in its own window');
+        expect(document.activeElement).toBe(typing);
+    });
+
     test('a window the browser refused leaves the pane detached all the same', () => {
         window.open = jest.fn(() => null);
         setUpDom();

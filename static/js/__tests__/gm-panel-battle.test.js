@@ -2,18 +2,22 @@
  * Unit tests for gm-panel-battle.js — the Battle tab's fight controls
  * (issue #345).
  *
- * The tab posts to the fight endpoint and reloads the page on the session,
- * so the board is always server-rendered; these tests assert the request
- * each control makes, the tab it brings forward, the navigation that
- * follows, and that a failure lands in the tab's own error line (which
- * stays until the next attempt — no toasts). The board itself is
- * battle.js's and is tested there.
+ * The tab posts to the fight endpoint and then draws itself again as the
+ * server renders it, in place (issue #89), so the board is always
+ * server-rendered and the rest of the page -- the earlier turns the reader
+ * loaded -- stays; these tests assert the request each control makes, the
+ * tab it brings forward, the drawing that follows with no reload, and that
+ * a failure lands in the tab's own error line (which stays until the next
+ * attempt — no toasts). The board itself is battle.js's and is tested there.
  */
+
+const BATTLE_PANEL_URL = '/tarmar/gm/sessions/{session_id}/battle/';
 
 function setUpDom({ sessionId = null, withForm = true, withBattle = false } = {}) {
     const config = JSON.stringify({
         attachUrl: '/tarmar/gm/characters/attach/',
         detachUrl: '/tarmar/gm/characters/detach/',
+        battlePanelUrlTemplate: BATTLE_PANEL_URL,
         sessionId,
     });
     document.body.innerHTML = `
@@ -36,6 +40,37 @@ function setUpDom({ sessionId = null, withForm = true, withBattle = false } = {}
 }
 
 const { resolvedJsonResponse: jsonResponse } = require('./test-helpers');
+
+/** An answer carrying HTML, as gm:battle_panel's. */
+function htmlResponse(html, { ok = true, status = 200, statusText = 'OK' } = {}) {
+    return Promise.resolve({ ok, status, statusText, text: () => Promise.resolve(html) });
+}
+
+/**
+ * The Battle tab as gm/_panel_battle.html renders it for a fight on the board:
+ * the form closed while it is on, a ruling form posting back to the address
+ * it was rendered under, and the pop-out pointing at the battle's page.
+ */
+function renderedTab({ live = true } = {}) {
+    return `
+        <section class="gm-panel-tab gm-panel-battle" id="gm-panel-battle" data-panel-container="battle"
+                 data-popout-url="/tarmar/battles/4/" hidden>
+            <form id="gm-fight-form" data-fight-url="/tarmar/gm/fight/" data-live="${live}">
+                <input type="text" id="gm-fight-foes"${live ? ' disabled' : ''}>
+                <button type="submit" id="gm-fight-start"${live ? ' disabled' : ''}>Fight</button>
+            </form>
+            <p id="gm-panel-battle-status" role="status" hidden></p>
+            <p id="gm-panel-battle-error" role="alert" hidden></p>
+            <div id="gm-battle" data-battle-id="4">
+                <form method="post" action="/tarmar/battles/4/hth-agreement/" class="agreement-battle-form">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="form-token">
+                    <input type="hidden" name="next" value="/tarmar/gm/sessions/12/battle/">
+                    <input type="hidden" name="scope" value="battle">
+                    <button type="submit" name="agreed" value="1" id="agree" data-focus-key="hth-whole-battle">Agree</button>
+                </form>
+            </div>
+        </section>`;
+}
 
 let panelBattle;
 
@@ -68,12 +103,16 @@ afterEach(() => {
 });
 
 describe('startFight', () => {
-    test('posts the named foes with the session and reloads on the fight', async () => {
+    test('posts the named foes with the session and draws the fight in place', async () => {
         setUpDom({ sessionId: 12 });
         loadTab();
         global.fetch.mockReturnValue(jsonResponse({
             ok: true, session_id: 12, battle_id: 4, battle_name: 'Quest: fight',
         }));
+        global.fetch.mockReturnValueOnce(jsonResponse({
+            ok: true, session_id: 12, battle_id: 4, battle_name: 'Quest: fight',
+        }));
+        global.fetch.mockReturnValueOnce(htmlResponse(renderedTab()));
 
         const done = panelBattle.startFight('two gray wolves');
         expect(window.gmPanel.activate).toHaveBeenCalledWith('battle');
@@ -83,14 +122,16 @@ describe('startFight', () => {
         expect(document.getElementById('gm-fight-button').disabled).toBe(true);
         expect(await done).toBe(true);
 
-        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
         const [url, options] = global.fetch.mock.calls[0];
         expect(url).toBe('/tarmar/gm/fight/');
         expect(options.method).toBe('POST');
         expect(options.headers['X-CSRFToken']).toBe('test-token');
         expect(JSON.parse(options.body)).toEqual({ session_id: 12, foes: 'two gray wolves' });
-        expect(document.getElementById('gm-panel-battle-status').textContent).toContain('Quest: fight');
-        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=12');
+        expect(global.fetch.mock.calls[1][0]).toBe('/tarmar/gm/sessions/12/battle/');
+        expect(document.getElementById('gm-battle')).not.toBeNull();
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
     test('the session in the URL wins over the one the page loaded with', async () => {
@@ -207,7 +248,8 @@ describe('controls', () => {
         loadTab();
         global.fetch.mockReturnValue(jsonResponse({ ok: true, session_id: 12, battle_id: 4, battle_name: 'x' }));
         document.getElementById('gm-fight-foes').value = 'a dire wolf';
-        const event = new Event('submit', { cancelable: true });
+        // A submit bubbles, as a browser's does: the tab listens on its section.
+        const event = new Event('submit', { cancelable: true, bubbles: true });
         document.getElementById('gm-fight-form').dispatchEvent(event);
         expect(event.defaultPrevented).toBe(true);
         await flushPromises();
@@ -454,5 +496,188 @@ describe('the bare-handed line repaints from the board (#844 review)', () => {
         expect(line.textContent).toBe('Bare is on the board.');
         line.remove();
         expect(() => panelBattle.paintBareHanded('x')).not.toThrow();
+    });
+});
+
+/**
+ * The tab drawn again in place (issue #89). A fight started from the page, a
+ * restart made elsewhere and a ruling posted from the board each used to
+ * reload the page, and the reload threw away the earlier turns the reader had
+ * loaded. The tab is drawn from the server's rendering instead, inside the
+ * section that stays, and nothing else on the page is touched.
+ */
+describe('the tab drawn again in place (#89)', () => {
+    let section;
+
+    /** The page on session 12 with an earlier page of the chat loaded. */
+    function setUpSession({ withBoard = false } = {}) {
+        setUpDom({ sessionId: 12 });
+        window.history.replaceState(null, '', '/tarmar/gm/?session=12');
+        if (withBoard) {
+            const holder = document.createElement('template');
+            holder.innerHTML = renderedTab().trim();
+            document.getElementById('gm-panel-battle')
+                .replaceChildren(...holder.content.firstElementChild.childNodes);
+        }
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="messages"><div class="message user" data-history-turn="0" id="loaded-earlier"></div></div>`);
+        window.battlePage = { initBattlePage: jest.fn(), REWOUND_EVENT: 'battle-rewound' };
+        window.gmPanelLayout = { isActive: () => true, paintPopouts: jest.fn() };
+        window.showConversationAsStored = jest.fn(() => Promise.resolve(true));
+        loadTab();
+        section = document.getElementById('gm-panel-battle');
+    }
+
+    afterEach(() => {
+        delete window.battlePage;
+        delete window.gmPanelLayout;
+        delete window.showConversationAsStored;
+    });
+
+    test('a fight puts the server\'s board in the tab and its lines in the chat', async () => {
+        setUpSession();
+        const earlier = document.getElementById('loaded-earlier');
+        global.fetch.mockReturnValueOnce(jsonResponse({
+            ok: true, session_id: 12, battle_id: 4, battle_name: 'Quest: fight',
+        }));
+        global.fetch.mockReturnValueOnce(htmlResponse(renderedTab()));
+
+        expect(await panelBattle.startFight('two gray wolves')).toBe(true);
+
+        // The same section, holding the server's rendering of the tab.
+        expect(document.getElementById('gm-panel-battle')).toBe(section);
+        expect(section.querySelector('#gm-battle')).not.toBeNull();
+        expect(section.getAttribute('data-popout-url')).toBe('/tarmar/battles/4/');
+        expect(section.hidden).toBe(true);
+        // Its forms go back to this page, not to the fragment's address.
+        expect(section.querySelector('input[name="next"]').value).toBe('/tarmar/gm/?session=12');
+        // battle.js wires the new arena; the pane's chrome is painted again.
+        expect(window.battlePage.initBattlePage).toHaveBeenCalledWith(section);
+        expect(window.gmPanelLayout.paintPopouts).toHaveBeenCalled();
+        // The form is the server's, shut while the fight is on, and the tab lit.
+        expect(document.getElementById('gm-fight-start').disabled).toBe(true);
+        expect(document.getElementById('gm-panel-tab-battle').classList.contains('is-live')).toBe(true);
+        expect(document.getElementById('gm-fight-button').disabled).toBe(false);
+        // The fight's lines come into the chat as stored, and the page stays.
+        expect(window.showConversationAsStored).toHaveBeenCalledTimes(1);
+        expect(earlier.isConnected).toBe(true);
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+    });
+
+    test('a board that cannot be drawn says so, and the fight still shows as on', async () => {
+        setUpSession();
+        global.fetch.mockReturnValueOnce(jsonResponse({
+            ok: true, session_id: 12, battle_id: 4, battle_name: 'Quest: fight',
+        }));
+        global.fetch.mockReturnValueOnce(htmlResponse('', { ok: false, status: 500, statusText: 'Server Error' }));
+
+        expect(await panelBattle.startFight('wolf')).toBe(true);
+
+        const error = document.getElementById('gm-panel-battle-error');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toBe('The board changed, but the page could not show it: Server Error');
+        expect(document.getElementById('gm-panel-battle-status').hidden).toBe(true);
+        expect(document.getElementById('gm-fight-start').disabled).toBe(true);
+        expect(document.getElementById('gm-panel-tab-battle').classList.contains('is-live')).toBe(true);
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+    });
+
+    test('a restart made elsewhere draws the tab again, not the page', async () => {
+        setUpSession({ withBoard: true });
+        global.fetch.mockReturnValueOnce(htmlResponse(renderedTab({ live: false })));
+
+        const rewound = new CustomEvent('battle-rewound', { bubbles: true, cancelable: true });
+        section.querySelector('#gm-battle').dispatchEvent(rewound);
+        await flushPromises();
+        await flushPromises();
+
+        expect(rewound.defaultPrevented).toBe(true);
+        expect(global.fetch.mock.calls[0][0]).toBe('/tarmar/gm/sessions/12/battle/');
+        expect(window.battlePage.initBattlePage).toHaveBeenCalledWith(section);
+        expect(document.getElementById('gm-fight-start').disabled).toBe(false);
+        // A restart writes nothing into the chat.
+        expect(window.showConversationAsStored).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+    });
+
+    test('a ruling posts as a script caller and draws the tab again', async () => {
+        setUpSession({ withBoard: true });
+        global.fetch.mockReturnValueOnce(jsonResponse({ status: 'paused', turn: 1 }));
+        global.fetch.mockReturnValueOnce(htmlResponse(renderedTab()));
+
+        const form = section.querySelector('.agreement-battle-form');
+        form.requestSubmit(document.getElementById('agree'));
+        await flushPromises();
+        await flushPromises();
+
+        const [url, options] = global.fetch.mock.calls[0];
+        expect(url).toBe('http://localhost/tarmar/battles/4/hth-agreement/');
+        expect(options.method).toBe('POST');
+        expect(options.headers['X-Requested-With']).toBe('XMLHttpRequest');
+        expect(options.body.get('scope')).toBe('battle');
+        expect(options.body.get('agreed')).toBe('1');
+        expect(global.fetch.mock.calls[1][0]).toBe('/tarmar/gm/sessions/12/battle/');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+    });
+
+    test('the ruling\'s button waits for the redraw, and the focus comes back to it', async () => {
+        setUpSession({ withBoard: true });
+        let answerDraw;
+        global.fetch.mockReturnValueOnce(jsonResponse({ status: 'paused', turn: 1 }));
+        global.fetch.mockReturnValueOnce(new Promise((resolve) => { answerDraw = resolve; }));
+
+        const button = document.getElementById('agree');
+        button.focus();
+        section.querySelector('.agreement-battle-form').requestSubmit(button);
+        await flushPromises();
+        await flushPromises();
+        // Recorded, the tab on its way: the button is still held.
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(button.disabled).toBe(true);
+
+        answerDraw({ ok: true, status: 200, text: () => Promise.resolve(renderedTab()) });
+        await flushPromises();
+        await flushPromises();
+
+        const drawn = document.getElementById('agree');
+        expect(drawn).not.toBe(button);
+        expect(drawn.disabled).toBe(false);
+        expect(document.activeElement).toBe(drawn);
+    });
+
+    test('a refused ruling stays in the tab\'s error line and draws nothing', async () => {
+        setUpSession({ withBoard: true });
+        global.fetch.mockReturnValueOnce(jsonResponse(
+            { error: 'Only the Game Master running this fight can rule on it' },
+            { ok: false, status: 403, statusText: 'Forbidden' },
+        ));
+
+        section.querySelector('.agreement-battle-form').requestSubmit();
+        await flushPromises();
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const error = document.getElementById('gm-panel-battle-error');
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toBe('Only the Game Master running this fight can rule on it');
+    });
+
+    test('draws asked for while one is on its way collapse into one more', async () => {
+        setUpSession({ withBoard: true });
+        let answerFirst;
+        global.fetch.mockReturnValueOnce(new Promise((resolve) => { answerFirst = resolve; }));
+        global.fetch.mockReturnValueOnce(htmlResponse(renderedTab()));
+
+        const first = panelBattle.drawTab();
+        panelBattle.drawTab();
+        panelBattle.drawTab();
+        answerFirst({ ok: true, status: 200, text: () => Promise.resolve(renderedTab()) });
+        await first;
+        await flushPromises();
+        await flushPromises();
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 });

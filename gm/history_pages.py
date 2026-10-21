@@ -23,20 +23,49 @@ from .retrieval import ChatMessage
 
 
 @dataclass(frozen=True)
+class HistoryTurn:
+    """One turn of a session's visible conversation, and where it stands.
+
+    Attributes:
+        number: The turn's place in the conversation, counted from 0. History
+            is only ever appended to, so a turn's number does not move; the
+            page marks each entry with it (``data-history-turn``), which is
+            how it knows which turns it holds (issue #89).
+        entries: The turn's visible entries, oldest first.
+    """
+
+    number: int
+    entries: list[ChatMessage]
+
+
+@dataclass(frozen=True)
 class HistoryPage:
     """Some consecutive turns of a session's visible conversation.
 
     Attributes:
-        entries: The page's visible entries, oldest first, as the chat
-            renders them.
+        turns: The page's turns, oldest first, as the chat renders them.
         start: The first turn on the page, counted from 0; also how many
             turns come before it, which the "Show earlier" control offers.
         total: How many turns the conversation holds.
+        continues_the_page: The page goes on from turns the reader's page
+            already holds (:func:`history_since`), so it offers no control
+            for the turns above it: they are on the page.
     """
 
-    entries: list[ChatMessage]
+    turns: list[HistoryTurn]
     start: int
     total: int
+    continues_the_page: bool = False
+
+    @property
+    def entries(self) -> list[ChatMessage]:
+        """The page's visible entries, oldest first, turn after turn."""
+        return [entry for turn in self.turns for entry in turn.entries]
+
+    @property
+    def offers_earlier(self) -> bool:
+        """Whether turns above the page are not on the reader's page."""
+        return bool(self.start) and not self.continues_the_page
 
 
 def history_turns(visible: Sequence[ChatMessage]) -> list[list[ChatMessage]]:
@@ -80,10 +109,46 @@ def history_page(
     turns = history_turns(visible)
     start, end = latest_window(len(turns), before, size)
     return HistoryPage(
-        entries=[entry for turn in turns[start:end] for entry in turn],
+        turns=_numbered(turns, start, end), start=start, total=len(turns)
+    )
+
+
+def history_since(visible: Sequence[ChatMessage], since: int) -> HistoryPage:
+    """Every turn from turn ``since`` to the end (issue #89).
+
+    For a page that already holds the turns before ``since`` and must show
+    the conversation as the server now holds it -- after a turn it lost sight
+    of, or a fight that wrote to the chat -- without a reload, which would
+    throw away the earlier pages the reader loaded. It holds every turn from
+    there, however many, since what the page holds below it is replaced.
+
+    Args:
+        visible: The entries a reader sees, oldest first.
+        since: The last turn the page holds as the server rendered it; it is
+            asked for again, as it may have gained entries since. Clamped
+            into the conversation.
+
+    Returns:
+        The page, which offers no control above it.
+    """
+    turns = history_turns(visible)
+    start = max(0, min(since, len(turns)))
+    return HistoryPage(
+        turns=_numbered(turns, start, len(turns)),
         start=start,
         total=len(turns),
+        continues_the_page=True,
     )
+
+
+def _numbered(
+    turns: list[list[ChatMessage]], start: int, end: int
+) -> list[HistoryTurn]:
+    """Turns ``start`` up to ``end``, each with its number."""
+    return [
+        HistoryTurn(number=number, entries=turns[number])
+        for number in range(start, end)
+    ]
 
 
 @dataclass(frozen=True)

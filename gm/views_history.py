@@ -15,7 +15,7 @@ from battle.access import is_dm
 from common.helpers import database_integer
 
 from .hand_records import latest_hand_edits, may_edit_by_hand
-from .history_pages import history_page, resolved_threads_page
+from .history_pages import history_page, history_since, resolved_threads_page
 from .models import GMRecordEdit, GMSession, StoryThread
 from .text_limits import GM_TEXT_LIMITS
 from .views import _hand_marked, _visible_history
@@ -37,17 +37,27 @@ def gm_history_page(request: HttpRequest, session_id: int) -> HttpResponse:
 
     Answers the entries and, while earlier turns remain, the next control,
     for ``gm-history.js`` to put in place of the control that asked.
+
+    ``?since=<last turn shown>`` answers every turn from that one to the end
+    instead, with no control (issue #89): the page puts them in place of
+    what it holds from that turn on, to show the conversation as stored
+    without a reload.
     """
     session = get_object_or_404(GMSession, pk=session_id, user=request.user)
+    visible = _visible_history(session)
     try:
-        before = _before(request)
+        page = (
+            history_since(visible, database_integer(request.GET["since"]))
+            if "since" in request.GET
+            else history_page(visible, before=_before(request))
+        )
     except ValueError:
-        return HttpResponseBadRequest("before must be the number of a turn")
+        return HttpResponseBadRequest("before and since must be the number of a turn")
     return render(
         request,
         "gm/_history_entries.html",
         {
-            "history_page": history_page(_visible_history(session), before=before),
+            "history_page": page,
             "active_session": session,
             # The fold's recap renders its correction form for a Game Master,
             # as it does on the page (issue #791).
