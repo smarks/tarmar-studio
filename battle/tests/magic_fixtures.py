@@ -26,7 +26,14 @@ from tarmar_engine.magic import (
     SpellEffectKind,
 )
 
-from battle.magic_rules import CASTING_DICE, load_magic_rules, magic_rules
+from battle.magic_rules import (
+    CASTING_DICE,
+    SchoolRow,
+    SchoolTable,
+    load_magic_rules,
+    magic_rules,
+    magic_schools,
+)
 from common.rolling import parse_dice_specification
 from reference.paths import CANON_MAGIC_RULES_FILE_NAME, DEFAULT_CANON_DIR
 from reference.rules_file import forget_values_derived_from_rules
@@ -220,3 +227,30 @@ def seated_rules(rules: MagicRules = INVENTED_RULES) -> Iterator[None]:
     finally:
         magic_rules.cache_clear()
         forget_values_derived_from_rules()
+
+
+#: An invented school table (issue #18): every school the engine files a
+#: spell under, a row naming one school outright, and a school with no spell.
+INVENTED_SCHOOLS = SchoolTable(
+    rows=(
+        SchoolRow(up_to=40, label="Usual", schools=("Elemental", "Mending")),
+        SchoolRow(up_to=60, label="Guarded", schools=("Protection",)),
+        SchoolRow(up_to=100, label="Rarer", schools=("Passage", "Control", "Sky")),
+    )
+)
+
+
+@contextmanager
+def seated_schools(table: SchoolTable | None = INVENTED_SCHOOLS) -> Iterator[None]:
+    """Seat ``table`` as the loaded canon's school table, then forget it.
+
+    Args:
+        table: What :func:`battle.magic_rules.magic_schools` answers with;
+            ``None`` for a canon that gates no spell by school.
+    """
+    magic_schools.cache_clear()
+    try:
+        with patch("battle.magic_rules.load_magic_schools", return_value=table):
+            yield
+    finally:
+        magic_schools.cache_clear()

@@ -58,6 +58,8 @@ class ServicesWords:
     field_death: str = sentence()
     pools_game_master_only: str = sentence()
     field_free_spell_points: str = sentence()
+    field_magic_school_roll: str = sentence()
+    field_magic_school: str = sentence()
     field_coin_adjustment: str = sentence()
     field_item_modifiers: str = sentence()
     roll_fixed_height: str = sentence()

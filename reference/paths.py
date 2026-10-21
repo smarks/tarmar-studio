@@ -44,12 +44,14 @@ them):
   (strings ``slug``, ``title``, ``image`` and a list of strings
   ``place_names``), and an optional list of strings
   ``case_sensitive_place_names``. Read by ``gm.maps``.
-- ``magic-rules.json`` (required to seat a battle): the magic-mechanics
-  numbers the engine's ``MagicRules`` takes, one top-level field per
-  mechanic, and an optional ``rulings`` list recording readings the pages
-  left open. Every field but ``rulings`` is named exactly as the engine
-  dataclass field it fills. Read by ``battle.magic_rules``, whose docstring
-  gives the full schema.
+- ``magic-rules.json`` (required to seat a battle and to roll a caster's
+  school): the magic-mechanics numbers the engine's ``MagicRules`` takes, one
+  top-level field per mechanic; the studio's own ``schools`` block, the table
+  a caster's school of magic is rolled on (issue #18), which the engine takes
+  nothing from; and an optional ``rulings`` list recording readings the pages
+  left open. Every field but ``schools`` and ``rulings`` is named exactly as
+  the engine dataclass field it fills. Read by ``battle.magic_rules``, whose
+  docstring gives the full schema.
 - ``character-rules.json`` (required to create a character): the numbers
   character creation reads, as the public character pages state them: the
   attribute ceiling and point buy, the starting age and aging stage, the

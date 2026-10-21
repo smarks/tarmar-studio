@@ -33,12 +33,17 @@ from tarmar_engine.magic import (
 from battle.magic_rules import (
     CASTING_DICE,
     MagicRulesError,
+    SchoolRow,
+    SchoolTable,
     load_magic_rules,
+    load_magic_schools,
     magic_rules,
+    magic_schools,
 )
 from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
+    DEFAULT_CANON_DIR,
     DM_RULES_DIR,
     MAGIC_RULES_FILE,
 )
@@ -150,6 +155,12 @@ INVENTED_RULES: dict[str, Any] = {
         "mana_lost_totals": [14, 15],
         "runaway_total": 15,
     },
+    # Every school the engine files a spell under, and one with none.
+    "schools": [
+        {"up_to": 40, "label": "Usual", "schools": ["Elemental", "Mending", "Passage"]},
+        {"up_to": 90, "label": "Rarer", "schools": ["Protection", "Control"]},
+        {"up_to": 100, "label": "Rarest", "schools": ["Starlight"]},
+    ],
     "rulings": [
         {"key": "made_up", "reading": "An invented reading.", "for_spencer": True}
     ],
@@ -295,8 +306,46 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             "runaway": None,
             "counterspell": None,
             "casting_failure": None,
+            "schools": None,
         }
         self.assertEqual(load_magic_rules(self.write_rules(rules)), MagicRules())
+        self.assertIsNone(load_magic_schools(self.write_rules(rules)))
+
+    def test_the_school_table_round_trips(self) -> None:
+        # Issue #18: the studio's own block, which the engine takes nothing
+        # from; its rows read as every percentile table's do.
+        table = load_magic_schools(self.write_rules(INVENTED_RULES))
+        self.assertEqual(
+            table,
+            SchoolTable(
+                rows=(
+                    SchoolRow(
+                        up_to=40,
+                        label="Usual",
+                        schools=("Elemental", "Mending", "Passage"),
+                    ),
+                    SchoolRow(
+                        up_to=90, label="Rarer", schools=("Protection", "Control")
+                    ),
+                    SchoolRow(up_to=100, label="Rarest", schools=("Starlight",)),
+                )
+            ),
+        )
+        assert table is not None
+        self.assertEqual(table.row_for(41).label, "Rarer")
+        self.assertEqual(table.row_holding("Starlight"), table.rows[2])
+        self.assertIsNone(table.row_holding("Weather"))
+
+    def test_a_malformed_school_table_is_refused_by_the_engine_rules_read(
+        self,
+    ) -> None:
+        # The system check reads the file through load_magic_rules, so a bad
+        # table must stop it there too, not only when a sheet asks.
+        rules = invented_rules()
+        rules["schools"][2]["schools"] = []
+        with self.assertRaises(MagicRulesError) as caught:
+            load_magic_rules(self.write_rules(rules))
+        self.assertIn("names no school", str(caught.exception))
 
     def test_null_casting_failure_loads_as_none(self) -> None:
         rules = invented_rules()
@@ -643,6 +692,46 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
     ("rulings", lambda rules: rules.update(rulings={})),
     ("rulings[0]", lambda rules: rules.update(rulings=["An unkeyed reading."])),
     ("rulings[0].reading", lambda rules: rules["rulings"][0].pop("reading")),
+    # The school roll's table (issue #18).
+    ("schools", lambda rules: rules.pop("schools")),
+    ("schools", lambda rules: rules.update(schools={})),
+    ("schools: has no rows", lambda rules: rules.update(schools=[])),
+    ("schools[0].up_to", lambda rules: rules["schools"][0].update(up_to="40")),
+    ("schools[1].label", lambda rules: rules["schools"][1].update(label="")),
+    ("schools[2].school", lambda rules: rules["schools"][2].update(school="Sky")),
+    ("schools[0].schools", lambda rules: rules["schools"][0].pop("schools")),
+    (
+        "schools[0].schools[1]",
+        lambda rules: rules["schools"][0].update(schools=["Elemental", ""]),
+    ),
+    (
+        "schools[0].schools",
+        lambda rules: rules["schools"][0]["schools"].append("Elemental"),
+    ),
+    (
+        "schools[2].schools[0] is longer than 40 characters",
+        lambda rules: rules["schools"][2].update(schools=["S" * 41]),
+    ),
+    (
+        "schools: the 'Rarest' row names no school",
+        lambda rules: rules["schools"][2].update(schools=[]),
+    ),
+    (
+        "schools: repeats the school ['Control']",
+        lambda rules: rules["schools"][2]["schools"].append("Control"),
+    ),
+    (
+        "schools: rows must rise in up_to",
+        lambda rules: rules["schools"][1].update(up_to=40),
+    ),
+    (
+        "schools: the last row's up_to must be 100",
+        lambda rules: rules["schools"][2].update(up_to=99),
+    ),
+    (
+        "schools names no row for the engine spells' schools ['Control', 'Protection']",
+        lambda rules: rules["schools"].pop(1),
+    ),
 ]
 
 
@@ -886,6 +975,20 @@ class CanonMagicRulesTest(SimpleTestCase):
         # Its mana-pool.md says how a casting roll's high results fail.
         self.assertIsNotNone(rules.casting_failure)
 
+    def test_the_default_canon_rolls_the_public_page_schools(self) -> None:
+        # schools-of-magic.md: "Common Schools (0-70%)" and "Less Common
+        # Schools (71-100%)"; the drift test holds the names to the page.
+        table = load_magic_schools(DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME)
+        assert table is not None
+        self.assertEqual([row.up_to for row in table.rows], [70, 100])
+
+    def test_the_loaded_school_table_loads_once_per_process(self) -> None:
+        magic_schools.cache_clear()
+        self.addCleanup(magic_schools.cache_clear)
+        loaded = magic_schools()
+        self.assertEqual(loaded, load_magic_schools(MAGIC_RULES_FILE))
+        self.assertIs(magic_schools(), loaded)
+
     def test_the_loaded_canon_file_loads_once_per_process(self) -> None:
         self.assertEqual(MAGIC_RULES_FILE, DM_RULES_DIR / CANON_MAGIC_RULES_FILE_NAME)
         magic_rules.cache_clear()
@@ -904,6 +1007,8 @@ class TarmarMagicRulesTest(SimpleTestCase):
     @skip_unless_canon_expects("magic_rules")
     def test_the_file_matches_the_canon_expectations(self) -> None:
         rules = load_magic_rules(MAGIC_RULES_FILE)
+        schools = load_magic_schools(MAGIC_RULES_FILE)
+        assert schools is not None, "the Tarmar canon rolls a caster's school"
         assert rules.push is not None, "the Tarmar canon offers Push"
         assert rules.channel is not None, "the Tarmar canon has Channel"
         runaway_band = rules.push.runaway_band()
@@ -979,5 +1084,10 @@ class TarmarMagicRulesTest(SimpleTestCase):
                 "mana_lost_totals": sorted(rules.casting_failure.mana_lost_totals),
                 "runaway_total": rules.casting_failure.runaway_total,
             },
+            # The school roll's table (issue #18): each row's reach, label and
+            # schools, in order.
+            "schools": [
+                [row.up_to, row.label, list(row.schools)] for row in schools.rows
+            ],
         }
         self.assertEqual(summary, CANON_EXPECTATIONS["magic_rules"])

@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django.utils.text import capfirst
 
+from battle.magic_rules import magic_schools
 from common.helpers import column_length, whole_number
 
 from .constants import (
@@ -20,6 +21,7 @@ from .constants import (
     CORE_ATTRIBUTE_FIELDS,
     MAX_CHARACTER_NAME_LENGTH,
     MAX_DEATH_CAUSE_LENGTH,
+    MAX_MAGIC_SCHOOL_LENGTH,
     MAX_SKILL_NAME_LENGTH,
     MINOR_INJURY_ROLL_PENALTY,
     SEVERE_INJURY_BAND_TOP,
@@ -47,7 +49,12 @@ from .equipment import (
 from .equipment_rules import equipment_rules
 from .movement import compute_gaits
 from .movement import movement_modifier as _movement_modifier
-from .rules import character_rules, scores_by_short_name, social_class_display
+from .rules import (
+    PERCENTILE_TOP,
+    character_rules,
+    scores_by_short_name,
+    social_class_display,
+)
 from .skill_rules import skill_rules
 from .skills import skill_name_refusal, specialised_skill_for_granted
 from .weapon_skill import weapon_skill_for_granted
@@ -161,6 +168,52 @@ def validate_literacy_roll(value: int) -> None:
         ValidationError: The dice cannot produce ``value``.
     """
     refusal = character_rules().literacy_roll.refusal("The literacy roll", value)
+    if refusal is not None:
+        raise ValidationError(refusal)
+
+
+def validate_magic_school_roll(value: int) -> None:
+    """A school roll percentile dice can produce (issue #18).
+
+    Raises:
+        ValidationError: ``value`` is not 1 to 100.
+    """
+    if not 1 <= value <= PERCENTILE_TOP:
+        raise ValidationError(
+            f"The school roll is a d100 roll, 1 to {PERCENTILE_TOP}; {value} was given"
+        )
+
+
+def magic_school_refusal(school: str) -> str | None:
+    """Why ``school`` is no school a character may hold, or ``None`` (#18).
+
+    The one statement of the check: the record's validator and
+    ``characters.magic.choose_school`` both ask it.
+
+    Args:
+        school: A school's name.
+
+    Returns:
+        The refusal when the loaded canon names no schools, or not this one.
+    """
+    table = magic_schools()
+    if table is None:
+        return "The canon names no schools of magic, so a character holds none"
+    if school not in table.schools:
+        return (
+            f"{school} is not a school of magic the canon names "
+            f"({', '.join(table.schools)})"
+        )
+    return None
+
+
+def validate_magic_school(value: str) -> None:
+    """A school the loaded canon's school table names (issue #18).
+
+    Raises:
+        ValidationError: :func:`magic_school_refusal` refuses it.
+    """
+    refusal = magic_school_refusal(value)
     if refusal is not None:
         raise ValidationError(refusal)
 
@@ -794,6 +847,20 @@ class Character(models.Model):
     # serving during a deploy inserts rows without them (issue #575).
     spells = models.JSONField(
         default=dict, db_default={}, blank=True, validators=[validate_spells]
+    )
+    # The caster's school of magic (issue #18): the d100 roll on the canon's
+    # school table (``battle.magic_rules.magic_schools``) and the school held,
+    # one of the schools the rolled row names. Written only by
+    # ``characters.magic``; a player learns a new spell only from it.
+    magic_school_roll = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[validate_magic_school_roll]
+    )
+    magic_school = models.CharField(
+        max_length=MAX_MAGIC_SCHOOL_LENGTH,
+        blank=True,
+        default="",
+        db_default="",
+        validators=[validate_magic_school],
     )
     # Coin gained (+) or spent (-) since creation (issue #757): purchases from
     # the catalog (never refunded) and Game Master grants. The purse

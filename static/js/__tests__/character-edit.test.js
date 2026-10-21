@@ -80,6 +80,7 @@ const CONFIG_DEFAULTS = {
         armor_stops: 12, armor_dex_penalty: 13, check_difficulty: 41,
         check_total_minimum: 3, check_total_maximum: 14, mana_grant: 101,
         defender_dodge_minimum: 2, defender_dodge_maximum: 15, situational: 21,
+        cast_total_minimum: 4, cast_total_maximum: 17,
     },
 };
 
@@ -3511,6 +3512,18 @@ describe('the sheet repaints what a change moves (issues #763-#766, #792, #797, 
         document.body.insertAdjacentHTML('beforeend', '<strong id="mana-current">0</strong>');
         characterEdit.paintSheet({ free_skill_points: 0, free_spell_points: 2, current_mana: 2 });
         expect(document.getElementById('mana-current').textContent).toBe('2');
+    });
+
+    test('a cast in the story repaints the injury readout, whose Mana it spent (#18)', async () => {
+        await loadPage();
+        document.getElementById('injury-thresholds').innerHTML =
+            '<span class="current-pool">Mana <strong id="current-mana">6</strong> / 6</span>';
+        characterEdit.paintSheet({
+            current_mana: 3,
+            injury_thresholds_html:
+                '<span class="current-pool">Mana <strong id="current-mana">3</strong> / 6</span>',
+        });
+        expect(document.getElementById('current-mana').textContent).toBe('3');
     });
 
     test('a run that earns the first points shows the controls that spend them (#792)', async () => {

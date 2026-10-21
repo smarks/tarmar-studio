@@ -36,6 +36,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from accounts.models import User
+from battle.magic_rules import magic_schools
 
 from .constants import (
     CHARACTER_ATTRIBUTE_FIELDS,
@@ -51,6 +52,7 @@ from .dice import (
     roll_3d6_logged,
     roll_attribute_logged,
     roll_d6_logged,
+    roll_d100,
     roll_demon_die_logged,
     roll_expression,
     roll_literacy_logged,
@@ -311,6 +313,13 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         # characters.magic.learn_spell, as into a skill; never a field update
         # (spells is not in CHARACTER_FIELDS). #774.
         "spells": _player(),
+        # The caster's school (issue #18): rolled once on the canon's table and
+        # chosen from the row it lands on, through the school roll and
+        # characters.magic.choose_school; never a field update.
+        "magic_school_roll": _game_master(
+            _said(lambda said: said.field_magic_school_roll)
+        ),
+        "magic_school": _game_master(_said(lambda said: said.field_magic_school)),
         # Moves only through characters.purse.move_coin: purchases, and a
         # Game Master giving or taking coin (#757).
         "coin_adjustment": _game_master(_said(lambda said: said.field_coin_adjustment)),
@@ -884,13 +893,11 @@ def apply_rolled_attributes(
         is_game_master,
     )
     rolled = []
-    logs = []
     for name in CHARACTER_ATTRIBUTE_FIELDS:
         total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
-        logs.append(f"{name}: {log}")
-    character.dice_log = "\n".join(part for part in (character.dice_log, *logs) if part)
+        append_dice_log(character, f"{name}: {log}")
     return "rolled the six attributes: " + "; ".join(rolled)
 
 
@@ -2532,7 +2539,7 @@ def change_field(
         # The same limits the Games Master's stated scores are held to.
         beyond = check_attribute(field_name, int(str(value)), is_game_master)
     elif field_name in CHARACTER_ATTRIBUTE_FIELDS:
-        _append_dice_log(
+        append_dice_log(
             character, check_point_buy(character, field_name, int(str(value)))
         )
     origin_was_recorded = character.location_recorded
@@ -2563,7 +2570,7 @@ def change_field(
     return notes
 
 
-def _append_dice_log(character: Character, line: str) -> None:
+def append_dice_log(character: Character, line: str) -> None:
     """Add a line to the character's dice log, where every roll is kept."""
     character.dice_log = "\n".join(part for part in (character.dice_log, line) if part)
 
@@ -2597,7 +2604,7 @@ def apply_wealth_to_coin(character: Character) -> str:
     coin, detail = starting_coin_for_wealth(character.wealth_level)
     character.starting_coin = coin
     character.wealth_recorded = True
-    _append_dice_log(
+    append_dice_log(
         character,
         f"Wealth: set to {character.wealth_level}, starting coin = {detail}",
     )
@@ -2620,7 +2627,7 @@ def apply_provenance_roll(character: Character, *, is_game_master: bool = False)
     character.provenance_class = social_class
     character.provenance_detail = detail
     character.provenance_recorded = True
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     return f"rolled provenance: {log}"
 
 
@@ -2641,8 +2648,73 @@ def apply_wealth_roll(character: Character, *, is_game_master: bool = False) -> 
     character.wealth_level = level
     character.starting_coin = coin
     character.wealth_recorded = True
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     return f"rolled wealth: {log}"
+
+
+#: Why a player may not roll the school (issue #18): a Game Master set it.
+SCHOOL_SET_BY_GAME_MASTER_REASON = (
+    "A Game Master set this character's school of magic; only a Game Master "
+    "can roll it again"
+)
+
+
+def can_roll_school(character: Character, *, is_game_master: bool) -> bool:
+    """Whether this asker may roll the character's school of magic now (#18).
+
+    The rule is :func:`apply_school_roll`'s, which enforces the same limits.
+    A canon with no school table has nothing to roll. A player rolls once,
+    and not over a school a Game Master set without a roll; a Game Master may
+    roll again.
+    """
+    if magic_schools() is None:
+        return False
+    if is_game_master:
+        return True
+    return character.magic_school_roll is None and not character.magic_school
+
+
+def apply_school_roll(character: Character, *, is_game_master: bool = False) -> str:
+    """Roll the caster's school of magic on the canon's table (issue #18).
+
+    schools-of-magic.md heads its lists "Common Schools (0-70%)" and "Less
+    Common Schools (71-100%)"; the canon's ``schools`` block carries them
+    (``battle.magic_rules``). The d100 lands on a row: a row naming one
+    school makes it the caster's, one naming several leaves the choice among
+    them to the player (``characters.magic.choose_school``). A Game Master's
+    roll over a school the new row does not name clears it, so the record
+    never holds a school its roll does not open; the history keeps it.
+
+    Raises:
+        CharacterChangeError: The canon has no school table; a player asking
+            for a roll already made, or over a school a Game Master set.
+    """
+    table = magic_schools()
+    if table is None:
+        raise CharacterChangeError(
+            "This canon names no schools of magic, so there is no school to roll"
+        )
+    check_first_roll(
+        character.magic_school_roll is not None,
+        "The school of magic is",
+        is_game_master,
+    )
+    if character.magic_school and not is_game_master:
+        raise CharacterChangeError(SCHOOL_SET_BY_GAME_MASTER_REASON)
+    roll = roll_d100()
+    row = table.row_for(roll)
+    log = f"School of magic: d100={roll} -> {row.label} ({', '.join(row.schools)})"
+    append_dice_log(character, log)
+    character.magic_school_roll = roll
+    held = character.magic_school
+    if len(row.schools) == 1:
+        character.magic_school = row.schools[0]
+        return f"rolled the school of magic: {log}; the school is {row.schools[0]}"
+    if held in row.schools:
+        return f"rolled the school of magic: {log}; the {held} school stands"
+    character.magic_school = ""
+    cleared = f"; the {held} school, not on this list, is cleared" if held else ""
+    return f"rolled the school of magic: {log}{cleared}; choose one of them"
 
 
 def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> str:
@@ -2670,7 +2742,7 @@ def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> 
     location, log = roll_location_logged()
     character.location = location
     character.location_recorded = True
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     followed = follow_origin(character, old_origin, was_recorded=was_recorded)
     granted = any(
         line.endswith(f"granted by the {location} origin") for *_, line in followed
@@ -2679,9 +2751,9 @@ def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> 
     # Origin's grant was already held (a reroll onto the same Origin, or one
     # sharing it), the log says the point stayed rather than claiming a new one.
     if granted or not character.origin_skill:
-        _append_dice_log(character, location_effects(location)[1])
+        append_dice_log(character, location_effects(location)[1])
     else:
-        _append_dice_log(
+        append_dice_log(
             character,
             f"Location effects: {character.origin_skill} "
             f"{character_rules().location.skill_points} "
@@ -2764,7 +2836,7 @@ def apply_starting_coin_roll(
         )
     coin, detail = starting_coin_for_wealth(character.wealth_level)
     character.starting_coin = coin
-    _append_dice_log(character, f"Starting coin rerolled: {detail}")
+    append_dice_log(character, f"Starting coin rerolled: {detail}")
     return f"starting coin rerolled: {detail}"
 
 
@@ -2781,7 +2853,7 @@ def apply_appearance_roll(character: Character, *, is_game_master: bool = False)
     check_first_roll(bool(character.appearance_roll), "Appearance is", is_game_master)
     value, log = roll_d6_logged()
     character.appearance_roll = str(value)
-    _append_dice_log(character, f"Appearance: {log}")
+    append_dice_log(character, f"Appearance: {log}")
     note = f"rolled appearance, {log}"
     if value in (1, 6):
         note += "; a 1 or a 6 is for the Game Master to qualify"
@@ -2869,7 +2941,7 @@ def apply_physical_roll(
         )
     value, log = _PHYSICAL_ROLLERS[field_name]()
     setattr(character, field_name, value)
-    _append_dice_log(character, f"{label}: {log}")
+    append_dice_log(character, f"{label}: {log}")
     return f"rolled {label.lower()}, {log}"
 
 
@@ -2913,7 +2985,7 @@ def apply_sheet_attribute_roll(
         total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
-        _append_dice_log(character, f"{name}: {log}")
+        append_dice_log(character, f"{name}: {log}")
     return "rolled the missing attributes: " + "; ".join(rolled)
 
 
@@ -3014,6 +3086,20 @@ SHEET_ROLLS: Mapping[str, SheetRoll] = MappingProxyType(
             lambda character: character.wealth_recorded,
             "Roll wealth again? The recorded level and coin are replaced; "
             "the history keeps them.",
+        ),
+        # schools-of-magic.md's d100 lists (issue #18). A player rolls once; a
+        # Game Master may roll again, which clears a school the new row does
+        # not name.
+        "magic_school": SheetRoll(
+            ("magic_school_roll", "magic_school"),
+            apply_school_roll,
+            lambda character, is_game_master: can_roll_school(
+                character, is_game_master=is_game_master
+            ),
+            lambda character: character.magic_school_roll is not None,
+            "Roll the school of magic again? The recorded roll is replaced, and "
+            "the school with it unless the new roll's list names it; the history "
+            "keeps them.",
         ),
         "starting_coin": SheetRoll(
             ("starting_coin",),
@@ -3179,11 +3265,15 @@ SURVIVAL_SAVE_ON_THE_BOARD = (
     "is fighting on the board, which rolls the survival save each turn itself"
 )
 
+#: Why nobody casts off the board for a fighting character (issue #18), after
+#: the character's name: the board's own turns cast.
+CAST_ON_THE_BOARD = "is fighting on the board, which casts on its own turns; cast there"
+
 #: The history field a survival save is kept under.
 SURVIVAL_SAVE_FIELD = "survival save"
 
 
-def _seated_in_a_live_fight(character: Character) -> bool:
+def seated_in_a_live_fight(character: Character) -> bool:
     """Whether a live record-writing fight has this character on its board.
 
     Read through the reverse relation, so this module needs no import of the
@@ -3227,7 +3317,7 @@ def survival_save_refusal(character: Character, *, is_game_master: bool) -> str 
         or condition.survival_save_target is None
     ):
         return NO_SURVIVAL_SAVE_DUE
-    if _seated_in_a_live_fight(character):
+    if seated_in_a_live_fight(character):
         return f"{character.name} {SURVIVAL_SAVE_ON_THE_BOARD}"
     if not is_game_master and _last_save_against(character) == condition.pools:
         return SURVIVAL_SAVE_ALREADY_ROLLED
@@ -3280,7 +3370,7 @@ def apply_survival_save(
     line = f"survival save, {log} {'≤' if survived else '>'} {target} ({against}): " + (
         "survives this turn" if survived else "fails, and dies"
     )
-    _append_dice_log(character, f"Survival save at {condition.pools}: {log}")
+    append_dice_log(character, f"Survival save at {condition.pools}: {log}")
     if not survived:
         character.is_alive = False
         character.death_cause = f"Failed a survival save ({total} > {target})"

@@ -28,6 +28,7 @@ from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView
 
 from accounts.models import User
+from battle.magic_rules import magic_schools
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from common.audit import audit_logger
 from common.breadcrumbs import BreadcrumbMixin, step, trail
@@ -72,7 +73,16 @@ from ..import_service import (
     save_imported_character,
     validate_import_payload,
 )
-from ..magic import MAX_MANA_GRANT, current_mana, known_spells, learnable_spells
+from ..magic import (
+    CASTING_ROLL,
+    MAX_MANA_GRANT,
+    castable_spells,
+    current_mana,
+    known_spells,
+    rolled_school_row,
+    schools_to_choose,
+    spells_open_to,
+)
 from ..models import (
     CHARACTER_FIELDS,
     MAX_COMBAT_LOG_ENTRIES,
@@ -138,10 +148,14 @@ def character_number_limits() -> dict[str, int]:
     The defender's dodge on the attack panel is held to the canon's bounds
     (issue #75), as :func:`characters.attack.resolve` holds it.
 
+    A Game Master's stated casting total is held to what the casting dice
+    can show (issue #18), as :func:`characters.magic.cast_in_story` holds it.
+
     Returns:
         :data:`FIXED_NUMBER_LIMITS` with ``check_total_minimum``,
-        ``check_total_maximum``, ``defender_dodge_minimum`` and
-        ``defender_dodge_maximum``.
+        ``check_total_maximum``, ``defender_dodge_minimum``,
+        ``defender_dodge_maximum``, ``cast_total_minimum`` and
+        ``cast_total_maximum``.
     """
     skill_check_dice = skill_rules().skill_check
     defender_dodge = equipment_rules().defender_dodge
@@ -151,6 +165,8 @@ def character_number_limits() -> dict[str, int]:
         "check_total_maximum": skill_check_dice.maximum,
         "defender_dodge_minimum": defender_dodge.minimum,
         "defender_dodge_maximum": defender_dodge.maximum,
+        "cast_total_minimum": CASTING_ROLL.minimum,
+        "cast_total_maximum": CASTING_ROLL.maximum,
     }
 
 
@@ -881,7 +897,14 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
         "coin_adjustment": format_coin(character.coin_adjustment),
         "known_spells": known_spells(character),
         "current_mana": current_mana(character),
-        "learnable_spells": learnable_spells(),
+        "learnable_spells": spells_open_to(character, is_game_master=is_game_master),
+        "castable_spells": castable_spells(character, is_game_master=is_game_master),
+        "casting_dice": CASTING_ROLL.dice,
+        "magic_schools": magic_schools(),
+        "rolled_school_row": rolled_school_row(character),
+        "schools_to_choose": schools_to_choose(
+            character, is_game_master=is_game_master
+        ),
         "mechanics_config": {
             "skillCheckUrl": reverse("characters:skill_check", args=[character.pk]),
             "weaponSkillUrl": reverse(
@@ -890,6 +913,8 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
             "coinUrl": reverse("characters:move_coin", args=[character.pk]),
             "learnSpellUrl": reverse("characters:learn_spell", args=[character.pk]),
             "grantManaUrl": reverse("characters:grant_mana", args=[character.pk]),
+            "chooseSchoolUrl": reverse("characters:choose_school", args=[character.pk]),
+            "castSpellUrl": reverse("characters:cast_spell", args=[character.pk]),
         },
     }
 
