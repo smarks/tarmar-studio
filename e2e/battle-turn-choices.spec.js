@@ -14,6 +14,7 @@
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
 /**
  * Stand the first figure between the other two, facing each other, and hand
@@ -67,27 +68,39 @@ test.describe('Choosing a turn by hand', () => {
             has: page.locator('.turn-option-name', { hasText: /^ATTACK$/ }),
         });
         await expect(attacks).toHaveCount(2);
+        // The configured words: an attack at the foe with the weapon in
+        // hand, and its odds.
+        const { shared, tarmar } = menuWords();
+        const attackLine = (foe) => menuLine(shared.with_odds, {
+            line: sentencePattern(shared.attack, {
+                aimed: escaped(foe), weapon: sentencePattern(shared.the_weapon),
+            }),
+            odds: `(?:${sentencePattern(tarmar.odds)}|${sentencePattern(tarmar.odds_armoured)})`,
+        });
         for (const foe of foes) {
-            const aimed = attacks.filter({ hasText: `Attack ${foe} with the` });
+            const aimed = attacks.filter({
+                has: page.locator('.turn-option-plain', { hasText: attackLine(foe) }),
+            });
             await expect(aimed).toHaveCount(1);
-            await expect(aimed.locator('.turn-option-plain'))
-                .toHaveText(new RegExp(`^Attack ${escaped(foe)} with the .+: \\d+ in 20 to hit, .+ a hit\\)$`));
-            await expect(aimed.locator('.turn-option-cost')).toHaveText('Costs nothing.');
+            await expect(aimed.locator('.turn-option-plain')).toHaveText(attackLine(foe));
+            await expect(aimed.locator('.turn-option-cost'))
+                .toHaveText(menuLine(menuWords().panel.costs_nothing));
         }
         // One AI pick on the whole menu, and no scoring until asked for.
         await expect(panel.locator('.turn-option-ai-pick')).toHaveCount(1);
         await expect(panel.locator('.turn-option-advice')).toHaveCount(0);
 
         const scoring = panel.locator('.turn-scoring-toggle');
-        await expect(scoring).toHaveText("Show the AI's scoring");
+        await expect(scoring).toHaveText(menuLine(menuWords().panel.show_scoring));
         await scoring.click();
         await expect(panel.locator('.turn-scoring-toggle')).toHaveAttribute('aria-pressed', 'true');
-        await expect(attacks.first().locator('.turn-option-advice')).toContainText('score ');
+        await expect(attacks.first().locator('.turn-option-advice'))
+            .toHaveText(menuLine(menuWords().panel.advice));
         await expect(attacks.first().locator('.turn-option-advice')).toContainText('P(hit)');
         // The reader's choice holds across a reload, as a setting does.
         await page.reload();
         await expect(page.locator('#turn-panel .turn-scoring-toggle'))
-            .toHaveText("Hide the AI's scoring");
+            .toHaveText(menuLine(menuWords().panel.hide_scoring));
         await expect(page.locator('#turn-panel .turn-option-advice').first()).toBeVisible();
         await page.locator('#turn-panel .turn-scoring-toggle').click();
         await expect(page.locator('#turn-panel .turn-option-advice')).toHaveCount(0);
@@ -95,7 +108,7 @@ test.describe('Choosing a turn by hand', () => {
         // Strike the foe the AI did not pick.
         const notPicked = attacks.filter({ hasNot: page.locator('.turn-option-ai-pick') });
         const plainLine = await notPicked.first().locator('.turn-option-plain').textContent();
-        const target = foes.find((foe) => plainLine.startsWith(`Attack ${foe} `));
+        const target = foes.find((foe) => attackLine(foe).test(plainLine));
         expect(target).toBeTruthy();
         await notPicked.first().click();
         await panel.locator('.turn-confirm').click();

@@ -1,0 +1,136 @@
+# The words the Games Master app refuses a request in: one table per module
+# that refuses (issue #97).
+#
+# Read once at startup (gm.refusal_words.load_refusal_words); a missing key, an unknown
+# key or a {name} a sentence may not use stops the server there rather than in
+# front of a player. GM_REFUSAL_WORDS_FILE names another file. Change the wording
+# freely; keep each {name} a sentence uses, or drop it. Changing a sentence
+# never changes who is refused.
+
+[hand_records]
+# What anyone without a Game Master's account is told.
+game_master_only = "Only a Game Master sets the records at this table by hand; a player's records follow the story."
+# Why a recap correction is refused while a turn runs.
+recap_while_turn_running = "The Game Master is still answering a message in this session, and that turn may rewrite the recap. Correct it once the reply has appeared."
+# {label}: how the refusal names the field ("The thread", "The recap").
+not_text = "{label} must be text"
+needed = "{label} is needed"
+ruling_not_recorded = "the ruling was not recorded"
+no_such_ruling = "There is no such ruling in force at this table"
+no_such_entity = "There is no such person or thing in this session"
+entity_kind = "A record is a person or a thing"
+entity_already_recorded = "{name} is already recorded; correct that one instead"
+entity_recorded_as_another_row = "{name} is already recorded as another row"
+no_such_thread = "There is no such thread in this session"
+# {thread}: the thread's number.
+thread_already_resolved = "Thread {thread} is already resolved"
+thread_still_open = "Thread {thread} is still open"
+not_folded_yet = "This session has not been folded into a recap yet"
+
+[policy]
+# What a player is told when a plan asks for a Game Master's action. Each of
+# these follows "Not done: <the action>, because" in the chat, so it starts in
+# lower case.
+game_master_only = "only a Game Master can bring a character back or remove one"
+# When a plan records or retires a house rule.
+house_rule = "only the Game Master sets the rulings at this table; a player's house rule is a suggestion for him, not a ruling"
+# When a plan rules on literacy (issue #743).
+literacy_ruling = "only the Game Master rules on whether a character can read; a player's literacy is rolled, and at an Origin of Consult GM the Game Master decides"
+# When a plan states a player's attribute scores (issue #404).
+player_stated_scores = "a player's attribute scores are rolled, not stated; only a Game Master can set them to chosen values"
+# When a plan states a player's Fatigue roll (issue #802).
+player_stated_fatigue = "a player's Fatigue roll is rolled, not stated; only a Game Master can record a roll made at his table"
+# When a plan marks a death, awards XP or moves coin (issue #802).
+game_master_records = "only the Game Master marks a death, awards XP, or gives or takes coin; a player's coin moves when they buy something"
+# What an aide is told when a plan rolls dice nobody asked for (issue #598).
+aide_unasked_roll = "the Game Master did not ask for a roll, and dice do not decide what happened at his table; that is his to say"
+
+[views]
+# What the player reads when a turn or a fight fails on an exception nobody
+# wrote for them (issue #13); the exception itself goes to the log.
+server_error = "The Game Master ran into an error on the server and could not finish. It has been logged; send your message again in a moment."
+# A second message to a session whose turn is still running (issue #515).
+turn_already_running = "The Game Master is still answering your last message in this session. Its reply will appear here when it is ready; send this one after that."
+# /fight while a message is still being answered (issue #836).
+fight_while_turn_running = "The Game Master is still answering your last message in this session. Start the fight once the reply has appeared."
+# /fight when the model cannot be asked who the party faces.
+fight_model_unreachable = "The Game Master could not be reached to choose who you face. Nothing was started; try the fight again in a moment."
+# A Retry of a turn that finished after its page lost the stream (issue #515).
+turn_already_answered = "That message was already answered while the page was away. Reload the page to see the reply."
+# When the model's plan could not be read twice over (issue #590).
+plan_unreadable = "The Game Master could not work out what to record or roll for that message, so nothing was changed. Try asking again in other words."
+invalid_session_id = "Invalid session_id"
+session_not_found = "GM session not found"
+invalid_character_id = "Invalid character_id"
+character_not_found = "Character not found"
+message_not_text = "message must be a string"
+no_message = "No message provided"
+# /rules when the canon's rules directory is missing.
+rules_not_found = "Rules directory not found"
+turn_not_found = "GM turn not found"
+name_not_text = "name must be a string"
+no_session_id = "No session_id"
+session_needs_name = "A session needs a name"
+resolved_from_not_thread = "resolved_from must be the id of a thread"
+attach_or_send = "Attach a character or send a message first"
+foes_not_text = "foes must be a string"
+send_to_claude_game_master_only = "Only a Game Master can send a session to Claude."
+note_not_text = "note must be a string"
+reviews_game_master_only = "Only a Game Master can see Claude's reviews."
+
+[views_records]
+# {changes}: the changes the endpoint takes, listed.
+change_one_of = "change must be one of: {changes}"
+
+[views_history]
+before_not_turn = "before must be the number of a turn"
+since_not_turn = "since must be the number of a turn"
+before_not_thread = "before must be the id of a thread"
+
+[fight]
+name_a_foe = "Name at least one foe, or leave it blank to ask the GM"
+could_not_say_who = "The GM could not say who you face — try naming the foes"
+found_nobody = "The GM found nobody to fight — try naming the foes"
+no_foes_in_bestiary = "The Game Master could not find foes for that in the bestiary — try asking again"
+bestiary_empty = "The bestiary is empty — load the catalog before fighting"
+# {calling}: what was asked for, quoted.
+not_a_calling = "{calling} is not a calling"
+fight_under_way = "A fight is already under way — finish it on the board first"
+other_players_characters = "The characters in this session belong to other players; only a Game Master fights with another player's character"
+attach_living_character = "Attach a living character before starting a fight"
+field_full = "The field holds {most} figures and the party fills it"
+no_foes = "No foes to fight"
+
+[executor]
+# Each of these follows "Not done: <the action>, because" in the chat, so it
+# starts in lower case.
+# Why a session may no longer change a character another player owns (#837).
+not_yours = "that character belongs to another player, and only a Game Master may change another player's character"
+no_such_character = "there is no character with id {id} in this session"
+duplicate_character_name = "this session already has a character called {name} (id {id}), and a second one needs a name of its own"
+# {ref}: the name a plan gave a character it meant to create first.
+not_created = "{ref} was not created, so this was not done"
+no_character_named = "no character was named"
+character_gone = "that character no longer exists"
+not_carrying = "the party is not carrying {item}"
+# {kind}: "person" or "thing".
+already_recorded_as = "{name} is already recorded as a {kind}"
+no_open_thread = "there is no open thread with id {id} in this session"
+no_active_ruling = "there is no active ruling with id {id} at this table"
+
+[withdraw]
+owner_only = "Only the character's owner withdraws it"
+session_id_not_id = "session_id must be a session's id"
+
+[luck]
+not_in_session = "That character is not in this session"
+no_luck = "{name} has no Luck to spend"
+luck_spent = "{name} has spent all {level} of this session's Luck (once per session per level); only a Game Master grants more"
+character_id_not_id = "character_id must be a character's id"
+
+[attach]
+# A character that may not join a session. One the user may not attach at all
+# is told [views] character_not_found.
+dead = "Character is dead"
+# {missing}: the parts of the record still to fill in, listed.
+incomplete = "Character is not complete: {missing}"

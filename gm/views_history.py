@@ -15,8 +15,9 @@ from battle.access import is_dm
 from common.helpers import database_integer
 
 from .hand_records import latest_hand_edits, may_edit_by_hand
-from .history_pages import history_page, resolved_threads_page
+from .history_pages import history_page, history_since, resolved_threads_page
 from .models import GMRecordEdit, GMSession, StoryThread
+from .refusal_words import refusal_words
 from .text_limits import GM_TEXT_LIMITS
 from .views import _hand_marked, _visible_history
 
@@ -37,17 +38,29 @@ def gm_history_page(request: HttpRequest, session_id: int) -> HttpResponse:
 
     Answers the entries and, while earlier turns remain, the next control,
     for ``gm-history.js`` to put in place of the control that asked.
+
+    ``?since=<last turn shown>`` answers every turn from that one to the end
+    instead, with no control (issue #89): the page puts them in place of
+    what it holds from that turn on, to show the conversation as stored
+    without a reload.
     """
     session = get_object_or_404(GMSession, pk=session_id, user=request.user)
-    try:
-        before = _before(request)
-    except ValueError:
-        return HttpResponseBadRequest("before must be the number of a turn")
+    visible = _visible_history(session)
+    if "since" in request.GET:
+        try:
+            page = history_since(visible, database_integer(request.GET["since"]))
+        except ValueError:
+            return HttpResponseBadRequest(refusal_words().views_history.since_not_turn)
+    else:
+        try:
+            page = history_page(visible, before=_before(request))
+        except ValueError:
+            return HttpResponseBadRequest(refusal_words().views_history.before_not_turn)
     return render(
         request,
         "gm/_history_entries.html",
         {
-            "history_page": history_page(_visible_history(session), before=before),
+            "history_page": page,
             "active_session": session,
             # The fold's recap renders its correction form for a Game Master,
             # as it does on the page (issue #791).
@@ -69,7 +82,7 @@ def gm_resolved_threads(request: HttpRequest, session_id: int) -> HttpResponse:
     try:
         before_id = _before(request)
     except ValueError:
-        return HttpResponseBadRequest("before must be the id of a thread")
+        return HttpResponseBadRequest(refusal_words().views_history.before_not_thread)
     before = StoryThread.objects.filter(session=session, pk=before_id).first()
     if before is None:
         raise Http404("No thread of this session has that id.")

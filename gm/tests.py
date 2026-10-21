@@ -23,8 +23,8 @@ from common.test_helpers import (
 )
 from reference.paths import CANON_NAME, TARMAR_CANON_NAME
 
-from . import views
 from .models import GMSession
+from .refusal_words import refusal_words
 from .services import (
     build_roll_message,
     build_rules_lookup_message,
@@ -510,10 +510,15 @@ class GMViewTest(BaseTestCase):
                 "mode",
                 "transcriptUrlTemplate",
                 "reviewUrl",
+                # What the page says when it has no reviewUrl (#94).
+                "reviewGameMasterOnly",
                 # Where a lost turn is asked after, and the turn still
                 # running when the page loaded (issue #515).
                 "turnUrlTemplate",
                 "runningTurn",
+                # Where the conversation is asked for as stored, from a turn
+                # on, to show it without a reload (issue #89).
+                "historyUrlTemplate",
             },
         )
         # Only a Game Master is given somewhere to send a review (issue #402).
@@ -862,7 +867,7 @@ class GMViewTest(BaseTestCase):
             content = b"".join(response.streaming_content)
         self.assertIn(b"error", content)
         # The frame carries the fixed sentence, not the exception's text (#13).
-        self.assertIn(json.dumps(views.GM_SERVER_ERROR_MESSAGE).encode(), content)
+        self.assertIn(json.dumps(refusal_words().views.server_error).encode(), content)
         self.assertNotIn(b"ollama exploded", content)
 
     @patch("gm.turn_engine.model.ollama_client.stream_chat")

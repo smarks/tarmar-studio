@@ -21,6 +21,7 @@ visitor takes the offer — sign in and find the battle still there.
 from django.contrib.auth.models import AnonymousUser
 from django.test import Client
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle.access import Actor, listable_battles, readable_battles
 from battle.limits import (
@@ -29,6 +30,7 @@ from battle.limits import (
     charge_guest_creation,
 )
 from battle.models import Battle, BattleCombatant, BattleDraft
+from battle.refusal_words import refusal_words
 from battle.services import claim_seat, create_battle, seatable_characters
 from characters.models import Character, characters_visible_to
 from common.guest import GUEST_KEY_SESSION_FIELD
@@ -221,10 +223,12 @@ class GuestCannotSaveOrChooseTest(GuestClientMixin):
         draft = self.open_draft()
         response = self.client.get(reverse("battle:setup", args=[draft.pk]))
         self.assertContains(response, "Seat a saved character")
-        self.assertContains(response, "As a guest you fight with generated fighters")
+        self.assertContains(
+            response, escape(refusal_words().guest_notes.saved_characters)
+        )
         self.assertContains(response, "guest-limit-characters")
         self.assertContains(response, "Import as a team")
-        self.assertContains(response, "Parties are saved teams")
+        self.assertContains(response, escape(refusal_words().guest_notes.parties))
         # The picker itself is offered to nobody it would not work for.
         self.assertNotContains(response, self.public_character.name)
 
@@ -263,7 +267,9 @@ class GuestCannotSaveOrChooseTest(GuestClientMixin):
                 character_ids=(self.public_character.pk,),
                 seed=7,
             )
-        self.assertIn("Sign in", str(caught.exception))
+        self.assertIn(
+            refusal_words().services.guest_saved_characters, str(caught.exception)
+        )
 
     def test_a_guest_claiming_a_seat_may_only_generate(self):
         dm = self.create_dm()
@@ -277,7 +283,9 @@ class GuestCannotSaveOrChooseTest(GuestClientMixin):
                 guest_key="k",
                 character_id=self.public_character.pk,
             )
-        self.assertIn("Sign in", str(caught.exception))
+        self.assertIn(
+            refusal_words().services.guest_own_character, str(caught.exception)
+        )
 
 
 class GuestAbuseBoundsTest(GuestClientMixin):
@@ -337,7 +345,7 @@ class GuestJourneyTest(GuestClientMixin):
         response = self.client.get(reverse("battle:list"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "You are playing as a guest")
-        self.assertContains(response, "Nothing here is saved to an account")
+        self.assertContains(response, escape(refusal_words().guest_notes.keep))
         self.assertContains(response, reverse("login"))
 
     def test_browsing_the_list_issues_no_guest_key(self):
@@ -387,7 +395,7 @@ class GuestJourneyTest(GuestClientMixin):
         seat = battle.combatants.get(is_open_seat=True)
         lobby = self.client.get(reverse("battle:detail", args=[battle.pk]))
         self.assertContains(lobby, "Sign in")
-        self.assertContains(lobby, "generate a fighter below")
+        self.assertContains(lobby, escape(refusal_words().guest_notes.claim_character))
         claimed = self.client.post(
             reverse("battle:seat-claim", args=[battle.pk, seat.pk]),
             {"archetype": "archer"},

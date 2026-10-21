@@ -32,7 +32,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from battle.refusal_words import (  # noqa: E402
+    load_refusal_words as load_battle_refusal_words,
+)
 from battle.wording import load_rulings_wording  # noqa: E402
+from characters.refusal_words import (  # noqa: E402
+    load_refusal_words as load_characters_refusal_words,
+)
 from common.base_url import (  # noqa: E402
     BASE_URL_RULE,
     BASE_URL_WITH_PATH_RULE,
@@ -47,10 +53,12 @@ from common.gate import (  # noqa: E402
 from common.message_templates import (  # noqa: E402
     MessageTemplateError,
     message_template_from_environment,
+    require_bare_fields,
 )
 from common.public_paths import LOGIN_PATH  # noqa: E402
 from common.services import ollama_client  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
+from gm.refusal_words import load_refusal_words as load_gm_refusal_words  # noqa: E402
 from reference.paths import (  # noqa: E402
     CANON_NAME,
     CONFIG_DIR,
@@ -171,6 +179,24 @@ BATTLE_RULINGS_WORDING_FILE = BASE_DIR / (
     os.environ.get("BATTLE_RULINGS_WORDING_FILE") or "config/battle-rulings.toml"
 )
 BATTLE_RULINGS_WORDING = load_rulings_wording(BATTLE_RULINGS_WORDING_FILE)
+
+# The words each app refuses a request in (issues #97, #86): one TOML file per
+# app under config/, one table per module, read and checked here as the rulings'
+# words are. BATTLE_REFUSAL_WORDS_FILE, GM_REFUSAL_WORDS_FILE and
+# CHARACTERS_REFUSAL_WORDS_FILE name other files,
+# resolved as GATE_HINTS_FILE is; empty means the default.
+BATTLE_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("BATTLE_REFUSAL_WORDS_FILE") or "config/battle-refusals.toml"
+)
+BATTLE_REFUSAL_WORDS = load_battle_refusal_words(BATTLE_REFUSAL_WORDS_FILE)
+GM_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("GM_REFUSAL_WORDS_FILE") or "config/gm-refusals.toml"
+)
+GM_REFUSAL_WORDS = load_gm_refusal_words(GM_REFUSAL_WORDS_FILE)
+CHARACTERS_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("CHARACTERS_REFUSAL_WORDS_FILE") or "config/characters-refusals.toml"
+)
+CHARACTERS_REFUSAL_WORDS = load_characters_refusal_words(CHARACTERS_REFUSAL_WORDS_FILE)
 
 # How many wrong guesses in a window before a hint is shown. Three because of
 # the #55 evidence, stated once beside the hints comment in common/gate.py. It
@@ -301,6 +327,17 @@ def _message_from_environment(name: str, default: str, *fields: str) -> str:
     """
     try:
         return message_template_from_environment(os.environ, name, default, *fields)
+    except MessageTemplateError as error:
+        raise ImproperlyConfigured(str(error)) from error
+
+
+def _page_message_from_environment(name: str, default: str, *fields: str) -> str:
+    """A message the page fills in itself (#94): as
+    :func:`_message_from_environment`, with every field a bare ``{name}``."""
+    try:
+        return require_bare_fields(
+            name, _message_from_environment(name, default, *fields)
+        )
     except MessageTemplateError as error:
         raise ImproperlyConfigured(str(error)) from error
 
@@ -666,6 +703,21 @@ GM_FIGHT_TOO_SLOW_MESSAGE = _message_from_environment(
     "The Game Master took longer than this table will wait to choose who you "
     "face, so nothing was started. It is often busy with other tables when "
     "that happens: give it a minute before you start the fight again.",
+)
+# What the Battle tab says when a fight request is answered with a page that
+# is not the app's JSON (issue #936): nginx's own 504 when its 60 s cut lands
+# before the app's 50 s fight deadline, or another error page, whose HTTP
+# status fills {status}. The page reads both from its #gm-panel-config block
+# (#94); the cut needs time outside the model's line, so a retry is invited.
+GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE = _page_message_from_environment(
+    "GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE",
+    "The server took too long to answer (HTTP 504). Try the fight again in a moment.",
+)
+GM_FIGHT_ERROR_PAGE_MESSAGE = _page_message_from_environment(
+    "GM_FIGHT_ERROR_PAGE_MESSAGE",
+    "The server answered with an error (HTTP {status}). Try the fight again in "
+    "a moment.",
+    "status",
 )
 # --- end GM turn waiting and timeout messages ---
 

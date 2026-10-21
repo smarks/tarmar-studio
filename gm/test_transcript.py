@@ -7,6 +7,7 @@ turn leaves a record, and that the download reproduces what the server stored,
 hidden entries marked as hidden.
 """
 
+import datetime
 import json
 from io import StringIO
 from unittest.mock import patch
@@ -19,9 +20,17 @@ from gm.engine import dm_system_prompt, system_prompt
 from gm.models import GMPromptSnapshot, GMSession, GMTurnRecord
 from gm.retrieval import CANON_KIND, PROCEDURE_KIND
 from gm.testing import add_character, gm_replies
-from gm.transcript import CHIP, HIDDEN, VISIBLE, Block, transcript_blocks
+from gm.transcript import (
+    CHIP,
+    HIDDEN,
+    VISIBLE,
+    Block,
+    render_transcript_text,
+    transcript_blocks,
+)
 from gm.turn_record import TurnRecorder, prompt_hash
-from gm.views import GM_SERVER_ERROR_MESSAGE
+
+from .refusal_words import refusal_words
 
 STREAM_URL = "/tarmar/gm/stream/"
 
@@ -120,12 +129,12 @@ class TurnRecordStreamTest(BaseTestCase):
 
         frames = _post_turn(self.client, {"message": "Are you there?"})
 
-        self.assertEqual(frames[-1], {"error": GM_SERVER_ERROR_MESSAGE})
+        self.assertEqual(frames[-1], {"error": refusal_words().views.server_error})
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
         # The record holds what the player was told (#13); the engine's
         # failed event keeps the real reason for whoever debugs the turn.
-        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(record.error, refusal_words().views.server_error)
         failed = record.events.get(kind="failed")
         self.assertEqual(failed.payload["error"], "ollama exploded")
         self.assertEqual(record.user_message, "Are you there?")
@@ -149,10 +158,10 @@ class TurnRecordStreamTest(BaseTestCase):
     def test_a_turn_refused_before_it_starts_is_recorded(self):
         frames = _post_turn(self.client, {"message": "   "})
 
-        self.assertEqual(frames[-1]["error"], "No message provided")
+        self.assertEqual(frames[-1]["error"], refusal_words().views.no_message)
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_REJECTED)
-        self.assertEqual(record.error, "No message provided")
+        self.assertEqual(record.error, refusal_words().views.no_message)
 
     def test_a_bad_roll_expression_is_recorded_as_rejected(self):
         _post_turn(self.client, {"message": "banana", "command": "roll"})
@@ -168,7 +177,7 @@ class TurnRecordStreamTest(BaseTestCase):
 
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_REJECTED)
-        self.assertEqual(record.error, "Rules directory not found")
+        self.assertEqual(record.error, refusal_words().views.rules_not_found)
 
     def test_character_with_no_session_is_recorded_as_rejected(self):
         _post_turn(self.client, {"command": "character"})
@@ -440,6 +449,36 @@ class TranscriptDownloadTest(BaseTestCase):
                 template.replace("{session_id}", str(self.session.pk)), self.url
             )
         self.assertContains(with_session, 'id="gm-transcript-button"')
+
+    def test_each_stamp_names_its_zone(self):
+        """The transcript's instants go through the one formatter a
+        downloaded file writes instants with (#123), each with its zone."""
+        created = datetime.datetime(2026, 10, 15, 2, 50, 11, tzinfo=datetime.UTC)
+        updated = datetime.datetime(2026, 10, 16, 8, 5, 0, tzinfo=datetime.UTC)
+        started = datetime.datetime(2026, 10, 16, 8, 4, 30, tzinfo=datetime.UTC)
+        exported = datetime.datetime(2026, 10, 20, 23, 40, tzinfo=datetime.UTC)
+        GMSession.objects.filter(pk=self.session.pk).update(
+            created_at=created, updated_at=updated
+        )
+        GMTurnRecord.objects.filter(session=self.session).update(started_at=started)
+        self.session.refresh_from_db()
+
+        with patch("django.utils.timezone.now", return_value=exported):
+            lines = render_transcript_text(self.session).splitlines()
+
+        self.assertIn("Created: 2026-10-15 02:50:11 UTC", lines)
+        self.assertIn("Updated: 2026-10-16 08:05:00 UTC", lines)
+        self.assertTrue(
+            any(
+                line.startswith("Exported: 2026-10-20 23:40:00 UTC by app")
+                for line in lines
+            )
+        )
+        self.assertTrue(
+            any(
+                line.startswith("TURN 1 · 2026-10-16 08:04:30 UTC · ") for line in lines
+            )
+        )
 
 
 class TranscriptCommandTest(BaseTestCase):

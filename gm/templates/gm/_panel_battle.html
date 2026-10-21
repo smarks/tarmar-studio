@@ -11,6 +11,13 @@ battle page is -- advance, the player's turn menu, the roster, the log, the
 poll. battle.js finds the arena by id at load, so this tab carries the
 page's one arena; the battle-page class scopes battle.css's tokens to it.
 
+gm:battle_panel renders this same partial for the tab to be drawn again in
+place (issue #89): when a fight starts from the page, when the board was
+restarted elsewhere, and when a ruling is posted from the tab.
+gm-panel-battle.js puts the section's contents and its pop-out attributes in
+place of the tab's and has battle.js wire the new arena. data-live on the
+fight form is whether the fight is on, which lights the tab's button.
+
 data-popout-url is where the pane's "open in its own window" control goes
 (issue #351): the battle's own page, which is the same arena this tab
 embeds. With no fight on the board there is nothing to open, and
@@ -19,7 +26,7 @@ data-popout-empty is what the disabled control says instead.
 {% load battle_status %}
 {% load gm_play %}
 <section class="gm-panel-tab gm-panel-battle battle-page" id="gm-panel-battle" data-panel-container="battle" role="region" aria-labelledby="gm-panel-tab-battle"{% if panel_battle %} data-popout-url="{% url 'battle:detail' panel_battle.pk %}"{% else %} data-popout-empty="No fight on the board to open yet"{% endif %} hidden>
-    <form class="gm-panel-picker gm-fight-form" id="gm-fight-form" data-fight-url="{% url 'gm:fight' %}" data-verdict-url="{% url 'gm:fight_verdict' %}">
+    <form class="gm-panel-picker gm-fight-form" id="gm-fight-form" data-fight-url="{% url 'gm:fight' %}" data-verdict-url="{% url 'gm:fight_verdict' %}" data-live="{% if battle_live %}true{% else %}false{% endif %}">
         <label class="sr-only" for="gm-fight-foes">Foes to fight (optional)</label>
         <input type="text" id="gm-fight-foes" placeholder="Foes, e.g. two gray wolves — or leave blank to ask the GM" autocomplete="off" {% if battle_live %}disabled{% endif %}>
         <button type="submit" class="btn btn-sm" id="gm-fight-start" {% if battle_live %}disabled title="A fight is already under way"{% endif %}>Fight</button>

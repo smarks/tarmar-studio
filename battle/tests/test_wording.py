@@ -127,6 +127,25 @@ class LoadRulingsWordingTest(SimpleTestCase):
                     "Pairs: {}",
                     "[hth_agreement] pairs_line cannot be filled (IndexError(",
                 ),
+                # A join that drops the sentence it carries (#90).
+                "dropped line": (
+                    "tarmar_menu",
+                    "yielded",
+                    "Moving in Final Movement instead",
+                    "[tarmar_menu] yielded must use ['line']",
+                ),
+                "dropped ruling": (
+                    "tarmar_menu",
+                    "cost_past_ruling",
+                    "{cost}",
+                    "[tarmar_menu] cost_past_ruling must use ['past']",
+                ),
+                "dropped guards": (
+                    "tarmar_menu",
+                    "dodge",
+                    "Dodge: +4 to your Target Number",
+                    "[tarmar_menu] dodge must use ['guards']",
+                ),
             }.items():
                 path = self.write(directory, self.shipped_with(table, key, value))
                 with (
@@ -170,3 +189,31 @@ def _toml_string(text: str) -> str:
     """``text`` as a TOML basic string."""
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
+
+
+class NoPlaceholderSentenceTest(SimpleTestCase):
+    """A sentence that takes no placeholders is sent unformatted, so it may
+    not write a doubled brace (the batch merge of #90 and #97)."""
+
+    def test_a_doubled_brace_in_a_placeholder_free_sentence_is_refused(self):
+        from dataclasses import dataclass
+
+        from common.wording import load_wording, sentence
+
+        @dataclass(frozen=True)
+        class Words:
+            plain: str = sentence()
+
+        @dataclass(frozen=True)
+        class Wording:
+            common: Words
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "words.toml"
+            path.write_text('[common]\nplain = "a {{brace}} here"\n')
+            with self.assertRaises(ImproperlyConfigured) as refused:
+                load_wording(path, Wording, "WORDS_FILE")
+            self.assertIn("doubled brace", str(refused.exception))
+            path.write_text('[common]\nplain = "a plain sentence"\n')
+            loaded = load_wording(path, Wording, "WORDS_FILE")
+            self.assertEqual(loaded.common.plain, "a plain sentence")

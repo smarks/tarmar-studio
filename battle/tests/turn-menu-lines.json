@@ -1,0 +1,4872 @@
+{
+ "tarmar every letter beside a foe": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter with a dagger in hand": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Dagger, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Dagger, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Dagger",
+   "cost": "the Dagger leaves your hand"
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Dagger",
+   "cost": "the Dagger leaves your hand"
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change to the Dagger",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up the Mace",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up the Mace",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter bare-handed": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with bare hands, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with bare hands, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change weapons",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change weapons",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up a weapon",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up a weapon",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter in hand-to-hand": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter held": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Struggle free of Foe: 4d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Struggle free of : 4d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter with the step away blocked": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking: with no hex picked you stay where you are, since no hex straight back from Foe or to either flank is clear",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking: with no hex picked you stay where you are, since no hex straight back from Foe or to either flank is clear",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter blocked in hand-to-hand": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Broadsword, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready the Longbow",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking: with no hex picked you stay where you are, since no hex straight back from Foe or to either flank is clear",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking: with no hex picked you stay where you are, since no hex straight back from Foe or to either flank is clear",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up the Mace",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX; with no hex picked you stay where you are, since no hex straight back from Foe or to either flank is clear",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX; with no hex picked you stay where you are, since no hex straight back from Foe or to either flank is clear",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar every letter with a dagger to throw": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "a_yield",
+   "target_id": null,
+   "plain": "Run up to 12 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Foe, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": null,
+   "plain": "Sprint up to 0 hexes toward the nearest enemy, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "b",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Dagger, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "b_yield",
+   "target_id": null,
+   "plain": "Charge : jog up to 7 hexes and attack with the Dagger, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, jogging toward Foe",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, jogging toward Foe, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": 2,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": 2,
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "e",
+   "target_id": null,
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Foe with the Dagger",
+   "cost": "the Dagger leaves your hand"
+  },
+  {
+   "letter": "f",
+   "target_id": null,
+   "plain": "Shoot  with the Dagger",
+   "cost": "the Dagger leaves your hand"
+  },
+  {
+   "letter": "g",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "g",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": 2,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "p",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": null,
+   "plain": "Attack  with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": 2,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": null,
+   "plain": "One last shot at  with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "m",
+   "target_id": 2,
+   "plain": "Change weapons",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "m",
+   "target_id": null,
+   "plain": "Change weapons",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "n",
+   "target_id": 2,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": null,
+   "plain": "Try to grapple : a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "q",
+   "target_id": 2,
+   "plain": "Pick up a weapon",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "q",
+   "target_id": null,
+   "plain": "Pick up a weapon",
+   "cost": "the Dagger is dropped"
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": null,
+   "plain": "Strike  in close with the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": 2,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "u",
+   "target_id": null,
+   "plain": "Try to draw your dagger: 3d6 at or under your DEX",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": 2,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "v",
+   "target_id": null,
+   "plain": "Break away from hand-to-hand: 4d6 at or under your DEX, then stand in a hex next to you",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": 2,
+   "plain": "Hold still in Foe's grip",
+   "cost": ""
+  },
+  {
+   "letter": "hold_still",
+   "target_id": null,
+   "plain": "Hold still in 's grip",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": 2,
+   "plain": "Squeeze Foe",
+   "cost": ""
+  },
+  {
+   "letter": "squeeze",
+   "target_id": null,
+   "plain": "Squeeze ",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": 2,
+   "plain": "Keep your hold on Foe",
+   "cost": ""
+  },
+  {
+   "letter": "maintain",
+   "target_id": null,
+   "plain": "Keep your hold on ",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": 2,
+   "plain": "Let Foe go",
+   "cost": ""
+  },
+  {
+   "letter": "release",
+   "target_id": null,
+   "plain": "Let  go",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": 2,
+   "plain": "Zz",
+   "cost": ""
+  },
+  {
+   "letter": "zz",
+   "target_id": null,
+   "plain": "Zz",
+   "cost": ""
+  }
+ ],
+ "tarmar two wolves": [
+  {
+   "letter": "j",
+   "target_id": 3,
+   "plain": "Attack Dire Wolf with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Gray Wolf with the Broadsword: 9 in 20 to hit, 2d6 less 1 armour (about 6 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  }
+ ],
+ "tarmar runner and a far foe": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 10 hexes toward Far",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Far: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Sprint up to 14 hexes toward Far",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 10 hexes toward Far, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Sprint up to 14 hexes toward Far, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Far: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit), moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  }
+ ],
+ "tarmar archer near and far": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Near",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 2,
+   "plain": "Shoot Near with the Longbow: 3 in 20 to hit, 1d6+2 less 6 armour (about 1 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "f",
+   "target_id": 3,
+   "plain": "Shoot Far with the Longbow: 11 in 20 to hit, 1d6+2 (about 6 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Near, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  }
+ ],
+ "tarmar archer cornered": [
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "l",
+   "target_id": 2,
+   "plain": "One last shot at Foe with the Longbow: 11 in 20 to hit, 1d6+2 (about 6 a hit)",
+   "cost": ""
+  }
+ ],
+ "tarmar swordsman apart": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit), moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  }
+ ],
+ "tarmar close strike": [
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Foe with the Dagger: 12 in 20 to hit, 1d6-1 (about 3 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  },
+  {
+   "letter": "o",
+   "target_id": 2,
+   "plain": "Try to grapple Foe: a hold pins them rather than hurting them",
+   "cost": ""
+  },
+  {
+   "letter": "t",
+   "target_id": 2,
+   "plain": "Strike Foe in close with the Dagger: 16 in 20 to hit, 1d6-1 (about 2 a hit)",
+   "cost": ""
+  }
+ ],
+ "tarmar a dagger at heavy armour": [
+  {
+   "letter": "j",
+   "target_id": 2,
+   "plain": "Attack Plate with the Dagger: 1 in 20 to hit, 1d6-1 less 6 armour (under 1 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "k",
+   "target_id": null,
+   "plain": "Defend: +4 to your Target Number against melee and non-missile attacks only",
+   "cost": ""
+  },
+  {
+   "letter": "n",
+   "target_id": null,
+   "plain": "Step one hex away instead of attacking",
+   "cost": ""
+  }
+ ],
+ "tarmar boxed in": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Bowman",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Bowman: no attack, since no clear jog gets nearer to Bowman",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Bowman",
+   "cost": ""
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Bowman",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear run gets nearer to Bowman, unless a way opens by Final Movement",
+   "cost": "1 Fatigue, only if you move"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Stand where you are, since no clear sprint gets nearer to Bowman, unless a way opens by Final Movement",
+   "cost": "6 Fatigue, only if you move"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Bowman: no attack, since no clear jog gets nearer to Bowman, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, standing, since no clear jog gets nearer to Bowman, unless a way opens by Final Movement",
+   "cost": ""
+  }
+ ],
+ "tarmar in the open": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 10 hexes toward Bowman",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Bowman: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, jogging toward Bowman",
+   "cost": ""
+  },
+  {
+   "letter": "sprint",
+   "target_id": 2,
+   "plain": "Sprint up to 14 hexes toward Bowman",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 10 hexes toward Bowman, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "sprint_yield",
+   "target_id": 2,
+   "plain": "Sprint up to 14 hexes toward Bowman, moving in Final Movement instead",
+   "cost": "6 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Bowman: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit), moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": 2,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, jogging toward Bowman, moving in Final Movement instead",
+   "cost": ""
+  }
+ ],
+ "tarmar charge walled off with a far foe": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Near",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 3,
+   "plain": "Charge Far: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Near, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 3,
+   "plain": "Charge Far: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit), moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  }
+ ],
+ "tarmar charge walled off alone": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Near",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Near: no attack, since a clear jog of up to 7 hexes ends 2 hexes from Near",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Near, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Near: no attack, since a clear jog of up to 7 hexes ends 2 hexes from Near, unless a way opens by Final Movement",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  }
+ ],
+ "tarmar wizard menu, invented rules": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe",
+   "cost": "1 mana, paid only if it succeeds"
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit), moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, pushing 1 more mana into it",
+   "cost": "2 mana (1 and 1 pushed), paid only if it succeeds; a success makes a Control Roll"
+  }
+ ],
+ "tarmar casts, invented rules": [
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe",
+   "cost": "1 mana, paid only if it succeeds"
+  },
+  {
+   "letter": "h",
+   "target_id": null,
+   "plain": "Cast Fire Missile",
+   "cost": "1 mana, paid only if it succeeds"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, pushing 2 more mana into it",
+   "cost": "3 mana (1 and 2 pushed), paid only if it succeeds; a success makes a Control Roll"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Press your countered Fire Missile again at Foe",
+   "cost": "1 mana, paid only if it succeeds; a counter against it means another opposed roll, and countered again its mana is spent with no casting roll"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Press your countered Fire Missile again at Foe, pushing 1 more mana into it",
+   "cost": "2 mana (1 and 1 pushed), paid only if it succeeds; a success makes a Control Roll; a counter against it means another opposed roll, and countered again its mana is spent with no casting roll"
+  },
+  {
+   "letter": "r",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe",
+   "cost": "1 mana, paid only if it succeeds"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, borrowing the 1 mana you lack",
+   "cost": "1 mana, paid only if it succeeds; paying it empties your pool and borrows the 1 you lack as debt, and a debt roll follows the spell"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, pushing 1 more mana into it, borrowing the 2 mana you lack",
+   "cost": "2 mana (1 and 1 pushed), paid only if it succeeds; a success makes a Control Roll; paying it empties your pool and borrows the 2 you lack as debt, and a debt roll follows the spell"
+  }
+ ],
+ "tarmar wizard menu, casting failure rules": [
+  {
+   "letter": "a",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "c",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only",
+   "cost": ""
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe",
+   "cost": "1 mana, paid only if it succeeds or the roll is 12 or 13"
+  },
+  {
+   "letter": "d",
+   "target_id": null,
+   "plain": "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
+   "cost": ""
+  },
+  {
+   "letter": "a_yield",
+   "target_id": 2,
+   "plain": "Run up to 12 hexes toward Foe, moving in Final Movement instead",
+   "cost": "1 Fatigue"
+  },
+  {
+   "letter": "b_yield",
+   "target_id": 2,
+   "plain": "Charge Foe: jog up to 7 hexes and attack with the Broadsword: 10 in 20 to hit, 2d6 (about 7 a hit), moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "c_yield",
+   "target_id": null,
+   "plain": "Dodge: +4 to your Target Number against missiles and thrown weapons only, moving in Final Movement instead",
+   "cost": ""
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, pushing 1 more mana into it",
+   "cost": "2 mana (1 and 1 pushed), paid only if it succeeds or the roll is 12 or 13; a success makes a Control Roll"
+  }
+ ],
+ "tarmar casts, casting failure rules": [
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe",
+   "cost": "1 mana, paid only if it succeeds or the roll is 12 or 13"
+  },
+  {
+   "letter": "h",
+   "target_id": null,
+   "plain": "Cast Fire Missile",
+   "cost": "1 mana, paid only if it succeeds or the roll is 12 or 13"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, pushing 2 more mana into it",
+   "cost": "3 mana (1 and 2 pushed), paid only if it succeeds or the roll is 12 or 13; a success makes a Control Roll"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Press your countered Fire Missile again at Foe",
+   "cost": "1 mana, paid only if it succeeds or the roll is 12 or 13; a counter against it means another opposed roll, and countered again its mana is spent with no casting roll"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Press your countered Fire Missile again at Foe, pushing 1 more mana into it",
+   "cost": "2 mana (1 and 1 pushed), paid only if it succeeds or the roll is 12 or 13; a success makes a Control Roll; a counter against it means another opposed roll, and countered again its mana is spent with no casting roll"
+  },
+  {
+   "letter": "r",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe",
+   "cost": "1 mana, paid only if it succeeds or the roll is 12 or 13"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, borrowing the 1 mana you lack",
+   "cost": "1 mana, paid only if it succeeds or the roll is 12 or 13; paying it empties your pool and borrows the 1 you lack as debt, and a debt roll follows the spell"
+  },
+  {
+   "letter": "h",
+   "target_id": 2,
+   "plain": "Cast Fire Missile at Foe, pushing 1 more mana into it, borrowing the 2 mana you lack",
+   "cost": "2 mana (1 and 1 pushed), paid only if it succeeds or the roll is 12 or 13; a success makes a Control Roll; paying it empties your pool and borrows the 2 you lack as debt, and a debt roll follows the spell"
+  }
+ ],
+ "tarmar anchors, no runaway rules": [
+  {
+   "letter": "anchor",
+   "target_id": 1,
+   "plain": "Anchor a runaway spell",
+   "cost": ""
+  },
+  {
+   "letter": "anchor",
+   "target_id": 3,
+   "plain": "Anchor a runaway spell",
+   "cost": ""
+  },
+  {
+   "letter": "anchor",
+   "target_id": null,
+   "plain": "Anchor a runaway spell",
+   "cost": ""
+  }
+ ],
+ "tarmar anchors, runaway rules": [
+  {
+   "letter": "anchor",
+   "target_id": 1,
+   "plain": "Take back control of your runaway Fire Missile: 2d8 at or under your WIS",
+   "cost": ""
+  },
+  {
+   "letter": "anchor",
+   "target_id": 3,
+   "plain": "Help Bram take back their runaway Fire Missile: 2d10 at or under your INT",
+   "cost": "6 mana, paid whether it holds or not; if it fails, Fire Missile runs away from you too"
+  },
+  {
+   "letter": "anchor",
+   "target_id": null,
+   "plain": "Anchor a runaway spell",
+   "cost": ""
+  }
+ ],
+ "tarmar helper anchor, a failure catches nobody": [
+  {
+   "letter": "anchor",
+   "target_id": 3,
+   "plain": "Help Bram take back their runaway Fire Missile: 2d10 at or under your INT",
+   "cost": "6 mana, paid whether it holds or not"
+  }
+ ],
+ "tarmar counters": [
+  {
+   "letter": "counter",
+   "target_id": 2,
+   "plain": "Counter Odo's spell this turn, committing 2 mana",
+   "cost": "2 mana, spent whether Odo casts or not"
+  },
+  {
+   "letter": "counter",
+   "target_id": null,
+   "plain": "Counter an enemy caster's spell this turn, committing 1 mana",
+   "cost": "1 mana, spent whether an enemy caster casts or not"
+  },
+  {
+   "letter": "counter",
+   "target_id": null,
+   "plain": "Counter an enemy caster's spell this turn, committing 2 mana",
+   "cost": "2 mana, spent whether an enemy caster casts or not"
+  }
+ ],
+ "classic two fighters": [
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": "f1",
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change to the Broadsword",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic every legal option engaged": [
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": null,
+   "plain": "Missile_attack",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": "f1",
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": "f1",
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": null,
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": null,
+   "plain": "Attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": null,
+   "plain": "Shift_attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": "f1",
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": null,
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": "f1",
+   "plain": "One last shot at Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": null,
+   "plain": "One_last_shot",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change to the Broadsword",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": null,
+   "plain": "Change to the Broadsword",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": null,
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": "f1",
+   "plain": "Grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": null,
+   "plain": "Grapple : move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": "f1",
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": null,
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": null,
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": null,
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": null,
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic every legal option apart": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "move",
+   "target_id": null,
+   "plain": "Move up to 10 hexes",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": null,
+   "plain": "Move up to 5 hexes without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: no attack, since a move of up to 5 hexes ends 1 hex from Blue, with no foe in reach of bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": null,
+   "plain": "Charge_attack",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": null,
+   "plain": "Dodge while moving up to 5 hexes: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": null,
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot Blue with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": null,
+   "plain": "Missile_attack",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": "f1",
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": "f1",
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": null,
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": null,
+   "plain": "Attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": null,
+   "plain": "Shift_attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": "f1",
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": null,
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": "f1",
+   "plain": "One last shot at Blue with bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": null,
+   "plain": "One_last_shot",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": null,
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": "f1",
+   "plain": "Grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": null,
+   "plain": "Grapple : move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": "f1",
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": null,
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": null,
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": null,
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": null,
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic every legal option prone": [
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": null,
+   "plain": "Missile_attack",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": "f1",
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": "f1",
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": null,
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": null,
+   "plain": "Attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": null,
+   "plain": "Shift_attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": "f1",
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": null,
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": "f1",
+   "plain": "One last shot at Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": null,
+   "plain": "One_last_shot",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": null,
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": "f1",
+   "plain": "Grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": null,
+   "plain": "Grapple : move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": "f1",
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": null,
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": null,
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": null,
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": null,
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic every legal option with a spare": [
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": null,
+   "plain": "Missile_attack",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": "f1",
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "stand_up",
+   "target_id": null,
+   "plain": "Stand up; it takes the whole turn",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": "f1",
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "crawl",
+   "target_id": null,
+   "plain": "Crawl up to 2 hexes, staying down",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "attack",
+   "target_id": null,
+   "plain": "Attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": null,
+   "plain": "Shift_attack",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": "f1",
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": null,
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": "f1",
+   "plain": "One last shot at Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "one_last_shot",
+   "target_id": null,
+   "plain": "One_last_shot",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": null,
+   "plain": "Change to the Dagger",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": null,
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": "f1",
+   "plain": "Grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": null,
+   "plain": "Grapple : move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "pick_up",
+   "target_id": "f1",
+   "plain": "Pick up the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "pick_up",
+   "target_id": null,
+   "plain": "Pick up the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": "f1",
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": null,
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": null,
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": null,
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": null,
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic a defending foe": [
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with the Broadsword: 10 or less on 4d6 to hit (about 16%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with the Broadsword: 10 or less on 4d6 to hit (about 16%), 2d6 less 2 armour (about 5 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "shift_defend",
+   "target_id": "f1",
+   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change to the Broadsword",
+   "cost": "the Broadsword is dropped"
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic an archer at range": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 8 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 4 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 4 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Dagger",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot Blue with the Small bow: 10 or less on 3d6 to hit (about 50%), 1d6-1 less 2 armour (about 1 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic archer boxed in": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Stand where you are, since no move of up to 10 hexes gets nearer to Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Stand where you are, since no move of up to 5 hexes gets nearer to Blue",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: no attack, since no move of up to 5 hexes gets nearer to Blue, with no foe in reach of bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge standing, since no move of up to 5 hexes gets nearer to Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic archer in the open": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: no attack, since a move of up to 5 hexes ends 1 hex from Blue, with no foe in reach of bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic archer too far": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: no attack, since a move of up to 5 hexes ends 3 hexes from Blue, with no foe in reach of bare hands",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic sword charge short": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: no attack, since a move of up to 5 hexes ends 2 hexes from Blue, with no foe in reach of the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic sword charge in reach": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: move up to 5 hexes and attack with the Broadsword: 11 or less on 3d6 to hit (about 62%), 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic halberd charge": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: move up to 5 hexes and attack with the Halberd: 11 or less on 3d6 to hit (about 62%), 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Halberd",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic charge at a giant": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Giant",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Giant without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Giant: move up to 5 hexes and attack with the Broadsword: 11 or less on 3d6 to hit (about 62%), 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Giant: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic spear charge": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: move up to 5 hexes and attack with the Spear: 11 or less on 3d6 to hit (about 62%), 1d6+1, and 1d6 more for the charge (about 8 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Spear",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic spear charge at leather": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: move up to 5 hexes and attack with the Spear: 11 or less on 3d6 to hit (about 62%), 1d6+1, and 1d6 more for the charge, less 2 armour (about 6 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Spear",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic charge strikes another foe": [
+  {
+   "letter": "move",
+   "target_id": "f2",
+   "plain": "Move up to 10 hexes toward Green",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f2",
+   "plain": "Move up to 5 hexes toward Green without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f2",
+   "plain": "Charge toward Green: move up to 5 hexes and attack Blue with the Broadsword: 11 or less on 3d6 to hit (about 62%), 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f2",
+   "plain": "Dodge while moving up to 5 hexes toward Green: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f2",
+   "plain": "Ready the Broadsword",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f2",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f2",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic bare-handed charge grapples": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: move up to 5 hexes and grapple them: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic bare-handed charge grapples another": [
+  {
+   "letter": "move",
+   "target_id": "f2",
+   "plain": "Move up to 10 hexes toward Green",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f2",
+   "plain": "Move up to 5 hexes toward Green without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f2",
+   "plain": "Charge toward Green: move up to 5 hexes and grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f2",
+   "plain": "Dodge while moving up to 5 hexes toward Green: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f2",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f2",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f2",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic wizard": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "charge_attack",
+   "target_id": "f1",
+   "plain": "Charge Blue: move up to 5 hexes and grapple them: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready another weapon",
+   "cost": ""
+  },
+  {
+   "letter": "cast",
+   "target_id": "f1",
+   "plain": "Cast Magic Fist at Blue",
+   "cost": "3 ST"
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ]
+}

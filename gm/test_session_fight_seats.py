@@ -9,8 +9,8 @@ leaving a line in the battle log.
 
 from battle import control
 from battle.models import Battle, BattleEvent
+from battle.refusal_words import refusal_words
 from battle.services import (
-    TAKE_SEAT_GAME_MASTER_ONLY,
     advance_turn,
     record_player_action,
     return_seat,
@@ -64,7 +64,9 @@ class SessionFightSeatsTest(BaseTestCase):
         battle = self._await(self.aldwin)
         pending = battle.pending_input_json
         candidate = pending["candidates"][0]
-        with self.assertRaisesMessage(ValueError, "not your combatant"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_your_combatant
+        ):
             record_player_action(
                 battle.pk,
                 self.game_master,
@@ -99,7 +101,9 @@ class SessionFightSeatsTest(BaseTestCase):
         battle = self._await(self.aldwin)
         pending = battle.pending_input_json
         candidate = pending["candidates"][0]
-        with self.assertRaisesMessage(ValueError, "not your combatant"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_your_combatant
+        ):
             record_player_action(
                 battle.pk,
                 self.alice,
@@ -130,14 +134,25 @@ class SessionFightSeatsTest(BaseTestCase):
     def test_nobody_else_moves_a_seat(self):
         seat_id = self.seat_of(self.aldwin).pk
         bob = self.create_user(username="bob")
-        with self.assertRaisesMessage(ValueError, TAKE_SEAT_GAME_MASTER_ONLY):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.take_seat_game_master_only
+        ):
             take_seat(self.battle.pk, seat_id, game_master=self.alice)
-        with self.assertRaisesMessage(ValueError, TAKE_SEAT_GAME_MASTER_ONLY):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.take_seat_game_master_only
+        ):
             take_seat(self.battle.pk, seat_id, game_master=bob)
         take_seat(self.battle.pk, seat_id, game_master=self.game_master)
-        with self.assertRaisesMessage(ValueError, "owner or the Game Master running"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.return_seat_owner_or_game_master
+        ):
             return_seat(self.battle.pk, seat_id, user=bob)
-        with self.assertRaisesMessage(ValueError, "already play"):
+        with self.assertRaisesMessage(
+            ValueError,
+            refusal_words().services.already_play_seat.format(
+                name=self.seat_of(self.aldwin).display_name
+            ),
+        ):
             take_seat(self.battle.pk, seat_id, game_master=self.game_master)
         self.assertEqual(self.seat_of(self.aldwin).player, self.game_master)
 
@@ -146,10 +161,14 @@ class SessionFightSeatsTest(BaseTestCase):
         # session owner -- not any Game Master account's.
         stranger = self.create_dm(username="stranger-gm")
         seat_id = self.seat_of(self.aldwin).pk
-        with self.assertRaisesMessage(ValueError, TAKE_SEAT_GAME_MASTER_ONLY):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.take_seat_game_master_only
+        ):
             take_seat(self.battle.pk, seat_id, game_master=stranger)
         take_seat(self.battle.pk, seat_id, game_master=self.game_master)
-        with self.assertRaisesMessage(ValueError, "owner or the Game Master running"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.return_seat_owner_or_game_master
+        ):
             return_seat(self.battle.pk, seat_id, user=stranger)
         self.login_as(stranger)
         state = self.client.get(f"/tarmar/battles/{self.battle.pk}/state/").json()
@@ -174,14 +193,16 @@ class SessionFightSeatsTest(BaseTestCase):
         self.assertTrue(battle.writes_to_records)
         seat = battle.combatants.get(character=mira)
         for game_master in (self.game_master, self.create_dm(username="other-gm")):
-            with self.assertRaisesMessage(ValueError, TAKE_SEAT_GAME_MASTER_ONLY):
+            with self.assertRaisesMessage(
+                ValueError, refusal_words().services.take_seat_game_master_only
+            ):
                 take_seat(battle.pk, seat.pk, game_master=game_master)
         seat.refresh_from_db()
         self.assertEqual(seat.player, self.alice)
 
     def test_a_finished_fight_moves_no_seat(self):
         Battle.objects.filter(pk=self.battle.pk).update(status=Battle.STATUS_FINISHED)
-        with self.assertRaisesMessage(ValueError, "over"):
+        with self.assertRaisesMessage(ValueError, refusal_words().services.battle_over):
             take_seat(
                 self.battle.pk,
                 self.seat_of(self.aldwin).pk,
@@ -190,7 +211,9 @@ class SessionFightSeatsTest(BaseTestCase):
 
     def test_a_beast_has_no_owner_to_stand_in_for(self):
         wolf = self.battle.combatants.get(beast__isnull=False)
-        with self.assertRaisesMessage(ValueError, "saved character"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.no_owner_to_stand_in_for
+        ):
             take_seat(self.battle.pk, wolf.pk, game_master=self.game_master)
 
     def test_the_arena_offers_each_viewer_only_the_hand_off_they_may_make(self):
@@ -214,7 +237,10 @@ class SessionFightSeatsTest(BaseTestCase):
         self.login_as(self.alice)
         refused = self.client.post(take_url)
         self.assertEqual(refused.status_code, 403)
-        self.assertEqual(refused.json()["error"], TAKE_SEAT_GAME_MASTER_ONLY)
+        self.assertEqual(
+            refused.json()["error"],
+            refusal_words().services.take_seat_game_master_only,
+        )
         self.assertEqual(self.seat_of(self.aldwin).player, self.alice)
 
         self.login_as(self.game_master)

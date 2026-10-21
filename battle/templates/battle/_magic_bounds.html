@@ -30,7 +30,7 @@ configuration (``battle.wording``, config/battle-rulings.toml).
                 <input type="hidden" name="{{ magic_bounds.fields.combatant }}" value="{{ lifting.combatant_id }}">
                 <input type="hidden" name="{{ magic_bounds.fields.bounds }}" value="{{ lifting.bound }}">
                 <input type="hidden" name="{{ magic_bounds.fields.lifted }}" value="">
-                <button type="submit" class="battle-button battle-button-quiet">{{ magic_bounds.words.hold_again }}</button>
+                <button type="submit" class="battle-button battle-button-quiet" data-focus-key="magic-hold-{{ lifting.combatant_id }}-{{ lifting.bound }}">{{ magic_bounds.words.hold_again }}</button>
             </form>
             {% endif %}
         </li>
@@ -56,7 +56,7 @@ configuration (``battle.wording``, config/battle-rulings.toml).
             {{ bound.label }}
         </label>
         {% endfor %}
-        <button type="submit" class="battle-button battle-button-outline">{{ magic_bounds.words.lift_button }}</button>
+        <button type="submit" class="battle-button battle-button-outline" data-focus-key="magic-lift">{{ magic_bounds.words.lift_button }}</button>
     </form>
     {% endif %}
 </div>

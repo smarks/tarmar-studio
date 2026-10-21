@@ -134,7 +134,7 @@ class RulesFileError(Exception):
     """
 
 
-def repeated_values(values: Iterable[str]) -> list[str]:
+def repeated_values[Value: (str, int)](values: Iterable[Value]) -> list[Value]:
     """Every value given more than once, each named once, in sorted order.
 
     The one "nothing repeated" check (issue #76): :func:`repeats_problem`
@@ -142,7 +142,8 @@ def repeated_values(values: Iterable[str]) -> list[str]:
     manifest's slugs.
 
     Args:
-        values: The values, in any order; read once, so an iterator will do.
+        values: The values, all text or all integers (issue #82: a set of
+            totals), in any order; read once, so an iterator will do.
 
     Returns:
         The repeated values, sorted; empty when no value appears twice.
@@ -152,14 +153,18 @@ def repeated_values(values: Iterable[str]) -> list[str]:
     )
 
 
-def repeats_problem(kind: str, values: Iterable[str]) -> str | None:
+def repeats_problem[Value: (str, int)](
+    kind: str, values: Iterable[Value]
+) -> str | None:
     """The refusal for values that should each appear once, or ``None``.
 
     The wording every rules file shares for :func:`repeated_values`: the
     reader's object hook and :meth:`RulesFileReader.unique_keys` use it, and
     so does each rules dataclass whose ``__post_init__`` refuses a repeated
-    label or key, raising it as a ``ValueError`` for
+    label, key or gait, raising it as a ``ValueError`` for
     :meth:`RulesFileReader.wrapped_value_errors` to name by field path.
+    :meth:`RulesFileReader.integer_set` and :meth:`RulesFileReader.text_list`
+    use it for their entries too (issue #82).
 
     Args:
         kind: What the values are, as the refusal names them (``"key"``).
@@ -479,16 +484,16 @@ class RulesFileReader:
 
     def integer_set(self, value: Any, field_path: str) -> frozenset[int]:
         """A list of integers with no repeats."""
-        integers = list(self.integer_list(value, field_path))
-        if len(set(integers)) != len(integers):
-            self.fail(field_path, f"repeats a total: {integers}")
+        integers = self.integer_list(value, field_path)
+        if problem := repeats_problem("total", integers):
+            self.fail(field_path, problem)
         return frozenset(integers)
 
     def text_list(self, value: Any, field_path: str) -> tuple[str, ...]:
         """A list of non-empty strings with no repeats."""
         texts = self.entries(value, field_path, self.text)
-        if len(set(texts)) != len(texts):
-            self.fail(field_path, f"repeats an entry: {list(texts)}")
+        if problem := repeats_problem("entry", texts):
+            self.fail(field_path, problem)
         return texts
 
     def unique_keys(self, items: Sequence[Keyed], field_path: str) -> None:

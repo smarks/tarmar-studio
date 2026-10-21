@@ -6,6 +6,7 @@ from .views import (
     GMMapView,
     GMReviewListView,
     gm_attach_picker,
+    gm_battle_panel,
     gm_campaign_panel,
     gm_characters_attach,
     gm_characters_detach,
@@ -71,6 +72,12 @@ urlpatterns = [
         "sessions/<int:session_id>/characters/",
         gm_characters_panel,
         name="characters_panel",
+    ),
+    # The Battle tab, asked for again when the board changes (#89).
+    path(
+        "sessions/<int:session_id>/battle/",
+        gm_battle_panel,
+        name="battle_panel",
     ),
     path(
         "sessions/<int:session_id>/campaign/",

@@ -16,11 +16,12 @@ from common.test_helpers import (
 from .engine import system_prompt_for
 from .messages import build_interrupted_turn_message
 from .models import GMEvent, GMSession, GMTurnRecord
+from .refusal_words import refusal_words
 from .retrieval import LEDGER_KIND, PROCEDURE_KIND, ROLL_KIND, SHEET_KIND
 from .testing import a_mapped_place, add_character, recorded
 from .tests import FakeMonotonicClock
 from .turn_engine.model import Paused
-from .views import GM_SERVER_ERROR_MESSAGE, PLAN_UNREADABLE_NOTICE, SSE_KEEPALIVE
+from .views import SSE_KEEPALIVE
 
 STREAM_URL = "/tarmar/gm/stream/"
 
@@ -231,7 +232,9 @@ class PlanTurnViewTest(PlanTurnTestCase):
 
         (procedure,) = [frame["procedure"] for frame in sent if "procedure" in frame]
         self.assertFalse(procedure["ran"])
-        self.assertIn("rolled, not stated", calls[1][-1]["content"])
+        self.assertIn(
+            refusal_words().policy.player_stated_scores, calls[1][-1]["content"]
+        )
         session = GMSession.objects.get(pk=sent[-1]["session_id"])
         self.assertEqual(list(session.attached_characters()), [])
         record = GMTurnRecord.objects.get(session=session)
@@ -290,7 +293,7 @@ class PlanTurnViewTest(PlanTurnTestCase):
         self.assertIn("Never plan a roll, or record anything", plan_call[-1]["content"])
         narrate = narrate_call[-1]["content"]
         self.assertIn("Not done: rolling dice, because", narrate)
-        self.assertIn("dice do not decide what happened at his table", narrate)
+        self.assertIn(refusal_words().policy.aide_unasked_roll, narrate)
         self.assertIn("say plainly that you do not know it", narrate)
 
     def test_a_play_turn_still_rolls_without_being_asked(self):
@@ -318,7 +321,7 @@ class PlanTurnViewTest(PlanTurnTestCase):
         )
 
         self.assertEqual(len(calls), 3)
-        self.assertIn(PLAN_UNREADABLE_NOTICE, sent[-1]["notices"])
+        self.assertIn(refusal_words().views.plan_unreadable, sent[-1]["notices"])
         self.assertFalse(any("procedure" in frame for frame in sent))
 
     def test_a_slash_roll_is_narrated_without_planning(self):
@@ -397,7 +400,7 @@ class PlanTurnViewTest(PlanTurnTestCase):
         with self.assertLogs("gm.views", "ERROR"):
             _text, sent, _calls = self.play(ConnectionError("model gone"))
 
-        self.assertEqual(sent[-1], {"error": GM_SERVER_ERROR_MESSAGE})
+        self.assertEqual(sent[-1], {"error": refusal_words().views.server_error})
         record = GMTurnRecord.objects.get(user=self.user)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
         self.assertIsNone(record.history_end)
@@ -482,7 +485,7 @@ class AFailureWithNoMessageTest(PlanTurnTestCase):
         with self.assertLogs("gm.views", "ERROR"):
             _text, sent, _calls = self.play(RuntimeError())
 
-        self.assertEqual(sent[-1].get("error"), GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(sent[-1].get("error"), refusal_words().views.server_error)
 
     def test_the_record_keeps_the_same_reason(self):
         with self.assertLogs("gm.views", "ERROR"):
@@ -490,7 +493,7 @@ class AFailureWithNoMessageTest(PlanTurnTestCase):
 
         record = GMTurnRecord.objects.latest("pk")
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(record.error, refusal_words().views.server_error)
 
 
 class ExceptionTextIsNotShownToThePlayerTest(PlanTurnTestCase):
@@ -516,10 +519,10 @@ class ExceptionTextIsNotShownToThePlayerTest(PlanTurnTestCase):
             text, sent, _calls = self.play(ConnectionError(self.SECRET))
 
         self.assertNotIn("s3cr3t", text)
-        self.assertEqual(sent[-1], {"error": GM_SERVER_ERROR_MESSAGE})
+        self.assertEqual(sent[-1], {"error": refusal_words().views.server_error})
         record = GMTurnRecord.objects.get(user=self.user)
-        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(record.error, refusal_words().views.server_error)
         state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
         self.assertNotIn("s3cr3t", state.content.decode())
-        self.assertEqual(state.json()["error"], GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(state.json()["error"], refusal_words().views.server_error)
         self.assertIn(self.SECRET, str(logged_exception(logs.records[0])))

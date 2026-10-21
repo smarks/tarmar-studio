@@ -18,6 +18,7 @@ from characters.help_text import help_text
 from characters.rules import character_rules
 from characters.skill_rules import SkillCostRules
 from characters.skills import aging_escalation_note
+from characters.tests.fixed_refusals import with_fixed_refusals
 from characters.tests.rules_fixtures import (
     DEFAULT_CHARACTER_RULES,
     DEFAULT_SKILL_RULES,
@@ -94,15 +95,13 @@ DEFAULT_LOCATION_CLAUSES = (
 )
 
 #: Each refusal and reason built from the rules, under the default canon.
+#: The default canon's dice in each field's reason, under the fixed words
+#: (``characters/tests/fixed_refusals.py``): the sentence is configuration
+#: (``config/characters-refusals.toml``, issue #85), the numbers the canon's.
 DEFAULT_REASONS = {
-    "strength": (
-        "Rolled (3d6) or bought (65 points); only a Game Master can change a "
-        "recorded score."
-    ),
-    "fatigue_roll": "Rolled (2d6) once; only a Game Master can change it.",
-    "literacy_roll": (
-        "Rolled (3d6) once; only a Game Master can have it rolled again."
-    ),
+    "strength": "services.field_attribute 3d6 65",
+    "fatigue_roll": "services.field_fatigue_roll 2d6",
+    "literacy_roll": "services.field_literacy_roll 3d6",
 }
 
 
@@ -132,6 +131,7 @@ class DefaultCanonTextTest(SimpleTestCase):
             with self.subTest(clause=clause):
                 self.assertIn(clause, help_text()["location"])
 
+    @with_fixed_refusals
     def test_each_reason_is_the_pinned_text(self) -> None:
         for field_name, expected in DEFAULT_REASONS.items():
             with self.subTest(field=field_name):
@@ -260,19 +260,19 @@ class InventedRulesTest(SimpleTestCase):
         with seated_character_rules(one_point):
             self.assertIn(DEFAULT_LOCATION_CLAUSES[0], help_text()["location"])
 
+    @with_fixed_refusals
     def test_the_refusals_follow_the_rules(self) -> None:
         self.assertEqual(
             services.field_refusal("charisma"),
-            "Rolled (4d4) or bought (50 points); only a Game Master can change a "
-            "recorded score.",
+            "services.field_attribute 4d4 50",
         )
         self.assertEqual(
             services.field_refusal("fatigue_roll"),
-            "Rolled (1d8+1) once; only a Game Master can change it.",
+            "services.field_fatigue_roll 1d8+1",
         )
         self.assertEqual(
             services.field_refusal("literacy_roll"),
-            "Rolled (2d10) once; only a Game Master can have it rolled again.",
+            "services.field_literacy_roll 2d10",
         )
         self.assertEqual(
             services.bought_not_rolled_reason(),

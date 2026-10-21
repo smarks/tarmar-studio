@@ -1178,6 +1178,8 @@ if (typeof module !== 'undefined' && module.exports) {
      * #28) and the counter control (tarmar-engine #31) share. Every word is the caller's from the server's
      * data; the selected copy's cost is the server's own line.
      *
+     * @param {Object<string, string>} words - the panel's words, the page's
+     *     #battle-turn-panel-words (#94)
      * @param {string} kind - ``push``, ``borrow`` or ``counter``: the class
      *     and focus-key
      *     prefix (``turn-push``, ``turn-push-amount``, ``turn-push-cost``)
@@ -1191,7 +1193,7 @@ if (typeof module !== 'undefined' && module.exports) {
      * @param {object} opts - the panel's options (``selectedIndex``,
      *     ``onSelect``)
      */
-    function buildCopyControl(kind, labelText, ariaLabel, choices, copies, aiPick, opts) {
+    function buildCopyControl(words, kind, labelText, ariaLabel, choices, copies, aiPick, opts) {
         const control = document.createElement('div');
         control.className = `turn-${kind}`;
         control.setAttribute('role', 'group');
@@ -1224,7 +1226,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if (choice.entry.index === aiPick) {
                 const tag = document.createElement('span');
                 tag.className = 'turn-option-ai-pick';
-                tag.textContent = 'AI pick';
+                tag.textContent = filledWords(words.ai_pick);
                 button.appendChild(tag);
             }
             button.addEventListener('click', () => {
@@ -1239,7 +1241,7 @@ if (typeof module !== 'undefined' && module.exports) {
         if (selected && selected.candidate.cost) {
             const cost = document.createElement('span');
             cost.className = `turn-${kind}-cost`;
-            cost.textContent = `Costs ${selected.candidate.cost}.`;
+            cost.textContent = filledWords(words.costs, { cost: selected.candidate.cost });
             control.appendChild(cost);
         }
         return control;
@@ -1252,6 +1254,7 @@ if (typeof module !== 'undefined' && module.exports) {
      * player picks an amount. The words under it are the server's: the
      * selected copy's cost, and the spell's Channel when the rules give one.
      *
+     * @param {Object<string, string>} words - the panel's words (#94)
      * @param {object} spell - the stage row (``name``, ``channel``)
      * @param {{candidate: object, index: number}} entry - the plain cast
      * @param {Array<{candidate: object, index: number}>} copies - its pushed
@@ -1260,15 +1263,15 @@ if (typeof module !== 'undefined' && module.exports) {
      * @param {object} opts - the panel's options (``selectedIndex``,
      *     ``onSelect``)
      */
-    function buildPushControl(spell, entry, copies, aiPick, opts) {
+    function buildPushControl(words, spell, entry, copies, aiPick, opts) {
         const label = (spell.channel === null || spell.channel === undefined)
-            ? 'Push more mana:'
-            : `Push more mana (Channel ${spell.channel}):`;
-        const choices = [{ entry, text: 'None' }].concat(copies.map((copy) => ({
-            entry: copy, text: `+${copy.candidate.push_mana} mana`,
+            ? filledWords(words.push_label)
+            : filledWords(words.push_label_channel, { channel: spell.channel });
+        const choices = [{ entry, text: filledWords(words.push_none) }].concat(copies.map((copy) => ({
+            entry: copy, text: filledWords(words.push_amount, { mana: copy.candidate.push_mana }),
         })));
         return buildCopyControl(
-            'push', label, `Push more mana into ${spell.name}`,
+            words, 'push', label, filledWords(words.push_group, { spell: spell.name }),
             choices, copies, aiPick, opts
         );
     }
@@ -1280,6 +1283,7 @@ if (typeof module !== 'undefined' && module.exports) {
      * mana it pushes. Nothing is borrowed unless the player picks one; the
      * selected copy's cost, debt roll and all, is the server's line.
      *
+     * @param {Object<string, string>} words - the panel's words (#94)
      * @param {object} spell - the stage row (``name``)
      * @param {Array<{candidate: object, index: number}>} copies - its
      *     borrowing copies, smallest push first
@@ -1287,15 +1291,18 @@ if (typeof module !== 'undefined' && module.exports) {
      * @param {object} opts - the panel's options (``selectedIndex``,
      *     ``onSelect``)
      */
-    function buildBorrowControl(spell, copies, aiPick, opts) {
+    function buildBorrowControl(words, spell, copies, aiPick, opts) {
         const choices = copies.map((copy) => ({
             entry: copy,
             text: copy.candidate.push_mana
-                ? `+${copy.candidate.push_mana} mana, borrow ${copy.candidate.borrowed}`
-                : `Borrow ${copy.candidate.borrowed} mana`,
+                ? filledWords(words.borrow_pushed, {
+                    pushed: copy.candidate.push_mana, borrowed: copy.candidate.borrowed,
+                })
+                : filledWords(words.borrow_amount, { borrowed: copy.candidate.borrowed }),
         }));
         return buildCopyControl(
-            'borrow', 'Borrow the mana you lack:', `Borrow mana for ${spell.name}`,
+            words, 'borrow', filledWords(words.borrow_label),
+            filledWords(words.borrow_group, { spell: spell.name }),
             choices, copies, aiPick, opts
         );
     }
@@ -1307,23 +1314,44 @@ if (typeof module !== 'undefined' && module.exports) {
      * selected commitment's cost is the server's line, and the bonus it buys
      * is in the engine's rationale behind the scoring switch.
      *
+     * @param {Object<string, string>} words - the panel's words (#94)
      * @param {Array<{candidate: object, index: number}>} copies - the
      *     counters against one caster, least commitment first
      * @param {number} aiPick - the AI's pick on the menu
      * @param {object} opts - the panel's options (``selectedIndex``,
      *     ``onSelect``)
      */
-    function buildCounterControl(copies, aiPick, opts) {
-        const caster = copies[0].candidate.target_name || 'the caster';
+    function buildCounterControl(words, copies, aiPick, opts) {
+        const caster = copies[0].candidate.target_name || filledWords(words.the_caster);
         const choices = copies.map((copy) => ({
-            entry: copy, text: `${copy.candidate.counter_mana} mana`,
+            entry: copy,
+            text: filledWords(words.counter_amount, { mana: copy.candidate.counter_mana }),
         }));
         const control = buildCopyControl(
-            'counter', `Counter ${caster}:`, `Counter ${caster}'s spell`,
+            words, 'counter', filledWords(words.counter_label, { caster }),
+            filledWords(words.counter_group, { caster }),
             choices, copies, aiPick, opts
         );
         control.dataset.caster = String(copies[0].candidate.target_id);
         return control;
+    }
+
+    /**
+     * The caster's pool in the panel's words: "Mana 3 of 10", and what is
+     * owed when ``owing`` and the caster owes any (tarmar-engine #28).
+     * @param {Object<string, string>} words - the panel's words (#94)
+     * @param {object} magic - the pending payload's ``magic``
+     * @param {{owing: boolean}} shown - whether to name a debt
+     * @returns {string}
+     */
+    function poolWords(words, magic, shown) {
+        const figures = {
+            pool_label: magic.pool_label, pool: magic.pool, max_pool: magic.max_pool,
+        };
+        if (shown.owing && magic.owed) {
+            return filledWords(words.pool_owing, { ...figures, owed: magic.owed });
+        }
+        return filledWords(words.pool, figures);
     }
 
     /**
@@ -1340,19 +1368,19 @@ if (typeof module !== 'undefined' && module.exports) {
      * profile's numbers under the other's label.
      */
     function buildCastStage(pending, casts, pushes, borrows, aiPick, opts) {
+        const words = opts.words;
         const stage = document.createElement('div');
         stage.className = 'turn-cast-stage';
         stage.setAttribute('role', 'group');
-        stage.setAttribute('aria-label', 'Spells');
+        stage.setAttribute('aria-label', filledWords(words.spells_group));
 
         const magic = pending.magic || emptyMagic();
         const pool = document.createElement('p');
         pool.className = 'turn-cast-pool';
         // Mana borrowed and not paid back (tarmar-engine #28), as published.
-        const owing = magic.owed ? `, owing ${magic.owed}` : '';
-        pool.textContent =
-            `${magic.pool_label} ${magic.pool} of ${magic.max_pool}${owing}.`
-            + ' Pick a spell to cast.';
+        pool.textContent = filledWords(words.stage_pool, {
+            pool: poolWords(words, magic, { owing: true }),
+        });
         stage.appendChild(pool);
 
         const castByKey = new Map(casts.map((entry) => [
@@ -1393,7 +1421,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if (entry && entry.index === aiPick) {
                 const tag = document.createElement('span');
                 tag.className = 'turn-option-ai-pick';
-                tag.textContent = 'AI pick';
+                tag.textContent = filledWords(words.ai_pick);
                 button.appendChild(tag);
             }
 
@@ -1409,14 +1437,14 @@ if (typeof module !== 'undefined' && module.exports) {
                 const escalation = document.createElement('span');
                 escalation.className = 'turn-spell-escalate';
                 escalation.textContent = pressing.candidate.plain
-                    || 'Presses the countered spell again';
+                    || filledWords(words.presses_again);
                 button.appendChild(escalation);
             }
 
             const note = document.createElement('span');
             note.className = 'turn-spell-note';
             if (button.disabled) {
-                note.textContent = spell.reason || 'not castable this turn';
+                note.textContent = spell.reason || filledWords(words.not_castable);
                 note.classList.add('is-blocked');
             } else {
                 note.textContent = spell.note;
@@ -1438,10 +1466,14 @@ if (typeof module !== 'undefined' && module.exports) {
             group.className = 'turn-spell-group';
             group.appendChild(button);
             if (pushable) {
-                group.appendChild(buildPushControl(spell, entry, copies, aiPick, opts));
+                group.appendChild(buildPushControl(
+                    words, spell, entry, copies, aiPick, opts
+                ));
             }
             if (borrowing.length) {
-                group.appendChild(buildBorrowControl(spell, borrowing, aiPick, opts));
+                group.appendChild(buildBorrowControl(
+                    words, spell, borrowing, aiPick, opts
+                ));
             }
             stage.appendChild(group);
         });
@@ -1450,7 +1482,7 @@ if (typeof module !== 'undefined' && module.exports) {
         standDown.type = 'button';
         standDown.className = 'battle-button battle-button-quiet turn-cast-standdown';
         standDown.dataset.focusKey = 'cast-standdown';
-        standDown.textContent = "Don't cast — pick another action";
+        standDown.textContent = filledWords(words.stand_down);
         standDown.addEventListener('click', () => {
             if (opts.onCastClose) { opts.onCastClose(); }
         });
@@ -1461,19 +1493,20 @@ if (typeof module !== 'undefined' && module.exports) {
     /**
      * What the selected option does with a hex (#819, #866): pick one on
      * the board, or leave it and the option makes its own move. The words
-     * are the page's; which hexes are legal is the server's.
+     * and which hexes are legal are both the server's (#94).
      */
     function buildDestinationNote(selected, opts) {
+        const words = opts.words;
         const note = document.createElement('div');
         note.className = 'turn-destination';
         const line = document.createElement('p');
         line.className = 'turn-destination-line';
         if (opts.destination) {
-            line.textContent = `Moving to hex ${hexLabel(opts.destination)}.`;
+            line.textContent = filledWords(words.moving_to, { hex: hexLabel(opts.destination) });
         } else {
-            line.textContent = `Pick one of the ${selected.destinations.length} `
-                + 'marked hexes on the board to move there, or leave it and '
-                + 'this action moves as it says.';
+            line.textContent = filledWords(words.pick_hex, {
+                count: selected.destinations.length,
+            });
         }
         note.appendChild(line);
         if (opts.destination) {
@@ -1481,7 +1514,7 @@ if (typeof module !== 'undefined' && module.exports) {
             clear.type = 'button';
             clear.className = 'battle-button battle-button-quiet turn-destination-clear';
             clear.dataset.focusKey = 'destination-clear';
-            clear.textContent = 'Leave the hex unpicked';
+            clear.textContent = filledWords(words.leave_hex);
             clear.addEventListener('click', () => {
                 if (opts.onClearDestination) { opts.onClearDestination(); }
             });
@@ -1522,18 +1555,20 @@ if (typeof module !== 'undefined' && module.exports) {
         }
         panel.hidden = false;
         const opts = options || {};
+        // The panel's own words (#94): #battle-turn-panel-words, the server's.
+        const words = opts.words;
 
         if (!pending.is_you) {
             const notice = document.createElement('p');
             notice.className = 'turn-waiting';
-            notice.append('Waiting for ');
             const who = document.createElement('strong');
             who.textContent = pending.display_name;
-            notice.appendChild(who);
             if (pending.player) {
-                notice.append(` — played by ${pending.player} — to choose an action.`);
+                appendFilledWords(notice, words.waiting_played, {
+                    name: who, player: pending.player,
+                });
             } else {
-                notice.append(' to choose an action.');
+                appendFilledWords(notice, words.waiting, { name: who });
             }
             panel.appendChild(notice);
             if (opts.isDm) {
@@ -1541,7 +1576,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 aiButton.type = 'button';
                 aiButton.className = 'battle-button battle-button-outline turn-ai-choose';
                 aiButton.dataset.focusKey = 'ai-choose';
-                aiButton.textContent = 'Have the AI choose for them';
+                aiButton.textContent = filledWords(words.ai_choose);
                 aiButton.disabled = Boolean(opts.busy);
                 aiButton.addEventListener('click', () => {
                     if (opts.onAiChoose) { opts.onAiChoose(); }
@@ -1554,17 +1589,15 @@ if (typeof module !== 'undefined' && module.exports) {
 
         const heading = document.createElement('p');
         heading.className = 'turn-prompt';
-        heading.append('Your move — ');
         const name = document.createElement('strong');
         name.textContent = pending.display_name;
-        heading.appendChild(name);
-        heading.append(`, turn ${pending.turn}. Pick one action.`);
+        appendFilledWords(heading, words.your_move, { name, turn: pending.turn });
         panel.appendChild(heading);
 
         const menu = document.createElement('div');
         menu.className = 'turn-options';
         menu.setAttribute('role', 'group');
-        menu.setAttribute('aria-label', 'Action options');
+        menu.setAttribute('aria-label', filledWords(words.options_group));
         const aiPick = topCandidateIndex(pending.candidates);
         const {
             plain, casts, pushes, borrows, counters,
@@ -1603,7 +1636,8 @@ if (typeof module !== 'undefined' && module.exports) {
                 const costNode = document.createElement('span');
                 costNode.className = 'turn-option-cost';
                 costNode.textContent = described.cost
-                    ? `Costs ${described.cost}.` : 'Costs nothing.';
+                    ? filledWords(words.costs, { cost: described.cost })
+                    : filledWords(words.costs_nothing);
                 option.appendChild(costNode);
             }
             if (!plainLine || opts.showScoring) {
@@ -1619,7 +1653,7 @@ if (typeof module !== 'undefined' && module.exports) {
         function tagAiPick(option) {
             const tag = document.createElement('span');
             tag.className = 'turn-option-ai-pick';
-            tag.textContent = 'AI pick';
+            tag.textContent = filledWords(words.ai_pick);
             option.insertBefore(tag, option.querySelector('.turn-option-name').nextSibling);
         }
 
@@ -1627,7 +1661,9 @@ if (typeof module !== 'undefined' && module.exports) {
             const option = buildOption(
                 candidate.letter,
                 candidate.name,
-                `score ${scoreText(candidate)} — ${candidate.rationale}`,
+                filledWords(words.advice, {
+                    score: scoreText(candidate), rationale: candidate.rationale,
+                }),
                 index === opts.selectedIndex,
                 `option-${index}`,
                 candidate
@@ -1647,7 +1683,7 @@ if (typeof module !== 'undefined' && module.exports) {
         // A counter control per enemy caster (tarmar-engine #31), with the
         // commitments the menu offers against it.
         counters.forEach((copies) => {
-            menu.appendChild(buildCounterControl(copies, aiPick, opts));
+            menu.appendChild(buildCounterControl(words, copies, aiPick, opts));
         });
 
         if (castable) {
@@ -1663,14 +1699,18 @@ if (typeof module !== 'undefined' && module.exports) {
             )));
             const borrowingOnly = Array.from(borrows.keys())
                 .filter((key) => !castKeys.has(key)).length;
-            const ready = (casts.length === 1 ? '1 cast ready'
-                : `${casts.length} casts ready`)
-                + (borrowingOnly ? `, ${borrowingOnly} by borrowing` : '');
+            const casting = casts.length === 1
+                ? filledWords(words.casts_ready_one)
+                : filledWords(words.casts_ready, { count: casts.length });
+            const ready = borrowingOnly
+                ? filledWords(words.ready_borrowing, { ready: casting, count: borrowingOnly })
+                : casting;
             const castOption = buildOption(
                 (casts[0] || borrowingCopies[0]).candidate.letter,
-                'CAST SPELL',
-                `${magic.pool_label} ${magic.pool} of ${magic.max_pool}`
-                + ` — ${ready}`,
+                filledWords(words.cast_option),
+                filledWords(words.cast_advice, {
+                    pool: poolWords(words, magic, { owing: false }), ready,
+                }),
                 Boolean(opts.castOpen),
                 'cast'
             );
@@ -1697,8 +1737,9 @@ if (typeof module !== 'undefined' && module.exports) {
             scoring.className = 'battle-button battle-button-quiet turn-scoring-toggle';
             scoring.dataset.focusKey = 'scoring';
             scoring.setAttribute('aria-pressed', opts.showScoring ? 'true' : 'false');
-            scoring.textContent = opts.showScoring
-                ? "Hide the AI's scoring" : "Show the AI's scoring";
+            scoring.textContent = filledWords(
+                opts.showScoring ? words.hide_scoring : words.show_scoring
+            );
             scoring.addEventListener('click', () => {
                 if (opts.onToggleScoring) { opts.onToggleScoring(); }
             });
@@ -1721,7 +1762,7 @@ if (typeof module !== 'undefined' && module.exports) {
         confirm.type = 'button';
         confirm.className = 'battle-button battle-button-primary turn-confirm';
         confirm.dataset.focusKey = 'confirm';
-        confirm.textContent = 'Take this action';
+        confirm.textContent = filledWords(words.confirm);
         confirm.disabled = opts.selectedIndex == null || Boolean(opts.busy);
         confirm.addEventListener('click', () => {
             if (opts.onConfirm && opts.selectedIndex != null) {
@@ -1784,10 +1825,30 @@ if (typeof module !== 'undefined' && module.exports) {
     // fetches with a later test's mock (#25). stopPagePolls is for them.
     const pagePolls = new Set();
 
-    /** Run `poll` every POLL_INTERVAL_MS until stopPagePolls. */
+    /**
+     * Run `poll` every POLL_INTERVAL_MS until stopPagePolls or stopPagePoll.
+     * @returns {number} the poll's id, for stopPagePoll
+     */
     function startPagePoll(poll) {
-        pagePolls.add(setInterval(poll, POLL_INTERVAL_MS));
+        const id = setInterval(poll, POLL_INTERVAL_MS);
+        pagePolls.add(id);
+        return id;
     }
+
+    /** Stop the one poll `id` names. */
+    function stopPagePoll(id) {
+        clearInterval(id);
+        pagePolls.delete(id);
+    }
+
+    /**
+     * What an arena's poll announces, on the arena, when the battle has gone
+     * back under it: a restart made elsewhere (#9). Cancellable: a page that
+     * can draw the arena again in place (the GM chat's Battle tab, #89)
+     * cancels it and does, so the rest of that page stays as it is; a page
+     * where nothing cancels it reloads for the server's clean slate.
+     */
+    const REWOUND_EVENT = 'battle-rewound';
 
     /** Stop every poll this script has started. */
     function stopPagePolls() {
@@ -1947,6 +2008,14 @@ if (typeof module !== 'undefined' && module.exports) {
         const labelsScript = byId('battle-status-labels');
         const statusLabels = labelsScript ? JSON.parse(labelsScript.textContent) : {};
         const pendingScript = byId('battle-pending');
+        // The turn panel's own words (#94), the server's, once per page.
+        const panelWordsScript = byId('battle-turn-panel-words');
+        if (panel && !panelWordsScript) {
+            // battle/_arena.html renders it beside the panel; a page that
+            // lost it would fail at the first word, with no name for why.
+            throw new Error('the turn panel has no #battle-turn-panel-words block (#94)');
+        }
+        const panelWords = panelWordsScript ? JSON.parse(panelWordsScript.textContent) : null;
         const isDm = Boolean(panel && panel.dataset.isDm);
         const staleSlot = byId('battle-stale-slot');
 
@@ -1968,6 +2037,26 @@ if (typeof module !== 'undefined' && module.exports) {
             if (back) {
                 back.value = `${window.location.pathname}${window.location.search}`;
             }
+        }
+
+        /**
+         * Render a refusal of stale pools (#842) from the 409 that carries
+         * the notice and the Game Master's control; they stay in the slot
+         * until a reload or an advance clears them. The Advance button and a
+         * player's choice reach the same refusal and are answered alike
+         * (#112). True when the refusal was rendered here; anything else is
+         * left to the caller's notice.
+         */
+        function showStale(data, status) {
+            if (status !== 409 || !staleSlot || !data || !data.stale_html) {
+                return false;
+            }
+            renderStale(data.stale_html);
+            if (button && data.advance) {
+                button.textContent = data.advance.label;
+                button.disabled = !data.advance.enabled;
+            }
+            return true;
         }
 
         initDiceToggle(log, root);
@@ -2071,6 +2160,7 @@ if (typeof module !== 'undefined' && module.exports) {
             // mismatch and the arena shows why.
             const answering = pending;
             renderTurnPanel(panel, answering, {
+                words: panelWords,
                 isDm,
                 selectedIndex,
                 castOpen,
@@ -2237,7 +2327,7 @@ if (typeof module !== 'undefined' && module.exports) {
             actionBusy = true;
             renderPanel();
             const data = await postAction(
-                panel.dataset.actUrl, 'Sending the action', body
+                panel.dataset.actUrl, 'Sending the action', body, showStale
             );
             actionBusy = false;
             if (!data) {
@@ -2251,10 +2341,16 @@ if (typeof module !== 'undefined' && module.exports) {
          * Follow the battle from the poll endpoint while someone else can
          * move it: players follow the whole battle; the DM only needs the
          * poll while a player's choice is being awaited. A turn counter or
-         * sequence going backwards means a restart happened elsewhere —
-         * reload for the clean server-rendered slate.
+         * sequence going backwards means a restart happened elsewhere: the
+         * page shows the clean server-rendered slate, in place where it can
+         * (REWOUND_EVENT). An arena the page has since drawn again in its
+         * place stops polling: the arena that replaced it polls for itself.
          */
         async function pollOnce() {
+            if (!arena.isConnected) {
+                stopPagePoll(pollId);
+                return;
+            }
             const shouldPoll = !TERMINAL_STATUSES.includes(currentStatus)
                 && (!isDm || currentStatus === 'awaiting');
             if (!panel || !shouldPoll) { return; }
@@ -2269,12 +2365,22 @@ if (typeof module !== 'undefined' && module.exports) {
             }
             if (!response.ok) { return; }
             const data = await response.json();
+            // Drawn again in its place while this was on its way: the answer
+            // is the new arena's to read, and a rewind seen here would reach
+            // no page that draws in place, and reload it (#89).
+            if (!arena.isConnected) {
+                stopPagePoll(pollId);
+                return;
+            }
             // Something newer was applied while this was in flight: drop
             // it, and let the next tick ask again.
             if (appliedCount !== appliedWhenAsked) { return; }
             const nextSequence = (data.view.next_sequence || 1) - 1;
             if (data.turn < currentTurn || nextSequence < lastSequence) {
-                pageNavigation.reload();
+                const rewound = new CustomEvent(
+                    REWOUND_EVENT, { bubbles: true, cancelable: true }
+                );
+                if (arena.dispatchEvent(rewound)) { pageNavigation.reload(); }
                 return;
             }
             const changed = data.status !== currentStatus
@@ -2318,24 +2424,14 @@ if (typeof module !== 'undefined' && module.exports) {
         ) || currentStatus;
         currentTurn = Number(turnLabel.textContent) || 0;
         renderPanel();
+        // The poll's id, so an arena drawn again in this one's place stops
+        // this one's poll (#89).
+        let pollId = null;
         if (panel && panel.dataset.stateUrl) {
-            startPagePoll(pollOnce);
+            pollId = startPagePoll(pollOnce);
         }
 
         if (button) {
-            // A record-writing fight whose records moved is refused (#842):
-            // the server sends the notice and the Game Master's control, and
-            // they stay in the slot until a reload or an advance clears them.
-            const showStale = (data, status) => {
-                if (status !== 409 || !staleSlot || !data || !data.stale_html) {
-                    return false;
-                }
-                renderStale(data.stale_html);
-                if (data.advance) {
-                    button.textContent = data.advance.label;
-                }
-                return true;
-            };
             let refusedAsStale = false;
             button.addEventListener('click', async () => {
                 button.disabled = true;
@@ -2486,7 +2582,8 @@ if (typeof module !== 'undefined' && module.exports) {
             initBattlePage,
             initLobbyPage,
             stopPagePolls,
+            REWOUND_EVENT,
         };
     }
-    root.battlePage = { initBattlePage, initLobbyPage };
+    root.battlePage = { initBattlePage, initLobbyPage, REWOUND_EVENT };
 }(typeof window !== 'undefined' ? window : globalThis));

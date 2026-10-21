@@ -490,7 +490,7 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         lambda rules: rules["borrowing"].update(debt_attributes=["WIS", ""]),
     ),
     (
-        "borrowing.debt_attributes repeats an entry",
+        "borrowing.debt_attributes repeats the entry ['WIS']",
         lambda rules: rules["borrowing"].update(debt_attributes=["WIS", "WIS"]),
     ),
     (

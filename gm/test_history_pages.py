@@ -15,8 +15,14 @@ from django.utils import timezone
 from common.pagination import PAGE_SIZE, latest_window
 from common.test_helpers import BaseTestCase
 
-from .history_pages import history_page, history_turns, resolved_threads_page
+from .history_pages import (
+    history_page,
+    history_since,
+    history_turns,
+    resolved_threads_page,
+)
 from .models import GMSession, StoryThread
+from .refusal_words import refusal_words
 
 #: Two more turns than a page holds, so the first two are on the page above.
 TURNS = PAGE_SIZE + 2
@@ -206,6 +212,86 @@ class ChatPageTest(BaseTestCase):
         text = response.content.decode()
         self.assertIn("Player move 1.", text)
         self.assertIn(f"Player move {TURNS}.", text)
+
+
+class ConversationSinceTest(BaseTestCase):
+    """The turns from one on, for a page showing the conversation as stored (#89).
+
+    A page that lost sight of a turn, or whose fight wrote into the chat, asks
+    for every turn from the last one it holds and puts them in place, rather
+    than reloading and throwing away the earlier pages the reader loaded.
+    Each entry carries its turn's number, which is how the page knows what it
+    holds.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.player = self.create_user("since-player")
+        self.session = GMSession.objects.create(
+            user=self.player, name="Long game", history=played(TURNS)
+        )
+        self.login_as(self.player)
+
+    def since(self, since: int | str):
+        return self.client.get(
+            reverse("gm:history_page", args=[self.session.pk]), {"since": since}
+        )
+
+    def test_every_turn_from_the_cursor_on_with_no_control(self):
+        page = self.since(1).content.decode()
+
+        # Turn 1 is the second turn: "Player move 2." onwards, to the end,
+        # however many that is, and nothing above it offered.
+        self.assertEqual(shown(page, r"Player move (\d+)\."), list(range(2, TURNS + 1)))
+        self.assertNotIn("data-earlier", page)
+
+    def test_each_entry_carries_its_turn(self):
+        page = self.since(TURNS - 1).content.decode()
+
+        self.assertEqual(
+            re.findall(r'data-history-turn="(\d+)"', page), [str(TURNS - 1)] * 2
+        )
+
+    def test_the_chat_page_marks_its_entries_the_same_way(self):
+        page = self.client.get(
+            reverse("gm:chat"), {"session": self.session.pk}
+        ).content.decode()
+
+        # The latest page holds turns 2 onwards (two above it), two entries each.
+        self.assertEqual(
+            sorted(set(map(int, re.findall(r'data-history-turn="(\d+)"', page)))),
+            list(range(2, TURNS)),
+        )
+
+    def test_a_cursor_past_the_end_shows_nothing(self):
+        page = self.since(TURNS + 4).content.decode()
+
+        self.assertEqual(shown(page, r"Player move (\d+)\."), [])
+
+    def test_a_cursor_that_is_not_a_number_is_refused(self):
+        for since in ("", "two", "-1"):
+            with self.subTest(since=since):
+                response = self.since(since)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.content.decode(),
+                    refusal_words().views_history.since_not_turn,
+                )
+
+    def test_only_the_owner_reads_it(self):
+        self.logout()
+        self.login_as(self.create_user("someone-else"))
+
+        self.assertEqual(self.since(0).status_code, 404)
+
+    def test_the_service_counts_the_turns_it_holds(self):
+        page = history_since(played(5), 3)
+
+        self.assertEqual([turn.number for turn in page.turns], [3, 4])
+        self.assertEqual(page.start, 3)
+        self.assertEqual(page.total, 5)
+        self.assertFalse(page.offers_earlier)
+        self.assertTrue(history_page(played(TURNS)).offers_earlier)
 
 
 class ResolvedThreadsPageTest(BaseTestCase):

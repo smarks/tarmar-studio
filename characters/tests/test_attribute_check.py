@@ -6,6 +6,7 @@ injury table's -1/-2 lowers the target here, and nobody names a direction
 it could be counted in backwards.
 """
 
+from characters.refusal_words import game_master_call_note
 from characters.services import CharacterChangeError
 from characters.skill_checks import AttributeCheck, attribute_check
 from characters.skill_rules import skill_rules
@@ -100,7 +101,7 @@ class AttributeCheckTest(BaseTestCase):
         with self.assertRaisesMessage(CharacterChangeError, "unconscious"):
             self.check(1, 1, 1)
         called = self.check(1, 1, 1, is_game_master=True)
-        self.assertTrue(called.line.endswith("(a Game Master's call: unconscious)"))
+        self.assertTrue(called.line.endswith(game_master_call_note("unconscious")))
 
 
 class AGameMastersModifierTest(BaseTestCase):

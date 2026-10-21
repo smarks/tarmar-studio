@@ -3,7 +3,9 @@ start, and the pause/replay flow that feeds human choices to the engine."""
 
 from battle.models import Battle, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
+    MIN_COMBATANTS,
     advance_turn,
     claim_seat,
     create_battle,
@@ -99,7 +101,9 @@ class SeatClaimTest(BaseTestCase):
     def test_claim_someone_elses_character_is_refused(self):
         other = self.create_user(username="other")
         character = create_character(other, name="NotYours")
-        with self.assertRaisesMessage(ValueError, "not one of your living characters"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_your_living_character
+        ):
             claim_seat(
                 self.battle.pk, self.seat.pk, self.player, character_id=character.pk
             )
@@ -109,7 +113,9 @@ class SeatClaimTest(BaseTestCase):
     def test_taken_seat_refuses_a_second_claim(self):
         claim_seat(self.battle.pk, self.seat.pk, self.player, archetype="archer")
         rival = self.create_user(username="rival")
-        with self.assertRaisesMessage(ValueError, "already taken"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.seat_already_taken
+        ):
             claim_seat(self.battle.pk, self.seat.pk, rival, archetype="wizard")
 
     def test_claim_is_a_conditional_update_not_a_read_then_write(self):
@@ -119,13 +125,17 @@ class SeatClaimTest(BaseTestCase):
         occupying the seat between the caller's read and the claim."""
         rival = self.create_user(username="rival")
         self.battle.combatants.filter(pk=self.seat.pk).update(player=rival)
-        with self.assertRaisesMessage(ValueError, "already taken"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.seat_already_taken
+        ):
             claim_seat(self.battle.pk, self.seat.pk, self.player, archetype="archer")
 
     def test_one_seat_per_user(self):
         seats = list(self.battle.combatants.filter(is_open_seat=True))
         claim_seat(self.battle.pk, seats[0].pk, self.player, archetype="archer")
-        with self.assertRaisesMessage(ValueError, "already hold a seat"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.already_hold_a_seat
+        ):
             claim_seat(self.battle.pk, seats[1].pk, self.player, archetype="wizard")
 
     def test_claim_needs_exactly_one_of_character_or_archetype(self):
@@ -177,7 +187,9 @@ class LobbyStartTest(BaseTestCase):
         battle = open_battle(self.dm, seats=1, count=1)
         seat = battle.combatants.get(is_open_seat=True)
         claim_seat(battle.pk, seat.pk, self.player, archetype="archer")
-        with self.assertRaisesMessage(ValueError, "must be ready"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.every_player_ready
+        ):
             start_battle(battle.pk)
 
     def test_start_builds_state_and_drops_unclaimed_seats(self):
@@ -196,7 +208,10 @@ class LobbyStartTest(BaseTestCase):
 
     def test_start_refuses_a_field_of_one(self):
         battle = open_battle(self.dm, seats=1, count=1)
-        with self.assertRaisesMessage(ValueError, "at least 2"):
+        with self.assertRaisesMessage(
+            ValueError,
+            refusal_words().services.too_few_combatants.format(fewest=MIN_COMBATANTS),
+        ):
             start_battle(battle.pk)
 
     def test_ready_flag_needs_your_own_seat(self):
@@ -237,7 +252,9 @@ class LobbyStartTest(BaseTestCase):
         set_seat_ready(battle.pk, seats[0].pk, self.player, ready=True)
         start_battle(battle.pk)
         rival = self.create_user(username="rival")
-        with self.assertRaisesMessage(ValueError, "no longer open"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_open_for_joining
+        ):
             claim_seat(battle.pk, seats[1].pk, rival, archetype="wizard")
 
 
@@ -477,7 +494,9 @@ class RemotePlayerTurnTest(BaseTestCase):
     def test_choice_off_the_menu_is_refused(self):
         battle, _seat = started_battle_with_player(self)
         battle, _events = advance_turn(battle.pk)
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             record_player_action(
                 battle.pk,
                 self.player,
@@ -491,7 +510,9 @@ class RemotePlayerTurnTest(BaseTestCase):
         battle, _events = advance_turn(battle.pk)
         chosen = battle.pending_input_json["candidates"][0]
         rival = self.create_user(username="rival")
-        with self.assertRaisesMessage(ValueError, "not your combatant"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_your_combatant
+        ):
             record_player_action(
                 battle.pk,
                 rival,
@@ -500,7 +521,9 @@ class RemotePlayerTurnTest(BaseTestCase):
                 letter=chosen["letter"],
                 target_id=chosen.get("target_id"),
             )
-        with self.assertRaisesMessage(ValueError, "not your combatant"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_your_combatant
+        ):
             record_player_action(
                 battle.pk,
                 self.dm,
@@ -523,7 +546,9 @@ class RemotePlayerTurnTest(BaseTestCase):
         # resumed the turn there is no pause left to refuse them for, and
         # the check would pass for the wrong reason.
         rival = self.create_user(username="rival")
-        with self.assertRaisesMessage(ValueError, "hand the choice to the AI"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.hand_choice_to_ai_denied
+        ):
             record_player_action(
                 battle.pk,
                 rival,
@@ -548,7 +573,9 @@ class RemotePlayerTurnTest(BaseTestCase):
 
     def test_nothing_pending_refuses_a_choice(self):
         battle, _seat = started_battle_with_player(self)
-        with self.assertRaisesMessage(ValueError, "No player input is pending"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.no_input_pending
+        ):
             record_player_action(
                 battle.pk,
                 self.player,

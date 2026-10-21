@@ -5,6 +5,12 @@
  * listening. When the stream drops after the server named the turn, the page
  * says the turn is still running, asks after it, and shows the session once
  * it is saved. A page loaded while a turn runs does the same.
+ *
+ * On the page of the session the turn saved into, the finished turn is shown
+ * in place (issue #89): the conversation as the server holds it, from the
+ * last turn the page holds, put in place of that turn and of what was
+ * written live after it. A reload did this before and threw away the earlier
+ * pages the reader had loaded.
  */
 
 function setUpDom(config = {}) {
@@ -13,6 +19,7 @@ function setUpDom(config = {}) {
         saveUrl: '/tarmar/gm/save/',
         deleteUrl: '/tarmar/gm/delete/',
         turnUrlTemplate: '/tarmar/gm/turns/{turn_id}/',
+        historyUrlTemplate: '/tarmar/gm/sessions/{session_id}/history/',
         turnPollMs: 0,
         sessionId: 7,
         mode: 'play',
@@ -74,6 +81,24 @@ function turnState(data) {
     return { ok: true, status: 200, json: () => Promise.resolve(data) };
 }
 
+/** gm:history_page's answer: entries rendered by gm/_history_entries.html. */
+function historyPage(html) {
+    return { ok: true, status: 200, text: () => Promise.resolve(html) };
+}
+
+/** One rendered turn: the player's message and the GM's reply. */
+function renderedTurn(number, said, reply) {
+    return `<div class="message user" data-history-turn="${number}"><div class="message-role">You</div>`
+        + `<div class="message-content">${said}</div></div>`
+        + `<div class="message assistant" data-history-turn="${number}"><div class="message-role">GM</div>`
+        + `<div class="message-content" data-markdown>${reply}</div></div>`;
+}
+
+/** The fetches a finished turn's page makes, by address. */
+function answerByAddress(turn, history) {
+    return (url) => Promise.resolve(url.includes('/history/') ? historyPage(history) : turnState(turn()));
+}
+
 async function settle() {
     for (let tick = 0; tick < 20; tick += 1) {
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -95,8 +120,10 @@ describe('a stream lost after the turn started', () => {
         fetch.mockResolvedValueOnce(droppedStream(['data: {"token":"The crypt"}\n\n'], '41'));
         // Running until the assertions are done, then finished, so the page's
         // wait ends here instead of polling into the next test.
-        fetch.mockImplementation(() => Promise.resolve(
-            turnState({ state: finished ? 'finished' : 'running', session_id: 7 })));
+        fetch.mockImplementation(answerByAddress(
+            () => ({ state: finished ? 'finished' : 'running', session_id: 7 }),
+            renderedTurn(0, 'I search the crypt', 'The crypt is cold.'),
+        ));
 
         document.getElementById('user-input').value = 'I search the crypt';
         chat.handleSubmit({ preventDefault() {} });
@@ -118,7 +145,14 @@ describe('a stream lost after the turn started', () => {
 
         finished = true;
         await settle();
-        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
+        // Shown in place, from the server's history: the streamed words give
+        // way to the reply as saved, and the page can be used again.
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(document.querySelectorAll('#messages > .message')).toHaveLength(2);
+        expect(document.querySelector('#messages > .message.assistant').textContent)
+            .toContain('The crypt is cold.');
+        expect(document.getElementById('send-btn').disabled).toBe(false);
     });
 
     test('shows the session once the turn has finished', async () => {
@@ -126,12 +160,79 @@ describe('a stream lost after the turn started', () => {
         fetch.mockResolvedValueOnce(droppedStream([], '41'));
         fetch.mockResolvedValueOnce(turnState({ state: 'running', session_id: 7 }));
         fetch.mockResolvedValueOnce(turnState({ state: 'finished', session_id: 7 }));
+        fetch.mockResolvedValueOnce(historyPage(renderedTurn(0, 'I search the crypt', 'Dust.')));
 
         await chat.streamMessage({ session_id: 7, message: 'I search the crypt' });
         await settle();
 
-        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
+        expect(fetch.mock.calls[3][0]).toBe('/tarmar/gm/sessions/7/history/?since=0');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(document.getElementById('messages').textContent).toContain('Dust.');
         expect(document.getElementById('gm-turn-running').hidden).toBe(true);
+    });
+
+    test('keeps the earlier pages the reader loaded (#89)', async () => {
+        const chat = loadChat();
+        // Turns 0 and 1 a "Show earlier" loaded, 2 and 3 the page rendered,
+        // and the player's message the page wrote live.
+        const messages = document.getElementById('messages');
+        messages.innerHTML = renderedTurn(0, 'one', 'One.') + renderedTurn(1, 'two', 'Two.')
+            + renderedTurn(2, 'three', 'Three.') + renderedTurn(3, 'four', 'Four.');
+        const earlier = Array.from(messages.querySelectorAll('[data-history-turn="0"], [data-history-turn="1"], [data-history-turn="2"]'));
+        const onDone = jest.fn();
+        document.addEventListener('gm-stream-done', onDone);
+        fetch.mockResolvedValueOnce(droppedStream(['data: {"token":"The door"}\n\n'], '41'));
+        fetch.mockResolvedValueOnce(turnState({
+            state: 'finished', session_id: 7, map: { slug: 'tarmar' },
+        }));
+        // Turn 3 asked for again, as it may have grown, and the new turn 4.
+        fetch.mockResolvedValueOnce(historyPage(
+            renderedTurn(3, 'four', 'Four.') + renderedTurn(4, 'I open the door', 'It creaks.')));
+
+        document.getElementById('user-input').value = 'I open the door';
+        chat.handleSubmit({ preventDefault() {} });
+        await settle();
+
+        expect(fetch.mock.calls[2][0]).toBe('/tarmar/gm/sessions/7/history/?since=3');
+        // The loaded pages are the very same elements, untouched.
+        earlier.forEach((element) => expect(element.isConnected).toBe(true));
+        const turns = Array.from(messages.children).map((child) => child.dataset.historyTurn);
+        expect(turns).toEqual(['0', '0', '1', '1', '2', '2', '3', '3', '4', '4']);
+        expect(messages.lastElementChild.textContent).toContain('It creaks.');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        // The side panel follows it as it follows a streamed turn.
+        expect(onDone).toHaveBeenCalledTimes(1);
+        expect(onDone.mock.calls[0][0].detail.map).toEqual({ slug: 'tarmar' });
+        document.removeEventListener('gm-stream-done', onDone);
+    });
+
+    test('a reply that cannot be shown says so, with a retry, and reloads nothing', async () => {
+        const chat = loadChat();
+        window.showNotice = jest.fn(() => {
+            const notice = document.createElement('div');
+            notice.append(Object.assign(document.createElement('button'), { className: 'notice-dismiss' }));
+            document.body.append(notice);
+            return notice;
+        });
+        fetch.mockResolvedValueOnce(droppedStream([], '41'));
+        fetch.mockResolvedValueOnce(turnState({ state: 'finished', session_id: 7 }));
+        fetch.mockResolvedValueOnce({ ok: false, status: 502, statusText: 'Bad Gateway' });
+
+        await chat.streamMessage({ session_id: 7, message: 'I search the crypt' });
+        await settle();
+
+        expect(window.showNotice.mock.calls[0][0])
+            .toBe('Your turn finished, but its reply could not be shown: Bad Gateway.');
+        expect(document.querySelector('.notice-retry')).not.toBeNull();
+        expect(document.getElementById('send-btn').disabled).toBe(false);
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+
+        fetch.mockResolvedValueOnce(historyPage(renderedTurn(0, 'I search the crypt', 'Dust.')));
+        document.querySelector('.notice-retry').click();
+        await settle();
+        expect(document.getElementById('messages').textContent).toContain('Dust.');
+        delete window.showNotice;
     });
 
     test('a turn that failed on the server hands the message back', async () => {
@@ -164,6 +265,7 @@ describe('a page loaded while its turn runs', () => {
     test('says so plainly, then picks up the finished turn', async () => {
         fetch.mockResolvedValueOnce(turnState({ state: 'running', session_id: 7 }));
         fetch.mockResolvedValueOnce(turnState({ state: 'finished', session_id: 7 }));
+        fetch.mockResolvedValueOnce(historyPage(renderedTurn(0, '5 years of campaigning', 'Done.')));
 
         loadChat({ runningTurn: { id: 52, message: '5 years of campaigning' } });
 
@@ -175,20 +277,24 @@ describe('a page loaded while its turn runs', () => {
         await settle();
 
         expect(fetch.mock.calls[0][0]).toBe('/tarmar/gm/turns/52/');
-        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
+        expect(document.getElementById('messages').textContent).toContain('Done.');
+        expect(document.getElementById('send-btn').disabled).toBe(false);
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('keeps asking when the network is still down', async () => {
         fetch.mockRejectedValueOnce(new TypeError('Load failed'));
         fetch.mockResolvedValueOnce({ ok: false, status: 502, json: () => Promise.resolve({}) });
         fetch.mockResolvedValueOnce(turnState({ state: 'finished', session_id: 7 }));
+        fetch.mockResolvedValueOnce(historyPage(renderedTurn(0, 'Hi', 'Hello.')));
         const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
         loadChat({ runningTurn: { id: 52, message: 'Hi' } });
         await settle();
 
         expect(warn).toHaveBeenCalledTimes(2);
-        expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=7');
+        expect(document.getElementById('messages').textContent).toContain('Hello.');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
         warn.mockRestore();
     });
 });

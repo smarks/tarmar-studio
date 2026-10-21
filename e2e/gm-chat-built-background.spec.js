@@ -19,6 +19,7 @@
 const {
     test, expect, loginAs, createCharacter, TEST_USER,
 } = require('./fixtures');
+const { refusal } = require('./refusals');
 const { runDjangoShell } = require('./django');
 
 // location.md: the skills each Origin's grant may be held in ("Village: Street
@@ -57,7 +58,8 @@ async function paneBackground(draft) {
 }
 
 /** The reason a player's sheet prints beside a rolled Origin (#970). */
-const ROLLED_ORIGIN_FIXED = 'The Origin was rolled, and a roll is final; only a Game Master can change it.';
+/** The configured reason a rolled Origin is final (#970, #85). */
+const rolledOriginFixed = () => refusal('characters', 'services', 'roll_fixed_origin');
 
 /**
  * The Origin the sheet shows: the select's value for a Game Master, the text
@@ -66,7 +68,7 @@ const ROLLED_ORIGIN_FIXED = 'The Origin was rolled, and a roll is final; only a 
 async function sheetOrigin(page) {
     const select = page.locator('[data-field="location"] select');
     if (await select.count()) return select.inputValue();
-    await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
+    await expect(page.locator('[data-locked-field="location"]')).toHaveText(rolledOriginFixed());
     const cell = page.locator('#location .physical-table td').first();
     return (await cell.innerText()).match(/^(City|Village|Rural|Consult GM)/)[1];
 }

@@ -31,6 +31,7 @@ from battle.checks import (
 from battle.magic_rules import MagicRulesError
 from battle.models import Battle
 from battle.persistence import TARMAR_PROFILE, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
     _match_candidate,
     names_option,
@@ -51,6 +52,7 @@ from .magic_fixtures import (
     rules_with_channel,
     seated_rules,
 )
+from .rulings_words import with_fixed_words
 from .test_cast_flow import awaiting_wizard_battle
 from .test_state import make_combatant
 
@@ -485,6 +487,7 @@ class PushedChoiceMatchTest(SimpleTestCase):
         )
 
 
+@with_fixed_words
 class RecordPushedChoiceTest(BaseTestCase):
     """Who may set ``push_mana``: a player, to an amount the menu offered."""
 
@@ -524,15 +527,22 @@ class RecordPushedChoiceTest(BaseTestCase):
 
     def test_a_pushed_copy_says_what_it_pushes_and_costs(self) -> None:
         pushed = self.offered["push_mana"]
-        self.assertIn(f", pushing {pushed} more mana into it", self.offered["plain"])
-        self.assertIn(f"{pushed} pushed)", self.offered["cost"])
-        self.assertIn("a success makes a Control Roll", self.offered["cost"])
+        self.assertRegex(
+            self.offered["plain"],
+            rf"^tarmar_menu\.pushing turn_menu\.cast_at .+ {pushed}$",
+        )
+        # The whole cost, the base and the pushed mana, and the Control Roll.
+        self.assertRegex(
+            self.offered["cost"], rf"^tarmar_menu\.push_cost \d+ .+ {pushed} \d+$"
+        )
 
     def test_a_push_the_menu_did_not_offer_is_refused(self) -> None:
         most_offered = max(
             candidate.get("push_mana") or 0 for candidate in self.pending["candidates"]
         )
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             self.record(most_offered + 1)
 
     def test_the_endpoint_reads_push_mana(self) -> None:
@@ -584,6 +594,7 @@ class BorrowedChoiceMatchTest(SimpleTestCase):
         )
 
 
+@with_fixed_words
 class RecordBorrowedChoiceTest(BaseTestCase):
     """Who may set ``borrow``: a player, for a borrowing copy the menu offered."""
 
@@ -627,14 +638,22 @@ class RecordBorrowedChoiceTest(BaseTestCase):
     def test_a_borrowing_copy_says_what_it_borrows(self) -> None:
         cost = int(self.offered["borrowed"])
         self.assertGreater(cost, 0)
-        self.assertIn(f", borrowing the {cost} mana you lack", self.offered["plain"])
-        self.assertIn(f"borrows the {cost} you lack as debt", self.offered["cost"])
-        self.assertIn("a debt roll follows the spell", self.offered["cost"])
+        self.assertRegex(
+            self.offered["plain"],
+            rf"^tarmar_menu\.borrowing turn_menu\.cast_at .+ {cost}$",
+        )
+        # The debt and the debt roll that follows.
+        self.assertRegex(
+            self.offered["cost"],
+            rf"^tarmar_menu\.borrowing_cost tarmar_menu\.cast_cost .+ {cost}$",
+        )
 
     def test_the_same_cast_without_borrowing_is_not_on_the_menu(self) -> None:
         # The caster cannot afford the plain cast: only the borrowing copy is
         # offered, and a choice that leaves borrow off is refused.
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             self.record(self.offered, borrow=False)
 
     def test_a_borrowing_the_menu_did_not_offer_is_refused(self) -> None:
@@ -643,7 +662,9 @@ class RecordBorrowedChoiceTest(BaseTestCase):
             for candidate in self.pending["candidates"]
             if not candidate.get("spell_key")
         )
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             self.record(not_a_cast, borrow=True)
 
     def test_the_endpoint_reads_borrow(self) -> None:
@@ -658,7 +679,9 @@ class RecordBorrowedChoiceTest(BaseTestCase):
         }
         response = self.post_json(url, {**body, "borrow": "yes"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "borrow is true or false")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views.borrow_true_or_false
+        )
         response = self.post_json(url, body)
         self.assertEqual(response.status_code, 400)
         response = self.post_json(url, {**body, "borrow": True})

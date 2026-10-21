@@ -1,0 +1,1 @@
+{% if can_edit %}<p class="formula field-locked-reason" id="{{ note_id }}" data-locked-note-for="{{ fields|join:' ' }}"{% if not reason %} hidden{% endif %}>{{ reason }}</p>{% endif %}

@@ -26,7 +26,10 @@ let sessionId = CHAT_CONFIG.sessionId;
 // that creates a session: once a session exists the server reads the mode off
 // its own row and ignores this. Sending it is safe because a mode says how the
 // GM behaves, never what the person may do — authority stays with the account.
-const SESSION_MODE = CHAT_CONFIG.mode;
+// The mode control changes it in place (issue #89).
+let sessionMode = CHAT_CONFIG.mode;
+// Where the conversation is asked for as stored, from a turn on (issue #89).
+const HISTORY_URL_TEMPLATE = CHAT_CONFIG.historyUrlTemplate;
 // A started turn runs to the end on the server whether or not this page is
 // still listening (issue #515). These say where to ask after one, and which
 // one was still running when the page loaded.
@@ -744,12 +747,117 @@ function setTurnRunning(text) {
   line.hidden = !text;
 }
 
-/** Show the session a finished turn saved into, from the server's own history. */
-function showFinishedTurn(finishedSessionId) {
-  const target = finishedSessionId || sessionId;
-  pageNavigation.go(target
-    ? `${window.location.pathname}?session=${encodeURIComponent(target)}`
-    : window.location.pathname);
+// ---------- the conversation as stored (issue #89) ----------
+//
+// Each entry the server renders carries the number of its turn
+// (gm/_history_entries.html's data-history-turn). The page holds the latest
+// turns, the earlier pages the reader loaded above them, and whatever it has
+// written live since. To show the conversation as the server holds it now
+// -- after a turn the page lost sight of, or a fight that wrote into the
+// chat -- it asks for every turn from the last one it holds as rendered, and
+// puts them in place of that turn and of everything written after it. A
+// reload did this before, and threw away the earlier pages.
+
+/** The attribute naming an entry's turn, as `dataset` reads it. */
+const HISTORY_TURN_KEY = 'historyTurn';
+/** The entries the server rendered, which carry it. */
+const RENDERED_ENTRIES = ':scope > [data-history-turn]';
+/** A "Show earlier" control (gm-history.js), which the page keeps. */
+const EARLIER_CONTROL = '[data-earlier]';
+
+/**
+ * Whether ``child`` of the message list stays when the turns from ``since``
+ * are put in place: a "Show earlier" control, or an entry of a turn before.
+ * @param {Element} child
+ * @param {number} since
+ * @returns {boolean}
+ */
+function heldBeforeTurn(child, since) {
+  if (child.matches(EARLIER_CONTROL)) return true;
+  const turn = child.dataset[HISTORY_TURN_KEY];
+  return turn !== undefined && Number(turn) < since;
+}
+
+/**
+ * Show this session's conversation as the server holds it, in place.
+ *
+ * What the page wrote after it asked (a turn sent meanwhile) stays below
+ * what comes back. The last reply gets its choice bar back, as on a load.
+ * @returns {Promise<boolean>} whether the conversation was put in place.
+ * @throws {Error} when it could not be fetched; the page is left as it was.
+ */
+async function showConversationAsStored() {
+  if (!sessionId || !HISTORY_URL_TEMPLATE) return false;
+  const marked = messagesEl.querySelectorAll(RENDERED_ENTRIES);
+  const since = marked.length
+    ? Number(marked[marked.length - 1].dataset[HISTORY_TURN_KEY]) : 0;
+  // What the page held when it asked: only that is the answer's to replace.
+  const heldWhenAsked = new Set(messagesEl.children);
+  const url = `${HISTORY_URL_TEMPLATE.replace('{session_id}', String(sessionId))}?since=${since}`;
+  const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html' } });
+  if (!resp.ok) throw new Error(resp.statusText || `status ${resp.status}`);
+  const holder = document.createElement('template');
+  holder.innerHTML = (await resp.text()).trim();
+  const fragment = holder.content;
+  if (!fragment.children.length) return false;
+  // Read before the replies are rendered away, as the page's load does.
+  const lastEntry = fragment.lastElementChild;
+  const lastReply = lastEntry.matches('.message.assistant')
+    ? lastEntry.querySelector(':scope > .message-content[data-markdown]') : null;
+  const lastMarkdown = lastReply ? lastReply.textContent : '';
+  fragment.querySelectorAll('[data-markdown]').forEach((element) => {
+    element.innerHTML = renderMarkdown(element.textContent);
+  });
+  // Gone: what the page held then, from the turn asked for on. Anything it
+  // wrote since (a turn sent meanwhile) stays, below what comes back; an
+  // earlier page loaded meanwhile is held, above it.
+  Array.from(messagesEl.children)
+    .filter((child) => heldWhenAsked.has(child) && !heldBeforeTurn(child, since))
+    .forEach((child) => child.remove());
+  const below = Array.from(messagesEl.children)
+    .find((child) => !heldWhenAsked.has(child) && !heldBeforeTurn(child, since)) || null;
+  messagesEl.insertBefore(fragment, below);
+  if (lastMarkdown) offerChoices(lastEntry, lastMarkdown);
+  scrollToBottom();
+  return true;
+}
+
+/**
+ * Show a turn the page lost sight of, once the server has finished it.
+ *
+ * On the page of the session it saved into it is shown in place (issue #89):
+ * the conversation as stored, the session's name and count, and the same
+ * `gm-stream-done` a streamed turn ends with, so the side panel follows it.
+ * A turn that saved into another session -- the first of a session this
+ * page had not got yet -- is shown by going to it: a page with no session
+ * has no loaded pages to lose.
+ * @param {{session_id: (number|null), session_name: (string|undefined),
+ *   message_count: (number|undefined), message_count_label: (string|undefined)}} finished
+ *   - the turn's state, as gm:turn answers it
+ */
+async function showFinishedTurn(finished) {
+  const target = finished.session_id || sessionId;
+  if (!target || target !== sessionId) {
+    pageNavigation.go(target
+      ? `${window.location.pathname}?session=${encodeURIComponent(target)}`
+      : window.location.pathname);
+    return;
+  }
+  removeThinking();
+  inFlightUserMessage = null;
+  try {
+    await showConversationAsStored();
+  } catch (err) {
+    setStreaming(false);
+    showFailure(`Your turn finished, but its reply could not be shown: ${err.message}.`,
+                () => { showFinishedTurn(finished); return true; });
+    return;
+  }
+  refreshSessionAfterTurn(
+    target, finished.session_name, finished.message_count, finished.message_count_label,
+  );
+  setStreaming(false);
+  document.dispatchEvent(new CustomEvent('gm-stream-done', { detail: finished }));
 }
 
 // Where this tab remembers a turn it started before there was a session to
@@ -890,7 +998,7 @@ async function awaitRunningTurn(turnId, pending) {
     forgetOwnTurn();
     setTurnRunning(null);
     if (data.state === 'finished') {
-      showFinishedTurn(data.session_id);
+      showFinishedTurn(data);
       return;
     }
     inFlightUserMessage = pending;
@@ -929,7 +1037,7 @@ async function resumeOwnTurn(remembered) {
   if (turnWaitsStopped) return;
   if (data.state === 'finished') {
     forgetOwnTurn();
-    showFinishedTurn(data.session_id);
+    showFinishedTurn(data);
     return;
   }
   if (data.state !== 'running') {
@@ -1018,7 +1126,7 @@ async function streamMessage(body) {
 
   try {
     const resp = await postWithCsrf(STREAM_URL, csrfToken(),
-                                    { ...body, mode: SESSION_MODE });
+                                    { ...body, mode: sessionMode });
 
     if (!resp.ok) {
       failTurn(await failureReason(resp), true);
@@ -1338,7 +1446,7 @@ async function promptReview() {
  */
 async function sendForReview(note) {
   if (!CHAT_CONFIG.reviewUrl) {
-    uiNotify('Only a Game Master can send a session to Claude.', 'info');
+    uiNotify(filledWords(CHAT_CONFIG.reviewGameMasterOnly), 'info');
     return;
   }
   if (!sessionId) {
@@ -1612,6 +1720,85 @@ if (sessionNameField && typeof initAutosave === 'function') {
   });
 }
 
+// ---------- the mode control (issues #353, #372, #89) ----------
+//
+// The select posts its form and paints the page from the mode the server
+// stored, in place: a form post answered with a redirect threw away the
+// earlier turns the reader had loaded. Each option carries the words its
+// mode puts on the page (gm/chat.html, from gm.models), so nothing here
+// words a mode.
+
+const modeSelect = document.getElementById('gm-mode-select');
+
+/**
+ * Paint the page in ``mode``: the indicator's name and line, the select,
+ * the message box's invitation and the empty chat's opening line, from the
+ * option's own words. A page with no session yet keeps the mode in its
+ * address, as the server's redirect did, so a reload shows it too.
+ * @param {string} mode - the mode the server stored
+ * @returns {boolean} false when the control offers no such mode
+ */
+function paintMode(mode) {
+  const option = modeSelect
+    && Array.from(modeSelect.options).find((candidate) => candidate.value === mode);
+  if (!option) return false;
+  modeSelect.value = mode;
+  sessionMode = mode;
+  const indicator = document.getElementById('gm-mode-indicator');
+  const name = indicator && indicator.querySelector('.gm-mode-name');
+  if (name) name.textContent = option.textContent;
+  const note = indicator && indicator.querySelector('.gm-mode-note');
+  if (note) note.textContent = option.dataset.description;
+  inputEl.placeholder = option.dataset.placeholder;
+  const opening = document.getElementById('gm-mode-opening');
+  if (opening) opening.textContent = option.dataset.opening;
+  if (!sessionId) {
+    const url = new URL(window.location);
+    url.searchParams.set('mode', mode);
+    history.replaceState(null, '', url);
+  }
+  return true;
+}
+
+/**
+ * Change the session's mode to the one the select names, and paint it.
+ *
+ * The session is the one the page knows now, which its first message may
+ * have made after the form was rendered without one. A refusal is said in a
+ * notice and the select goes back to the mode in force.
+ * @returns {Promise<boolean>} whether the mode was changed
+ */
+async function switchMode() {
+  const form = modeSelect.form;
+  const inForce = sessionMode;
+  const body = new FormData(form);
+  if (sessionId) body.set('session_id', String(sessionId));
+  modeSelect.disabled = true;
+  try {
+    const resp = await fetch(form.action, {
+      method: 'POST',
+      body,
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      paintMode(inForce);
+      uiNotify(`The mode could not be changed: ${data.error || resp.statusText}`);
+      return false;
+    }
+    return paintMode(data.mode);
+  } catch (err) {
+    paintMode(inForce);
+    uiNotify(`The mode could not be changed: ${err.message}`);
+    return false;
+  } finally {
+    modeSelect.disabled = false;
+  }
+}
+
+if (modeSelect) modeSelect.addEventListener('change', switchMode);
+
 function newSession() {
   pageNavigation.go(window.location.pathname);
 }
@@ -1776,6 +1963,10 @@ if (typeof module !== 'undefined' && module.exports) {
     applySessionName,
     refreshSessionAfterTurn,
     failureReason,
+    showConversationAsStored,
+    showFinishedTurn,
+    switchMode,
+    paintMode,
     // sessionId is module-scoped now that it comes from #chat-config rather
     // than an inline <script>'s global, so read it through a getter — a
     // snapshot would miss the reassignment a /save or a first message makes.

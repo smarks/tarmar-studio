@@ -626,20 +626,27 @@ def load_magic_rules(path: Path) -> MagicRules:
     return reader.magic_rules(reader.parsed_file())
 
 
-def totals_in_words(totals: Iterable[int]) -> str:
+def totals_in_words(totals: Iterable[int], *, or_word: str) -> str:
     """Natural totals as the prompt and the turn menu say them: "17 or 18".
 
     The one place a set of the canon's natural totals (a tier's, the casting
     roll's mana-spending ones, the Debt Roll's automatic failures) is put into
-    words, lowest first (issue #48).
+    words, lowest first (issue #48). The word between them is the caller's:
+    the turn menu's is configuration (``common.or_word`` in
+    ``config/battle-rulings.toml``, #90), and the GM prompt's is the prompt's
+    own (``gm.engine.PROMPT_OR_WORD``), since ``gm.engine`` and this module
+    are imported by the offline CLI with no Django and so no settings to
+    read the configured word from.
 
     Args:
         totals: The natural totals, in any order.
+        or_word: The word between each pair of totals, "or".
 
     Returns:
-        The totals ascending, joined with " or "; "" when there are none.
+        The totals ascending, each pair parted by ``or_word``; "" when there
+        are none.
     """
-    return " or ".join(str(total) for total in sorted(totals))
+    return f" {or_word} ".join(str(total) for total in sorted(totals))
 
 
 @functools.cache

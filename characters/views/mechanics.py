@@ -38,6 +38,7 @@ from ..purse import (
     format_purse,
     move_coin_for_reason,
 )
+from ..refusal_words import game_master_call_note
 from ..skill_checks import skill_check
 from ..skills import normalize_skill_name, skill_name_refusal
 from ..weapon_skill import record_weapon_skill
@@ -116,6 +117,11 @@ def character_record_weapon_skill(request: HttpRequest, pk: int) -> HttpResponse
     return _change(request, pk, "skills", apply)
 
 
+#: The skill check answer's key for what ends its line when a Game Master
+#: called it past the rules (``static/js/mechanics.js`` reads it).
+GAME_MASTER_CALL_NOTE = "game_master_call_note"
+
+
 @login_required
 @require_POST
 @rate_limit("skill_check", max_requests=60, window_seconds=60)
@@ -145,7 +151,17 @@ def character_skill_check(request: HttpRequest, pk: int) -> HttpResponse:
         pk,
         "skill_check",
         apply,
-        answer=lambda character, note: {"check": asdict(checks[0])},
+        # The page writes the check's line itself, from the server's numbers;
+        # what a Game Master called it past comes in the configured words, so
+        # the script holds no copy of them (issue #85).
+        answer=lambda character, note: {
+            "check": {
+                **asdict(checks[0]),
+                GAME_MASTER_CALL_NOTE: game_master_call_note(
+                    checks[0].game_master_call
+                ),
+            }
+        },
     )
 
 

@@ -79,3 +79,5 @@ one arena per page is the rule and the ids need no prefix.
 {{ view_json|json_script:"battle-view" }}
 {{ pending|json_script:"battle-pending" }}
 {{ seats|json_script:"battle-seats" }}
+{# The turn panel's own words (#94), read once by battle.js. #}
+{{ turn_panel_words|json_script:"battle-turn-panel-words" }}

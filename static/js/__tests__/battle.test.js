@@ -4,6 +4,13 @@
  */
 
 const { flush } = require('./test-helpers');
+// The turn panel's own words (#94), as the page's #battle-turn-panel-words
+// carries them, in the shape of the server's fixed test words
+// (battle/tests/rulings_words.py): each sentence is its own key followed by
+// the {names} it fills, so a test proves which sentence was used and what
+// filled it, never the shipped wording. A Python test holds the file to the
+// server's FIXED_WORDS.
+const PANEL_WORDS = require('./fixtures/turn-panel-words.json');
 
 let battle;
 
@@ -1426,23 +1433,23 @@ describe('renderTurnPanel (#250)', () => {
 
     test('no pending decision hides the panel', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, null, {});
+        battle.renderTurnPanel(panel, null, { words: PANEL_WORDS });
         expect(panel.hidden).toBe(true);
         expect(panel.textContent).toBe('');
     });
 
     test('your turn renders every option with advice and the AI pick tag', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, samplePending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, samplePending(), { words: PANEL_WORDS,  selectedIndex: null });
         expect(panel.hidden).toBe(false);
-        expect(panel.textContent).toContain('Your move');
-        expect(panel.textContent).toContain('Kestra Duskmere');
+        expect(panel.textContent).toContain('turn_panel.your_move Kestra Duskmere 3');
         const options = panel.querySelectorAll('.turn-option');
         expect(options).toHaveLength(2);
         expect(options[0].textContent).toContain('MOVE');
-        expect(options[0].textContent).toContain('score 0.5 — Close the gap');
+        expect(options[0].textContent).toContain('turn_panel.advice Close the gap 0.5');
         // The higher-scored ATTACK carries the AI pick tag; MOVE does not.
-        expect(options[1].querySelector('.turn-option-ai-pick')).not.toBeNull();
+        expect(options[1].querySelector('.turn-option-ai-pick').textContent)
+            .toBe('turn_panel.ai_pick');
         expect(options[0].querySelector('.turn-option-ai-pick')).toBeNull();
     });
 
@@ -1472,35 +1479,36 @@ describe('renderTurnPanel (#250)', () => {
 
     test('a described option leads with its plain line and cost, not the score', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, describedPending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, describedPending(), { words: PANEL_WORDS,  selectedIndex: null });
         const options = panel.querySelectorAll('.turn-option');
         expect(options).toHaveLength(3);
         expect(options[0].querySelector('.turn-option-plain').textContent)
             .toBe('Attack Gray Wolf with bare hands: 2 in 20 to hit, '
                 + '1d6-1 less 1 armour (about 2 a hit)');
         expect(options[0].querySelector('.turn-option-cost').textContent)
-            .toBe('Costs nothing.');
+            .toBe('turn_panel.costs_nothing');
         expect(options[2].querySelector('.turn-option-cost').textContent)
-            .toBe('Costs 1 Fatigue.');
+            .toBe('turn_panel.costs 1 Fatigue');
         // The scoring is not on the rows until the reader asks for it.
         expect(panel.querySelector('.turn-option-advice')).toBeNull();
         const toggle = panel.querySelector('.turn-scoring-toggle');
-        expect(toggle.textContent).toBe("Show the AI's scoring");
+        expect(toggle.textContent).toBe('turn_panel.show_scoring');
         expect(toggle.getAttribute('aria-pressed')).toBe('false');
     });
 
     test('the scoring switch shows every row its score and working', () => {
         const panel = panelNode();
         const onToggleScoring = jest.fn();
-        battle.renderTurnPanel(panel, describedPending(), {
+        battle.renderTurnPanel(panel, describedPending(), { words: PANEL_WORDS,
             selectedIndex: null, showScoring: true, onToggleScoring,
         });
         const advice = panel.querySelectorAll('.turn-option-advice');
         expect(advice).toHaveLength(3);
-        expect(advice[0].textContent).toBe('score 0.178 — Strike Gray Wolf: bare hands ...');
+        expect(advice[0].textContent)
+            .toBe('turn_panel.advice Strike Gray Wolf: bare hands ... 0.178');
         const toggle = panel.querySelector('.turn-scoring-toggle');
         expect(toggle.getAttribute('aria-pressed')).toBe('true');
-        expect(toggle.textContent).toBe("Hide the AI's scoring");
+        expect(toggle.textContent).toBe('turn_panel.hide_scoring');
         toggle.click();
         expect(onToggleScoring).toHaveBeenCalled();
     });
@@ -1509,7 +1517,7 @@ describe('renderTurnPanel (#250)', () => {
         // The Dire Wolf strike outscores the AI's own choice; the server's
         // mark is what the AI chose (#775).
         const panel = panelNode();
-        battle.renderTurnPanel(panel, describedPending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, describedPending(), { words: PANEL_WORDS,  selectedIndex: null });
         const options = panel.querySelectorAll('.turn-option');
         expect(options[2].querySelector('.turn-option-ai-pick')).not.toBeNull();
         expect(options[1].querySelector('.turn-option-ai-pick')).toBeNull();
@@ -1519,7 +1527,7 @@ describe('renderTurnPanel (#250)', () => {
     test('each target of an attack is its own row with its own target', () => {
         const panel = panelNode();
         const onConfirm = jest.fn();
-        battle.renderTurnPanel(panel, describedPending(), {
+        battle.renderTurnPanel(panel, describedPending(), { words: PANEL_WORDS,
             selectedIndex: 1, onConfirm,
         });
         panel.querySelector('.turn-confirm').click();
@@ -1531,14 +1539,14 @@ describe('renderTurnPanel (#250)', () => {
     test('selection state and confirm gating are data-driven', () => {
         const panel = panelNode();
         const onSelect = jest.fn();
-        battle.renderTurnPanel(panel, samplePending(), {
+        battle.renderTurnPanel(panel, samplePending(), { words: PANEL_WORDS,
             selectedIndex: null, onSelect,
         });
         expect(panel.querySelector('.turn-confirm').disabled).toBe(true);
         panel.querySelectorAll('.turn-option')[1].click();
         expect(onSelect).toHaveBeenCalledWith(1);
 
-        battle.renderTurnPanel(panel, samplePending(), { selectedIndex: 1 });
+        battle.renderTurnPanel(panel, samplePending(), { words: PANEL_WORDS,  selectedIndex: 1 });
         const options = panel.querySelectorAll('.turn-option');
         expect(options[1].getAttribute('aria-pressed')).toBe('true');
         expect(options[0].getAttribute('aria-pressed')).toBe('false');
@@ -1548,7 +1556,7 @@ describe('renderTurnPanel (#250)', () => {
     test('confirm hands the selected candidate to onConfirm', () => {
         const panel = panelNode();
         const onConfirm = jest.fn();
-        battle.renderTurnPanel(panel, samplePending(), {
+        battle.renderTurnPanel(panel, samplePending(), { words: PANEL_WORDS,
             selectedIndex: 1, onConfirm,
         });
         panel.querySelector('.turn-confirm').click();
@@ -1560,10 +1568,10 @@ describe('renderTurnPanel (#250)', () => {
     test('someone else\'s turn shows a waiting notice, not the menu', () => {
         const panel = panelNode();
         battle.renderTurnPanel(
-            panel, samplePending({ is_you: false }), { isDm: false }
+            panel, samplePending({ is_you: false }), { words: PANEL_WORDS, isDm: false }
         );
-        expect(panel.textContent).toContain('Waiting for Kestra Duskmere');
-        expect(panel.textContent).toContain('played by playeruser');
+        expect(panel.querySelector('.turn-waiting').innerHTML)
+            .toBe('turn_panel.waiting_played <strong>Kestra Duskmere</strong> playeruser');
         expect(panel.querySelector('.turn-option')).toBeNull();
         expect(panel.querySelector('.turn-ai-choose')).toBeNull();
     });
@@ -1572,7 +1580,7 @@ describe('renderTurnPanel (#250)', () => {
         const panel = panelNode();
         const onAiChoose = jest.fn();
         battle.renderTurnPanel(
-            panel, samplePending({ is_you: false }), { isDm: true, onAiChoose }
+            panel, samplePending({ is_you: false }), { words: PANEL_WORDS, isDm: true, onAiChoose }
         );
         const aiButton = panel.querySelector('.turn-ai-choose');
         expect(aiButton).not.toBeNull();
@@ -1596,6 +1604,7 @@ describe('turn panel wiring on the battle page (#250)', () => {
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
             <script id="battle-seats" type="application/json">[]</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
     }
 
@@ -1610,7 +1619,7 @@ describe('turn panel wiring on the battle page (#250)', () => {
         battle.initBattlePage();
         const panel = document.getElementById('turn-panel');
         expect(panel.hidden).toBe(false);
-        expect(panel.textContent).toContain('Waiting for');
+        expect(panel.textContent).toContain('turn_panel.waiting_played');
         expect(panel.querySelector('.turn-option')).toBeNull();
         expect(panel.querySelector('.turn-ai-choose')).toBeNull();
         expect(document.querySelector('.combatant-name')).toBeNull();
@@ -1626,7 +1635,7 @@ describe('turn panel wiring on the battle page (#250)', () => {
         battle.initBattlePage();
         const panel = document.getElementById('turn-panel');
         expect(panel.hidden).toBe(false);
-        expect(panel.textContent).toContain('Your move');
+        expect(panel.textContent).toContain('turn_panel.your_move');
     });
 
     test('confirming posts the choice and applies the completed turn', async () => {
@@ -1676,6 +1685,88 @@ describe('turn panel wiring on the battle page (#250)', () => {
         expect(document.getElementById('battle-status').textContent).toBe('Paused');
         expect(document.querySelector('.turn-group[data-turn="1"]')).not.toBeNull();
     });
+
+    // A choice resumes the turn, which a record-writing fight whose records
+    // moved refuses as the advance does (#842): the 409 carries the notice,
+    // the Game Master's control and the readout, rendered as the advance's
+    // refusal is (#112).
+    const stalePending = {
+        combatant_id: 1, turn: 1, display_name: 'Aldwin',
+        player: 'warden', is_you: true,
+        candidates: [{ letter: 'j', name: 'ATTACK', score: 1.9,
+                       rationale: 'advice', target_id: 2, spell_key: '' }],
+    };
+
+    function refuseStale(staleHtml, advance) {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 409,
+            json: async () => ({
+                error: "Aldwin: the record's pools have changed",
+                advance,
+                stale_html: staleHtml,
+            }),
+        });
+        require('../api.js');
+        global.uiNotify = jest.fn();
+    }
+
+    async function confirmChoice() {
+        const panel = document.getElementById('turn-panel');
+        panel.querySelector('.turn-option').click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        return panel;
+    }
+
+    test('a stale-pools refusal of a choice shows the notice and the control (#112)', async () => {
+        mountAwaitingPage(stalePending);
+        document.body.insertAdjacentHTML(
+            'beforeend',
+            '<button id="advance-turn" data-url="/tarmar/battles/1/advance/">'
+            + "Waiting on Aldwin's move</button>"
+            + '<div id="battle-stale-slot"></div>'
+        );
+        battle.initBattlePage();
+        refuseStale(
+            '<p id="battle-stale-pools">Aldwin: the record changed.</p>'
+            + '<form><input type="hidden" name="next" value="/tarmar/battles/1/act/">'
+            + '<button id="resnapshot-pools">Take the pools from the records</button></form>',
+            { label: 'Pools changed on the records', enabled: false }
+        );
+
+        const panel = await confirmChoice();
+
+        expect(document.getElementById('battle-stale-pools').textContent).toContain('Aldwin');
+        expect(document.getElementById('resnapshot-pools')).not.toBeNull();
+        // Back to the page the choice was made on, never the act endpoint.
+        expect(document.querySelector('#battle-stale-slot input[name="next"]').value)
+            .toBe(`${window.location.pathname}${window.location.search}`);
+        expect(document.getElementById('advance-turn').textContent)
+            .toBe('Pools changed on the records');
+        expect(document.getElementById('advance-turn').disabled).toBe(true);
+        expect(global.uiNotify).not.toHaveBeenCalled();
+        // The menu stays, so the choice can be made again once the pools
+        // are taken from the records.
+        expect(panel.querySelector('.turn-option')).not.toBeNull();
+    });
+
+    test('a stale-pools refusal with no notice for this viewer says why (#112)', async () => {
+        // A player who does not run the battle gets no readout and no
+        // control (views.advance_control), so the refusal's words are all
+        // there is to show.
+        mountAwaitingPage(stalePending);
+        document.body.insertAdjacentHTML('beforeend', '<div id="battle-stale-slot"></div>');
+        battle.initBattlePage();
+        refuseStale('', null);
+
+        await confirmChoice();
+
+        expect(document.getElementById('battle-stale-pools')).toBeNull();
+        expect(global.uiNotify).toHaveBeenCalledWith(
+            "Sending the action failed (HTTP 409: Aldwin: the record's pools have changed)."
+        );
+    });
 });
 
 describe('the turn panel keeps keyboard focus (#646)', () => {
@@ -1700,6 +1791,7 @@ describe('the turn panel keeps keyboard focus (#646)', () => {
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
             <script id="battle-seats" type="application/json">[]</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
         battle.initBattlePage();
         return document.getElementById('turn-panel');
@@ -1747,14 +1839,14 @@ describe('the turn panel keeps keyboard focus (#646)', () => {
         const outside = document.createElement('button');
         document.body.appendChild(outside);
         outside.focus();
-        battle.renderTurnPanel(panel, twoOptionPending(), { selectedIndex: 0 });
+        battle.renderTurnPanel(panel, twoOptionPending(), { words: PANEL_WORDS,  selectedIndex: 0 });
         expect(document.activeElement).toBe(outside);
     });
 
     test('a panel with nothing pending forgets where focus was', () => {
         const panel = mountAwaitingPage(twoOptionPending());
         panel.querySelectorAll('.turn-option')[0].focus();
-        battle.renderTurnPanel(panel, null, {});
+        battle.renderTurnPanel(panel, null, { words: PANEL_WORDS });
         expect(panel.dataset.lastFocusKey).toBeUndefined();
     });
 
@@ -1830,6 +1922,7 @@ describe('a submitted choice names its pause (#644)', () => {
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
             <script id="battle-seats" type="application/json">[]</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
     }
 
@@ -2028,14 +2121,14 @@ describe('the wizard cast flow (#250)', () => {
 
     test('every cast candidate collapses into one CAST SPELL option', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, castingPending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,  selectedIndex: null });
         const options = panel.querySelectorAll('.turn-option');
         // MOVE, DODGE and one cast group — not one row per spell.
         expect(options).toHaveLength(3);
         const cast = panel.querySelector('.turn-option-cast');
         expect(cast).not.toBeNull();
-        expect(cast.textContent).toContain('CAST SPELL');
-        expect(cast.textContent).toContain('Mana 4 of 10');
+        expect(cast.textContent).toContain('turn_panel.cast_option');
+        expect(cast.textContent).toContain('turn_panel.pool 10 4 Mana');
         // The AI's favourite is a cast, so the group wears the tag.
         expect(cast.querySelector('.turn-option-ai-pick')).not.toBeNull();
         // Closed by default: no spell list until the player declares a cast.
@@ -2045,13 +2138,13 @@ describe('the wizard cast flow (#250)', () => {
     test('declaring a cast opens the stage without choosing a spell', () => {
         const panel = panelNode();
         const onCastOpen = jest.fn();
-        battle.renderTurnPanel(panel, castingPending(), {
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,
             selectedIndex: null, onCastOpen,
         });
         panel.querySelector('.turn-option-cast').click();
         expect(onCastOpen).toHaveBeenCalled();
 
-        battle.renderTurnPanel(panel, castingPending(), {
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const stage = panel.querySelector('.turn-cast-stage');
@@ -2068,7 +2161,7 @@ describe('the wizard cast flow (#250)', () => {
 
     test('the stage lists known spells, the unavailable ones with the reason', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, castingPending(), {
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const spells = panel.querySelectorAll('.turn-spell');
@@ -2082,13 +2175,14 @@ describe('the wizard cast flow (#250)', () => {
         expect(bolt.textContent).toContain('needs 5 mana, 4 left');
         expect(bolt.disabled).toBe(true);
         // The AI's advice reaches the spell it favours, as advice only.
-        expect(spells[0].querySelector('.turn-option-ai-pick')).not.toBeNull();
+        expect(spells[0].querySelector('.turn-option-ai-pick').textContent)
+            .toBe('turn_panel.ai_pick');
     });
 
     test('picking a spell selects its candidate and ungates the confirm', () => {
         const panel = panelNode();
         const onSelect = jest.fn();
-        battle.renderTurnPanel(panel, castingPending(), {
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true, onSelect,
         });
         panel.querySelectorAll('.turn-spell')[1].click();
@@ -2096,7 +2190,7 @@ describe('the wizard cast flow (#250)', () => {
         expect(onSelect).toHaveBeenCalledWith(2);
 
         const onConfirm = jest.fn();
-        battle.renderTurnPanel(panel, castingPending(), {
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,
             selectedIndex: 2, castOpen: true, onConfirm,
         });
         expect(panel.querySelectorAll('.turn-spell')[1]
@@ -2112,7 +2206,7 @@ describe('the wizard cast flow (#250)', () => {
     test('standing down closes the stage and clears the cast', () => {
         const panel = panelNode();
         const onCastClose = jest.fn();
-        battle.renderTurnPanel(panel, castingPending(), {
+        battle.renderTurnPanel(panel, castingPending(), { words: PANEL_WORDS,
             selectedIndex: 2, castOpen: true, onCastClose,
         });
         const standDown = panel.querySelector('.turn-cast-standdown');
@@ -2137,6 +2231,7 @@ describe('the wizard cast flow (#250)', () => {
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
             <script id="battle-seats" type="application/json">[]</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(castingPending())}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
         battle.initBattlePage();
         global.fetch = jest.fn().mockResolvedValue({
@@ -2177,6 +2272,7 @@ describe('the wizard cast flow (#250)', () => {
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
             <script id="battle-seats" type="application/json">[]</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(castingPending())}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
         battle.initBattlePage();
         const panel = document.getElementById('turn-panel');
@@ -2225,21 +2321,21 @@ describe('the wizard cast flow (#250)', () => {
 
     test('the pool is printed under the name the server gave it', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, classicCastingPending(), {
+        battle.renderTurnPanel(panel, classicCastingPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const cast = panel.querySelector('.turn-option-cast');
-        expect(cast.textContent).toContain('ST 12 of 12');
+        expect(cast.textContent).toContain('turn_panel.pool 12 12 ST');
         expect(cast.textContent).not.toContain('Mana');
         expect(panel.querySelector('.turn-cast-pool').textContent)
-            .toContain('ST 12 of 12');
+            .toContain('turn_panel.pool 12 12 ST');
         expect(panel.querySelector('.turn-cast-pool').textContent)
             .not.toContain('Mana');
     });
 
     test('one spell aimed at two foes gets a button each (#263)', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, classicCastingPending(), {
+        battle.renderTurnPanel(panel, classicCastingPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const spells = panel.querySelectorAll('.turn-spell');
@@ -2258,7 +2354,7 @@ describe('the wizard cast flow (#250)', () => {
     test('each aiming selects its own candidate, not the last one', () => {
         const panel = panelNode();
         const onSelect = jest.fn();
-        battle.renderTurnPanel(panel, classicCastingPending(), {
+        battle.renderTurnPanel(panel, classicCastingPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true, onSelect,
         });
         const spells = panel.querySelectorAll('.turn-spell');
@@ -2270,11 +2366,11 @@ describe('the wizard cast flow (#250)', () => {
 
     test('the cast option counts casts, not spells (#263)', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, classicCastingPending(), {
+        battle.renderTurnPanel(panel, classicCastingPending(), { words: PANEL_WORDS,
             selectedIndex: null,
         });
         expect(panel.querySelector('.turn-option-cast').textContent)
-            .toContain('2 casts ready');
+            .toContain('turn_panel.casts_ready 2');
     });
 
     test('a non-caster keeps the plain menu, no cast group', () => {
@@ -2286,7 +2382,7 @@ describe('the wizard cast flow (#250)', () => {
             ],
             magic: null,
         });
-        battle.renderTurnPanel(panel, pending, { selectedIndex: null });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null });
         expect(panel.querySelector('.turn-option-cast')).toBeNull();
         expect(panel.querySelectorAll('.turn-option')).toHaveLength(1);
     });
@@ -2301,7 +2397,7 @@ describe('the wizard cast flow (#250)', () => {
                   target_id: 9, spell_key: '' },
             ],
         });
-        battle.renderTurnPanel(panel, pending, { selectedIndex: null });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null });
         expect(panel.querySelector('.turn-option-cast')).toBeNull();
     });
 });
@@ -2321,6 +2417,7 @@ function mountPage(pending) {
         <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
         <script id="battle-seats" type="application/json">[]</script>
         <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+        <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
     `;
     battle.initBattlePage();
     global.fetch = jest.fn().mockResolvedValue({
@@ -2384,34 +2481,38 @@ describe('pushing mana into a cast (#960)', () => {
 
     function amounts(panel) {
         return Array.from(panel.querySelectorAll('.turn-push-amount'))
-            .map((button) => button.textContent.replace('AI pick', ''));
+            .map((button) => button.textContent.replace(PANEL_WORDS.ai_pick, ''));
     }
 
     test('a pushed copy is no spell of its own: one row, one count', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         expect(panel.querySelectorAll('.turn-spell')).toHaveLength(2);
         expect(panel.querySelector('.turn-option-cast').textContent)
-            .toContain('2 casts ready');
+            .toContain('turn_panel.casts_ready 2');
     });
 
     test('the push control offers exactly the amounts on the menu', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         // One control, beside the cast that has pushed copies; Shield has none.
         expect(panel.querySelectorAll('.turn-push')).toHaveLength(1);
-        expect(amounts(panel)).toEqual(['None', '+1 mana', '+2 mana']);
+        expect(amounts(panel)).toEqual([
+            'turn_panel.push_none', 'turn_panel.push_amount 1', 'turn_panel.push_amount 2',
+        ]);
         expect(panel.querySelector('.turn-push-label').textContent)
-            .toBe('Push more mana (Channel 3):');
+            .toBe('turn_panel.push_label_channel 3');
+        expect(panel.querySelector('.turn-push').getAttribute('aria-label'))
+            .toBe('turn_panel.push_group Fire Missile');
     });
 
     test('the AI pick stays on the plain cast the AI chose', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const missile = panel.querySelectorAll('.turn-spell')[0];
@@ -2427,7 +2528,7 @@ describe('pushing mana into a cast (#960)', () => {
         pending.candidates[1].ai_choice = false;
         pending.candidates[4].ai_choice = true;
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pending, {
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const missile = panel.querySelectorAll('.turn-spell')[0];
@@ -2444,12 +2545,12 @@ describe('pushing mana into a cast (#960)', () => {
     test('picking the spell selects the plain cast: no push by default', () => {
         const panel = panelNode();
         const onSelect = jest.fn();
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true, onSelect,
         });
         panel.querySelectorAll('.turn-spell')[0].click();
         expect(onSelect).toHaveBeenCalledWith(1);
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: 1, castOpen: true,
         });
         const pressed = Array.from(panel.querySelectorAll('.turn-push-amount'))
@@ -2462,13 +2563,13 @@ describe('pushing mana into a cast (#960)', () => {
     test('an amount selects its copy and shows what it costs', () => {
         const panel = panelNode();
         const onSelect = jest.fn();
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: 1, castOpen: true, onSelect,
         });
         panel.querySelectorAll('.turn-push-amount')[2].click();
         expect(onSelect).toHaveBeenCalledWith(4);
 
-        battle.renderTurnPanel(panel, pushPending(), {
+        battle.renderTurnPanel(panel, pushPending(), { words: PANEL_WORDS,
             selectedIndex: 4, castOpen: true,
         });
         expect(panel.querySelectorAll('.turn-spell')[0]
@@ -2476,7 +2577,7 @@ describe('pushing mana into a cast (#960)', () => {
         expect(panel.querySelectorAll('.turn-push-amount')[2]
             .getAttribute('aria-pressed')).toBe('true');
         expect(panel.querySelector('.turn-push-cost').textContent)
-            .toBe('Costs 3 mana (1 and 2 pushed).');
+            .toBe('turn_panel.costs 3 mana (1 and 2 pushed)');
         expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
     });
 
@@ -2572,23 +2673,23 @@ describe('borrowing mana for a cast (tarmar-engine #28)', () => {
             (candidate) => candidate.spell_key !== 'shield'
         );
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pending, { selectedIndex: null, castOpen: true });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null, castOpen: true });
         expect(panel.querySelector('.turn-option-cast').textContent)
-            .toContain('0 casts ready, 1 by borrowing');
+            .toContain('turn_panel.ready_borrowing 1 turn_panel.casts_ready 0');
         expect(panel.querySelectorAll('.turn-borrow')).toHaveLength(1);
     });
 
     test('the borrowing control lists the menu\'s copies, in the server\'s numbers', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, borrowPending(), {
+        battle.renderTurnPanel(panel, borrowPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         // Shield is affordable (its pushed copy borrows); only Lightning
         // Bolt is paid for by borrowing alone.
         expect(panel.querySelector('.turn-option-cast').textContent)
-            .toContain('1 cast ready, 1 by borrowing');
+            .toContain('turn_panel.ready_borrowing 1 turn_panel.casts_ready_one');
         expect(panel.querySelector('.turn-cast-pool').textContent)
-            .toBe('Mana 1 of 10, owing 2. Pick a spell to cast.');
+            .toBe('turn_panel.stage_pool turn_panel.pool_owing 10 2 1 Mana');
         const group = boltGroup(panel);
         const bolt = group.querySelector('.turn-spell');
         // Not castable on its own: the row stays disabled with the reason.
@@ -2598,7 +2699,9 @@ describe('borrowing mana for a cast (tarmar-engine #28)', () => {
         expect(group.querySelector('.turn-push')).toBeNull();
         const choices = Array.from(group.querySelectorAll('.turn-borrow-amount'));
         expect(choices.map((button) => button.textContent))
-            .toEqual(['Borrow 2 mana', '+1 mana, borrow 3']);
+            .toEqual(['turn_panel.borrow_amount 2', 'turn_panel.borrow_pushed 3 1']);
+        expect(group.querySelector('.turn-borrow-label').textContent)
+            .toBe('turn_panel.borrow_label');
         expect(choices.map((button) => button.dataset.borrowed)).toEqual(['2', '3']);
         // Nothing is borrowed until the player picks.
         expect(choices.every((button) => button.getAttribute('aria-pressed') === 'false'))
@@ -2608,18 +2711,18 @@ describe('borrowing mana for a cast (tarmar-engine #28)', () => {
             .find((node) => node.textContent.includes('Shield'));
         expect(shieldGroup.querySelector('.turn-push')).toBeNull();
         expect(Array.from(shieldGroup.querySelectorAll('.turn-borrow-amount'))
-            .map((button) => button.textContent)).toEqual(['+1 mana, borrow 1']);
+            .map((button) => button.textContent)).toEqual(['turn_panel.borrow_pushed 1 1']);
     });
 
     test('a borrowing copy selects its cast and shows what it costs', () => {
         const panel = panelNode();
         const onSelect = jest.fn();
-        battle.renderTurnPanel(panel, borrowPending(), {
+        battle.renderTurnPanel(panel, borrowPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true, onSelect,
         });
         boltGroup(panel).querySelector('.turn-borrow-amount').click();
         expect(onSelect).toHaveBeenCalledWith(4);
-        battle.renderTurnPanel(panel, borrowPending(), {
+        battle.renderTurnPanel(panel, borrowPending(), { words: PANEL_WORDS,
             selectedIndex: 4, castOpen: true,
         });
         const group = boltGroup(panel);
@@ -2627,7 +2730,7 @@ describe('borrowing mana for a cast (tarmar-engine #28)', () => {
         expect(group.querySelector('.turn-borrow-amount').getAttribute('aria-pressed'))
             .toBe('true');
         expect(group.querySelector('.turn-borrow-cost').textContent)
-            .toBe('Costs 3 mana; borrows the 2 you lack.');
+            .toBe('turn_panel.costs 3 mana; borrows the 2 you lack');
         expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
     });
 
@@ -2706,15 +2809,16 @@ describe('a Runaway on the board (tarmar-engine #30)', () => {
     test('each anchor is a row with the server\'s line and cost', () => {
         document.body.innerHTML = '<div id="turn-panel" hidden></div>';
         const panel = document.getElementById('turn-panel');
-        battle.renderTurnPanel(panel, anchorPending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, anchorPending(), { words: PANEL_WORDS,  selectedIndex: null });
         const rows = panel.querySelectorAll('.turn-option-anchor');
         expect(rows).toHaveLength(2);
         expect(rows[0].querySelector('.turn-option-plain').textContent)
             .toBe('Take back control of your runaway Fire Missile: 2d8 at or under your WIS');
-        expect(rows[0].querySelector('.turn-option-cost').textContent).toBe('Costs nothing.');
+        expect(rows[0].querySelector('.turn-option-cost').textContent)
+            .toBe('turn_panel.costs_nothing');
         expect(rows[0].querySelector('.turn-option-ai-pick')).not.toBeNull();
         expect(rows[1].querySelector('.turn-option-cost').textContent)
-            .toBe('Costs 2 mana, paid whether it holds or not.');
+            .toBe('turn_panel.costs 2 mana, paid whether it holds or not');
         // Not an anchor: DEFEND carries no anchor class.
         expect(panel.querySelectorAll('.turn-option')).toHaveLength(3);
     });
@@ -2831,15 +2935,16 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
 
     test('each enemy caster gets one counter control with the menu\'s amounts', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, counterPending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, counterPending(), { words: PANEL_WORDS,  selectedIndex: null });
         const controls = panel.querySelectorAll('.turn-counter');
         expect(controls).toHaveLength(2);
-        expect(controls[0].getAttribute('aria-label')).toBe("Counter Bram's spell");
+        expect(controls[0].getAttribute('aria-label')).toBe('turn_panel.counter_group Bram');
         expect(controls[0].querySelector('.turn-counter-label').textContent)
-            .toBe('Counter Bram:');
+            .toBe('turn_panel.counter_label Bram');
         // Least commitment first, whatever order the menu listed them in.
         const amounts = Array.from(controls[0].querySelectorAll('.turn-counter-amount'));
-        expect(amounts.map((button) => button.textContent)).toEqual(['1 mana', '2 mana']);
+        expect(amounts.map((button) => button.textContent))
+            .toEqual(['turn_panel.counter_amount 1', 'turn_panel.counter_amount 2']);
         expect(amounts.map((button) => button.dataset.counterMana)).toEqual(['1', '2']);
         expect(amounts.every((button) => button.getAttribute('aria-pressed') === 'false'))
             .toBe(true);
@@ -2851,12 +2956,12 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
 
     test('a picked commitment is pressed and shows the server\'s cost', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, counterPending(), { selectedIndex: 1 });
+        battle.renderTurnPanel(panel, counterPending(), { words: PANEL_WORDS,  selectedIndex: 1 });
         const bram = panel.querySelector('.turn-counter');
         const pressed = bram.querySelector('[aria-pressed="true"]');
-        expect(pressed.textContent).toBe('2 mana');
+        expect(pressed.textContent).toBe('turn_panel.counter_amount 2');
         expect(bram.querySelector('.turn-counter-cost').textContent)
-            .toBe('Costs 2 mana, spent whether Bram casts or not.');
+            .toBe('turn_panel.costs 2 mana, spent whether Bram casts or not');
         expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
     });
 
@@ -2884,7 +2989,7 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
 
     test('an escalating cast reads as pressing the countered spell again', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, escalationPending(), {
+        battle.renderTurnPanel(panel, escalationPending(), { words: PANEL_WORDS,
             selectedIndex: null, castOpen: true,
         });
         const spell = panel.querySelector('.turn-spell');
@@ -2905,7 +3010,7 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
         });
         pending.magic.pool = 1;
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pending, { selectedIndex: null, castOpen: true });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null, castOpen: true });
         const spell = panel.querySelector('.turn-spell');
         expect(spell.disabled).toBe(true);
         expect(spell.classList.contains('is-escalation')).toBe(true);
@@ -2916,7 +3021,7 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
 
     test('counter buttons carry their commitment and no push', () => {
         const panel = panelNode();
-        battle.renderTurnPanel(panel, counterPending(), { selectedIndex: null });
+        battle.renderTurnPanel(panel, counterPending(), { words: PANEL_WORDS,  selectedIndex: null });
         const amounts = Array.from(panel.querySelectorAll('.turn-counter-amount'));
         expect(amounts.every((button) => button.dataset.pushMana === undefined)).toBe(true);
     });
@@ -2925,7 +3030,7 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
         const pending = escalationPending();
         delete pending.candidates[1].escalate;
         const panel = panelNode();
-        battle.renderTurnPanel(panel, pending, { selectedIndex: null, castOpen: true });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,  selectedIndex: null, castOpen: true });
         expect(panel.querySelector('.turn-spell-escalate')).toBeNull();
         expect(panel.querySelector('.turn-spell').classList.contains('is-escalation'))
             .toBe(false);
@@ -3242,6 +3347,7 @@ describe('control modes', () => {
             <div id="battle-log"></div>
             <div id="turn-panel" data-act-url="/act/" data-state-url="/state/" data-is-dm="true" hidden></div>
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
     }
 
@@ -3399,6 +3505,7 @@ describe('the hex picker (#819, #866)', () => {
             <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
             <script id="battle-seats" type="application/json">${JSON.stringify(seats)}</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
     }
 
@@ -3451,10 +3558,10 @@ describe('the hex picker (#819, #866)', () => {
         panel.querySelector('.turn-option').click();
         expect(arena.querySelectorAll('.arena-destination')).toHaveLength(3);
         expect(panel.querySelector('.turn-destination-line').textContent)
-            .toContain('Pick one of the 3 marked hexes');
+            .toContain('turn_panel.pick_hex 3');
         arena.querySelector('[data-hex="0,1"]').dispatchEvent(new Event('click'));
         expect(panel.querySelector('.turn-destination-line').textContent)
-            .toBe('Moving to hex (0, 1).');
+            .toBe('turn_panel.moving_to (0, 1)');
         expect(arena.querySelector('.is-chosen').getAttribute('data-hex')).toBe('0,1');
         // Clearing leaves the option making its own move.
         panel.querySelector('.turn-destination-clear').click();
@@ -3580,6 +3687,7 @@ describe('the poll follows the pause, and only forwards (#9)', () => {
             <script id="battle-seats" type="application/json">[]</script>
             <script id="battle-status-labels" type="application/json">${JSON.stringify(STATUS_CHOICES)}</script>
             <script id="battle-pending" type="application/json">${JSON.stringify(pending)}</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
         `;
         battle.initBattlePage();
         return document.getElementById('turn-panel');
@@ -3751,6 +3859,241 @@ describe('stopping the page polls (#25)', () => {
             await jest.advanceTimersByTimeAsync(6100);
             expect(global.fetch).toHaveBeenCalledTimes(1);
             expect(pageNavigation.reload).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+});
+
+describe('the turn panel writes only the server\'s words (#94)', () => {
+    test('a page whose panel lost its words block says so as it starts', () => {
+        document.body.innerHTML = `
+            <svg id="battle-arena"></svg>
+            <div id="turn-panel" hidden></div>
+            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+        `;
+        expect(() => battle.initBattlePage()).toThrow('#battle-turn-panel-words');
+    });
+
+    // Every word the panel draws around the menu's lines is the server's
+    // [turn_panel]. Under the fixed words a word written back into
+    // battle.js shows as itself instead of its key, so each panel below is
+    // drawn and every key must turn up in what a reader sees or hears.
+    function seen(panel) {
+        // Each piece of text on its own line, so one word's key never runs
+        // into the next.
+        const texts = [];
+        const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) { texts.push(walker.currentNode.nodeValue); }
+        const labels = Array.from(panel.querySelectorAll('[aria-label]'))
+            .map((node) => node.getAttribute('aria-label'));
+        return [...texts, ...labels].join('\n');
+    }
+
+    function draw(pending, options) {
+        document.body.innerHTML = '<div id="turn-panel" hidden></div>';
+        const panel = document.getElementById('turn-panel');
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS, ...options });
+        return seen(panel);
+    }
+
+    const waitingFor = (player) => ({
+        combatant_id: 1, turn: 2, display_name: 'Bram', player, is_you: false,
+        candidates: [],
+    });
+
+    function choosing(candidates, magic) {
+        return {
+            combatant_id: 1, turn: 2, display_name: 'Bram', player: 'sam', is_you: true,
+            candidates, magic,
+        };
+    }
+
+    const moves = [
+        { letter: 'a', name: 'MOVE', score: 0.2, rationale: 'Close', target_id: null,
+          spell_key: '', plain: 'Move', cost: '', destinations: [[0, 1], [1, 0]] },
+        { letter: 'j', name: 'ATTACK', score: 0.9, rationale: 'Strike', target_id: 2,
+          spell_key: '', plain: 'Attack', cost: '1 Fatigue', ai_choice: true },
+    ];
+
+    const cast = (spell, extra) => ({
+        letter: 'h', name: `CAST SPELL ${spell}`, score: 0, rationale: 'cast',
+        target_id: 2, spell_key: spell, plain: '', cost: '1 mana', ...extra,
+    });
+    const row = (spell, extra) => ({
+        key: spell, target_id: 2, name: spell, cost: 'Elemental — 1 mana', note: '',
+        castable: true, reason: '', channel: null, ...extra,
+    });
+
+    test('every panel word turns up, and only as the server wrote it', () => {
+        const drawn = [
+            draw(waitingFor(''), { isDm: true }),
+            draw(waitingFor('sam'), {}),
+            draw(choosing(moves), { selectedIndex: 0, showScoring: true, destination: [0, 1] }),
+            draw(choosing(moves), { selectedIndex: 0, showScoring: false }),
+            // Two casts: one with a push and no Channel, one pressed again
+            // with no line of its own; a third only borrowing pays for, with
+            // no reason given for it on its own; the caster owes mana.
+            draw(choosing([
+                cast('missile'),
+                cast('missile', { push_mana: 1 }),
+                cast('bolt', { escalate: true }),
+                cast('shield', { borrow: true, borrowed: 2 }),
+                cast('shield', { borrow: true, borrowed: 3, push_mana: 1 }),
+            ], {
+                pool_label: 'Mana', pool: 1, max_pool: 10, owed: 2,
+                spells: [row('missile'), row('bolt'), row('shield', { castable: false })],
+            }), { castOpen: true, selectedIndex: 1 }),
+            // One cast, pushed under a Channel.
+            draw(choosing([cast('missile'), cast('missile', { push_mana: 1 })], {
+                pool_label: 'Mana', pool: 4, max_pool: 10,
+                spells: [row('missile', { channel: 3 })],
+            }), { castOpen: true }),
+            // A counter whose caster the menu does not name.
+            draw(choosing([
+                { letter: 'counter', name: 'COUNTER', score: 0, rationale: 'counter',
+                  target_id: 7, counter_mana: 1, spell_key: '', cost: '1 mana' },
+            ]), { selectedIndex: 0 }),
+        ].join('\n');
+        Object.keys(PANEL_WORDS).forEach((key) => {
+            // Whole keys: "costs" is not found inside "costs_nothing".
+            const drawnKey = new RegExp(`turn_panel\\.${key}(?!\\w)`);
+            expect([key, drawnKey.test(drawn)]).toEqual([key, true]);
+        });
+    });
+});
+
+/**
+ * A battle that went back under the page (#9, #89): a restart made elsewhere.
+ * The arena's poll announces it on the arena; a page that can draw the arena
+ * again in place (the GM chat's Battle tab) cancels the announcement and does,
+ * and only a page where nothing cancels it reloads.
+ */
+describe('a battle that went back under the page (#89)', () => {
+    /** An arena in `holder`, on turn 3, polling as a player's page does. */
+    function mountArenaOnTurnThree(holder) {
+        holder.innerHTML = `
+            <strong id="battle-status">Awaiting players</strong>
+            <span id="battle-turn">3</span>
+            <div id="battle-roster"></div>
+            <svg id="battle-arena"></svg>
+            <div id="battle-log"></div>
+            <div id="turn-panel" hidden
+                 data-act-url="/tarmar/battles/1/act/"
+                 data-state-url="/tarmar/battles/1/state/"></div>
+            <script id="battle-view" type="application/json">${JSON.stringify(sampleState([sampleCombatant()]))}</script>
+            <script id="battle-seats" type="application/json">[]</script>
+            <script id="battle-pending" type="application/json">null</script>
+            <script id="battle-turn-panel-words" type="application/json">${JSON.stringify(PANEL_WORDS)}</script>
+        `;
+        battle.initBattlePage(holder);
+        require('../api.js');
+    }
+
+    /** The state endpoint answering with the battle back at its start. */
+    function answerRestarted() {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: 'paused', turn: 0, view: sampleState([sampleCombatant()]),
+                events: [], seats: [], pending: null,
+            }),
+        });
+    }
+
+    test('a page where nothing draws the arena again reloads', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<main id="page"></main>';
+            mountArenaOnTurnThree(document.getElementById('page'));
+            answerRestarted();
+            const heard = jest.fn();
+            document.addEventListener(battle.REWOUND_EVENT, heard);
+
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(heard).toHaveBeenCalledTimes(1);
+            expect(heard.mock.calls[0][0].target.id).toBe('battle-arena');
+            expect(pageNavigation.reload).toHaveBeenCalledTimes(1);
+            document.removeEventListener(battle.REWOUND_EVENT, heard);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a page that draws it again in place cancels the reload', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<section id="gm-panel-battle"></section>';
+            const tab = document.getElementById('gm-panel-battle');
+            mountArenaOnTurnThree(tab);
+            answerRestarted();
+            const drawAgain = jest.fn((event) => event.preventDefault());
+            tab.addEventListener(battle.REWOUND_EVENT, drawAgain);
+
+            await jest.advanceTimersByTimeAsync(2100);
+
+            expect(drawAgain).toHaveBeenCalledTimes(1);
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+            expect(pageNavigation.go).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('an answer that lands after the arena was drawn again reloads nothing', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<section id="gm-panel-battle"></section>';
+            const tab = document.getElementById('gm-panel-battle');
+            mountArenaOnTurnThree(tab);
+            let answer;
+            global.fetch = jest.fn(() => new Promise((resolve) => { answer = resolve; }));
+            const heard = jest.fn();
+            document.addEventListener(battle.REWOUND_EVENT, heard);
+
+            // The tick's request goes out; the tab is drawn again meanwhile.
+            await jest.advanceTimersByTimeAsync(2100);
+            tab.replaceChildren();
+            answer({
+                ok: true,
+                json: async () => ({
+                    status: 'paused', turn: 0, view: sampleState([sampleCombatant()]),
+                    events: [], seats: [], pending: null,
+                }),
+            });
+            await jest.advanceTimersByTimeAsync(6100);
+
+            expect(heard).not.toHaveBeenCalled();
+            expect(pageNavigation.reload).not.toHaveBeenCalled();
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+            document.removeEventListener(battle.REWOUND_EVENT, heard);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('an arena drawn again in its place stops its poll', async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<section id="gm-panel-battle"></section>';
+            const tab = document.getElementById('gm-panel-battle');
+            mountArenaOnTurnThree(tab);
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({
+                    status: 'awaiting', turn: 3, view: sampleState([sampleCombatant()]),
+                    events: [], seats: [], pending: null,
+                }),
+            });
+            await jest.advanceTimersByTimeAsync(2100);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+
+            // The tab's contents drawn again: this arena is off the page.
+            tab.replaceChildren();
+            await jest.advanceTimersByTimeAsync(6100);
+
+            expect(global.fetch).toHaveBeenCalledTimes(1);
         } finally {
             jest.useRealTimers();
         }

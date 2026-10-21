@@ -13,6 +13,7 @@ from common.test_helpers import BaseTestCase, create_character
 
 from .luck import LuckAccount, luck_accounts, luck_level, spend_luck
 from .models import GMSession, SessionCharacter
+from .refusal_words import refusal_words
 
 # Three points buy Luck level 2 (1 + 2).
 LUCK_LEVEL_TWO = {"luck": 3}
@@ -44,7 +45,10 @@ class SpendLuckTest(BaseTestCase):
             first, "spent Luck in The Barrow: +2 to the lockpick; 1 of 2 this session"
         )
         spend_luck(self.session, self.character.pk, is_game_master=False)
-        with self.assertRaisesMessage(CharacterChangeError, "spent all 2"):
+        with self.assertRaisesMessage(
+            CharacterChangeError,
+            refusal_words().luck.luck_spent.format(name=self.character.name, level=2),
+        ):
             spend_luck(self.session, self.character.pk, is_game_master=False)
         self.assertEqual(luck_accounts(self.session)[self.character.pk].remaining, 0)
         self.character.refresh_from_db()
@@ -79,10 +83,14 @@ class SpendLuckTest(BaseTestCase):
     def test_no_luck_or_no_seat_is_refused(self) -> None:
         plain = create_character(self.player, name="Plain")
         self.session.characters.add(plain)
-        with self.assertRaisesMessage(CharacterChangeError, "has no Luck"):
+        with self.assertRaisesMessage(
+            CharacterChangeError, refusal_words().luck.no_luck.format(name="Plain")
+        ):
             spend_luck(self.session, plain.pk, is_game_master=False)
         stranger = create_character(self.player, name="Elsewhere", skills={"luck": 1})
-        with self.assertRaisesMessage(CharacterChangeError, "not in this session"):
+        with self.assertRaisesMessage(
+            CharacterChangeError, refusal_words().luck.not_in_session
+        ):
             spend_luck(self.session, stranger.pk, is_game_master=False)
         self.assertNotIn(plain.pk, luck_accounts(self.session))
         self.assertEqual(luck_accounts(None), {})
@@ -124,7 +132,10 @@ class SpendLuckEndpointTest(BaseTestCase):
         )
         refused = self.post_json(self.url, {"character_id": self.character.pk})
         self.assertEqual(refused.status_code, 400)
-        self.assertIn("only a Game Master grants more", refused.json()["error"])
+        self.assertIn(
+            refusal_words().luck.luck_spent.format(name=self.character.name, level=2),
+            refused.json()["error"],
+        )
         self.assertEqual(
             self.post_json(self.url, {"character_id": "x"}).status_code, 400
         )

@@ -20,6 +20,11 @@ const {
 } = require('./fixtures');
 const { runDjangoShell, readDjangoShell } = require('./django');
 const { loadedCharacterRules } = require('./character-rules');
+const { refusal } = require('./refusals');
+
+/** The note that says once why a recorded attribute is locked (#84). */
+const ATTRIBUTE_LOCKED_NOTE_ID = 'attribute-locked-reason';
+const ATTRIBUTE_LOCKED_NOTE = `#${ATTRIBUTE_LOCKED_NOTE_ID}`;
 
 /** The character id from the editor's URL. */
 function characterId(page) {
@@ -58,10 +63,17 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
             await expect(page.locator(`[data-field="${field}"]`), field).toHaveCount(0);
             await expect(page.locator(`[data-locked-field="${field}"]`), field).toBeVisible();
         }
-        await expect(page.locator('[data-locked-field="strength"]')).toHaveText(
-            `Rolled (${rules.attribute_dice}) or bought (${rules.point_buy.total} points); only a `
-            + 'Game Master can change a recorded score.'
-        );
+        // The six attributes share one reason, so their table says it once,
+        // under it, and each locked cell points to it (#84): the sentence was
+        // printed in all six cells, and the table did not fit a phone.
+        const attributeReason = refusal('characters', 'services', 'field_attribute', {
+            dice: rules.attribute_dice, points: rules.point_buy.total,
+        });
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toHaveText(attributeReason);
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeVisible();
+        await expect(page.getByText(attributeReason, { exact: true })).toHaveCount(1);
+        await expect(page.locator(`[data-locked-field][aria-describedby="${ATTRIBUTE_LOCKED_NOTE_ID}"]`))
+            .toHaveCount(6);
         // What the rules let a player choose stays an input.
         await expect(page.locator('[data-field="name"]')).toHaveCount(1);
         // The Origin is "roll or choose", and creation rolled it: a roll is
@@ -69,20 +81,20 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         // input before, which was the bug.
         await expect(page.locator('[data-field="location"]')).toHaveCount(0);
         await expect(page.locator('[data-locked-field="location"]')).toHaveText(
-            'The Origin was rolled, and a roll is final; only a Game Master can change it.'
+            refusal('characters', 'services', 'roll_fixed_origin')
         );
         // Height and weight are "choose or roll", and creation rolled them:
         // a roll is final for a player (Spencer's ruling on #948). This
         // asserted an input before, which was the bug.
         await expect(page.locator('[data-locked-field="height_roll"]')).toHaveText(
-            'Height was rolled, and a roll is final; only a Game Master can change it.'
+            refusal('characters', 'services', 'roll_fixed_height')
         );
         await expect(page.locator('[data-field="weight_roll"]')).toHaveCount(0);
         await expect(page.locator('[data-locked-field="weight_roll"]')).toBeVisible();
         const height = await postFieldUpdate(page, id, 'height_roll', '6');
         expect(height).toEqual({
             status: 400,
-            body: { error: 'Height was rolled, and a roll is final; only a Game Master can change it.' },
+            body: { error: refusal('characters', 'services', 'roll_fixed_height') },
         });
         // The Fatigue roll was made at creation: no second roll offered.
         await expect(page.locator('#roll-fatigue-btn')).toHaveCount(0);
@@ -92,7 +104,9 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         const coin = await postFieldUpdate(page, id, 'starting_coin', 1000000);
         expect(fatigue).toEqual({
             status: 400,
-            body: { error: `Rolled (${rules.fatigue.dice}) once; only a Game Master can change it.` },
+            body: {
+                error: refusal('characters', 'services', 'field_fatigue_roll', { dice: rules.fatigue.dice }),
+            },
         });
         expect(strength.status).toBe(400);
         expect(coin.status).toBe(400);
@@ -178,6 +192,8 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         await page.reload();
         const roll = page.locator('#roll-attributes-btn');
         await expect(roll).toBeVisible();
+        // No score is locked, so nothing says why yet (#84).
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeHidden();
 
         const strength = page.locator('[data-field="strength"] input');
         await expect(strength).toHaveAttribute('min', '3');
@@ -189,6 +205,7 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         // no longer roll the rest (#748 review): no reload needed.
         await expect(page.locator('[data-readonly-field="strength"]')).toHaveText('15');
         await expect(page.locator('[data-locked-field="strength"]')).toBeVisible();
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeVisible();
         await expect(roll).toBeHidden();
         await page.reload();
         await expect(roll).toHaveCount(0);
@@ -306,7 +323,7 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         await expect(row).toContainText('Broadsword');
         await expect(row.locator('[data-field="to_hit_mod"]')).toHaveCount(0);
         await expect(page.locator('#item-modifier-note')).toContainText(
-            "Item modifiers are a Game Master's grant; the rules give equipment none."
+            refusal('characters', 'services', 'field_item_modifiers')
         );
 
         await logout(page);

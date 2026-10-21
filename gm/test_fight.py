@@ -33,7 +33,7 @@ from common.services.ollama_client import (
 from common.test_helpers import BaseTestCase, create_character, logged_exception
 from common.test_helpers import make_beast as shared_make_beast
 
-from . import battle_report, fight, views
+from . import battle_report, fight
 from .battle_report import (
     LOG_PREAMBLE,
     RESTART_TEXT,
@@ -60,6 +60,7 @@ from .fight import (
     start_fight,
 )
 from .models import GMSession, GMTurnRecord
+from .refusal_words import refusal_words
 from .retrieval import BATTLE_KIND, is_battle_message, is_hidden_message
 from .testing import game_master_sets_the_foes_asked_for, gm_replies
 from .turn_record import running_turn_for
@@ -375,17 +376,23 @@ class FightStartTest(BaseTestCase):
 
     def test_no_living_characters_no_fight(self):
         self.session.characters.clear()
-        with self.assertRaisesMessage(FightError, "Attach a living character"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.attach_living_character
+        ):
             start_fight(self.session, foes_text="gray wolf")
         self.session.characters.add(self.aldwin)
         self.aldwin.is_alive = False
         self.aldwin.save()
-        with self.assertRaisesMessage(FightError, "Attach a living character"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.attach_living_character
+        ):
             start_fight(self.session, foes_text="gray wolf")
 
     def test_a_fight_under_way_refuses_a_second_and_a_finished_one_allows_it(self):
         first = start_fight(self.session, foes_text="gray wolf").battle
-        with self.assertRaisesMessage(FightError, "already under way"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.fight_under_way
+        ):
             start_fight(self.session, foes_text="gray wolf")
         Battle.objects.filter(pk=first.pk).update(status=Battle.STATUS_FINISHED)
         self.session.refresh_from_db()
@@ -413,7 +420,9 @@ class FightStartTest(BaseTestCase):
             self.session.characters.add(
                 create_character(self.user, name=f"Extra {number}")
             )
-        with self.assertRaisesMessage(FightError, "fills it"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.field_full.format(most=MAX_COMBATANTS)
+        ):
             start_fight(self.session, foes_text="gray wolf")
 
     def test_long_names_fit_the_battle_name_column(self):
@@ -471,7 +480,7 @@ class FoesFromTheModelTest(BaseTestCase):
     @patch("gm.services.ollama_client.chat")
     def test_an_empty_list_is_an_error(self, mock_stream):
         mock_stream.return_value = '{"foes": []}'
-        with self.assertRaisesMessage(FightError, "nobody to fight"):
+        with self.assertRaisesMessage(FightError, refusal_words().fight.found_nobody):
             request_foes_from_model(self.history, max_foes=5)
 
     @patch("gm.services.ollama_client.chat")
@@ -526,7 +535,9 @@ class FoesFromTheModelTest(BaseTestCase):
         response = MagicMock(status_code=STRUCTURED_OUTPUT_UNAVAILABLE_STATUS)
         refused = httpx.HTTPStatusError("501", request=MagicMock(), response=response)
         mock_chat.side_effect = [refused, "I would rather not say who you face."]
-        with self.assertRaisesMessage(FightError, "try naming the foes"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.could_not_say_who
+        ):
             request_foes_from_model(self.history, max_foes=5)
 
 
@@ -587,7 +598,7 @@ class FightEndpointTest(BaseTestCase):
         mock_stream.return_value = "nope"
         response = self._post({"session_id": self.session.pk})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("try naming the foes", response.json()["error"])
+        self.assertIn(refusal_words().fight.could_not_say_who, response.json()["error"])
         self.assertIsNone(Battle.objects.first())
 
     @patch("gm.services.ollama_client.chat")
@@ -613,7 +624,7 @@ class FightEndpointTest(BaseTestCase):
         ]
         result = self._post({"session_id": self.session.pk, "foes": ""})
         self.assertEqual(result.status_code, 400)
-        self.assertIn("try naming the foes", result.json()["error"])
+        self.assertIn(refusal_words().fight.could_not_say_who, result.json()["error"])
         self.assertIsNone(Battle.objects.first())
 
     def test_refusals(self):
@@ -636,7 +647,9 @@ class FightEndpointTest(BaseTestCase):
         self.session.characters.clear()
         response = self._post({"session_id": self.session.pk, "foes": "wolf"})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Attach a living character", response.json()["error"])
+        self.assertIn(
+            refusal_words().fight.attach_living_character, response.json()["error"]
+        )
 
     def test_requires_login(self):
         self.logout()
@@ -694,6 +707,9 @@ class ChatPageBattleTabTest(BaseTestCase):
         self.assertNotContains(response, 'id="restart-battle"')
         self.assertContains(response, "js/battle.js")
         self.assertContains(response, "js/gm-panel-battle.js")
+        # The turn panel's words reach the tab as they reach the battle page
+        # (#94), in the arena partial's own block.
+        self.assertContains(response, 'id="battle-turn-panel-words"')
         self.assertContains(response, "css/battle.css")
         # The fight form waits while this one is under way.
         self.assertContains(response, 'id="gm-fight-start" disabled')
@@ -720,6 +736,73 @@ class ChatPageBattleTabTest(BaseTestCase):
         self.assertNotContains(response, "is-live")
         self.assertContains(response, 'id="battle-arena"')
         self.assertNotContains(response, 'id="gm-fight-start" disabled')
+
+    def test_the_tab_alone_is_rendered_for_drawing_it_again(self):
+        """gm:battle_panel renders the page's partial, from the page's context (#89).
+
+        The page asks for it when the board changes under it, rather than
+        reloading, which threw away the earlier turns the reader had loaded.
+        """
+        battle = start_fight(self.session, foes_text="gray wolf").battle
+        page = self.client.get(f"/tarmar/gm/?session={self.session.pk}")
+
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertTemplateUsed(response, "gm/_panel_battle.html")
+        self.assertTemplateNotUsed(response, "gm/chat.html")
+        for key in ("panel_battle", "battle_live", "panel_verdict", "can_control"):
+            with self.subTest(key=key):
+                self.assertEqual(response.context[key], page.context[key])
+        self.assertEqual(response.context["active_session"], self.session)
+        self.assertContains(response, 'id="gm-panel-battle"')
+        self.assertContains(response, f'data-popout-url="/tarmar/battles/{battle.pk}/"')
+        self.assertContains(response, 'data-live="true"')
+        self.assertContains(response, 'id="battle-arena"')
+        # The turn panel's words (#94) come with the arena: battle.js reads
+        # them again when it wires the tab drawn from this.
+        self.assertContains(response, 'id="battle-turn-panel-words"')
+        self.assertContains(response, 'id="gm-fight-start" disabled')
+
+    def test_the_tab_rendered_alone_says_when_the_fight_is_over(self):
+        battle = start_fight(self.session, foes_text="gray wolf").battle
+        Battle.objects.filter(pk=battle.pk).update(status=Battle.STATUS_FINISHED)
+
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertContains(response, 'data-live="false"')
+        self.assertNotContains(response, 'id="gm-fight-start" disabled')
+
+    def test_the_tab_rendered_alone_with_no_fight_offers_the_form(self):
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertContains(response, 'id="gm-battle-empty"')
+        self.assertContains(response, 'data-popout-empty="')
+        self.assertNotIn("view_json", response.context)
+
+    def test_only_the_owner_reads_the_tab(self):
+        self.logout()
+        self.login_as(self.create_user(username="stranger"))
+
+        response = self.client.get(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_tab_is_only_read(self):
+        response = self.client.post(f"/tarmar/gm/sessions/{self.session.pk}/battle/")
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_the_page_tells_the_tab_where_to_ask(self):
+        response = self.client.get(f"/tarmar/gm/?session={self.session.pk}")
+
+        self.assertEqual(
+            response.context["panel_config"]["battlePanelUrlTemplate"],
+            "/tarmar/gm/sessions/{session_id}/battle/",
+        )
+        self.assertEqual(
+            response.context["chat_config"]["historyUrlTemplate"],
+            "/tarmar/gm/sessions/{session_id}/history/",
+        )
 
     def test_battle_entries_are_hidden_from_the_transcript(self):
         battle = start_fight(self.session, foes_text="gray wolf").battle
@@ -1131,7 +1214,9 @@ class OverlappingFightsTest(BaseTestCase):
             return real_parse(text)
 
         with patch("gm.fight.parse_foe_text", side_effect=start_another):
-            with self.assertRaisesMessage(FightError, "already under way"):
+            with self.assertRaisesMessage(
+                FightError, refusal_words().fight.fight_under_way
+            ):
                 start_fight(self.session, foes_text="gray wolf")
 
         self.assertEqual(Battle.objects.count(), 1)
@@ -1183,7 +1268,9 @@ class StandInsAreNotLeftBehindTest(BaseTestCase):
 
         before = self.generated()
         with patch("gm.fight.parse_foe_text", side_effect=start_another):
-            with self.assertRaisesMessage(FightError, "already under way"):
+            with self.assertRaisesMessage(
+                FightError, refusal_words().fight.fight_under_way
+            ):
                 start_fight(self.session, foes_text="shadow hound")
 
         self.assertEqual(self.generated(), before)
@@ -1294,7 +1381,7 @@ class FightTakesTheTurnClaimTest(BaseTestCase):
         self.assertEqual(response.status_code, 400)
         record = GMTurnRecord.objects.get(session=self.session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_REJECTED)
-        self.assertIn("Attach a living character", record.error)
+        self.assertIn(refusal_words().fight.attach_living_character, record.error)
         self.assertIsNone(running_turn_for(self.user, self.session.pk))
 
     def test_a_fight_that_fails_releases_the_claim(self):
@@ -1310,7 +1397,7 @@ class FightTakesTheTurnClaimTest(BaseTestCase):
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
         # The record is read back to the player by gm:turn, so it holds the
         # fixed sentence; Django logs the traceback of what was raised (#13).
-        self.assertEqual(record.error, views.GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(record.error, refusal_words().views.server_error)
         state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
         self.assertNotIn("hunter2", state.content.decode())
         self.assertIn(secret, str(logged_exception(logs.records[0])))
@@ -1338,7 +1425,9 @@ class FightTakesTheTurnClaimTest(BaseTestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("already answered", response.json()["error"])
+        self.assertIn(
+            refusal_words().views.turn_already_answered, response.json()["error"]
+        )
 
 
 class FightSeatsOnlyWhatTheOwnerMayChangeTest(BaseTestCase):
@@ -1377,7 +1466,9 @@ class FightSeatsOnlyWhatTheOwnerMayChangeTest(BaseTestCase):
     def test_with_only_their_character_there_is_no_fight(self):
         self.lose_the_role()
 
-        with self.assertRaisesMessage(FightError, "belong to other players"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.other_players_characters
+        ):
             start_fight(self.session, foes_text="gray wolf", seed=3)
 
         self.assertEqual(Battle.objects.count(), 0)
@@ -1572,7 +1663,9 @@ class PlayersFoesAreTheGameMastersTest(BaseTestCase):
         response = self._post("a rat")
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("could not find foes", response.json()["error"])
+        self.assertIn(
+            refusal_words().fight.no_foes_in_bestiary, response.json()["error"]
+        )
         self.assertIsNone(Battle.objects.first())
 
     @patch("gm.services.ollama_client.chat")
@@ -1607,11 +1700,13 @@ class PlayersFoesAreTheGameMastersTest(BaseTestCase):
             response = self._post("wolves")
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["error"], views.FIGHT_MODEL_UNREACHABLE)
+        self.assertEqual(
+            response.json()["error"], refusal_words().views.fight_model_unreachable
+        )
         self.assertIsNone(Battle.objects.first())
         record = GMTurnRecord.objects.get(session=self.session)
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
-        self.assertEqual(record.error, views.FIGHT_MODEL_UNREACHABLE)
+        self.assertEqual(record.error, refusal_words().views.fight_model_unreachable)
         state = self.client.get(f"/tarmar/gm/turns/{record.pk}/")
         self.assertNotIn("s3cr3t", state.content.decode())
         self.assertIn(secret, "\n".join(logs.output))

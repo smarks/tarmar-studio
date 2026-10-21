@@ -262,25 +262,37 @@ class ModeIndicatorTest(BaseTestCase):
         page = self._page(self.create_dm())
         self.assertIn('<div class="gm-mode-indicator" id="gm-mode-indicator">', page)
         indicator = page.split('id="gm-mode-indicator"')[1].split("</div>")[0]
-        # ``onchange`` submits the mode form, which is a state change the
-        # server renders back; nothing here hides or times out the strip.
+        # chat.js posts the mode form and paints the stored mode back
+        # (issue #89); nothing here hides or times out the strip.
         for dismissal in ("onclick", "setTimeout", "aria-live", "dismiss"):
             with self.subTest(dismissal=dismissal):
                 self.assertNotIn(dismissal, indicator)
 
+    @staticmethod
+    def _chrome(page: str) -> str:
+        """The opening line and the message box, as the page shows them.
+
+        The mode control's options carry every mode's words for switching in
+        place (issue #89), so the page as a whole holds both; what is shown
+        is the opening line and the box.
+        """
+        opening = page.split('id="gm-mode-opening">')[1].split("</p>")[0]
+        box = page.split('id="user-input"')[1].split(">")[0]
+        return f"{opening}\n{box}"
+
     def test_the_page_asks_a_game_master_what_the_aide_answers(self):
         """The chrome cannot invite the GM into a scene the aide won't run."""
-        page = self._page(self.create_dm())
-        self.assertIn("Ask a rules question", page)
-        self.assertIn('placeholder="Ask the aide"', page)
-        self.assertNotIn("What do you do?", page)
-        self.assertNotIn("Describe your character concept", page)
+        chrome = self._chrome(self._page(self.create_dm()))
+        self.assertIn("Ask a rules question", chrome)
+        self.assertIn('placeholder="Ask the aide"', chrome)
+        self.assertNotIn("What do you do?", chrome)
+        self.assertNotIn("Describe your character concept", chrome)
 
     def test_a_players_page_keeps_its_own_words(self):
-        page = self._page(self.create_player())
-        self.assertIn("Describe your character concept", page)
-        self.assertIn('placeholder="What do you do?"', page)
-        self.assertNotIn("Ask a rules question", page)
+        chrome = self._chrome(self._page(self.create_player()))
+        self.assertIn("Describe your character concept", chrome)
+        self.assertIn('placeholder="What do you do?"', chrome)
+        self.assertNotIn("Ask a rules question", chrome)
 
     def test_the_badge_follows_the_same_role_test_as_the_dm_prompt(self):
         """The page cannot claim one mode while the model runs in the other."""

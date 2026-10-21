@@ -1,16 +1,17 @@
 """The words a Game Master's rulings on a battle are shown in (issues #867, #37).
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
-headings and buttons, the battle-log lines and the refusals live in
-``config/battle-rulings.toml``, which Spencer edits with no Python, read once at
-startup into ``settings.BATTLE_RULINGS_WORDING`` by :func:`load_rulings_wording`.
-A missing or unknown key, a value that is not text, and a ``{name}`` a sentence
-may not use all stop the server then, not in front of a player.
+headings and buttons, the battle-log lines, the refusals and the turn menu's
+lines (#90) live in ``config/battle-rulings.toml``, which Spencer edits with no
+Python, read once at startup into ``settings.BATTLE_RULINGS_WORDING`` by
+:func:`load_rulings_wording`. A missing or unknown key, a value that is not
+text, and a ``{name}`` a sentence may not use all stop the server then, not in
+front of a player.
 
 Each table of the file is one dataclass below and each key one field, so code
 and templates read a sentence as an attribute (``words().magic_bounds.heading``)
 and no key is spelled twice. A field's metadata names the ``{placeholders}`` its
-sentence may use; a sentence may leave any of them out.
+sentence may use; a sentence may leave any of them out, except the names a field requires.
 
 settings.py imports this module while it is still loading, so nothing here
 reads the settings at import time (``django.conf.settings`` is lazy).
@@ -18,81 +19,246 @@ reads the settings at import time (``django.conf.settings`` is lazy).
 
 from __future__ import annotations
 
-import string
-import tomllib
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, get_type_hints
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
 
-#: The field metadata key naming the placeholders a sentence may use.
-PLACEHOLDERS = "placeholders"
-
-
-def _sentence(*placeholders: str) -> Any:
-    """A wording field whose sentence may use ``placeholders``."""
-    return field(metadata={PLACEHOLDERS: frozenset(placeholders)})
+from common.wording import load_wording, sentence
 
 
 @dataclass(frozen=True)
 class CommonWords:
     """Words both rulings use."""
 
-    game_master: str = _sentence("name")
-    and_word: str = _sentence()
-    unknown_figure: str = _sentence()
+    game_master: str = sentence("name")
+    and_word: str = sentence()
+    or_word: str = sentence()
+    unknown_figure: str = sentence()
+
+
+@dataclass(frozen=True)
+class TurnMenuWords:
+    """The turn menu's words both profiles' lines use (#90)."""
+
+    the_weapon: str = sentence("weapon")
+    bare_hands: str = sentence()
+    with_odds: str = sentence("line", "odds", required=("line", "odds"))
+    no_nearer: str = sentence("move", "aimed")
+    ends_from: str = sentence("move", "distance", "aimed")
+    standing: str = sentence("reason", required=("reason",))
+    stand: str = sentence("reason", required=("reason",))
+    reach: str = sentence("move", "hexes", required=("move",))
+    no_attack_charge: str = sentence("aimed", "reason", required=("reason",))
+    attack: str = sentence("aimed", "weapon")
+    shoot: str = sentence("aimed", "weapon")
+    last_shot: str = sentence("aimed", "weapon")
+    cast: str = sentence("spell")
+    cast_at: str = sentence("spell", "aimed")
+    ready: str = sentence("weapon")
+    ready_another: str = sentence()
+    change_to: str = sentence("weapon")
+    change_weapons: str = sentence()
+    dropped: str = sentence("weapon")
+    pick_up: str = sentence("weapon")
+    stand_up: str = sentence()
+    under_one: str = sentence()
+    about: str = sentence("damage")
+
+
+@dataclass(frozen=True)
+class TarmarMenuWords:
+    """A Tarmar figure's turn menu's own words (#788, #56, #57, #90)."""
+
+    odds: str = sentence("faces", "sides", "dice", "average")
+    odds_armoured: str = sentence("faces", "sides", "dice", "stops", "average")
+    clear_gait: str = sentence("gait")
+    nearest_enemy: str = sentence()
+    run: str = sentence("hexes", "aimed")
+    sprint: str = sentence("hexes", "aimed")
+    fatigue: str = sentence("fatigue")
+    fatigue_if_moving: str = sentence("fatigue")
+    charge: str = sentence("aimed", "gait", "hexes", "weapon")
+    dodge_guards: str = sentence()
+    defend_guards: str = sentence()
+    dodge: str = sentence("guards", required=("guards",))
+    dodge_standing: str = sentence("line", "standing", required=("line", "standing"))
+    dodge_toward: str = sentence("line", "aimed", required=("line",))
+    defend: str = sentence("guards", required=("guards",))
+    drop: str = sentence("gait", "hexes")
+    leaves_hand: str = sentence("weapon")
+    press_again: str = sentence("spell")
+    press_again_at: str = sentence("spell", "aimed")
+    pushing: str = sentence("line", "pushed", required=("line",))
+    push_cost: str = sentence("total", "level", "pushed", "paid", required=("paid",))
+    cast_cost: str = sentence("mana", "paid", required=("paid",))
+    paid_on_success: str = sentence()
+    paid_on_success_or_total: str = sentence("totals")
+    borrowing: str = sentence("line", "owed", required=("line",))
+    borrowing_cost: str = sentence("cost", "owed", required=("cost",))
+    pressing_cost: str = sentence("cost", required=("cost",))
+    anchor: str = sentence()
+    self_anchor: str = sentence("spell", "dice", "attribute")
+    helper_anchor: str = sentence("name", "spell", "dice", "attribute")
+    helper_anchor_cost: str = sentence("mana")
+    helper_caught: str = sentence("cost", "spell", required=("cost",))
+    counter: str = sentence("name", "mana")
+    counter_cost: str = sentence("mana", "name")
+    an_enemy_caster: str = sentence()
+    step_away: str = sentence()
+    step_away_stuck: str = sentence("line", "stuck", required=("line", "stuck"))
+    no_step_away: str = sentence("threat")
+    grapple: str = sentence("aimed")
+    close_strike: str = sentence("aimed", "weapon")
+    draw_dagger: str = sentence()
+    break_away: str = sentence()
+    break_away_stuck: str = sentence("line", "stuck", required=("line", "stuck"))
+    break_away_steps: str = sentence("line", required=("line",))
+    struggle_free: str = sentence("aimed")
+    hold_still: str = sentence("aimed")
+    squeeze: str = sentence("aimed")
+    maintain: str = sentence("aimed")
+    release: str = sentence("aimed")
+    pick_up_any: str = sentence()
+    yielded: str = sentence("line", required=("line",))
+    yielded_blocked: str = sentence("line", required=("line",))
+    cost_past_ruling: str = sentence("cost", "past", required=("cost", "past"))
+
+
+@dataclass(frozen=True)
+class ClassicMenuWords:
+    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90)."""
+
+    move_word: str = sentence()
+    no_foe_in_reach: str = sentence("reason", "weapon", required=("reason",))
+    charge: str = sentence("aimed", "hexes", "weapon")
+    charge_another: str = sentence("aimed", "hexes", "struck", "weapon")
+    charge_grapple: str = sentence("aimed", "hexes", "grapple")
+    charge_grapple_another: str = sentence("aimed", "hexes", "struck", "grapple")
+    grapple_words: str = sentence()
+    shift_attack: str = sentence("aimed", "weapon")
+    odds: str = sentence("needed", "dice", "chance")
+    odds_damage: str = sentence("odds", "damage", "average", required=("odds",))
+    odds_damage_armoured: str = sentence(
+        "odds", "damage", "stops", "average", required=("odds",)
+    )
+    charge_dice: str = sentence("damage", "extra", required=("damage",))
+    charge_dice_armoured: str = sentence("damage", "extra", required=("damage",))
+    move: str = sentence("hexes")
+    move_toward: str = sentence("hexes", "aimed")
+    half_move: str = sentence("hexes")
+    half_move_toward: str = sentence("hexes", "aimed")
+    dodge: str = sentence("how", "dice", "plain_dice", required=("how",))
+    dodge_moving: str = sentence("hexes")
+    dodge_moving_toward: str = sentence("hexes", "aimed")
+    shift_defend: str = sentence("dice", "plain_dice")
+    pick_up_any: str = sentence()
+    crawl: str = sentence("hexes")
+    disengage: str = sentence()
+    hth_attack: str = sentence("aimed", "grapple")
+    cast_cost: str = sentence("strength")
+    go_prone: str = sentence()
+    kneel: str = sentence()
+    do_nothing: str = sentence()
+    pass_turn: str = sentence()
+
+
+@dataclass(frozen=True)
+class TurnPanelWords:
+    """The turn panel's own words, around the server's lines (#94): the
+    prompt, each option's cost and the AI's pick, the push, borrow and counter
+    controls, the cast stage, the hex picker and the buttons."""
+
+    waiting: str = sentence("name", required=("name",))
+    waiting_played: str = sentence("name", "player", required=("name",))
+    ai_choose: str = sentence()
+    your_move: str = sentence("name", "turn", required=("name",))
+    options_group: str = sentence()
+    ai_pick: str = sentence()
+    advice: str = sentence("score", "rationale", required=("rationale",))
+    show_scoring: str = sentence()
+    hide_scoring: str = sentence()
+    costs: str = sentence("cost", required=("cost",))
+    costs_nothing: str = sentence()
+    cast_option: str = sentence()
+    casts_ready_one: str = sentence()
+    casts_ready: str = sentence("count")
+    ready_borrowing: str = sentence("ready", "count", required=("ready",))
+    cast_advice: str = sentence("pool", "ready", required=("pool", "ready"))
+    spells_group: str = sentence()
+    pool: str = sentence("pool_label", "pool", "max_pool")
+    pool_owing: str = sentence("pool_label", "pool", "max_pool", "owed")
+    stage_pool: str = sentence("pool", required=("pool",))
+    not_castable: str = sentence()
+    stand_down: str = sentence()
+    push_label: str = sentence()
+    push_label_channel: str = sentence("channel")
+    push_none: str = sentence()
+    push_amount: str = sentence("mana")
+    push_group: str = sentence("spell")
+    borrow_label: str = sentence()
+    borrow_amount: str = sentence("borrowed")
+    borrow_pushed: str = sentence("pushed", "borrowed")
+    borrow_group: str = sentence("spell")
+    the_caster: str = sentence()
+    counter_label: str = sentence("caster")
+    counter_amount: str = sentence("mana")
+    counter_group: str = sentence("caster")
+    presses_again: str = sentence()
+    moving_to: str = sentence("hex")
+    pick_hex: str = sentence("count")
+    leave_hex: str = sentence()
+    confirm: str = sentence()
 
 
 @dataclass(frozen=True)
 class HthAgreementWords:
     """The HTH-by-agreement ruling's words (#867)."""
 
-    heading: str = _sentence()
-    game_master_only: str = _sentence()
-    none_marked: str = _sentence()
-    whole_battle_line: str = _sentence()
-    pairs_line: str = _sentence("pairs")
-    pair_names: str = _sentence("first", "second")
-    log_battle_marked: str = _sentence("by")
-    log_battle_lifted: str = _sentence("by")
-    log_pair_marked: str = _sentence("by", "pair")
-    log_pair_lifted: str = _sentence("by", "pair")
-    mark_whole_battle: str = _sentence()
-    lift_whole_battle: str = _sentence()
-    lift_pair: str = _sentence()
-    mark_pair: str = _sentence()
-    first_of_pair: str = _sentence()
-    second_of_pair: str = _sentence()
-    refuse_scope: str = _sentence()
-    refuse_pair: str = _sentence()
-    refuse_pair_missing: str = _sentence()
-    refuse_same_side: str = _sentence("first", "second")
-    refuse_classic: str = _sentence()
+    heading: str = sentence()
+    game_master_only: str = sentence()
+    none_marked: str = sentence()
+    whole_battle_line: str = sentence()
+    pairs_line: str = sentence("pairs")
+    pair_names: str = sentence("first", "second")
+    log_battle_marked: str = sentence("by")
+    log_battle_lifted: str = sentence("by")
+    log_pair_marked: str = sentence("by", "pair")
+    log_pair_lifted: str = sentence("by", "pair")
+    mark_whole_battle: str = sentence()
+    lift_whole_battle: str = sentence()
+    lift_pair: str = sentence()
+    mark_pair: str = sentence()
+    first_of_pair: str = sentence()
+    second_of_pair: str = sentence()
+    refuse_scope: str = sentence()
+    refuse_pair: str = sentence()
+    refuse_pair_missing: str = sentence()
+    refuse_same_side: str = sentence("first", "second")
+    refuse_classic: str = sentence()
 
 
 @dataclass(frozen=True)
 class MagicBoundsWords:
     """The magic-bounds ruling's words (#37)."""
 
-    heading: str = _sentence()
-    channel: str = _sentence()
-    push_cap: str = _sentence()
-    counter_bounds: str = _sentence()
-    game_master_only: str = _sentence()
-    none_lifted: str = _sentence("bounds")
-    lifting_line: str = _sentence("bound", "name", "by")
-    log_lifted: str = _sentence("by", "bounds", "name")
-    log_held: str = _sentence("by", "name", "bounds")
-    past_by_ruling: str = _sentence("bounds")
-    figure_label: str = _sentence()
-    lift_button: str = _sentence()
-    hold_again: str = _sentence()
-    refuse_bounds: str = _sentence("bounds")
-    refuse_bounds_list: str = _sentence()
-    refuse_combatant: str = _sentence()
-    refuse_classic: str = _sentence()
+    heading: str = sentence()
+    channel: str = sentence()
+    push_cap: str = sentence()
+    counter_bounds: str = sentence()
+    game_master_only: str = sentence()
+    none_lifted: str = sentence("bounds")
+    lifting_line: str = sentence("bound", "name", "by")
+    log_lifted: str = sentence("by", "bounds", "name")
+    log_held: str = sentence("by", "name", "bounds")
+    past_by_ruling: str = sentence("bounds")
+    figure_label: str = sentence()
+    lift_button: str = sentence()
+    hold_again: str = sentence()
+    refuse_bounds: str = sentence("bounds")
+    refuse_bounds_list: str = sentence()
+    refuse_combatant: str = sentence()
+    refuse_classic: str = sentence()
 
 
 @dataclass(frozen=True)
@@ -100,50 +266,12 @@ class RulingsWording:
     """The whole file: one table per ruling, and the words they share."""
 
     common: CommonWords
+    turn_menu: TurnMenuWords
+    tarmar_menu: TarmarMenuWords
+    classic_menu: ClassicMenuWords
+    turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
-
-
-def _table(path: Path, name: str, raw: Any, words_type: type) -> Any:
-    """One table of the file as its dataclass, or ``ImproperlyConfigured``."""
-    where = f"BATTLE_RULINGS_WORDING_FILE {path} [{name}]"
-    if not isinstance(raw, dict):
-        raise ImproperlyConfigured(f"{where} is missing or is not a table")
-    known = {word_field.name: word_field for word_field in fields(words_type)}
-    unknown = sorted(set(raw) - set(known))
-    missing = sorted(set(known) - set(raw))
-    if unknown or missing:
-        raise ImproperlyConfigured(
-            f"{where}: unknown keys {unknown}, missing keys {missing}"
-        )
-    for key, word_field in known.items():
-        value = raw[key]
-        if not isinstance(value, str) or not value.strip():
-            raise ImproperlyConfigured(f"{where} {key} is not a sentence")
-        allowed = word_field.metadata[PLACEHOLDERS]
-        # A trial fill with every name the sentence may use catches what a
-        # Game Master would otherwise meet: a name it may not use, a stray or
-        # unbalanced brace, a positional {} or a nested {name:{spec}}.
-        try:
-            value.format(**dict.fromkeys(allowed, ""))
-        except (KeyError, IndexError, ValueError, AttributeError) as error:
-            raise ImproperlyConfigured(
-                f"{where} {key} cannot be filled ({error!r}); it may use only "
-                f"{sorted(allowed)}"
-            ) from error
-        # An empty trial value fills shapes the real ones break on ("{by:>{name}}"
-        # pads to a width read from a name), so each field must be a bare name:
-        # no format spec, no conversion, no attribute or index.
-        for _text, field_name, spec, conversion in string.Formatter().parse(value):
-            if field_name is None:
-                continue
-            if spec or conversion or "." in field_name or "[" in field_name:
-                raise ImproperlyConfigured(
-                    f"{where} {key} has a field that is not a bare name: "
-                    f"{{{field_name}{'!' + conversion if conversion else ''}"
-                    f"{':' + spec if spec else ''}}}; write {{name}} alone"
-                )
-    return words_type(**raw)
 
 
 def load_rulings_wording(path: Path) -> RulingsWording:
@@ -161,25 +289,7 @@ def load_rulings_wording(path: Path) -> RulingsWording:
             is missing, or has an unknown or a missing key; a value is not
             text; or a sentence uses a ``{name}`` it may not.
     """
-    try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise ImproperlyConfigured(
-            f"BATTLE_RULINGS_WORDING_FILE {path} cannot be read ({error}); the "
-            "battle's rulings need their words (issues #867, #37)."
-        ) from error
-    tables = get_type_hints(RulingsWording)
-    unknown = sorted(set(raw) - set(tables))
-    if unknown:
-        raise ImproperlyConfigured(
-            f"BATTLE_RULINGS_WORDING_FILE {path}: unknown tables {unknown}"
-        )
-    return RulingsWording(
-        **{
-            name: _table(path, name, raw.get(name), words_type)
-            for name, words_type in tables.items()
-        }
-    )
+    return load_wording(path, RulingsWording, "BATTLE_RULINGS_WORDING_FILE")
 
 
 def words() -> RulingsWording:

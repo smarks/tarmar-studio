@@ -16,7 +16,9 @@
  * quietly recording somebody else's move.
  */
 
+const { refusalFixedParts } = require('./refusals');
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { menuWords, sentencePattern } = require('./turn-menu');
 
 test.describe('A turn choice names the pause it was made for', () => {
     test('a submission for another figure is refused and the arena says so',
@@ -30,7 +32,7 @@ test.describe('A turn choice names the pause it was made for', () => {
 
             await adminPage.click('#advance-turn');
             const panel = adminPage.locator('#turn-panel');
-            await expect(panel).toContainText('Your move');
+            await expect(panel).toContainText(new RegExp(sentencePattern(menuWords().panel.your_move)));
 
             // Another figure in this battle — a combatant id the server can
             // resolve to a name, so the refusal reads as the reader's own
@@ -71,7 +73,9 @@ test.describe('A turn choice names the pause it was made for', () => {
             // The reason stands on the page until it is dismissed — a
             // notice, not a flash (the project's no-transient-UI rule).
             const notice = adminPage.locator('#notice-region .notice-error');
-            await expect(notice).toContainText('the battle is waiting on');
+            for (const part of refusalFixedParts('battle', 'services', 'stale_choice')) {
+                await expect(notice).toContainText(part);
+            }
             await expect(notice).toContainText(awaitedName);
             await expect(notice.locator('.notice-dismiss')).toBeVisible();
 

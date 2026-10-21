@@ -65,7 +65,7 @@ class RolledPhysicalFixedTest(BaseTestCase):
                 self.assertEqual(response.status_code, 400, response.content)
                 self.assertEqual(
                     response.json()["error"],
-                    services.ROLL_FIXED_REASONS[field],
+                    services.roll_fixed_reason(field),
                 )
         self.character.refresh_from_db()
         self.assertEqual(
@@ -75,7 +75,7 @@ class RolledPhysicalFixedTest(BaseTestCase):
     def test_the_service_refuses_a_player_on_every_path_through_it(self):
         with self.assertRaisesMessage(
             services.CharacterChangeError,
-            services.ROLL_FIXED_REASONS["height_roll"],
+            services.roll_fixed_reason("height_roll"),
         ):
             services.update_field(self.character.pk, "height_roll", "6")
         self.character.refresh_from_db()
@@ -100,7 +100,7 @@ class RolledPhysicalFixedTest(BaseTestCase):
                 self.assertFalse(_input_cell(page, field))
                 self.assertEqual(
                     _locked_reason(page, field),
-                    services.ROLL_FIXED_REASONS[field],
+                    services.roll_fixed_reason(field),
                 )
 
     def test_a_game_master_changes_a_rolled_value_any_time(self):

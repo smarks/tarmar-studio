@@ -24,6 +24,8 @@ const {
     characterIdFromUrl, seedCharacterFromExport,
 } = require('./fixtures');
 const { pinDice } = require('./dice');
+const { runDjangoShell } = require('./django');
+const { refusal, gameMasterCallNote } = require('./refusals');
 const { loadedSkillRules } = require('./skill-rules');
 const { item, sheetValues } = require('./equipment-rules');
 
@@ -180,6 +182,29 @@ test.describe('Sheet mechanics', () => {
         expect(total, 'the total must fall short of the difficulty').toBeLessThan(check.max_difficulty);
         await page.reload();
         await expect(page.locator('#recent-changes')).toContainText(`${skill} check: ${check.dice}`);
+    });
+
+    test("#85: a Game Master's Literacy check for one not known to read ends with the server's call note", async ({ page }) => {
+        // The note is the server's configured words, sent with the check's
+        // answer; the sheet's script holds no copy of them.
+        await loginAs(page, TEST_ADMIN);
+        const characterId = await seedCharacterFromExport(
+            page, TEST_ADMIN, mechanicsCharacter(`Unread ${Date.now()}`)
+        );
+        runDjangoShell(
+            'from characters.models import Character; '
+            + `Character.objects.filter(pk=${characterId}).update(intelligence=10, `
+            + "skills={'literacy': 3}, literacy_roll=18, literacy_rolled=True)"
+        );
+        await page.reload();
+        await page.locator('#skill-check-skill').selectOption('literacy');
+        await page.locator('#skill-check-btn').click();
+        const result = page.locator('#skill-check-result');
+        await expect(result).toBeVisible();
+        const note = gameMasterCallNote('not known to read');
+        expect(note).toContain(refusal('characters', 'common', 'a_game_masters_call'));
+        await expect(result).toContainText(note.trim());
+        expect((await result.textContent()).endsWith(note), 'the line ends with the note').toBe(true);
     });
 
     test('#757: catalog gear is bought from the purse', async ({ page, browser }) => {

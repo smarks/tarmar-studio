@@ -19,6 +19,7 @@ from tarmar_engine.policy import Candidate
 from battle.engine.state import BattleState, ContestState, CounterState
 from battle.models import Battle, BattleCombatant
 from battle.persistence import TARMAR_PROFILE, dump_state, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
     _match_candidate,
     _take_off_board,
@@ -32,6 +33,7 @@ from battle.viewmodel import tarmar_view
 from common.test_helpers import BaseTestCase
 
 from .magic_fixtures import COUNTER_RULES, seated_rules
+from .rulings_words import with_fixed_words
 from .test_cast_flow import awaiting_wizard_battle
 from .test_state import make_combatant
 
@@ -125,6 +127,7 @@ class CounterChoiceMatchTest(BaseTestCase):
         self.assertIs(_match_candidate([self.one, self.two], choice), self.two)
 
 
+@with_fixed_words
 class CounterMenuTest(BaseTestCase):
     """A seated wizard facing an enemy mage, paused on its decision."""
 
@@ -170,12 +173,9 @@ class CounterMenuTest(BaseTestCase):
                 self.assertFalse(offered["ai_choice"])
                 name = offered["target_name"]
                 mana = offered["counter_mana"]
+                self.assertEqual(offered["plain"], f"tarmar_menu.counter {mana} {name}")
                 self.assertEqual(
-                    offered["plain"],
-                    f"Counter {name}'s spell this turn, committing {mana} mana",
-                )
-                self.assertEqual(
-                    offered["cost"], f"{mana} mana, spent whether {name} casts or not"
+                    offered["cost"], f"tarmar_menu.counter_cost {mana} {name}"
                 )
                 # The bonus the commitment buys is the engine's working.
                 self.assertIn(
@@ -212,7 +212,9 @@ class CounterMenuTest(BaseTestCase):
         ):
             with (
                 self.subTest(choice=choice),
-                self.assertRaisesMessage(ValueError, "not on the pending menu"),
+                self.assertRaisesMessage(
+                    ValueError, refusal_words().services.option_not_on_menu
+                ),
             ):
                 self.record(**choice)
 
@@ -228,7 +230,9 @@ class CounterMenuTest(BaseTestCase):
         }
         response = self.post_json(url, {**body, "counter_mana": "all of it"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "A numeric counter_mana is required")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views.numeric_counter_mana
+        )
         response = self.post_json(url, body)
         self.assertEqual(response.status_code, 400)
         response = self.post_json(
@@ -248,6 +252,7 @@ class CounterMenuTest(BaseTestCase):
         self.assertFalse(status_events(battle, "counter_declared"))
 
 
+@with_fixed_words
 class EscalationMenuTest(BaseTestCase):
     """A seated wizard whose Fire Missile at its foe stands countered."""
 
@@ -277,9 +282,9 @@ class EscalationMenuTest(BaseTestCase):
         self.assertFalse(pressed["ai_choice"])
         self.assertEqual(
             pressed["plain"],
-            f"Press your countered Fire Missile again at {pressed['target_name']}",
+            f"tarmar_menu.press_again_at {pressed['target_name']} Fire Missile",
         )
-        self.assertIn("another opposed roll", pressed["cost"])
+        self.assertTrue(pressed["cost"].startswith("tarmar_menu.pressing_cost "))
 
     def test_an_unopposed_escalation_ends_the_contest_and_casts(self) -> None:
         (pressed, *_pushed) = self.escalations()
@@ -354,7 +359,9 @@ class GameMasterCountersForAFoeTest(BaseTestCase):
                 counter_mana=counter_mana,
             )
 
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             choose(COMMITMENTS[-1] + 1)
         battle, _events = choose(COMMITMENTS[0])
         (declared,) = status_events(battle, "counter_declared")

@@ -3,8 +3,10 @@
 import json
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle.models import Battle
+from battle.refusal_words import refusal_words
 from battle.services import (
     advance_turn,
     claim_seat,
@@ -12,6 +14,7 @@ from battle.services import (
     set_seat_ready,
     start_battle,
 )
+from battle.tests.fixed_refusals import with_fixed_refusals
 from common.test_helpers import BaseTestCase
 
 
@@ -211,7 +214,11 @@ class SeatEndpointTest(LobbyViewTestMixin):
         # The lobby's controls are plain forms, so a refusal comes back as
         # the page with the reason on it, never as raw JSON (#339, item 2).
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "already taken", status_code=400)
+        self.assertContains(
+            response,
+            escape(refusal_words().services.seat_already_taken),
+            status_code=400,
+        )
         self.assertTemplateUsed(response, "battle/battle_detail.html")
 
     def test_only_a_dm_starts_the_battle(self):
@@ -221,7 +228,9 @@ class SeatEndpointTest(LobbyViewTestMixin):
         set_seat_ready(battle.pk, seat.pk, self.player, ready=True)
         self.login_as(self.player)
         response = self.client.post(reverse("battle:start", args=[battle.pk]))
-        self.assertContains(response, "can start it", status_code=403)
+        self.assertContains(
+            response, escape(refusal_words().views.start_denied), status_code=403
+        )
         self.switch_to(self.dm)
         response = self.client.post(reverse("battle:start", args=[battle.pk]))
         self.assertRedirects(response, reverse("battle:detail", args=[battle.pk]))
@@ -304,8 +313,11 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("combatant_id is required", response.json()["error"])
+        self.assertIn(
+            refusal_words().views.choice_combatant_id, response.json()["error"]
+        )
 
+    @with_fixed_refusals
     def test_a_submission_naming_another_combatant_is_refused(self):
         battle, seat = self.awaiting_battle()
         chosen = battle.pending_input_json["candidates"][0]
@@ -321,11 +333,12 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
             },
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("the battle is waiting on", response.json()["error"])
+        self.assertIn("services.stale_choice", response.json()["error"])
         battle.refresh_from_db()
         self.assertEqual(battle.status, Battle.STATUS_AWAITING)
         self.assertEqual(battle.turn_inputs_json, {})
 
+    @with_fixed_refusals
     def test_a_submission_naming_another_turn_is_refused(self):
         battle, _seat = self.awaiting_battle()
         chosen = battle.pending_input_json["candidates"][0]
@@ -340,7 +353,7 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
             },
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("the battle is waiting on", response.json()["error"])
+        self.assertIn("services.stale_choice", response.json()["error"])
 
     def test_another_player_may_not_act(self):
         battle, _seat = self.awaiting_battle()
@@ -350,7 +363,9 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
         response = self.act(battle, {"letter": chosen["letter"]})
         # Watchable since the spectator flow — but never theirs to act in.
         self.assertEqual(response.status_code, 400)
-        self.assertIn("not your combatant", response.json()["error"])
+        self.assertIn(
+            refusal_words().services.not_your_combatant, response.json()["error"]
+        )
 
     def test_a_bystander_may_not_hand_the_choice_to_the_ai(self):
         """Narrowed to bystanders by #308.
@@ -369,7 +384,9 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
         self.login_as(rival)
         response = self.act(battle, {"ai": True})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("hand the choice to the AI", response.json()["error"])
+        self.assertIn(
+            refusal_words().services.hand_choice_to_ai_denied, response.json()["error"]
+        )
 
     def test_the_seats_own_player_may_stand_the_ai_in_for_one_decision(self):
         battle, _seat = self.awaiting_battle()

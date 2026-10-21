@@ -17,6 +17,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from common.context_processors import git_info
+from common.instants import labelled_instant
 
 from .messages import TYPED_KEY
 from .models import GMEvent, GMSession, GMTurnRecord
@@ -239,7 +240,7 @@ def _fold_lines(session: GMSession) -> list[str]:
 
 
 def _turn_start_lines(record: GMTurnRecord, number: int) -> list[str]:
-    started = timezone.localtime(record.started_at).strftime("%Y-%m-%d %H:%M:%S %Z")
+    started = labelled_instant(record.started_at)
     authority = "Game Master authority" if record.is_game_master else "player"
     prompt = (
         record.prompt.prompt_hash[:SHORT_HASH_LENGTH] if record.prompt else "unknown"
@@ -312,9 +313,9 @@ def render_transcript_text(session: GMSession) -> str:
         f"Session {session.pk}: {session.name}",
         f"Owner: {_owner(session)}",
         f"Mode now: {session.mode}",
-        f"Created: {timezone.localtime(session.created_at):%Y-%m-%d %H:%M:%S %Z}",
-        f"Updated: {timezone.localtime(session.updated_at):%Y-%m-%d %H:%M:%S %Z}",
-        f"Exported: {timezone.localtime():%Y-%m-%d %H:%M:%S %Z} "
+        f"Created: {labelled_instant(session.created_at)}",
+        f"Updated: {labelled_instant(session.updated_at)}",
+        f"Exported: {labelled_instant()} "
         f"by app {git_info(None)['git_sha_short'] or 'unknown'}",
         f"History entries: {len(history)} · turn records: {len(records)}",
         # Where a long session was folded, and what the model reads for the
@@ -351,7 +352,7 @@ def render_transcript_text(session: GMSession) -> str:
     if not edits:
         lines.append("(none: every record here was written by the turns)")
     for edit in edits:
-        stamp = timezone.localtime(edit.created_at).strftime("%Y-%m-%d %H:%M:%S %Z")
+        stamp = labelled_instant(edit.created_at)
         authority = "Game Master authority" if edit.is_game_master else "player"
         lines.append(f"{stamp} · {authority} · {edit.line}")
         lines.append(f"  before: {_compact(edit.before)}")

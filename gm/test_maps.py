@@ -61,7 +61,7 @@ from .maps import (
     party_place,
     place_name_from_title,
 )
-from .models import CampaignState, GMSession
+from .models import CampaignState, GMSession, GMTurnRecord
 from .testing import gm_replies
 
 STREAM_URL = "/tarmar/gm/stream/"
@@ -607,6 +607,21 @@ class MapStreamFrameTest(TestCanonMapsMixin, BaseTestCase):
                 "place": "Asterhold",
             },
         )
+
+    @patch("gm.turn_engine.model.ollama_client.stream_chat")
+    def test_a_finished_turn_read_back_carries_the_same_map(self, mock_stream):
+        """A page that lost the stream follows the party just the same (#89)."""
+        mock_stream.side_effect = gm_replies(["You ride ", "into Asterhold."])
+        response = self.client.post(
+            STREAM_URL, json.dumps({"message": "Go"}), content_type="application/json"
+        )
+        frame = self._done_frame(response)
+        record = GMTurnRecord.objects.get()
+
+        state = self.client.get(f"/tarmar/gm/turns/{record.pk}/").json()
+
+        self.assertEqual(state["state"], "finished")
+        self.assertEqual(state["map"], frame["map"])
 
     @patch("gm.turn_engine.model.ollama_client.stream_chat")
     def test_done_frame_has_no_map_when_no_place_is_named(self, mock_stream):

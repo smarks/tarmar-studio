@@ -575,16 +575,37 @@
       const splitLabel = open ? `Close the ${pane.title} pane` : `Show ${pane.title} as its own pane`;
       pane.splitButton.setAttribute('aria-label', splitLabel);
       pane.splitButton.title = splitLabel;
-      const target = open ? popoutTarget(name) : null;
-      pane.popoutButton.disabled = !target || settings.detached;
-      const popoutLabel = target
-        ? `Open ${target.label} in its own window`
-        : pane.container.getAttribute('data-popout-empty') || `${pane.title} has nothing to open yet`;
-      pane.popoutButton.setAttribute('aria-label', popoutLabel);
-      pane.popoutButton.title = popoutLabel;
+      paintPopout(name, pane);
     });
 
     applyWeights();
+  }
+
+  /**
+   * Paint a pane's "own window" control from what its tab holds now.
+   * @param {string} name
+   * @param {object} pane
+   */
+  function paintPopout(name, pane) {
+    const settings = settingsFor(name);
+    const open = state.open.includes(name);
+    const target = open ? popoutTarget(name) : null;
+    pane.popoutButton.disabled = !target || settings.detached;
+    const popoutLabel = target
+      ? `Open ${target.label} in its own window`
+      : pane.container.getAttribute('data-popout-empty') || `${pane.title} has nothing to open yet`;
+    pane.popoutButton.setAttribute('aria-label', popoutLabel);
+    pane.popoutButton.title = popoutLabel;
+  }
+
+  /**
+   * Paint every pane's "own window" control again, and nothing else: for a
+   * tab whose contents were replaced in place (issue #89), which changes
+   * what there is to open. Unlike render() it moves no pane, so the keyboard
+   * focus stays where the reader has it.
+   */
+  function paintPopouts() {
+    panes.forEach((pane, name) => paintPopout(name, pane));
   }
 
   /* ===== The arrangement ===== */
@@ -744,6 +765,7 @@
     dividedWeights,
     parsePanes,
     render,
+    paintPopouts,
     DEFAULT_WIDTH,
     MIN_WIDTH,
     WIDTH_KEY,

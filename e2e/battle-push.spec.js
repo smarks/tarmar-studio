@@ -70,13 +70,14 @@
 
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
-    loadedCanon, DEFAULT_CANON,
+    loadedCanon, DEFAULT_CANON, escaped,
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
 const {
     BATTLE_SEED, PUSH_TURNS_SEED, WIZARD_SEED, pinTheTurns, claimAWizard, openTheWizardsStage,
 } = require('./wizard-stage');
 const { readDjangoShell, runDjangoShell } = require('./django');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
 /**
  * The turns' seed for the Runaway branch (tarmar-engine #30), set after the
@@ -283,13 +284,20 @@ test.describe('Pushing mana into a cast', () => {
         const amounts = missileGroup.locator('.turn-push-amount');
         // The default canon caps a push at three mana, and the wizard has
         // the mana for all three.
-        await expect(amounts).toHaveText(['None', '+1 mana', '+2 mana', '+3 mana']);
+        const { panel, tarmar } = menuWords();
+        await expect(amounts).toHaveText([
+            menuLine(panel.push_none),
+            ...[1, 2, 3].map((mana) => menuLine(panel.push_amount, { mana: String(mana) })),
+        ]);
         await expect(amounts.first()).toHaveAttribute('aria-pressed', 'true');
 
         await amounts.nth(2).click();
         await expect(amounts.nth(2)).toHaveAttribute('aria-pressed', 'true');
-        await expect(missileGroup.locator('.turn-push-cost'))
-            .toContainText('3 mana (1 and 2 pushed)');
+        await expect(missileGroup.locator('.turn-push-cost')).toHaveText(
+            menuLine(panel.costs, {
+                cost: sentencePattern(tarmar.push_cost, { total: '3', level: '1', pushed: '2' }),
+            })
+        );
         await playerPage.click('#turn-panel .turn-confirm');
 
         // The turn ran: the player's pushed cast, its Control Roll against
@@ -316,7 +324,15 @@ test.describe('Pushing mana into a cast', () => {
             { beforeTurn: emptyTheWizardsPool }
         );
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
-        await expect(stage.locator('.turn-cast-pool')).toContainText('Mana 0 of');
+        // The configured words, the pool named as the server names it.
+        const pool = { pool_label: 'Mana', pool: '0' };
+        await expect(stage.locator('.turn-cast-pool')).toHaveText(menuLine(
+            menuWords().panel.stage_pool,
+            {
+                pool: `(?:${sentencePattern(menuWords().panel.pool, pool)}`
+                    + `|${sentencePattern(menuWords().panel.pool_owing, pool)})`,
+            }
+        ));
 
         // Fire Missile has no plain cast with an empty pool: its row is
         // disabled with the server's reason, and its borrowing control lists
@@ -328,15 +344,16 @@ test.describe('Pushing mana into a cast', () => {
         await expect(missileGroup.locator('.turn-spell-note'))
             .toContainText('borrow the 1 it lacks');
         const copies = missileGroup.locator('.turn-borrow-amount');
+        const { panel } = menuWords();
+        const borrowOne = menuLine(panel.borrow_amount, { borrowed: '1' });
         if (defaultCanon) {
             // The default canon: no Channel, a debt cap of four, a push cap
             // of three.
-            await expect(copies).toHaveText([
-                'Borrow 1 mana', '+1 mana, borrow 2', '+2 mana, borrow 3',
-                '+3 mana, borrow 4',
-            ]);
+            await expect(copies).toHaveText([borrowOne, ...[1, 2, 3].map((pushed) => menuLine(
+                panel.borrow_pushed, { pushed: String(pushed), borrowed: String(pushed + 1) }
+            ))]);
         } else {
-            await expect(copies).toHaveText(['Borrow 1 mana']);
+            await expect(copies).toHaveText([borrowOne]);
         }
         await expect(copies.first()).toHaveAttribute('aria-pressed', 'false');
 
@@ -405,13 +422,13 @@ test.describe('Pushing mana into a cast', () => {
         const anchor = playerPage.locator('#turn-panel .turn-option-anchor');
         await expect(anchor).toHaveCount(1, { timeout: 15000 });
         await expect(anchor.locator('.turn-option-ai-pick')).toBeVisible();
-        await expect(anchor.locator('.turn-option-plain'))
-            .toContainText('Take back control of your runaway Fire Missile');
-        if (defaultCanon) {
-            await expect(anchor.locator('.turn-option-plain')).toContainText(
-                '3d6 at or under your WIS'
-            );
-        }
+        // The configured words, with the default canon's roll: 3d6 against WIS.
+        await expect(anchor.locator('.turn-option-plain')).toHaveText(
+            menuLine(menuWords().tarmar.self_anchor, {
+                spell: 'Fire Missile',
+                ...(defaultCanon ? { dice: '3d6', attribute: 'WIS' } : {}),
+            })
+        );
         await expect(runawayLine).toHaveCount(1);
         await anchor.click();
         await playerPage.click('#turn-panel .turn-confirm');
@@ -533,8 +550,13 @@ test.describe('Pushing mana into a cast', () => {
                     // The AI never counters: no commitment is its pick.
                     await expect(control.locator('.turn-option-ai-pick')).toHaveCount(0);
                     const amounts = control.locator('.turn-counter-amount');
-                    const texts = await amounts.allTextContents();
-                    const mana = texts.map((text) => Number(text.replace(' mana', '')));
+                    // Each button names its commitment in the configured
+                    // words, and carries it as data-counter-mana.
+                    const mana = (await amounts.evaluateAll((buttons) => buttons
+                        .map((button) => button.dataset.counterMana))).map(Number);
+                    await expect(amounts).toHaveText(mana.map((amount) => menuLine(
+                        menuWords().panel.counter_amount, { mana: String(amount) }
+                    )));
                     // One button per mana from the least the canon allows.
                     expect(mana).toEqual(mana.map((_amount, index) => mana[0] + index));
                     await expect(amounts.first()).toHaveAttribute('aria-pressed', 'false');
@@ -546,8 +568,11 @@ test.describe('Pushing mana into a cast', () => {
                     committed = String(mana[picked]);
                     await amounts.nth(picked).click();
                     await expect(amounts.nth(picked)).toHaveAttribute('aria-pressed', 'true');
-                    await expect(control.locator('.turn-counter-cost'))
-                        .toContainText(`${committed} mana, spent whether`);
+                    await expect(control.locator('.turn-counter-cost')).toContainText(
+                        new RegExp(sentencePattern(menuWords().tarmar.counter_cost, {
+                            mana: committed,
+                        }))
+                    );
                     await playerPage.click('#turn-panel .turn-confirm');
                 },
             },
@@ -606,7 +631,9 @@ test.describe('Pushing mana into a cast', () => {
                     await adminPage.locator('#turn-panel .turn-option-cast').click();
                     const pressed = adminPage.locator('#turn-panel .turn-spell.is-escalation');
                     await expect(pressed.locator('.turn-spell-escalate')).toHaveText(
-                        `Press your countered Fire Missile again at ${defender}`
+                        menuLine(menuWords().tarmar.press_again_at, {
+                            spell: 'Fire Missile', aimed: escaped(defender),
+                        })
                     );
                     await pressed.click();
                     await adminPage.click('#turn-panel .turn-confirm');

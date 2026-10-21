@@ -3,32 +3,52 @@
  * The tab's markup is gm/templates/gm/_panel_battle.html: a fight form and,
  * once a fight is on, the battle app's own arena (battle/_arena.html), which
  * battle.js drives exactly as it drives the battle page — this file never
- * touches the board. It owns one thing: starting a fight. The tab's form,
- * the command bar's Fight button and chat.js's /fight command all come
- * through startFight(foesText), which posts to the fight endpoint and
- * reloads the page on the session, so the board on screen is what the
- * server rendered. While the request runs (asking the model who the party
- * faces can take a while) the tab says so; a failure stays in the tab's
- * error line (no toasts). Advance, the player's turn menu, restart and the
- * poll are battle.js's, found by id within the tab at load.
+ * touches the board. It owns starting a fight, and drawing the tab again.
+ * The tab's form, the command bar's Fight button and chat.js's /fight
+ * command all come through startFight(foesText), which posts to the fight
+ * endpoint. The fight's board is then drawn in place (issue #89): the tab
+ * as the server renders it (gm:battle_panel, the partial the page renders),
+ * wired by battle.js as the page's own arena is, and the lines the fight
+ * wrote into the chat, through chat.js. A reload did this before, and threw
+ * away every earlier turn the reader had loaded. While the request runs
+ * (asking the model who the party faces can take a while) the tab says so;
+ * a failure stays in the tab's error line (no toasts). Advance, the
+ * player's turn menu, restart and the poll are battle.js's, found by id
+ * within the tab.
+ *
+ * The tab is drawn again the same way when battle.js's poll finds the board
+ * restarted elsewhere (its REWOUND_EVENT), and when a Game Master's ruling
+ * form in the board (HTH by agreement, magic bounds, the stale pools'
+ * resnapshot) is posted: each posts as a script caller, which the battle
+ * endpoints answer in JSON, rather than as a form the server answers with a
+ * reload of the page.
  *
  * The panel's width is the viewer's now, not this tab's: it used to widen
  * the panel for the hex board, and issue #351 replaced that with a panel
  * the viewer drags to whatever width the map deserves.
  *
- * Reads #gm-panel-config (sessionId — the block the Characters tab reads)
- * and the fight endpoint from the form's data-fight-url; the CSRF token comes
- * from the page, through api.js's csrfToken().
+ * Reads #gm-panel-config (sessionId and battlePanelUrlTemplate — the block
+ * the Characters tab reads — and the two error-page messages,
+ * fightTimeoutMessage and fightErrorPageMessage) and the fight endpoint from
+ * the form's data-fight-url; the CSRF token comes from the page, through
+ * api.js's csrfToken().
  * postWithCsrf/csrfToken come from api.js; gmPanel from gm-panel.js.
  */
 if (typeof module !== 'undefined' && module.exports) {
   require('./api.js');
+  require('./gm-panel-drafts.js');
 }
 
 (function (root) {
   const configElement = root.document.getElementById('gm-panel-config');
   const config = configElement ? JSON.parse(configElement.textContent) : {};
   const TAB_NAME = 'battle';
+  /** The tab's section, which stays in place while its contents are drawn again. */
+  const SECTION_ID = 'gm-panel-battle';
+  /** The section's attributes a fresh rendering carries over (gm-panel-layout.js reads them). */
+  const POPOUT_ATTRIBUTES = ['data-popout-url', 'data-popout-empty'];
+  /** The board's ruling forms, which post as a script caller (issue #89). */
+  const RULING_FORMS = '#gm-battle form[method="post"]';
 
   function byId(id) {
     return root.document.getElementById(id);
@@ -132,10 +152,12 @@ if (typeof module !== 'undefined' && module.exports) {
    * @returns {string} the line for the tab's error.
    */
   function withoutJson(response) {
+    // The server's words (settings GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE and
+    // GM_FIGHT_ERROR_PAGE_MESSAGE, #94), from the panel's config block.
     if (response.status === 504) {
-      return 'The server took too long to answer (HTTP 504). Try the fight again in a moment.';
+      return root.filledWords(config.fightTimeoutMessage);
     }
-    return `The server answered with an error (HTTP ${response.status}). Try the fight again in a moment.`;
+    return root.filledWords(config.fightErrorPageMessage, { status: response.status });
   }
 
   /** Bring the tab into view: select it, and open the panel on a phone. */
@@ -145,11 +167,149 @@ if (typeof module !== 'undefined' && module.exports) {
     root.gmPanel.setOpen(true);
   }
 
+  /** The draw of the tab on its way, and whether another was asked for meanwhile. */
+  let drawing = null;
+  let drawAgain = false;
+
+  /**
+   * Draw the tab again as the server renders it now (issue #89): the
+   * section's contents and its pop-out attributes from gm:battle_panel, the
+   * forms pointed back at this page, the new arena wired by battle.js, and
+   * the tab's live mark and the pane's pop-out control painted from it. The
+   * arena it replaces stops polling once it is off the page (battle.js).
+   * Draws asked for while one is on its way collapse into one more.
+   * @returns {Promise<boolean>} false when there is no session or no tab.
+   * @throws {Error} when the tab could not be fetched; the tab is left as it was.
+   */
+  async function drawTab() {
+    if (drawing) {
+      drawAgain = true;
+      return drawing;
+    }
+    drawing = fetchAndDrawTab();
+    let drawn;
+    try {
+      drawn = await drawing;
+    } catch (error) {
+      // Every caller waiting on this draw hears why it failed.
+      drawAgain = false;
+      throw error;
+    } finally {
+      drawing = null;
+    }
+    if (!drawAgain) return drawn;
+    drawAgain = false;
+    return drawTab();
+  }
+
+  async function fetchAndDrawTab() {
+    const sessionId = currentSessionId();
+    const section = byId(SECTION_ID);
+    if (!sessionId || !section || !config.battlePanelUrlTemplate) return false;
+    const url = config.battlePanelUrlTemplate.replace('{session_id}', String(sessionId));
+    const response = await fetch(url, { headers: { Accept: 'text/html' } });
+    if (!response.ok) throw new Error(response.statusText || `HTTP ${response.status}`);
+    const holder = root.document.createElement('template');
+    holder.innerHTML = (await response.text()).trim();
+    const fresh = holder.content.querySelector(`#${SECTION_ID}`);
+    if (!fresh) throw new Error('the answer held no Battle tab');
+    POPOUT_ATTRIBUTES.forEach((name) => {
+      if (fresh.hasAttribute(name)) {
+        section.setAttribute(name, fresh.getAttribute(name));
+      } else {
+        section.removeAttribute(name);
+      }
+    });
+    // Where the keyboard focus is in the tab (a ruling's button just
+    // pressed) goes back on the same control, by its focus key or id, the
+    // way the refetched tabs carry it (gm-panel-drafts.js).
+    const carried = root.gmPanelDrafts.read(section);
+    section.replaceChildren(...fresh.childNodes);
+    // Rendered under the fragment's address, the forms would go back there.
+    const here = `${root.location.pathname}${root.location.search}`;
+    section.querySelectorAll('input[name="next"]').forEach((input) => {
+      input.value = here;
+    });
+    if (typeof root.applyLocalTimes === 'function') root.applyLocalTimes(section);
+    if (root.battlePage) root.battlePage.initBattlePage(section);
+    root.gmPanelDrafts.restore(section, carried);
+    const form = byId('gm-fight-form');
+    if (form) paintFightForm(form.dataset.live === 'true');
+    const panes = root.gmPanelLayout;
+    if (panes && panes.isActive()) panes.paintPopouts();
+    return true;
+  }
+
+  /**
+   * Show what a change on the board left behind, in place: the tab drawn
+   * again and, when the change wrote into the chat, the conversation as
+   * stored (chat.js's showConversationAsStored).
+   * @param {boolean} wroteToChat
+   * @returns {Promise<boolean>} Whether everything was shown.
+   */
+  async function showBoardChange(wroteToChat) {
+    const asked = [drawTab()];
+    if (wroteToChat && typeof root.showConversationAsStored === 'function') {
+      asked.push(root.showConversationAsStored());
+    }
+    try {
+      await Promise.all(asked);
+      return true;
+    } catch (error) {
+      show('error', `The board changed, but the page could not show it: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Post one of the board's ruling forms as a script caller (issue #89),
+   * then draw the tab again. A refusal stays in the tab's error line.
+   * @param {HTMLFormElement} form
+   * @param {HTMLElement|null} submitter - The button pressed, whose name
+   *   and value are part of what the form says.
+   * @returns {Promise<boolean>} Whether the ruling was recorded.
+   */
+  async function postRuling(form, submitter) {
+    clear('error');
+    const body = new FormData(form);
+    if (submitter && submitter.name) body.append(submitter.name, submitter.value);
+    // One post per press: the button waits until the tab is drawn from the
+    // answer, which brings a fresh one.
+    if (submitter) submitter.disabled = true;
+    try {
+      return await postAndDraw(form, body);
+    } finally {
+      if (submitter) submitter.disabled = false;
+    }
+  }
+
+  /** postRuling's request, and the tab drawn from it once it is recorded. */
+  async function postAndDraw(form, body) {
+    let data;
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body,
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+      });
+      data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        show('error', data.error || response.statusText || `HTTP ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      show('error', `Request failed: ${error.message}`);
+      return false;
+    }
+    return showBoardChange(false);
+  }
+
   /**
    * Start a fight from the session's attached characters.
    * @param {string} [foesText] - Who the party faces, in the player's words
    *   ("two gray wolves, a dire wolf"); empty asks the GM.
-   * @returns {Promise<boolean>} true when the page is reloading on the fight.
+   * @returns {Promise<boolean>} true when the fight started.
    */
   async function startFight(foesText) {
     const foes = (foesText || '').trim();
@@ -198,7 +358,17 @@ if (typeof module !== 'undefined' && module.exports) {
       return false;
     }
     show('status', `The board is set: ${data.battle_name}. Loading…`);
-    root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
+    // The fight writes its opening lines into the chat, and the board is
+    // the session's now: both are shown in place (issue #89). The tab's own
+    // form comes back as the server renders it, closed while the fight is on.
+    const shown = await showBoardChange(true);
+    if (!shown) {
+      // The fight is on whether or not its board could be shown.
+      clear('status');
+      paintFightForm(true);
+    }
+    const commandButton = byId('gm-fight-button');
+    if (commandButton) commandButton.disabled = false;
     return true;
   }
 
@@ -280,13 +450,29 @@ if (typeof module !== 'undefined' && module.exports) {
       const status = event.detail && event.detail.status;
       if (TERMINAL_STATUSES.includes(status)) showVerdict();
     });
-    const form = byId('gm-fight-form');
-    const input = byId('gm-fight-foes');
-    if (form) {
-      form.addEventListener('submit', (event) => {
+    // Delegated from the section, which stays in place when the tab is
+    // drawn again around it (issue #89).
+    const section = byId(SECTION_ID);
+    if (section) {
+      section.addEventListener('submit', (event) => {
+        const form = event.target;
+        if (form.id === 'gm-fight-form') {
+          event.preventDefault();
+          const input = byId('gm-fight-foes');
+          startFight(input ? input.value : '');
+          return;
+        }
+        if (!form.matches(RULING_FORMS)) return;
         event.preventDefault();
-        startFight(input ? input.value : '');
+        postRuling(form, event.submitter || null);
       });
+      // A restart made elsewhere: the board is drawn again here, not the page.
+      if (root.battlePage) {
+        section.addEventListener(root.battlePage.REWOUND_EVENT, (event) => {
+          event.preventDefault();
+          showBoardChange(false);
+        });
+      }
     }
     const commandButton = byId('gm-fight-button');
     if (commandButton) {
@@ -301,7 +487,7 @@ if (typeof module !== 'undefined' && module.exports) {
   }
 
   const api = {
-    startFight, showVerdict, currentSessionId, init, paintFightForm, paintBareHanded,
+    startFight, showVerdict, currentSessionId, init, paintFightForm, paintBareHanded, drawTab,
   };
   root.gmPanelBattle = api;
 

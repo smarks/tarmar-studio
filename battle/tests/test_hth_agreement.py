@@ -338,6 +338,37 @@ class AgreementEndpointTest(BaseTestCase):
         self.assertEqual(same_figure.status_code, 400)
         self.assertEqual(same_figure.json()["error"], words().hth_agreement.refuse_pair)
 
+    def test_a_script_posting_the_form_gets_the_battle_payload(self):
+        """The GM chat's Battle tab posts the panel's own form (#89)."""
+        self.login_as(self.dm)
+        response = self.client.post(
+            self.url,
+            {"scope": "battle", "agreed": "true", "next": "/tarmar/gm/"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["rulings"]["hth_agreement"]["whole_battle"])
+        refused = self.client.post(
+            self.url, {"scope": "everyone"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        self.assertEqual(refused.status_code, 400)
+        self.assertEqual(refused.json()["error"], words().hth_agreement.refuse_scope)
+
+    def test_a_script_posting_the_form_for_someone_else_is_refused_in_json(self):
+        """Only the fight's Game Master rules; a form body changes nothing (#89)."""
+        self.login_as(self.create_player(username="bystander"))
+        response = self.client.post(
+            self.url,
+            {"scope": "battle", "agreed": "true"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["error"], words().hth_agreement.game_master_only
+        )
+        self.battle.refresh_from_db()
+        self.assertFalse(self.battle.hth_agreement_json)
+
     def test_a_bystander_game_master_reads_only_the_line(self):
         bystander = self.create_dm(username="bystander")
         self.login_as(bystander)

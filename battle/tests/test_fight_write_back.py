@@ -11,14 +11,16 @@ without undoing a death. A player's own battle writes nothing (coordinator's
 ruling under the standing rule; Spencer may overrule).
 """
 
+import json
+
 from django.urls import reverse
 
-from battle import profiles
+from battle import control, profiles
 from battle.engine.state import BattleState
 from battle.models import Battle
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
-    RESULTS_RECORDED_REFUSAL,
     WITHHELD_NOT_GAME_MASTER,
     WITHHELD_OTHER_PLAYERS,
     StalePools,
@@ -29,11 +31,13 @@ from battle.services import (
     resnapshot_pools,
     restart_battle,
     results_recorded,
+    set_combatant_control_mode,
     set_seat_ready,
     stale_pools,
     start_battle,
     withheld_characters,
 )
+from battle.tests.fixed_refusals import with_fixed_refusals
 from characters import services as character_services
 from characters.models import Character
 from characters.services import FightReport
@@ -290,7 +294,9 @@ class FightWriteBackTest(BaseTestCase):
         damage = self.character.fatigue_damage
         with self.assertRaises(ValueError) as caught:
             restart_battle(battle.pk)
-        self.assertEqual(str(caught.exception), RESULTS_RECORDED_REFUSAL)
+        self.assertEqual(
+            str(caught.exception), refusal_words().services.results_recorded
+        )
         self.character.refresh_from_db()
         self.assertEqual(self.character.fatigue_damage, damage)
 
@@ -404,7 +410,9 @@ class PlayersOwnBattleTest(BaseTestCase):
         self.assertNotContains(response, 'id="restart-battle"')
         response = self.client.post(f"/tarmar/battles/{battle.pk}/restart/")
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], RESULTS_RECORDED_REFUSAL)
+        self.assertEqual(
+            response.json()["error"], refusal_words().services.results_recorded
+        )
         self.login_as(game_master)
         response = self.client.get(f"/tarmar/battles/{battle.pk}/")
         self.assertContains(response, 'id="restart-battle"')
@@ -451,13 +459,14 @@ class LobbyStartTest(BaseTestCase):
         battle = start_battle(self.battle.pk)
         self.assertEqual(tarmar_state(battle).by_id(self.seat.pk).debt, 0)
 
+    @with_fixed_refusals
     def test_a_character_who_died_after_the_claim_cannot_start(self):
         Character.objects.filter(pk=self.character.pk).update(
             is_alive=False, death_cause="a fall"
         )
         with self.assertRaises(ValueError) as caught:
             start_battle(self.battle.pk)
-        self.assertIn("has died since claiming a seat", str(caught.exception))
+        self.assertIn("services.died_since_claiming", str(caught.exception))
 
 
 class ClassicFightWriteBackTest(BaseTestCase):
@@ -530,6 +539,7 @@ class StalePoolsTest(BaseTestCase):
             fatigue_damage=0, body_damage=0
         )
 
+    @with_fixed_refusals
     def test_a_fight_healed_while_it_sat_unfinished_is_refused(self):
         battle = self.hurt(self.make_battle())
         if battle.status in OVER:
@@ -537,7 +547,7 @@ class StalePoolsTest(BaseTestCase):
         self.heal()
         turn = Battle.objects.get(pk=battle.pk).turn_number
 
-        with self.assertRaisesMessage(StalePools, "Aldwin: the record's pools"):
+        with self.assertRaisesMessage(StalePools, "services.stale_pools Aldwin"):
             advance_turn(battle.pk)
 
         self.assertEqual(Battle.objects.get(pk=battle.pk).turn_number, turn)
@@ -585,6 +595,7 @@ class StalePoolsTest(BaseTestCase):
         self.assertNotIn("owed", note.message)
         advance_turn(battle.pk)
 
+    @with_fixed_refusals
     def test_a_debt_the_game_master_settles_mid_fight_is_what_the_board_owes(self):
         # Borrowing (tarmar-engine #28): the board must not go on rolling
         # against, capping by or paying back a debt the record forgave.
@@ -598,7 +609,7 @@ class StalePoolsTest(BaseTestCase):
             self.character.pk, owed=0, is_game_master=True
         )
 
-        with self.assertRaisesMessage(StalePools, "Aldwin: the record's pools"):
+        with self.assertRaisesMessage(StalePools, "services.stale_pools Aldwin"):
             advance_turn(battle.pk)
 
         battle = resnapshot_pools(battle.pk, is_game_master=True)
@@ -613,13 +624,17 @@ class StalePoolsTest(BaseTestCase):
         battle = self.hurt(self.make_battle())
         self.heal()
 
-        with self.assertRaisesMessage(ValueError, "Only a Game Master"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.resnapshot_game_master_only
+        ):
             resnapshot_pools(battle.pk, is_game_master=False)
 
     def test_nothing_to_take_is_said(self):
         battle = self.make_battle()
 
-        with self.assertRaisesMessage(ValueError, "already holds its record's pools"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.pools_already_held
+        ):
             resnapshot_pools(battle.pk, is_game_master=True)
 
     def test_a_fight_nobody_touched_goes_on(self):
@@ -645,6 +660,7 @@ class StalePoolsTest(BaseTestCase):
 
         advance_turn(battle.pk)
 
+    @with_fixed_refusals
     def test_the_page_says_so_and_offers_the_game_master_the_control(self):
         battle = self.hurt(self.make_battle())
         if battle.status in OVER:
@@ -666,7 +682,7 @@ class StalePoolsTest(BaseTestCase):
         self.assertContains(page, 'id="resnapshot-pools"')
         self.assertContains(page, "Pools changed on the records")
         self.assertEqual(refused.status_code, 409)
-        self.assertIn("Aldwin: the record's pools", refused.json()["error"])
+        self.assertIn("services.stale_pools Aldwin", refused.json()["error"])
         # The notice and the control come with the refusal, for a page that
         # was open when the records moved (review of #842).
         self.assertIn('id="resnapshot-pools"', refused.json()["stale_html"])
@@ -678,6 +694,120 @@ class StalePoolsTest(BaseTestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(stale_pools(Battle.objects.get(pk=battle.pk)), [])
+
+
+@with_fixed_refusals
+class StalePoolsAnsweredAlikeTest(BaseTestCase):
+    """The advance and a player's choice refuse stale pools alike (#112).
+
+    A choice resumes the paused turn, which reaches the same #842 refusal the
+    advance does. The act endpoint answered it as a plain 400 with its text,
+    so a Game Master choosing for a figure got no readout and no control to
+    take the pools from the records; both now answer the 409 with both.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.game_master = self.create_dm()
+        self.character = create_character(self.create_user("player"), name="Aldwin")
+        battle = create_battle(
+            self.game_master,
+            name="Whose move",
+            count=1,
+            seed=3,
+            character_ids=(self.character.pk,),
+            control_mode=control.MANUAL,
+        )
+        self.battle, _events = advance_turn(battle.pk)
+        self.assertEqual(self.battle.status, Battle.STATUS_AWAITING)
+        # The record moves under the paused fight: a wound from elsewhere.
+        Character.objects.filter(pk=self.character.pk).update(fatigue_damage=1)
+        self.assertEqual(stale_pools(self.battle), ["Aldwin"])
+        self.login_as(self.game_master)
+
+    def assert_refused_with_the_readout(self, response) -> None:
+        self.assertEqual(response.status_code, 409, response.content)
+        payload = response.json()
+        self.assertIn("services.stale_pools Aldwin", payload["error"])
+        self.assertFalse(payload["advance"]["enabled"])
+        self.assertEqual(payload["advance"]["label"], "Pools changed on the records")
+        self.assertIn('id="battle-stale-pools"', payload["stale_html"])
+        self.assertIn('id="resnapshot-pools"', payload["stale_html"])
+
+    def test_the_advance_answers_with_the_readout(self):
+        response = self.client.post(
+            reverse("battle:advance", args=[self.battle.pk]),
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assert_refused_with_the_readout(response)
+
+    def test_a_choice_answers_with_the_readout(self):
+        pending = self.battle.pending_input_json
+        option = pending["candidates"][0]
+        choice = {
+            "combatant_id": pending["combatant_id"],
+            "turn": pending["turn"],
+            "letter": option["letter"],
+            "target_id": option.get("target_id"),
+            "spell_key": option.get("spell_key") or "",
+        }
+
+        response = self.client.post(
+            reverse("battle:act", args=[self.battle.pk]),
+            json.dumps(choice),
+            content_type="application/json",
+        )
+
+        self.assert_refused_with_the_readout(response)
+        self.assertEqual(
+            Battle.objects.get(pk=self.battle.pk).turn_number, self.battle.turn_number
+        )
+
+    def test_a_seated_player_is_refused_with_neither_readout_nor_control(self):
+        """The refusal's words alone: the readout and the control that takes
+        the pools from the records are a Game Master's (#842), and the take
+        is refused to anyone else."""
+        player = self.character.user
+        battle = create_battle(
+            self.game_master,
+            name="Her move",
+            count=1,
+            seed=3,
+            character_ids=(self.character.pk,),
+        )
+        seat = battle.combatants.get(character=self.character)
+        battle.combatants.filter(pk=seat.pk).update(player=player)
+        set_combatant_control_mode(battle.pk, seat.pk, control.MANUAL)
+        battle, _events = advance_turn(battle.pk)
+        self.assertEqual(battle.pending_input_json["combatant_id"], seat.pk)
+        Character.objects.filter(pk=self.character.pk).update(fatigue_damage=2)
+        pending = battle.pending_input_json
+        option = pending["candidates"][0]
+        self.login_as(player)
+
+        refused = self.client.post(
+            reverse("battle:act", args=[battle.pk]),
+            json.dumps(
+                {
+                    "combatant_id": pending["combatant_id"],
+                    "turn": pending["turn"],
+                    "letter": option["letter"],
+                    "target_id": option.get("target_id"),
+                    "spell_key": option.get("spell_key") or "",
+                }
+            ),
+            content_type="application/json",
+        )
+        taken = self.client.post(reverse("battle:resnapshot", args=[battle.pk]))
+
+        self.assertEqual(refused.status_code, 409, refused.content)
+        payload = refused.json()
+        self.assertIn("services.stale_pools Aldwin", payload["error"])
+        self.assertIsNone(payload["advance"])
+        self.assertEqual(payload["stale_html"], "")
+        self.assertEqual(taken.status_code, 403)
+        self.assertEqual(stale_pools(Battle.objects.get(pk=battle.pk)), ["Aldwin"])
 
 
 class DemotedMakerStopsWritingTest(BaseTestCase):

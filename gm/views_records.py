@@ -25,6 +25,7 @@ from common.helpers import _json_error, _parse_json_body, database_integer
 from . import hand_records
 from .battle_report import filed_verdict, notice_key
 from .models import GMSession
+from .refusal_words import refusal_words
 
 #: How many hand edits one account may send a minute: far above any hand.
 HAND_EDITS_PER_MINUTE = 60
@@ -53,7 +54,7 @@ def gm_fight_verdict(request: HttpRequest) -> JsonResponse:
     """
     session = _own_session(request, request.GET.get("session_id"))
     if session is None:
-        return _json_error("GM session not found", status=404)
+        return _json_error(refusal_words().views.session_not_found, status=404)
     notice = filed_verdict(session)
     return JsonResponse(
         {
@@ -74,15 +75,19 @@ def _hand_edit(
     """Run the hand edit a body names, and answer as every hand edit does."""
     session = _own_session(request, session_id)
     if session is None:
-        return _json_error("GM session not found", status=404)
+        return _json_error(refusal_words().views.session_not_found, status=404)
     if not hand_records.may_edit_by_hand(request.user):
-        return _json_error(hand_records.GAME_MASTER_ONLY, status=403)
+        return _json_error(refusal_words().hand_records.game_master_only, status=403)
     data, error = _parse_json_body(request)
     if error:
         return error
     change = changes.get(str(data.get("change", "")))
     if change is None:
-        return _json_error(f"change must be one of: {', '.join(changes)}")
+        return _json_error(
+            refusal_words().views_records.change_one_of.format(
+                changes=", ".join(changes)
+            )
+        )
     try:
         done = change(session, request.user, data)
     except hand_records.HandEditError as refusal:

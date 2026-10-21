@@ -608,8 +608,8 @@ class GaitRules:
     def __post_init__(self) -> None:
         if not self.order:
             raise ValueError("order names no gait")
-        if len(set(self.order)) != len(self.order):
-            raise ValueError(f"order repeats a gait: {list(self.order)}")
+        if problem := repeats_problem("gait", self.order):
+            raise ValueError(f"order {problem}")
         if set(self.base_distances) != set(self.order):
             raise ValueError(
                 f"base_distances must give exactly the gaits of order "

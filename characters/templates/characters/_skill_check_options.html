@@ -1,6 +1,8 @@
 {% comment %}The skill check's options (issue #756). A partial because a rename, an
 allocation or a run of years changes the skills held, and those responses send
-these back re-rendered (issues #765, #792).{% endcomment %}
+these back re-rendered (issues #765, #792). Rendered from
+characters.views.characters.skill_check_options_context, which carries the
+configured words that mark an option only a Game Master calls for (issue #85).{% endcomment %}
 {% for skill in skill_check_skills %}
-<option value="{{ skill.name }}">{{ skill.name|title }}{% if skill.attribute %} ({{ skill.attribute }}){% endif %}{% if not skill.held %} — untrained{% endif %}{% if skill.game_master_only %} — not known to read; a Game Master's call{% endif %}</option>
+<option value="{{ skill.name }}">{{ skill.name|title }}{% if skill.attribute %} ({{ skill.attribute }}){% endif %}{% if not skill.held %} — untrained{% endif %}{% if skill.game_master_only %} — not known to read; {{ game_masters_call }}{% endif %}</option>
 {% endfor %}

@@ -20,6 +20,7 @@ from common.test_helpers import (
 
 from . import engine as prompts
 from .models import GMEvent, GMSession, GMTurnRecord
+from .refusal_words import refusal_words
 from .testing import add_character
 from .turn_engine import events
 from .turn_engine.engine import (
@@ -313,7 +314,10 @@ class TurnEngineTest(SimpleTestCase):
 
         self.assertIn("This message is from a player", model.requests[0][-1]["content"])
         self.assertFalse(outcome.results[0].ran)
-        self.assertIn("rolled, not stated", model.requests[1][-1]["content"])
+        self.assertIn(
+            refusal_words().policy.player_stated_scores,
+            model.requests[1][-1]["content"],
+        )
 
     def test_a_turn_with_known_results_skips_planning(self):
         model = FakeModel(["You rolled well."])

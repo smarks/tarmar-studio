@@ -9,6 +9,7 @@ from django.urls import reverse
 
 from battle.models import Battle, BattleEvent
 from battle.profiles import for_battle
+from battle.refusal_words import refusal_words
 from battle.services import restart_battle, take_seat, withdraw_from_fight
 from common.test_helpers import BaseTestCase, create_character
 
@@ -197,12 +198,20 @@ class WithdrawMidFightTest(BaseTestCase):
             record_before,
         )
         if not battle.is_over:
-            with self.assertRaisesMessage(ValueError, "withdrawn from this session"):
+            with self.assertRaisesMessage(
+                ValueError,
+                refusal_words().services.withdrawn_seat.format(
+                    name=self.seat.display_name
+                ),
+            ):
                 take_seat(self.battle.pk, self.seat.pk, game_master=self.game_master)
 
     def test_the_game_master_cannot_take_the_withdrawn_seat(self) -> None:
         withdraw(self.aldwin, self.session.pk, self.player)
-        with self.assertRaisesMessage(ValueError, "withdrawn from this session"):
+        with self.assertRaisesMessage(
+            ValueError,
+            refusal_words().services.withdrawn_seat.format(name=self.seat.display_name),
+        ):
             take_seat(self.battle.pk, self.seat.pk, game_master=self.game_master)
         self.login_as(self.game_master)
         state = self.client.get(f"/tarmar/battles/{self.battle.pk}/state/").json()
@@ -278,7 +287,8 @@ class WithdrawMidFightTest(BaseTestCase):
         self.login_as(self.game_master)
         page = self.client.get(reverse("gm:chat") + f"?session={self.session.pk}")
         html = page.content.decode()
-        self.assertIn('<div class="message assistant notice">', html)
+        # Each entry names its turn since #89, so the match stops at the class.
+        self.assertIn('<div class="message assistant notice" data-history-turn=', html)
         self.assertIn(line, html)
 
     def test_a_finished_fight_is_left_as_it_ended(self) -> None:

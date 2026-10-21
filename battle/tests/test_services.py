@@ -7,6 +7,7 @@ from battle.engine import engine
 from battle.engine.state import BattleState, GroundWeapon
 from battle.generation import generate_character
 from battle.models import Battle, BattleEvent
+from battle.refusal_words import refusal_words
 from battle.services import (
     _catalog_weapon,
     advance_turn,
@@ -697,7 +698,9 @@ class RestartBattleTest(BaseTestCase):
         Battle.objects.filter(pk=self.battle.pk).update(initial_state_json={})
         with self.assertRaises(ValueError) as raised:
             restart_battle(self.battle.pk)
-        self.assertIn("no starting snapshot", str(raised.exception))
+        self.assertIn(
+            refusal_words().services.no_starting_snapshot, str(raised.exception)
+        )
 
     def test_restart_of_a_finished_battle_is_allowed(self):
         Battle.objects.filter(pk=self.battle.pk).update(

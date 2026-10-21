@@ -4,14 +4,61 @@
  * A player's "/fight two gray wolves" is a request the Game Master answers
  * (issue #841): the fake Ollama sets the foes with a set_foes answer held to
  * the bestiary catalog, the battle is built through the battle app's setup
- * service, and the page reloads with the board in the panel and the opening
- * line saying who set the foes. The seeded 'Aldwin the Bold' is the party; he is
- * seated to the player, so the first Advance stops at his move and the
- * turn panel offers his options.
+ * service, and the board is drawn in the panel and the opening line saying
+ * who set the foes lands in the chat, in place (issue #89): a reload threw
+ * away the earlier turns the reader had loaded. The seeded 'Aldwin the Bold'
+ * is the party; he is seated to the player, so the first Advance stops at
+ * his move and the turn panel offers his options.
  */
 
+const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_USER, chooseToAttach } = require('./fixtures');
-const { runDjangoShell } = require('./django');
+const { runDjangoShell, readDjangoShell } = require('./django');
+
+/** Leave a mark on the page that a reload would wipe. */
+async function markThePage(page) {
+    await page.evaluate(() => { window.issue89NotReloaded = true; });
+}
+
+/** Whether the mark left by markThePage is still there. */
+async function stillTheSamePage(page) {
+    return page.evaluate(() => window.issue89NotReloaded === true);
+}
+
+/** A page of turns (common/pagination.py's PAGE_SIZE), and two above it. */
+const PAGE_SIZE = 50;
+const TURNS = PAGE_SIZE + 2;
+
+/**
+ * Seed a session of TURNS turns for this worker's player, with a character
+ * of ``name`` attached; its id. The turns are written to the history
+ * directly, as gm-history-paging.spec.js does: the turn endpoint's rate
+ * limit takes fewer a minute than a page holds.
+ * @param {string} name
+ * @returns {string}
+ */
+function seedLongSessionWith(name) {
+    const output = readDjangoShell(`
+from django.contrib.auth import get_user_model
+from characters.models import Character
+from gm.models import GMSession
+owner = get_user_model().objects.get(username=${JSON.stringify(TEST_USER.username)})
+character = Character.objects.create(
+    user=owner, name=${JSON.stringify(name)},
+    strength=12, dexterity=12, intelligence=12, wisdom=12, constitution=12,
+    charisma=12, appearance_roll='3', height_roll='3', weight_roll='3',
+    fatigue_roll=7,
+)
+history = []
+for number in range(1, ${TURNS} + 1):
+    history.append({'role': 'user', 'content': f'Player move {number}.'})
+    history.append({'role': 'assistant', 'content': f'GM reply {number}.'})
+session = GMSession.objects.create(user=owner, name='Long fight', history=history)
+session.characters.add(character)
+print('SESSION', session.pk)
+`);
+    return output.match(/SESSION (\d+)/)[1];
+}
 
 /**
  * Seed a character for this worker's player who comes onto the board past
@@ -63,7 +110,7 @@ test.describe('GM panel — Battle tab', () => {
         await page.fill('#user-input', '/fight two gray wolves');
         await page.press('#user-input', 'Enter');
 
-        // The page reloads on the same session with the Battle tab up.
+        // The board is drawn on the same session with the Battle tab up.
         const board = page.locator('#gm-battle');
         await expect(board).toBeVisible();
         expect(page.url()).toBe(sessionUrl);
@@ -113,6 +160,50 @@ test.describe('GM panel — Battle tab', () => {
         await expect(page.locator('#advance-turn')).toBeVisible();
         await expect(page.locator('#battle-control')).toHaveCount(0);
         await expect(page.locator('#restart-battle')).toHaveCount(0);
+    });
+
+    test('a fight keeps the earlier turns the reader loaded: nothing reloads (#89)', async ({ page }, testInfo) => {
+        const name = `Brin ${testInfo.workerIndex}-${Date.now() % 100000}`;
+        const sessionId = seedLongSessionWith(name);
+        await page.goto(`/tarmar/gm/?session=${sessionId}`);
+
+        // The page above the latest, loaded by the reader.
+        const moves = page.locator('#messages .message.user .message-content');
+        await expect(moves).toHaveCount(PAGE_SIZE);
+        await page.locator('#messages [data-earlier] button').click();
+        await expect(moves).toHaveCount(TURNS);
+        await expect(moves.first()).toHaveText('Player move 1.');
+        await markThePage(page);
+
+        await page.fill('#user-input', '/fight two gray wolves');
+        await page.press('#user-input', 'Enter');
+
+        // The board, as the server renders it, in the tab.
+        await expect(page.locator('#gm-battle')).toBeVisible();
+        await expect(page.locator('#battle-arena .arena-combatant')).toHaveCount(3);
+        await expect(page.locator('#battle-roster')).toContainText(name);
+        await expect(page.locator('#gm-panel-tab-battle')).toHaveClass(/is-live/);
+        await expect(page.locator('#gm-fight-start')).toBeDisabled();
+        await expect(page.locator('#gm-panel-battle-status')).toBeHidden();
+        // The fight's opening line in the chat, below every turn loaded.
+        await expect(page.locator('#messages .message.assistant').last())
+            .toContainText('The fight moves to the board');
+        await expect(moves.first()).toHaveText('Player move 1.');
+        await expect(moves.filter({ hasText: `Player move ${TURNS}.` })).toHaveCount(1);
+        expect(await stillTheSamePage(page)).toBe(true);
+        expect(new URL(page.url()).searchParams.get('session')).toBe(sessionId);
+
+        // The arena drawn in place is wired: Advance stops at the player's
+        // figure and its turn menu plays, with the page still the same.
+        await page.click('#advance-turn');
+        const panel = page.locator('#turn-panel');
+        await expect(panel).toContainText(name);
+        await panel.locator('.turn-option').first().click();
+        await panel.locator('.turn-confirm').click();
+        await expect(page.locator('#battle-log .turn-group[data-turn="1"]')).toBeVisible();
+        await expect(page.locator('#battle-turn')).toHaveText('1');
+        await expect(moves.first()).toHaveText('Player move 1.');
+        expect(await stillTheSamePage(page)).toBe(true);
     });
 
     test('a death on the board is on the sheet before anyone says a word (#750)', async ({ page }, testInfo) => {
@@ -169,7 +260,7 @@ test.describe('GM panel — Battle tab', () => {
 
         const error = page.locator('#gm-panel-battle-error');
         await expect(error).toBeVisible();
-        await expect(error).toContainText('still answering your last message');
+        await expect(error).toContainText(refusal('gm', 'views', 'fight_while_turn_running'));
         await expect(page.locator('#gm-battle')).toHaveCount(0);
         // The turn ends as it would have, with no fight in its history.
         await expect(page.locator('.message.assistant').last()).toContainText('nothing stirs', { timeout: 30000 });

@@ -484,6 +484,28 @@ class MagicBoundsEndpointTest(CanonImposesTestCase):
             [PUSH_CAP],
         )
 
+    def test_a_script_posting_the_form_gets_the_battle_payload(self):
+        """The GM chat's Battle tab posts the panel's own form, fields and all (#89)."""
+        self.login_as(self.dm)
+        response = self.client.post(
+            self.url,
+            {
+                COMBATANT_FIELD: self.ids[0],
+                BOUNDS_FIELD: [CHANNEL, PUSH_CAP],
+                LIFTED_FIELD: "true",
+                "next": "/tarmar/gm/",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(
+                entry["bound"]
+                for entry in response.json()["rulings"]["magic_bounds_lifted"]
+            ),
+            sorted([CHANNEL, PUSH_CAP]),
+        )
+
     def test_the_json_caller_reads_back_the_ruling_and_nonsense_is_refused(self):
         self.login_as(self.dm)
         response = self.post_json(

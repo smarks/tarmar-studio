@@ -342,7 +342,7 @@ class CharacterRulesFileTest(SimpleTestCase):
         self.assert_changed_refused(
             lambda rules: rules["location"]["rows"][0].update(skills=["Sail", "Sail"]),
             "location.rows[0].skills",
-            "repeats an entry",
+            "repeats the entry ['Sail']",
         )
 
     def test_a_malformed_ruling_is_refused(self) -> None:

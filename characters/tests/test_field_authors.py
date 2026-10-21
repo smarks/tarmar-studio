@@ -26,6 +26,7 @@ from character_export.export_utils import (
 from characters import services
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import CHARACTER_FIELDS, Character
+from characters.refusal_words import refusal_words
 from characters.services import (
     FIELD_RULES,
     GAME_MASTER_UPDATE_FIELDS,
@@ -33,6 +34,7 @@ from characters.services import (
     CharacterChangeError,
     FieldAuthor,
 )
+from characters.templatetags.character_fields import ATTRIBUTE_LOCKED_NOTE_ID
 from common.test_helpers import BaseTestCase, create_character
 
 MIGRATION = importlib.import_module(
@@ -115,9 +117,9 @@ class ThePageAndTheServerAgreeTest(BaseTestCase):
             reverse("characters:edit", args=[self.character.pk])
         ).content.decode()
 
-        # One of each cell shape: attribute, choice, text and number.
+        page = html.replace("&#x27;", "'")
+        # One of each other cell shape: choice, text and number.
         for name in (
-            "strength",
             "provenance_class",
             "wealth_level",
             "provenance_detail",
@@ -128,12 +130,66 @@ class ThePageAndTheServerAgreeTest(BaseTestCase):
             with self.subTest(field=name):
                 self.assertIn(
                     f'data-locked-field="{name}">{services.field_refusal(name)}',
-                    html.replace("&#x27;", "'"),
+                    page,
+                )
+        # The six attributes share one reason (issue #84): the table states it
+        # once, under it, and each locked cell points to that note, where the
+        # sentence used to be printed in every cell.
+        attribute_reason = services.field_refusal("strength")
+        self.assertEqual(page.count(attribute_reason), 1, attribute_reason)
+        self.assertIn(
+            f'<p class="formula field-locked-reason" id="{ATTRIBUTE_LOCKED_NOTE_ID}" '
+            f'data-locked-note-for="{" ".join(CHARACTER_ATTRIBUTE_FIELDS)}">'
+            f"{attribute_reason}</p>",
+            page,
+        )
+        for name in CHARACTER_ATTRIBUTE_FIELDS:
+            with self.subTest(attribute=name):
+                self.assertEqual(services.field_refusal(name), attribute_reason)
+                self.assertIn(
+                    f'<span data-readonly-field="{name}" data-locked-field="{name}" '
+                    f'aria-describedby="{ATTRIBUTE_LOCKED_NOTE_ID}">',
+                    page,
                 )
         # The Fatigue roll's cell is its roll readout (#636): no input for a
         # player, and no second roll once it is recorded.
         self.assertNotIn('data-field="fatigue_roll"', html)
         self.assertNotIn('id="roll-fatigue-btn"', html)
+
+    def sheet_as(self, user) -> str:
+        """The character's sheet as ``user`` reads it, apostrophes unescaped."""
+        self.logout()
+        self.login_as(user)
+        return (
+            self.client.get(reverse("characters:edit", args=[self.character.pk]))
+            .content.decode()
+            .replace("&#x27;", "'")
+        )
+
+    def test_a_reader_who_cannot_edit_gets_no_locked_note(self):
+        # A public character read by someone else is the read-only sheet
+        # (#273): no reason beside any value, so none under the table (#84).
+        self.character.is_public = True
+        self.character.save()
+        page = self.sheet_as(self.create_user("agree-reader"))
+
+        self.assertNotIn(ATTRIBUTE_LOCKED_NOTE_ID, page)
+        self.assertNotIn("data-locked-field", page)
+        self.assertNotIn(services.field_refusal("strength"), page)
+
+    def test_a_game_masters_sheet_carries_only_the_hidden_empty_note(self):
+        page = self.sheet_as(self.create_dm("agree-note-gm"))
+
+        # Nothing is locked for a Game Master, so the note is there for the
+        # page's use and says nothing (#84).
+        self.assertIn(
+            f'id="{ATTRIBUTE_LOCKED_NOTE_ID}" '
+            f'data-locked-note-for="{" ".join(CHARACTER_ATTRIBUTE_FIELDS)}" hidden></p>',
+            page,
+        )
+        self.assertEqual(page.count(ATTRIBUTE_LOCKED_NOTE_ID), 1)
+        self.assertNotIn(services.field_refusal("strength"), page)
+        self.assertNotIn("data-locked-field", page)
 
 
 class PlayerFieldUpdateTest(BaseTestCase):
@@ -226,7 +282,7 @@ class PlayerFieldUpdateTest(BaseTestCase):
         result = services.update_field(
             self.character.pk, "strength", 25, is_game_master=True
         )
-        self.assertIn("the Game Master's call", result.note)
+        self.assertIn(refusal_words().common.the_game_masters_call, result.note)
 
     def test_the_fatigue_service_holds_a_player_by_default(self):
         with self.assertRaisesMessage(
@@ -296,6 +352,12 @@ class PointBuyTest(BaseTestCase):
         page = self.client.get(reverse("characters:edit", args=[self.character.pk]))
         self.assertContains(page, 'id="point-buy-note"')
         self.assertContains(page, 'class="editable-field" data-field="strength"')
+        # No score is locked yet, so the note that will say why is there,
+        # hidden, for the page to show when the first one locks (#84).
+        self.assertContains(
+            page,
+            f'data-locked-note-for="{" ".join(CHARACTER_ATTRIBUTE_FIELDS)}" hidden></p>',
+        )
 
         first = self.update("strength", 15)
         self.assertEqual(first.status_code, 200, first.content)

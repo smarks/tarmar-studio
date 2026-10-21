@@ -29,16 +29,20 @@ from .models import (
     StoryThread,
     SupplyItem,
 )
-from .testing import a_mapped_place, add_character, gm_replies, recorded
+from .refusal_words import refusal_words
+from .testing import (
+    a_mapped_place,
+    add_character,
+    gm_replies,
+    recorded,
+    with_fixed_gm_refusals,
+)
 from .turn_engine import events
 from .turn_engine.engine import TurnEngine, TurnRequest
-from .turn_engine.executor import NOT_YOURS_REFUSAL, RecordsExecutor
+from .turn_engine.executor import RecordsExecutor
 from .turn_engine.model import FakeModel
 from .turn_engine.plan import NewCharacter, PlannedAction, read_plan
 from .turn_engine.policy import (
-    GAME_MASTER_RECORDS_REFUSAL,
-    PLAYER_STATED_FATIGUE_REFUSAL,
-    PLAYER_STATED_SCORES_REFUSAL,
     TurnPolicy,
 )
 from .turn_engine.state import refusal_lines, settled_refusals
@@ -221,7 +225,9 @@ class GameMasterActionsTest(ExecutorTestCase):
         self.assertFalse(Character.objects.filter(name="Giant").exists())
         first, second = outcome.results
         self.assertIn("between 1 and", first.error)
-        self.assertIn("Giant was not created", second.error)
+        self.assertIn(
+            refusal_words().executor.not_created.format(ref="Giant"), second.error
+        )
         self.assertTrue(
             first.procedure["lines"][0].startswith(
                 "⚙️ Not done: recording attributes for Giant, because"
@@ -339,7 +345,9 @@ class GameMasterActionsTest(ExecutorTestCase):
         self.assertIn("six core attributes", years.error)
         self.assertIn("wealth_level must be one of", background.error)
         self.assertIn("Name may contain", rename.error)
-        self.assertIn("no character with id 999", stranger.error)
+        self.assertIn(
+            refusal_words().executor.no_such_character.format(id=999), stranger.error
+        )
         self.assertFalse(any(result.ran for result in outcome.results))
         self.assertIn(
             "Not done: playing years of experience for Blank, because", years.result
@@ -358,7 +366,7 @@ class GameMasterActionsTest(ExecutorTestCase):
         with patch("characters.services.changing", side_effect=Character.DoesNotExist):
             result = executor.run(action, recorded_events.append)
 
-        self.assertEqual(result.error, "that character no longer exists")
+        self.assertEqual(result.error, refusal_words().executor.character_gone)
         self.assertEqual(len(recorded_events), 1)
 
     def test_dice_are_rolled_and_shown_without_changing_anyone(self):
@@ -511,9 +519,14 @@ class PlayerActionsTest(ExecutorTestCase):
         )
 
         self.assertEqual(self.characters(), [])
-        self.assertEqual(outcome.results[0].error, PLAYER_STATED_SCORES_REFUSAL)
+        self.assertEqual(
+            outcome.results[0].error, refusal_words().policy.player_stated_scores
+        )
         self.assertIn("This message is from a player", model.requests[1][-1]["content"])
-        self.assertIn("rolled, not stated", model.requests[1][-1]["content"])
+        self.assertIn(
+            refusal_words().policy.player_stated_scores,
+            model.requests[1][-1]["content"],
+        )
 
     def test_a_player_rolls_attributes_and_fatigue_once(self):
         outcome, *_rest = self.play(
@@ -578,7 +591,7 @@ class PlayerActionsTest(ExecutorTestCase):
             )
         )
 
-        reason = services.ROLL_FIXED_REASONS["location"]
+        reason = services.roll_fixed_reason("location")
         self.assertFalse(outcome.results[0].ran)
         self.assertEqual(outcome.results[0].error, reason)
         self.assertIn(reason, model.requests[1][-1]["content"])
@@ -702,7 +715,7 @@ class PlayerActionsTest(ExecutorTestCase):
         self.assertIn("Location: d100=80 -> Rural", character.dice_log)
         self.assertIn("a rolled background", outcome.results[0].result)
         with self.assertRaisesMessage(
-            services.CharacterChangeError, services.ROLL_FIXED_REASONS["location"]
+            services.CharacterChangeError, services.roll_fixed_reason("location")
         ):
             services.update_field(character.pk, "location", "City")
 
@@ -726,7 +739,7 @@ class PlayerActionsTest(ExecutorTestCase):
         )
 
         self.assertEqual(
-            outcome.results[0].error, services.ROLL_FIXED_REASONS["location"]
+            outcome.results[0].error, services.roll_fixed_reason("location")
         )
         character.refresh_from_db()
         self.assertEqual(character.location, "Rural")
@@ -736,7 +749,7 @@ class PlayerActionsTest(ExecutorTestCase):
         outcome, *_rest = self.play(
             plan({"action": "revive_character", "character_id": character.pk})
         )
-        self.assertIn("only a Game Master", outcome.results[0].error)
+        self.assertIn(refusal_words().policy.game_master_only, outcome.results[0].error)
 
 
 class CampaignStateTest(ExecutorTestCase):
@@ -816,7 +829,10 @@ class CampaignStateTest(ExecutorTestCase):
             plan({"action": "adjust_supplies", "item": "torches", "spent": True})
         )
 
-        self.assertIn("not carrying torches", outcome.results[0].error)
+        self.assertIn(
+            refusal_words().executor.not_carrying.format(item="torches"),
+            outcome.results[0].error,
+        )
         self.assertFalse(SupplyItem.objects.filter(session=self.session).exists())
 
     def test_the_clock_only_ever_moves_forward_by_what_it_was_given(self):
@@ -918,7 +934,12 @@ class CampaignStateTest(ExecutorTestCase):
             and not event.payload["frame"].get("ran")
         ]
         self.assertTrue(refusals)
-        self.assertIn("already recorded as a thing", refusals[0])
+        self.assertIn(
+            refusal_words().executor.already_recorded_as.format(
+                name="Shadow", kind="thing"
+            ),
+            refusals[0],
+        )
         self.assertEqual(SceneEntity.objects.filter(session=self.session).count(), 1)
 
     def test_a_thread_is_opened_and_closed(self):
@@ -998,7 +1019,9 @@ class CampaignStateTest(ExecutorTestCase):
         )
 
         self.assertFalse(result.ran)
-        self.assertIn(f"no open thread with id {thread.pk}", result.error)
+        self.assertIn(
+            refusal_words().executor.no_open_thread.format(id=thread.pk), result.error
+        )
 
     def test_an_opened_thread_remembers_the_turn_that_opened_it(self):
         _outcome, _yielded, _model, turn = self.play(
@@ -1191,6 +1214,7 @@ class FollowUpReadsTheRecordsAfterTheFirstPlanTest(ExecutorTestCase):
             except StopIteration as stop:
                 return stop.value, model
 
+    @with_fixed_gm_refusals
     def test_a_character_the_first_plan_started_can_be_named(self):
         def leaked() -> str:
             wren = self.session.attached_characters().get(name="Wren")
@@ -1211,7 +1235,9 @@ class FollowUpReadsTheRecordsAfterTheFirstPlanTest(ExecutorTestCase):
         )
         self.assertTrue(all(result.ran for result in outcome.results))
         self.assertIsNotNone(wren.fatigue_roll)
-        self.assertNotIn("there is no character", model.requests[-1][-1]["content"])
+        self.assertNotIn(
+            "executor.no_such_character", model.requests[-1][-1]["content"]
+        )
 
     def test_a_thread_the_first_plan_opened_can_be_closed(self):
         def leaked() -> str:
@@ -1275,7 +1301,7 @@ class RefusalsReachTheNextTurnTest(ExecutorTestCase):
         planning = model.requests[0][-1]["content"]
         self.assertIn("Already refused in this session", planning)
         self.assertIn("record_attributes", planning)
-        self.assertIn("rolled, not stated", planning)
+        self.assertIn(refusal_words().policy.player_stated_scores, planning)
 
     def test_the_narrating_call_is_told_too(self):
         """So the reply explains the refusal instead of ignoring it."""
@@ -1455,7 +1481,7 @@ class RefusalMemoryIsKeyedByRoleTest(ExecutorTestCase):
             self.STATED,
             roster_ids=set(),
             policy=TurnPolicy.for_turn(MODE_PLAY, is_game_master=True),
-            settled={"record_attributes": PLAYER_STATED_SCORES_REFUSAL},
+            settled={"record_attributes": refusal_words().policy.player_stated_scores},
         )
 
         self.assertTrue(reading.ok)
@@ -1536,7 +1562,10 @@ class AnotherPlayersCharacterTest(ExecutorTestCase):
 
         self.assertEqual([result.ran for result in outcome.results], [False] * 4)
         self.assertTrue(
-            all(NOT_YOURS_REFUSAL in result.error for result in outcome.results),
+            all(
+                refusal_words().executor.not_yours in result.error
+                for result in outcome.results
+            ),
             [result.error for result in outcome.results],
         )
         after = Character.objects.get(pk=self.theirs.pk)
@@ -1581,7 +1610,7 @@ class AnotherPlayersCharacterTest(ExecutorTestCase):
         )
 
         self.assertFalse(result.ran)
-        self.assertIn(NOT_YOURS_REFUSAL, result.error)
+        self.assertIn(refusal_words().executor.not_yours, result.error)
 
 
 class NoSecondCharacterOfTheSameNameTest(ExecutorTestCase):
@@ -1699,7 +1728,10 @@ class NoSecondCharacterOfTheSameNameTest(ExecutorTestCase):
 
         self.assertFalse(result.ran)
         self.assertIn(
-            f"already has a character called Wren (id {wren.pk})", result.error
+            refusal_words().executor.duplicate_character_name.format(
+                name="Wren", id=wren.pk
+            ),
+            result.error,
         )
         self.assertEqual(self.session.attached_characters().count(), 1)
 
@@ -1838,7 +1870,7 @@ class PlayersAreHeldToTheRecordsRulesTest(ExecutorTestCase):
         self.assertEqual([result.ran for result in outcome.results], [False] * 3)
         self.assertTrue(
             all(
-                result.error == GAME_MASTER_RECORDS_REFUSAL
+                result.error == refusal_words().policy.game_master_records
                 for result in outcome.results
             )
         )
@@ -1857,7 +1889,9 @@ class PlayersAreHeldToTheRecordsRulesTest(ExecutorTestCase):
         )
 
         self.assertFalse(outcome.results[0].ran)
-        self.assertEqual(outcome.results[0].error, PLAYER_STATED_FATIGUE_REFUSAL)
+        self.assertEqual(
+            outcome.results[0].error, refusal_words().policy.player_stated_fatigue
+        )
         self.wren.refresh_from_db()
         self.assertIsNone(self.wren.fatigue_roll)
 

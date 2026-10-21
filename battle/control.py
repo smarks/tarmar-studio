@@ -34,6 +34,7 @@ unseated figure would name an owner who does not exist.
 
 from __future__ import annotations
 
+from .refusal_words import refusal_words
 from .refusals import BattleRefusal
 
 #: The AI decides this combatant's action.
@@ -76,7 +77,7 @@ def clean_mode(value) -> str:
     """
     mode = str(value or "").strip()
     if mode not in MODES:
-        raise BattleRefusal("Control mode must be automatic or manual")
+        raise BattleRefusal(refusal_words().control.battle_mode)
     return mode
 
 
@@ -88,7 +89,7 @@ def clean_combatant_mode(value) -> str:
     """
     mode = str(value or "").strip()
     if mode not in COMBATANT_MODES:
-        raise BattleRefusal("Control mode must be automatic, manual, or inherited")
+        raise BattleRefusal(refusal_words().control.combatant_mode)
     return mode
 
 
@@ -112,14 +113,17 @@ def seat_holder_label(combatant) -> str:
     Empty means nobody is sitting in it — which is not the same as nobody
     owning it (see :func:`owner_label`).
     """
-    if combatant.player_id is not None:
-        # ``player`` may be deferred or the relation unfetched; the caller
-        # selects it related where it matters, and the id alone is enough
-        # to know somebody is there.
-        return combatant.player.username
-    if combatant.guest_key:
-        return GUEST_OWNER
-    return ""
+    # Imported here, not at the top: battle.models imports this module for
+    # its mode constants, and battle.access imports battle.models, so a
+    # module-level import would be a cycle.
+    from .access import seat_is_held
+
+    if not seat_is_held(combatant):
+        return ""
+    # Held, by an account (named) or else by a guest. The caller selects
+    # ``player`` related where it matters; a guest's seat has none to fetch.
+    holder = combatant.player
+    return holder.username if holder is not None else GUEST_OWNER
 
 
 def owner_label(battle, combatant) -> str:

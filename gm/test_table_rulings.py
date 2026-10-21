@@ -8,19 +8,21 @@ from common.test_helpers import BaseTestCase
 
 from .engine import system_prompt_for
 from .models import GMEvent, GMSession, GMTurnRecord, TableRuling
+from .refusal_words import refusal_words
 from .test_plan_turn_view import PlanTurnTestCase
 from .testing import run_actions
 from .turn_engine import events
 from .turn_engine.executor import RecordsExecutor
 from .turn_engine.messages import RULINGS_APPLY
 from .turn_engine.plan import read_plan
-from .turn_engine.policy import HOUSE_RULE_REFUSAL, TurnPolicy
+from .turn_engine.policy import TurnPolicy
 from .turn_engine.state import RULINGS_HEADING, ruling_lines
 
 CRIT_QUESTION = (
     "At my table a natural 20 just crits — no confirmation roll. A player has "
     "rolled a natural 20 with a sword. What damage does he take?"
 )
+
 CRIT_RULE = "a natural 20 just crits, with no confirmation roll"
 CRIT_LINE_START = "- critical hits (ruling "
 
@@ -84,7 +86,7 @@ class RulingActionsTest(BaseTestCase):
         self.assertFalse(result.ran)
         self.assertEqual(
             result.result,
-            f"Not done: recording a house rule, because {HOUSE_RULE_REFUSAL}.",
+            f"Not done: recording a house rule, because {refusal_words().policy.house_rule}.",
         )
         self.assertFalse(TableRuling.objects.exists())
 
@@ -98,7 +100,7 @@ class RulingActionsTest(BaseTestCase):
             is_game_master=False,
         )
 
-        self.assertIn(HOUSE_RULE_REFUSAL, result.result)
+        self.assertIn(refusal_words().policy.house_rule, result.result)
         self.assertTrue(TableRuling.objects.get().active)
 
     def test_a_second_ruling_on_the_topic_supersedes_the_first(self):
@@ -149,7 +151,7 @@ class RulingActionsTest(BaseTestCase):
 
         self.assertFalse(result.ran)
         self.assertIn(
-            "there is no active ruling with id 999 at this table", result.result
+            refusal_words().executor.no_active_ruling.format(id=999), result.result
         )
 
     def test_a_malformed_ruling_is_not_a_plan(self):
@@ -277,7 +279,7 @@ class RulingTurnViewTest(PlanTurnTestCase):
 
         (procedure,) = [frame["procedure"] for frame in sent if "procedure" in frame]
         self.assertFalse(procedure["ran"])
-        self.assertIn(HOUSE_RULE_REFUSAL, calls[1][-1]["content"])
+        self.assertIn(refusal_words().policy.house_rule, calls[1][-1]["content"])
         self.assertFalse(TableRuling.objects.exists())
 
     def test_the_panel_lists_the_tables_rulings(self):

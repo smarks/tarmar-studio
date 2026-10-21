@@ -8,6 +8,12 @@ other, and an archer could not shoot anyone but the nearest enemy.
 Wolf: bare hands at 1 hex, d20 -3 vs TN 16 — P(hit) 0.100 ..."). Each option
 now carries a plain line built from the same figures, what it costs, and
 whether it is the AI's pick; the score stays on the payload.
+
+The menu's words are configuration (``config/battle-rulings.toml``, #90), so
+the tests that read a line run under :data:`~.rulings_words.FIXED_WORDS`, in
+which each sentence is its own key followed by what filled it
+(``"tarmar_menu.run Far 10"``): they prove which sentence was chosen and what
+filled it, never the shipped wording.
 """
 
 from dataclasses import replace
@@ -25,10 +31,10 @@ from battle.engine.state import (
     GroundWeapon,
     WeaponState,
 )
-from battle.magic_rules import magic_rules
 from battle.models import Battle, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
-from battle.policy import Candidate, choose_option
+from battle.policy import Candidate, Forecast, choose_option
+from battle.refusal_words import refusal_words
 from battle.services import (
     _catalog_weapon,
     advance_turn,
@@ -36,9 +42,14 @@ from battle.services import (
     record_player_action,
     set_combatant_control_mode,
 )
+from battle.wording import words
 from common.test_helpers import BaseTestCase
 
-from .magic_fixtures import CASTING_FAILURE, seated_rules
+from .magic_fixtures import CASTING_FAILURE, INVENTED_RULES, seated_rules
+from .rulings_words import with_fixed_words
+
+#: A close strike made bare-handed, under the fixed words.
+BARE_HANDED_CLOSE_STRIKE = "tarmar_menu.close_strike Foe turn_menu.bare_hands"
 
 
 def figure(combatant_id: int, name: str, position: tuple[int, int], **fields):
@@ -66,12 +77,67 @@ def figure(combatant_id: int, name: str, position: tuple[int, int], **fields):
     )
 
 
+def plain_line_board() -> tuple[BattleState, CombatantState, CombatantState]:
+    """Aldwin beside Foe, a dagger and a longbow spare and a mace on the
+    ground: the board each letter's plain line is read on."""
+    actor = figure(
+        1,
+        "Aldwin",
+        (0, 0),
+        spare_weapons=[_catalog_weapon("dagger"), _catalog_weapon("longbow")],
+    )
+    foe = figure(2, "Foe", (1, 0))
+    state = BattleState(
+        arena_radius=4,
+        combatants=[actor, foe],
+        ground_weapons=[GroundWeapon(q=0, r=1, weapon=_catalog_weapon("mace"))],
+    )
+    return state, actor, foe
+
+
+def boxed_in_board() -> tuple[BattleState, CombatantState]:
+    """Aldwin ringed by his own side, three hexes from an archer (#57)."""
+    aldwin = figure(1, "Aldwin", (0, 0), team="Red", move_run=10, move_sprint=14)
+    shields = [
+        figure(10 + index, f"Shield {index}", cell, team="Red")
+        for index, cell in enumerate(hexes.neighbors((0, 0)))
+    ]
+    bowman = figure(2, "Bowman", (3, 0), team="Blue", weapon=_catalog_weapon("longbow"))
+    return (
+        BattleState(arena_radius=5, combatants=[aldwin, *shields, bowman]),
+        aldwin,
+    )
+
+
+def open_board() -> tuple[BattleState, CombatantState]:
+    """Aldwin in the open, four hexes from an archer (#57)."""
+    aldwin = figure(1, "Aldwin", (0, 0), team="Red", move_run=10, move_sprint=14)
+    bowman = figure(2, "Bowman", (4, 0), team="Blue", weapon=_catalog_weapon("longbow"))
+    return BattleState(arena_radius=5, combatants=[aldwin, bowman]), aldwin
+
+
+def walled_off_board(*, with_far: bool = True) -> tuple[BattleState, CombatantState]:
+    """Aldwin, Near three hexes off ringed by Aldwin's side, and Far five
+    hexes the other way in the open (#56)."""
+    aldwin = figure(1, "Aldwin", (0, 0), team="Red")
+    near = figure(2, "Near", (3, 0), team="Blue")
+    wall = [
+        figure(10 + index, f"Guard {index}", cell, team="Red")
+        for index, cell in enumerate(hexes.neighbors((3, 0)))
+    ]
+    far = figure(3, "Far", (-5, 0), team="Blue")
+    combatants = [aldwin, near, *wall, *([far] if with_far else [])]
+    return BattleState(arena_radius=7, combatants=combatants), aldwin
+
+
 class EveryTargetTest(BaseTestCase):
     """The engine's menu, with each attack also aimed at every legal target."""
 
     def menu(self, state: BattleState, actor: CombatantState):
+        """The AI's own menu, and the engine's every-target menu a seated
+        player is offered (tarmar-engine #21)."""
         advice = choose_option(state, actor)
-        return advice, turn_menu.every_target(state, actor, advice.candidates)
+        return advice, choose_option(state, actor, every_target=True).candidates
 
     def test_an_attack_is_offered_at_each_adjacent_enemy(self):
         fighter = figure(1, "Aldwin", (0, 0))
@@ -86,8 +152,9 @@ class EveryTargetTest(BaseTestCase):
         # nobody who is out of reach.
         self.assertEqual(len(engine_strikes), 1)
         self.assertEqual({c.target_id for c in strikes}, {2, 3})
-        # The engine's own candidate keeps its place, first.
-        self.assertIs(strikes[0], engine_strikes[0])
+        # The engine's own candidate keeps its place, first: an equal one,
+        # since the every-target menu is built apart from the AI's.
+        self.assertEqual(strikes[0], engine_strikes[0])
         other = strikes[1]
         self.assertEqual(other.name, "ATTACK")
         self.assertTrue(
@@ -178,6 +245,67 @@ class EveryTargetTest(BaseTestCase):
         advice, menu = self.menu(state, held)
         self.assertEqual(menu, advice.candidates)
 
+    @with_fixed_words
+    def test_each_target_s_row_reads_its_own_forecast(self):
+        """An extra row carries the engine's forecast for its own target, so
+        its plain line names that target's armour, not the AI target's."""
+        fighter = figure(1, "Aldwin", (0, 0))
+        gray = figure(2, "Gray Wolf", (1, 0), stops=3, armour_tier="Medium")
+        dire = figure(3, "Dire Wolf", (0, 1))
+        state = BattleState(arena_radius=4, combatants=[fighter, gray, dire])
+        strikes = {
+            entry.target_id: entry
+            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, fighter)
+            if entry.letter == "j"
+        }
+        self.assertEqual(set(strikes), {2, 3})
+        for target_id, stops in ((2, 3), (3, 0)):
+            with self.subTest(target_id=target_id):
+                strike = strikes[target_id]
+                assert strike.forecast is not None
+                self.assertEqual(strike.forecast.armour_stops, stops)
+                # Under the fixed words: the armoured odds name the stops
+                # last, the unarmoured odds none.
+                odds, armour = (
+                    ("tarmar_menu.odds_armoured", f" {stops}")
+                    if stops
+                    else ("tarmar_menu.odds", "")
+                )
+                self.assertIn(f"{odds} ", strike.plain)
+                self.assertTrue(
+                    strike.plain.endswith(
+                        f" 2d6 {strike.forecast.winning_faces} 20{armour}"
+                    ),
+                    strike.plain,
+                )
+
+    def test_a_cast_is_offered_at_every_enemy_nearest_first(self):
+        wizard = figure(
+            1,
+            "Morwen",
+            (0, 0),
+            spells=["fire_missile"],
+            mana=8,
+            max_mana=8,
+            intelligence=14,
+        )
+        near = figure(2, "Near", (2, 0))
+        far = figure(3, "Far", (-4, 0))
+        state = BattleState(arena_radius=6, combatants=[wizard, near, far])
+        advice, menu = self.menu(state, wizard)
+        casts = [
+            c
+            for c in menu
+            if c.spell_key == "fire_missile" and not c.push_mana and not c.borrow
+        ]
+        self.assertEqual([c.target_id for c in casts], [2, 3])
+        self.assertTrue(all(c.forecast is not None for c in casts))
+        # The AI's own cast stays aimed at the nearest.
+        self.assertEqual(
+            [c.target_id for c in advice.candidates if c.spell_key == "fire_missile"],
+            [2],
+        )
+
     def test_teammates_are_never_offered(self):
         fighter = figure(1, "Aldwin", (0, 0), team="Red")
         friend = figure(2, "Friend", (1, 0), team="Red")
@@ -187,12 +315,12 @@ class EveryTargetTest(BaseTestCase):
         self.assertEqual({c.target_id for c in menu if c.letter == "j"}, {3})
 
 
+@with_fixed_words
 class MenuEntryTest(BaseTestCase):
     """What each option says to the player who reads it (#788)."""
 
     def entries(self, state: BattleState, actor: CombatantState) -> list[dict]:
-        advice = choose_option(state, actor)
-        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         return [candidate.to_payload() for candidate in menu]
 
     def test_an_attack_reads_as_who_it_hits_and_the_odds(self):
@@ -205,8 +333,9 @@ class MenuEntryTest(BaseTestCase):
         self.assertEqual(strike["target_name"], "Gray Wolf")
         self.assertRegex(
             strike["plain"],
-            r"^Attack Gray Wolf with the Broadsword: \d+ in 20 to hit, "
-            r"2d6 less 1 armour \((about \d+|under 1) a hit\)$",
+            r"^turn_menu\.with_odds turn_menu\.attack Gray Wolf turn_menu\.the_weapon "
+            r"Broadsword tarmar_menu\.odds_armoured "
+            r"(turn_menu\.about \d+|turn_menu\.under_one) 2d6 \d+ 20 1$",
         )
         self.assertEqual(strike["cost"], "")
         # The score and its working are still there for the page to show.
@@ -221,20 +350,21 @@ class MenuEntryTest(BaseTestCase):
             entry for entry in self.entries(state, fighter) if entry["letter"] == "j"
         )
         faces = int(strike["rationale"].split(" of 20 faces")[0].rsplit("(", 1)[1])
-        self.assertIn(f": {faces} in 20 to hit", strike["plain"])
+        self.assertTrue(
+            strike["plain"].endswith(f" {faces} {turn_menu.DIE_FACES}"), strike["plain"]
+        )
 
     def test_movement_says_what_it_costs(self):
         runner = figure(1, "Aldwin", (0, 0), move_run=10, move_sprint=14)
         far = figure(2, "Far", (5, 0))
         state = BattleState(arena_radius=6, combatants=[runner, far])
         entries = {entry["letter"]: entry for entry in self.entries(state, runner)}
-        self.assertEqual(entries["a"]["plain"], "Run up to 10 hexes toward Far")
-        self.assertEqual(entries["a"]["cost"], "1 Fatigue")
-        self.assertEqual(entries["sprint"]["plain"], "Sprint up to 14 hexes toward Far")
-        self.assertEqual(entries["sprint"]["cost"], "6 Fatigue")
+        self.assertEqual(entries["a"]["plain"], "tarmar_menu.run Far 10")
+        self.assertEqual(entries["a"]["cost"], "tarmar_menu.fatigue 1")
+        self.assertEqual(entries["sprint"]["plain"], "tarmar_menu.sprint Far 14")
+        self.assertEqual(entries["sprint"]["cost"], "tarmar_menu.fatigue 6")
         self.assertEqual(
-            entries["a_yield"]["plain"],
-            "Run up to 10 hexes toward Far, moving in Final Movement instead",
+            entries["a_yield"]["plain"], "tarmar_menu.yielded tarmar_menu.run Far 10"
         )
         self.assertEqual(entries["c"]["cost"], "")
 
@@ -244,6 +374,7 @@ class MenuEntryTest(BaseTestCase):
             "Morwen",
             (0, 0),
             spells=["fire_missile"],
+            spell_skill_levels={"fire_missile": 1},
             mana=8,
             max_mana=8,
             intelligence=14,
@@ -251,18 +382,26 @@ class MenuEntryTest(BaseTestCase):
         foe = figure(2, "Foe", (3, 0))
         state = BattleState(arena_radius=6, combatants=[wizard, foe])
         # #816: a spell's mana is paid on a success, or on a failing total the
-        # canon's casting_failure block names (tarmar-engine #46).
+        # canon's casting_failure block names (tarmar-engine #46). On the
+        # invented rules, whose Channel (twice the recorded level) lets the
+        # cast through under either canon: the menu is built on the seated
+        # rules, as the turn is.
         for casting_failure, paid_when in (
-            (CASTING_FAILURE, "paid only if it succeeds or the roll is 12 or 13"),
-            (None, "paid only if it succeeds"),
+            (
+                CASTING_FAILURE,
+                "tarmar_menu.paid_on_success_or_total 12 common.or_word 13",
+            ),
+            (None, "tarmar_menu.paid_on_success"),
         ):
-            loaded = replace(magic_rules(), casting_failure=casting_failure)
+            loaded = replace(INVENTED_RULES, casting_failure=casting_failure)
             with self.subTest(paid_when=paid_when), seated_rules(loaded):
                 cast = next(
                     entry for entry in self.entries(state, wizard) if entry["spell_key"]
                 )
-                self.assertEqual(cast["plain"], "Cast Fire Missile at Foe")
-                self.assertRegex(cast["cost"], rf"^\d+ mana, {paid_when}$")
+                self.assertEqual(cast["plain"], "turn_menu.cast_at Foe Fire Missile")
+                self.assertRegex(
+                    cast["cost"], rf"^tarmar_menu\.cast_cost \d+ {paid_when}$"
+                )
 
     def test_throwing_the_only_hand_weapon_says_so(self):
         thrower = figure(1, "Harar", (0, 0), weapon=_catalog_weapon("dagger"))
@@ -271,7 +410,7 @@ class MenuEntryTest(BaseTestCase):
         throw = next(
             entry for entry in self.entries(state, thrower) if entry["letter"] == "f"
         )
-        self.assertEqual(throw["cost"], "the Dagger leaves your hand")
+        self.assertEqual(throw["cost"], "tarmar_menu.leaves_hand Dagger")
 
     def test_exactly_one_option_is_the_ai_pick_and_it_is_the_engine_choice(self):
         archer = figure(1, "Dorra", (0, 0), weapon=_catalog_weapon("longbow"))
@@ -299,7 +438,7 @@ class MenuEntryTest(BaseTestCase):
         game = classic_game()
         fighter, _foe = game.figures
         advice = classic_policy.choose_option(game, fighter)
-        menu = turn_menu.player_menu(CLASSIC_PROFILE, game, fighter, advice)
+        menu = turn_menu.player_menu(CLASSIC_PROFILE, game, fighter)
         self.assertEqual(
             [(c.letter, c.target_id, c.score) for c in menu],
             [(c.letter, c.target_id, c.score) for c in advice.candidates],
@@ -411,7 +550,9 @@ class PlayerAimsThroughTheBattleTest(BaseTestCase):
 
     def test_a_target_off_the_menu_is_refused(self):
         battle = self.pause()
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             record_player_action(
                 battle.pk,
                 self.dm,
@@ -482,23 +623,13 @@ class AiStandInTakesTheAiPickTest(BaseTestCase):
         )
 
 
+@with_fixed_words
 class PlainLineTest(BaseTestCase):
     """Every option's plain line and cost, letter by letter (#788)."""
 
     def setUp(self):
         super().setUp()
-        self.actor = figure(
-            1,
-            "Aldwin",
-            (0, 0),
-            spare_weapons=[_catalog_weapon("dagger"), _catalog_weapon("longbow")],
-        )
-        self.foe = figure(2, "Foe", (1, 0))
-        self.state = BattleState(
-            arena_radius=4,
-            combatants=[self.actor, self.foe],
-            ground_weapons=[GroundWeapon(q=0, r=1, weapon=_catalog_weapon("mace"))],
-        )
+        self.state, self.actor, self.foe = plain_line_board()
 
     def line(self, letter: str, *, target: bool = True) -> tuple[str, str]:
         described = turn_menu.describe(
@@ -510,46 +641,31 @@ class PlainLineTest(BaseTestCase):
         return described.plain, described.cost
 
     def test_each_option_reads_as_what_it_does_and_costs(self):
+        # Foe is already beside Aldwin, so no jog gets nearer (#57).
+        dodge_standing = (
+            "tarmar_menu.dodge_standing tarmar_menu.dodge tarmar_menu.dodge_guards "
+            "turn_menu.standing turn_menu.no_nearer Foe tarmar_menu.clear_gait jog"
+        )
         expected = {
-            # Foe is already beside Aldwin, so no jog gets nearer (#57).
-            "c": (
-                "Dodge: +4 to your Target Number against missiles and thrown weapons only, "
-                "standing, since no clear jog gets nearer to Foe",
-                "",
-            ),
+            "c": (dodge_standing, ""),
             # A DROP may jog first to a picked hex (#866).
-            "d": (
-                "Drop prone where you stand, or first jog up to 7 hexes to a hex you pick",
-                "",
-            ),
-            "e": ("Ready the Longbow", ""),
-            "g": ("Stand up; it takes the whole turn", ""),
-            "p": ("Stand up; it takes the whole turn", ""),
-            "k": (
-                "Defend: +4 to your Target Number against melee and non-missile attacks only",
-                "",
-            ),
-            "m": ("Change to the Dagger", "the Broadsword is dropped"),
-            "n": ("Step one hex away instead of attacking", ""),
-            "o": ("Try to grapple Foe: a hold pins them rather than hurting them", ""),
-            "q": ("Pick up the Mace", "the Broadsword is dropped"),
-            "u": ("Try to draw your dagger: 3d6 at or under your DEX", ""),
+            "d": ("tarmar_menu.drop jog 7", ""),
+            "e": ("turn_menu.ready Longbow", ""),
+            "g": ("turn_menu.stand_up", ""),
+            "p": ("turn_menu.stand_up", ""),
+            "k": ("tarmar_menu.defend tarmar_menu.defend_guards", ""),
+            "m": ("turn_menu.change_to Dagger", "turn_menu.dropped Broadsword"),
+            "n": ("tarmar_menu.step_away", ""),
+            "o": ("tarmar_menu.grapple Foe", ""),
+            "q": ("turn_menu.pick_up Mace", "turn_menu.dropped Broadsword"),
+            "u": ("tarmar_menu.draw_dagger", ""),
             # Outside a grapple, v is the HTH DISENGAGE (tarmar-engine #19).
-            "v": (
-                "Break away from hand-to-hand: 4d6 at or under your DEX, then "
-                "stand in a hex next to you",
-                "",
-            ),
-            "hold_still": ("Hold still in Foe's grip", ""),
-            "squeeze": ("Squeeze Foe", ""),
-            "maintain": ("Keep your hold on Foe", ""),
-            "release": ("Let Foe go", ""),
-            "c_yield": (
-                "Dodge: +4 to your Target Number against missiles and thrown weapons only, "
-                "standing, since no clear jog gets nearer to Foe, unless a way "
-                "opens by Final Movement",
-                "",
-            ),
+            "v": ("tarmar_menu.break_away_steps tarmar_menu.break_away", ""),
+            "hold_still": ("tarmar_menu.hold_still Foe", ""),
+            "squeeze": ("tarmar_menu.squeeze Foe", ""),
+            "maintain": ("tarmar_menu.maintain Foe", ""),
+            "release": ("tarmar_menu.release Foe", ""),
+            "c_yield": (f"tarmar_menu.yielded_blocked {dodge_standing}", ""),
         }
         for letter, wanted in expected.items():
             with self.subTest(letter=letter):
@@ -573,88 +689,99 @@ class PlainLineTest(BaseTestCase):
         """The engine steps n and v straight back or to either flank only,
         and logs "nowhere to step to" when all three are blocked (#57)."""
         self.assertEqual(len(self.block_the_step_away()), 3)
-        stuck = (
-            "with no hex picked you stay where you are, since no hex straight "
-            "back from Foe or to either flank is clear"
-        )
+        stuck = "tarmar_menu.no_step_away Foe"
         # Another hex beside Aldwin is still clear for a player to pick.
         self.assertTrue(movement.legal_destinations(self.state, self.actor, "n"))
         self.assertEqual(
             self.line("n"),
-            (f"Step one hex away instead of attacking: {stuck}", ""),
+            (f"tarmar_menu.step_away_stuck tarmar_menu.step_away {stuck}", ""),
         )
         self.actor.hth_with = [self.foe.combatant_id]
         self.foe.hth_with = [self.actor.combatant_id]
         self.assertTrue(movement.legal_destinations(self.state, self.actor, "v"))
         self.assertEqual(
             self.line("v"),
-            (f"Break away from hand-to-hand: 4d6 at or under your DEX; {stuck}", ""),
+            (f"tarmar_menu.break_away_stuck tarmar_menu.break_away {stuck}", ""),
         )
 
     def test_a_step_away_with_a_clear_hex_steps(self):
         self.actor.hth_with = [self.foe.combatant_id]
         self.foe.hth_with = [self.actor.combatant_id]
         self.assertEqual(
-            self.line("v"),
-            (
-                "Break away from hand-to-hand: 4d6 at or under your DEX, then "
-                "stand in a hex next to you",
-                "",
-            ),
+            self.line("v"), ("tarmar_menu.break_away_steps tarmar_menu.break_away", "")
         )
 
     def test_a_dodge_with_no_missile_threat_names_nobody(self):
         self.assertEqual(
             self.line("c", target=False),
-            (
-                "Dodge: +4 to your Target Number against missiles and thrown weapons only",
-                "",
-            ),
+            ("tarmar_menu.dodge tarmar_menu.dodge_guards", ""),
         )
 
     def test_an_option_the_menu_does_not_know_is_named_as_the_engine_names_it(self):
         self.assertEqual(self.line("zz", target=False), ("Zz", ""))
 
     def test_an_attack_with_no_forecast_in_its_working_names_no_odds(self):
-        self.assertEqual(self.line("j"), ("Attack Foe with the Broadsword", ""))
+        self.assertEqual(
+            self.line("j"), ("turn_menu.attack Foe turn_menu.the_weapon Broadsword", "")
+        )
 
     def test_a_held_figure_struggles_free(self):
         self.actor.grappled_by = 2
-        self.assertEqual(
-            self.line("v"), ("Struggle free of Foe: 4d6 at or under your DEX", "")
-        )
+        self.assertEqual(self.line("v"), ("tarmar_menu.struggle_free Foe", ""))
 
     def test_a_sword_in_hand_strikes_in_close_with_bare_hands(self):
         """The HTH table's t is "Bare hands or dagger" (tarmar-engine #19)."""
-        self.assertEqual(self.line("t"), ("Strike Foe in close with bare hands", ""))
+        self.assertEqual(self.line("t"), (BARE_HANDED_CLOSE_STRIKE, ""))
         self.actor.weapon = _catalog_weapon("dagger")
-        self.assertEqual(self.line("t"), ("Strike Foe in close with the Dagger", ""))
+        self.assertEqual(
+            self.line("t"),
+            ("tarmar_menu.close_strike Foe turn_menu.the_weapon Dagger", ""),
+        )
 
     def test_bare_hands_and_nothing_to_ready(self):
         self.actor.weapon = WeaponState(damage="1d6-2")
         self.actor.spare_weapons = []
         self.state.ground_weapons = []
-        self.assertEqual(self.line("t"), ("Strike Foe in close with bare hands", ""))
-        self.assertEqual(self.line("e"), ("Ready another weapon", ""))
-        self.assertEqual(self.line("m"), ("Change weapons", ""))
-        self.assertEqual(self.line("q"), ("Pick up a weapon", ""))
+        self.assertEqual(self.line("t"), (BARE_HANDED_CLOSE_STRIKE, ""))
+        self.assertEqual(self.line("e"), ("turn_menu.ready_another", ""))
+        self.assertEqual(self.line("m"), ("turn_menu.change_weapons", ""))
+        self.assertEqual(self.line("q"), ("tarmar_menu.pick_up_any", ""))
 
     def test_the_odds_read_under_one_when_a_hit_barely_hurts(self):
-        rationale = (
-            "Strike Foe: Broadsword at 1 hex, d20 +0 vs TN 16 — P(hit) 0.250 "
-            "(5 of 20 faces) x 0.078 expected damage (1d6-1 less 5 armour stops) "
-            "= 0.020"
+        # Read from the engine's forecast fields (tarmar-engine #22), not its
+        # prose.
+        forecast = Forecast(
+            hit_chance=0.25,
+            damage_expression="1d6-1",
+            armour_stops=5,
+            expected_damage=0.078,
+            target_number=16,
+            bonus=0,
+            winning_faces=5,
         )
         self.assertEqual(
-            turn_menu._odds(rationale),
-            "5 in 20 to hit, 1d6-1 less 5 armour (under 1 a hit)",
+            turn_menu._odds(forecast),
+            "tarmar_menu.odds_armoured turn_menu.under_one 1d6-1 5 20 5",
         )
-        unarmoured = rationale.replace("less 5 armour", "less 0 armour")
+        unarmoured = replace(forecast, armour_stops=0)
         self.assertEqual(
-            turn_menu._odds(unarmoured), "5 in 20 to hit, 1d6-1 (under 1 a hit)"
+            turn_menu._odds(unarmoured),
+            "tarmar_menu.odds turn_menu.under_one 1d6-1 5 20",
         )
 
+    def test_a_cast_forecast_carries_no_d20_odds(self):
+        """A cast's chance is 3d6 roll-unders, not faces of the d20."""
+        cast = Forecast(
+            hit_chance=0.375,
+            damage_expression="1d6",
+            armour_stops=0,
+            expected_damage=3.5,
+        )
+        self.assertEqual(turn_menu._odds(cast), "")
+        self.assertEqual(turn_menu._odds(None), "")
 
+
+@with_fixed_words
 class MoversSayTheMoveTheEngineMakesTest(BaseTestCase):
     """A DODGE, MOVE or SPRINT reads as the move the engine will make (#57).
 
@@ -666,108 +793,75 @@ class MoversSayTheMoveTheEngineMakesTest(BaseTestCase):
     """
 
     def menu(self, state: BattleState, actor: CombatantState) -> dict[str, dict]:
-        advice = choose_option(state, actor)
-        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         return {entry.letter: entry.to_payload() for entry in menu}
 
-    def boxed_in(self) -> tuple[BattleState, CombatantState]:
-        aldwin = figure(1, "Aldwin", (0, 0), team="Red", move_run=10, move_sprint=14)
-        shields = [
-            figure(10 + index, f"Shield {index}", cell, team="Red")
-            for index, cell in enumerate(hexes.neighbors((0, 0)))
-        ]
-        bowman = figure(
-            2, "Bowman", (3, 0), team="Blue", weapon=_catalog_weapon("longbow")
-        )
-        return (
-            BattleState(arena_radius=5, combatants=[aldwin, *shields, bowman]),
-            aldwin,
-        )
-
-    def in_the_open(self) -> tuple[BattleState, CombatantState]:
-        aldwin = figure(1, "Aldwin", (0, 0), team="Red", move_run=10, move_sprint=14)
-        bowman = figure(
-            2, "Bowman", (4, 0), team="Blue", weapon=_catalog_weapon("longbow")
-        )
-        return BattleState(arena_radius=5, combatants=[aldwin, bowman]), aldwin
-
     def test_a_boxed_in_dodge_reads_standing_as_the_engine_does(self):
-        entries = self.menu(*self.boxed_in())
+        entries = self.menu(*boxed_in_board())
         # The engine's own working says it will dodge standing.
         self.assertIn(
             "standing, since no clear jog gets nearer to Bowman",
             entries["c"]["rationale"],
         )
-        self.assertEqual(
-            entries["c"]["plain"],
-            "Dodge: +4 to your Target Number against missiles and thrown weapons "
-            "only, standing, since no clear jog gets nearer to Bowman",
+        standing = (
+            "tarmar_menu.dodge_standing tarmar_menu.dodge tarmar_menu.dodge_guards "
+            "turn_menu.standing turn_menu.no_nearer Bowman tarmar_menu.clear_gait jog"
         )
+        self.assertEqual(entries["c"]["plain"], standing)
         self.assertEqual(
-            entries["c_yield"]["plain"],
-            "Dodge: +4 to your Target Number against missiles and thrown weapons "
-            "only, standing, since no clear jog gets nearer to Bowman, unless a "
-            "way opens by Final Movement",
+            entries["c_yield"]["plain"], f"tarmar_menu.yielded_blocked {standing}"
         )
 
     def test_a_boxed_in_run_or_sprint_stands_and_costs_nothing_unless_it_moves(self):
-        entries = self.menu(*self.boxed_in())
+        entries = self.menu(*boxed_in_board())
         # The engine's own working says a run gains nothing.
         self.assertIn("so moving gains nothing", entries["a"]["rationale"])
+        stand = "turn_menu.stand turn_menu.no_nearer Bowman tarmar_menu.clear_gait"
         self.assertEqual(
             (entries["a"]["plain"], entries["a"]["cost"]),
-            (
-                "Stand where you are, since no clear run gets nearer to Bowman",
-                "1 Fatigue, only if you move",
-            ),
+            (f"{stand} run", "tarmar_menu.fatigue_if_moving 1"),
         )
         self.assertEqual(
             (entries["sprint"]["plain"], entries["sprint"]["cost"]),
-            (
-                "Stand where you are, since no clear sprint gets nearer to Bowman",
-                "6 Fatigue, only if you move",
-            ),
+            (f"{stand} sprint", "tarmar_menu.fatigue_if_moving 6"),
         )
         self.assertEqual(
-            entries["a_yield"]["plain"],
-            "Stand where you are, since no clear run gets nearer to Bowman, "
-            "unless a way opens by Final Movement",
+            entries["a_yield"]["plain"], f"tarmar_menu.yielded_blocked {stand} run"
         )
 
     def test_in_the_open_the_dodge_jogs_toward_the_archer(self):
-        entries = self.menu(*self.in_the_open())
+        entries = self.menu(*open_board())
         self.assertIn("jogging toward Bowman", entries["c"]["rationale"])
         self.assertEqual(
             entries["c"]["plain"],
-            "Dodge: +4 to your Target Number against missiles and thrown weapons "
-            "only, jogging toward Bowman",
+            "tarmar_menu.dodge_toward Bowman tarmar_menu.dodge tarmar_menu.dodge_guards",
         )
         self.assertEqual(
             (entries["a"]["plain"], entries["a"]["cost"]),
-            ("Run up to 10 hexes toward Bowman", "1 Fatigue"),
+            ("tarmar_menu.run Bowman 10", "tarmar_menu.fatigue 1"),
         )
         self.assertEqual(
             (entries["sprint"]["plain"], entries["sprint"]["cost"]),
-            ("Sprint up to 14 hexes toward Bowman", "6 Fatigue"),
+            ("tarmar_menu.sprint Bowman 14", "tarmar_menu.fatigue 6"),
         )
 
     def test_a_boxed_in_charge_says_it_cannot_reach(self):
         """A charge no clear jog brings nearer stands and strikes nothing (#56)."""
-        entries = self.menu(*self.boxed_in())
+        entries = self.menu(*boxed_in_board())
         # The engine's own working: out of reach, scored 0.
         self.assertIn("out of charge reach", entries["b"]["rationale"])
         self.assertEqual(entries["b"]["score"], 0.0)
-        self.assertEqual(
-            entries["b"]["plain"],
-            "Charge Bowman: no attack, since no clear jog gets nearer to Bowman",
+        no_attack = (
+            "turn_menu.no_attack_charge Bowman turn_menu.no_nearer Bowman "
+            "tarmar_menu.clear_gait jog"
         )
+        self.assertEqual(entries["b"]["plain"], no_attack)
         self.assertEqual(
-            entries["b_yield"]["plain"],
-            "Charge Bowman: no attack, since no clear jog gets nearer to Bowman, "
-            "unless a way opens by Final Movement",
+            entries["b_yield"]["plain"], f"tarmar_menu.yielded_blocked {no_attack}"
         )
 
 
+@with_fixed_words
 class ChargeRowsReadTheEngineReachTest(BaseTestCase):
     """A CHARGE row is offered only at a target the engine's charge reaches (#56).
 
@@ -778,19 +872,6 @@ class ChargeRowsReadTheEngineReachTest(BaseTestCase):
     (#37) it charges a farther enemy it can reach instead.
     """
 
-    def board(self, *, with_far: bool = True) -> tuple[BattleState, CombatantState]:
-        """Aldwin, Near three hexes off ringed by Aldwin's side, and Far five
-        hexes the other way in the open."""
-        aldwin = figure(1, "Aldwin", (0, 0), team="Red")
-        near = figure(2, "Near", (3, 0), team="Blue")
-        wall = [
-            figure(10 + index, f"Guard {index}", cell, team="Red")
-            for index, cell in enumerate(hexes.neighbors((3, 0)))
-        ]
-        far = figure(3, "Far", (-5, 0), team="Blue")
-        combatants = [aldwin, near, *wall, *([far] if with_far else [])]
-        return BattleState(arena_radius=7, combatants=combatants), aldwin
-
     def engine_charge(self, state: BattleState, actor: CombatantState) -> Candidate:
         return next(
             candidate
@@ -799,14 +880,13 @@ class ChargeRowsReadTheEngineReachTest(BaseTestCase):
         )
 
     def menu(self, state: BattleState, actor: CombatantState) -> list[dict]:
-        advice = choose_option(state, actor)
         return [
             entry.to_payload()
-            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         ]
 
     def test_only_the_reachable_enemy_is_offered_a_charge(self):
-        state, aldwin = self.board()
+        state, aldwin = walled_off_board()
         # The engine charges Far, past Near, which is the nearer.
         engine = self.engine_charge(state, aldwin)
         self.assertEqual(engine.target_id, 3)
@@ -819,7 +899,7 @@ class ChargeRowsReadTheEngineReachTest(BaseTestCase):
                 self.assertEqual(rows[0]["score"], engine.score)
 
     def test_each_row_matches_the_engine_s_scoring_of_that_target_alone(self):
-        state, aldwin = self.board()
+        state, aldwin = walled_off_board()
         offered = {
             entry["target_id"]
             for entry in self.menu(state, aldwin)
@@ -843,19 +923,23 @@ class ChargeRowsReadTheEngineReachTest(BaseTestCase):
                 )
 
     def test_a_charge_that_ends_short_says_where_it_stops(self):
-        state, aldwin = self.board(with_far=False)
+        state, aldwin = walled_off_board(with_far=False)
         engine = self.engine_charge(state, aldwin)
         self.assertEqual((engine.target_id, engine.score), (2, 0.0))
         rows = {entry["letter"]: entry for entry in self.menu(state, aldwin)}
         self.assertEqual(
             rows["b"]["plain"],
-            "Charge Near: no attack, since a clear jog of up to 7 hexes ends "
-            "2 hexes from Near",
+            "turn_menu.no_attack_charge Near turn_menu.ends_from Near 2 hexes "
+            "turn_menu.reach 7 tarmar_menu.clear_gait jog",
         )
 
 
 class DefendAndDodgeDriftTest(SimpleTestCase):
     """DODGE and DEFEND say what the rules page says they guard against.
+
+    The words are the shipped configuration's (``dodge_guards`` and
+    ``defend_guards``, #90): a rewording that drops a word of the rules
+    page's cell fails here.
 
     special-combat-situations.md's "Defending and Dodging" table: Dodge
     "Missiles and thrown only", Defend "Melee and non-missile only". The
@@ -883,33 +967,56 @@ class DefendAndDodgeDriftTest(SimpleTestCase):
         self.assertEqual(self.table_row("Defend"), "Melee and non-missile only")
 
     def test_the_plain_lines_carry_the_pages_words(self):
-        for action, words in (
-            ("Dodge", turn_menu.DODGE_DEFENDS_AGAINST),
-            ("Defend", turn_menu.DEFEND_DEFENDS_AGAINST),
+        tarmar = words().tarmar_menu
+        for action, guards in (
+            ("Dodge", tarmar.dodge_guards),
+            ("Defend", tarmar.defend_guards),
         ):
             with self.subTest(action=action):
                 row = self.table_row(action).lower().split()
                 # Every word of the cell is in the line, "only" included.
                 self.assertTrue(
-                    all(word in words.split() for word in row), (row, words)
+                    all(word in guards.split() for word in row), (row, guards)
                 )
 
+    def test_the_rendered_lines_carry_the_pages_words(self):
+        """The Dodge and Defend lines as the menu draws them, not only the
+        guard words: a sentence that dropped or reworded them fails here."""
+        bare = WeaponState(damage="1d6")
+        actor = figure(1, "Aldwin", (0, 0), weapon=bare)
+        state = BattleState(
+            arena_radius=4, combatants=[actor, figure(2, "Foe", (1, 0), weapon=bare)]
+        )
+        for action, letter in (("Dodge", "c"), ("Defend", "k")):
+            with self.subTest(action=action):
+                line = turn_menu.describe(
+                    state,
+                    actor,
+                    Candidate(letter, action.upper(), 0.0, ""),
+                    ai_choice=False,
+                ).plain.lower()
+                row = self.table_row(action).lower().split()
+                self.assertTrue(all(word in line.split() for word in row), (row, line))
 
+
+@with_fixed_words
 class EveryPlainLineCarriesItsOddsTest(BaseTestCase):
-    """Each kind of attack line reads its odds off the engine's own working.
+    """Each kind of attack line reads its odds off the engine's own forecast.
 
-    The odds come from the engine's rationale prose (``turn_menu._odds``); a
-    change to that wording must fail here rather than silently drop the odds
-    from the menu. Every kind is built from a real engine menu, not a
-    hand-written rationale. (Structured forecast fields are asked of the
-    engine in smarks/tarmar-engine#22.)
+    The odds come from the engine's ``Candidate.forecast`` fields
+    (``turn_menu._odds``, tarmar-engine #22); an option that stops carrying
+    one must fail here rather than silently drop the odds from the menu.
+    Every kind is built from a real engine menu, not a hand-written forecast.
     """
 
-    ODDS = r": \d+ in 20 to hit, \S+( less \d+ armour)? \((about \d+|under 1) a hit\)"
+    ODDS = (
+        r" tarmar_menu\.odds(_armoured)? (turn_menu\.about \d+|turn_menu\.under_one)"
+        r" \S+ \d+ 20( \d+)?"
+    )
+    WITH_ODDS = r"^turn_menu\.with_odds "
 
     def plain_of(self, state, actor, letter: str) -> str:
-        advice = choose_option(state, actor)
-        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         entry = next(c for c in menu if c.letter == letter).to_payload()
         return entry["plain"]
 
@@ -919,16 +1026,20 @@ class EveryPlainLineCarriesItsOddsTest(BaseTestCase):
         engaged = BattleState(arena_radius=4, combatants=[swordsman, foe])
         self.assertRegex(
             self.plain_of(engaged, swordsman, "j"),
-            r"^Attack Foe with the Broadsword" + self.ODDS + "$",
+            self.WITH_ODDS
+            + r"turn_menu\.attack Foe turn_menu\.the_weapon Broadsword"
+            + self.ODDS
+            + "$",
         )
 
         far = figure(2, "Foe", (3, 0))
         apart = BattleState(arena_radius=6, combatants=[swordsman, far])
-        charge = r"^Charge Foe: jog up to \d+ hexes and attack with the Broadsword"
-        self.assertRegex(self.plain_of(apart, swordsman, "b"), charge + self.ODDS + "$")
+        charge = r"turn_menu\.with_odds tarmar_menu\.charge Foe jog \d+ turn_menu\.the_weapon "
+        charge += r"Broadsword" + self.ODDS + "$"
+        self.assertRegex(self.plain_of(apart, swordsman, "b"), "^" + charge)
         self.assertRegex(
             self.plain_of(apart, swordsman, "b_yield"),
-            charge + self.ODDS + ", moving in Final Movement instead$",
+            r"^tarmar_menu\.yielded " + charge,
         )
 
         archer = figure(1, "Dorra", (0, 0), weapon=_catalog_weapon("longbow"))
@@ -937,14 +1048,20 @@ class EveryPlainLineCarriesItsOddsTest(BaseTestCase):
         )
         self.assertRegex(
             self.plain_of(shooting, archer, "f"),
-            r"^Shoot Foe with the Longbow" + self.ODDS + "$",
+            self.WITH_ODDS
+            + r"turn_menu\.shoot Foe turn_menu\.the_weapon Longbow"
+            + self.ODDS
+            + "$",
         )
         cornered = BattleState(
             arena_radius=4, combatants=[archer, figure(2, "Foe", (1, 0))]
         )
         self.assertRegex(
             self.plain_of(cornered, archer, "l"),
-            r"^One last shot at Foe with the Longbow" + self.ODDS + "$",
+            self.WITH_ODDS
+            + r"turn_menu\.last_shot Foe turn_menu\.the_weapon Longbow"
+            + self.ODDS
+            + "$",
         )
 
         brawler = figure(
@@ -954,5 +1071,8 @@ class EveryPlainLineCarriesItsOddsTest(BaseTestCase):
         close = BattleState(arena_radius=4, combatants=[brawler, slower])
         self.assertRegex(
             self.plain_of(close, brawler, "t"),
-            r"^Strike Foe in close with the Dagger" + self.ODDS + "$",
+            self.WITH_ODDS
+            + r"tarmar_menu\.close_strike Foe turn_menu\.the_weapon Dagger"
+            + self.ODDS
+            + "$",
         )

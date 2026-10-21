@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from .constants import CHARACTER_ATTRIBUTE_FIELDS
 from .dice import Roller, roll_dice_faces, roll_dice_logged
 from .models import Character
+from .refusal_words import game_master_call_note
 from .rules import DiceRollRules
 from .services import CharacterChangeError
 from .skill_rules import skill_rules
@@ -228,9 +229,7 @@ class SkillCheck:
             text += f": {self.outcome}"
         if self.natural:
             text += f" ({self.natural})"
-        if self.game_master_call:
-            text += f" (a Game Master's call: {self.game_master_call})"
-        return text
+        return text + game_master_call_note(self.game_master_call)
 
 
 def injury_penalty(character: Character) -> int:
@@ -482,9 +481,7 @@ class AttributeCheck:
             f"{self.attribute} check, {self.dice} {comparison} {self.target} "
             f"({against}): {'passes' if self.passed else 'fails'}"
         )
-        if self.game_master_call:
-            text += f" (a Game Master's call: {self.game_master_call})"
-        return text
+        return text + game_master_call_note(self.game_master_call)
 
 
 def attribute_check(

@@ -16,15 +16,12 @@ from common.test_helpers import create_character
 from .engine import MODE_PLAY
 from .luck import LUCK_SKILL, spend_luck
 from .models import SessionCharacter
+from .refusal_words import refusal_words
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .turn_engine.policy import (
     ACTION_NAMES,
     CAMPAIGN_ACTIONS,
-    GAME_MASTER_ONLY_REFUSAL,
-    GAME_MASTER_RECORDS_REFUSAL,
     HOUSE_RULE_ACTIONS,
-    LITERACY_RULING_REFUSAL,
-    PLAYER_STATED_SCORES_REFUSAL,
 )
 from .withdraw import withdraw
 
@@ -69,17 +66,18 @@ NOT_THE_SHARED_REFUSAL: dict[str, str] = {
     "roll": "is dead and makes no rolls",
 }
 
-#: What only a Game Master asks for, and the policy's words refusing a
-#: player's plan it whoever the character is (issues #403, #743, #802),
-#: before any record is read.
+#: What only a Game Master asks for, and which of the policy's refusals (a
+#: key of ``config/gm-refusals.toml``'s [policy] table) answers a player's plan
+#: for it whoever the character is (issues #403, #743, #802), before any record
+#: is read.
 GAME_MASTER_ONLY: dict[str, str] = {
-    "revive_character": GAME_MASTER_ONLY_REFUSAL,
-    "remove_character": GAME_MASTER_ONLY_REFUSAL,
-    "mark_dead": GAME_MASTER_RECORDS_REFUSAL,
-    "award_xp": GAME_MASTER_RECORDS_REFUSAL,
-    "set_coin": GAME_MASTER_RECORDS_REFUSAL,
-    "record_attributes": PLAYER_STATED_SCORES_REFUSAL,
-    "rule_literacy": LITERACY_RULING_REFUSAL,
+    "revive_character": "game_master_only",
+    "remove_character": "game_master_only",
+    "mark_dead": "game_master_records",
+    "award_xp": "game_master_records",
+    "set_coin": "game_master_records",
+    "record_attributes": "player_stated_scores",
+    "rule_literacy": "literacy_ruling",
 }
 
 
@@ -116,7 +114,7 @@ class DeadCharacterActionsTest(ExecutorTestCase):
 
     def expected(self, name: str) -> str:
         if not self.game_master and name in GAME_MASTER_ONLY:
-            return GAME_MASTER_ONLY[name]
+            return getattr(refusal_words().policy, GAME_MASTER_ONLY[name])
         return NOT_THE_SHARED_REFUSAL.get(name, DEAD_WORDS)
 
     def test_each_action_on_the_dead(self) -> None:

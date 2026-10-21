@@ -1,0 +1,53 @@
+# The words the characters app refuses in, and the phrase that marks a Game
+# Master's call (issues #85, #97): one table per module, and the phrases more
+# than one module uses.
+#
+# Read once at startup (characters.refusal_words.load_refusal_words); a missing
+# key, an unknown key or a {name} a sentence may not use stops the server there
+# rather than in front of a player. CHARACTERS_REFUSAL_WORDS_FILE names another
+# file. Change the wording freely; keep each {name} a sentence uses, or drop
+# it. Changing a sentence never changes who is refused.
+
+[common]
+# Ends a history line when a Game Master set what a player may not: "strength
+# recorded as 22 (outside the 3-18 a player may set: the Game Master's call)".
+the_game_masters_call = "the Game Master's call"
+# Marks a check's line ("(a Game Master's call: unconscious)") and the skill
+# check's option for a skill only a Game Master calls for.
+a_game_masters_call = "a Game Master's call"
+
+[services]
+# What the sheet prints beside a value only a Game Master sets, for a player,
+# and what a player's update of it is told (issue #748).
+# {dice}: the canon's attribute dice; {points}: its point-buy total (#68).
+field_attribute = "Rolled ({dice}) or bought ({points} points); only a Game Master can change a recorded score."
+field_appearance_roll = "Rolled (1d6); only a Game Master can change it or qualify a 1 or a 6."
+# {dice}: the canon's Fatigue roll.
+field_fatigue_roll = "Rolled ({dice}) once; only a Game Master can change it."
+# {dice}: the canon's literacy roll.
+field_literacy_roll = "Rolled ({dice}) once; only a Game Master can have it rolled again."
+# A literacy ruling at "Consult GM", which has no check (issue #743).
+literacy_ruling_game_master_only = "Only a Game Master rules on whether a character can read; a player's literacy is rolled"
+# What a "Consult GM" origin is (issue #801).
+origin_ruling_game_master_only = "Only a Game Master rules what a Consult GM origin is"
+# The Dragonborn secret (issue #810).
+dragonborn_game_master_only = "Only a Game Master can set this."
+field_provenance = "Rolled on the provenance table; only a Game Master can change it."
+field_wealth_level = "Rolled on the wealth table; only a Game Master can change it."
+field_starting_coin = "Set once by the wealth roll; only a Game Master can change it."
+field_total_xp = "Earned in play or prior experience; only a Game Master can award it."
+field_age = "Moves with years of prior experience; only a Game Master can change it."
+field_free_skill_points = "Earned with XP; only a Game Master can grant more."
+field_death = "Only a Game Master can mark a death or revive."
+# Current Fatigue, Body and Mana and the mana owed (issue #751).
+pools_game_master_only = "Only a Game Master can set current Fatigue, Body and Mana and the mana owed; a fight on the board records them on its own"
+field_free_spell_points = "Spell Points from the Magic track; only a Game Master grants mana."
+field_coin_adjustment = "Moves with purchases; only a Game Master gives or takes coin."
+# An equipment item's modifiers (issue #752).
+field_item_modifiers = "Item modifiers are a Game Master's grant; the rules give equipment none."
+# A player's own choice once it was rolled: a roll is final (issues #948, #970).
+roll_fixed_height = "Height was rolled, and a roll is final; only a Game Master can change it."
+roll_fixed_weight = "Weight was rolled, and a roll is final; only a Game Master can change it."
+roll_fixed_origin = "The Origin was rolled, and a roll is final; only a Game Master can change it."
+# A field nobody sets by hand; {field}: its name.
+nobody_sets = "{field} is not something anyone sets by hand."

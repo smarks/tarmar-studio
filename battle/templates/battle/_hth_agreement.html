@@ -11,7 +11,9 @@ endpoint refuses anyone else. Included by the battle page and by the GM
 chat's Battle tab; each form names the page it came from (``next``), so a
 post from the chat lands back in the chat, re-rendered from the record. The
 battle payload carries this partial too (``rulings_html``), and battle.js
-puts it in place when ``data-record`` changes. The words are configuration
+puts it in place when ``data-record`` changes. Each button's data-focus-key
+lets the GM chat's Battle tab, drawn again after a post (issue #89), give the
+keyboard focus back to the same control. The words are configuration
 (``battle.wording``, config/battle-rulings.toml).
 {% endcomment %}
 <div class="battle-panel battle-agreement-panel" id="{{ hth_agreement.panel_id }}" data-record="{{ hth_agreement.record }}">
@@ -24,10 +26,10 @@ puts it in place when ``data-record`` changes. The words are configuration
         <input type="hidden" name="scope" value="battle">
         {% if hth_agreement.whole_battle %}
         <input type="hidden" name="agreed" value="">
-        <button type="submit" class="battle-button battle-button-outline">{{ hth_agreement.words.lift_whole_battle }}</button>
+        <button type="submit" class="battle-button battle-button-outline" data-focus-key="hth-whole-battle">{{ hth_agreement.words.lift_whole_battle }}</button>
         {% else %}
         <input type="hidden" name="agreed" value="true">
-        <button type="submit" class="battle-button battle-button-outline">{{ hth_agreement.words.mark_whole_battle }}</button>
+        <button type="submit" class="battle-button battle-button-outline" data-focus-key="hth-whole-battle">{{ hth_agreement.words.mark_whole_battle }}</button>
         {% endif %}
     </form>
     {% if hth_agreement.pairs %}
@@ -42,7 +44,7 @@ puts it in place when ``data-record`` changes. The words are configuration
                 <input type="hidden" name="first" value="{{ pair.first }}">
                 <input type="hidden" name="second" value="{{ pair.second }}">
                 <input type="hidden" name="agreed" value="">
-                <button type="submit" class="battle-button battle-button-quiet">{{ hth_agreement.words.lift_pair }}</button>
+                <button type="submit" class="battle-button battle-button-quiet" data-focus-key="hth-pair-{{ pair.first }}-{{ pair.second }}">{{ hth_agreement.words.lift_pair }}</button>
             </form>
         </li>
         {% endfor %}
@@ -66,7 +68,7 @@ puts it in place when ``data-record`` changes. The words are configuration
                 {% for combatant in hth_agreement.combatants %}<option value="{{ combatant.id }}"{% if forloop.counter == 2 %} selected{% endif %}>{{ combatant.name }}</option>{% endfor %}
             </select>
         </label>
-        <button type="submit" class="battle-button battle-button-outline">{{ hth_agreement.words.mark_pair }}</button>
+        <button type="submit" class="battle-button battle-button-outline" data-focus-key="hth-mark-pair">{{ hth_agreement.words.mark_pair }}</button>
     </form>
     {% endif %}
 </div>

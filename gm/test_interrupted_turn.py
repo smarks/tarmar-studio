@@ -18,9 +18,9 @@ from common.test_helpers import BaseTestCase
 
 from .messages import build_interrupted_turn_message, resumes_interrupted_turn
 from .models import GMSession, GMTurnRecord
+from .refusal_words import refusal_words
 from .retrieval import INTERRUPTED_KIND, PROCEDURE_KIND
 from .testing import gm_replies
-from .views import GM_SERVER_ERROR_MESSAGE
 
 STREAM_URL = "/tarmar/gm/stream/"
 # A plan whose one action changes a character before any reply is written.
@@ -111,7 +111,7 @@ class InterruptedTurnTest(BaseTestCase):
         response, chunks = self._open({"message": "Roll Fatigue."})
         frames = list(_data_frames(chunks))
 
-        self.assertEqual(frames[-1]["error"], GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(frames[-1]["error"], refusal_words().views.server_error)
         session = GMSession.objects.get()
         self.assertEqual(session.history[-1]["kind"], INTERRUPTED_KIND)
         # The turn's record keeps what already ran (issue #539).
@@ -138,7 +138,7 @@ class InterruptedTurnTest(BaseTestCase):
         # of its own: the page already holds the entries from the one before.
         naming = [frame for frame in frames if "session_id" in frame]
         self.assertEqual([next(iter(frame)) for frame in naming], ["procedure"])
-        self.assertEqual(frames[-1]["error"], GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(frames[-1]["error"], refusal_words().views.server_error)
         session = GMSession.objects.get()
         for frame in naming:
             self.assertIn(f'data-id="{session.pk}"', frame["session_row_html"])

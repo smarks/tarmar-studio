@@ -23,6 +23,8 @@ than a badge that only reports.
 import json
 from unittest.mock import patch
 
+from django.utils.html import escape
+
 from common.test_helpers import BaseTestCase, create_character
 
 from .engine import (
@@ -41,7 +43,13 @@ from .engine import (
     system_prompts_by_authority_and_mode,
 )
 from .messages import build_mode_switch_message
-from .models import MODE_DESCRIPTIONS, MODE_LABELS, GMSession
+from .models import (
+    MODE_DESCRIPTIONS,
+    MODE_LABELS,
+    MODE_OPENINGS,
+    MODE_PLACEHOLDERS,
+    GMSession,
+)
 from .retrieval import MODE_KIND, is_hidden_message
 from .services import default_mode_for_user, get_system_message
 from .testing import gm_replies
@@ -450,6 +458,71 @@ class ModeEndpointTest(BaseTestCase):
         self.assertEqual(self.client.get(MODE_URL).status_code, 405)
 
 
+class ModeSwitchedInPlaceTest(BaseTestCase):
+    """The page's script posts the same form and is answered in JSON (#89).
+
+    A redirect reloaded the page, throwing away the earlier turns the reader
+    had loaded; the script paints the page from the stored mode instead.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.dm = self.create_dm()
+        self.login_as(self.dm)
+
+    def _switch(self, data: dict):
+        return self.client.post(MODE_URL, data, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def test_it_answers_with_the_mode_it_stored(self):
+        session = GMSession.objects.create(name="Quest", user=self.dm, mode=MODE_AIDE)
+
+        response = self._switch({"mode": MODE_PLAY, "session_id": session.pk})
+
+        self.assertEqual(response.json(), {"ok": True, "mode": MODE_PLAY})
+        session.refresh_from_db()
+        self.assertEqual(session.mode, MODE_PLAY)
+
+    def test_an_unrecognised_mode_answers_with_the_default_it_took(self):
+        session = GMSession.objects.create(name="Quest", user=self.dm, mode=MODE_PLAY)
+
+        response = self._switch({"mode": "wizard", "session_id": session.pk})
+
+        self.assertEqual(response.json()["mode"], MODE_AIDE)
+
+    def test_with_no_session_yet_it_answers_with_the_choice(self):
+        response = self._switch({"mode": MODE_PLAY})
+
+        self.assertEqual(response.json(), {"ok": True, "mode": MODE_PLAY})
+        self.assertFalse(GMSession.objects.exists())
+
+    def test_another_persons_session_is_not_found(self):
+        stranger = self.create_player(username="stranger")
+        session = GMSession.objects.create(name="Theirs", user=stranger, mode=MODE_PLAY)
+
+        response = self._switch({"mode": MODE_AIDE, "session_id": session.pk})
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"], "GM session not found")
+        session.refresh_from_db()
+        self.assertEqual(session.mode, MODE_PLAY)
+
+    def test_each_option_carries_the_words_its_mode_puts_on_the_page(self):
+        page = self.client.get(CHAT_URL).content.decode()
+        for mode in GM_MODES:
+            with self.subTest(mode=mode):
+                option = page.split(f'<option value="{mode}"')[1].split(">")[0]
+                self.assertIn(f'data-description="{MODE_DESCRIPTIONS[mode]}"', option)
+                self.assertIn(f'data-placeholder="{MODE_PLACEHOLDERS[mode]}"', option)
+                opening = escape(MODE_OPENINGS[mode])
+                self.assertIn(f'data-opening="{opening}"', option)
+
+    def test_the_select_submits_nothing_by_itself(self):
+        """chat.js posts it; an inline handler would post it as a reload."""
+        page = self.client.get(CHAT_URL).content.decode()
+        select = page.split('<select id="gm-mode-select"')[1].split(">")[0]
+        self.assertNotIn("onchange", select)
+
+
 class ModeControlOnThePageTest(BaseTestCase):
     """The #353 indicator names the mode and changes it, without a menu."""
 
@@ -495,15 +568,16 @@ class ModeControlOnThePageTest(BaseTestCase):
         """A Game Master who has chosen to play is asked what he does."""
         dm = self.create_dm()
         session = GMSession.objects.create(name="Quest", user=dm, mode=MODE_PLAY)
-        page = self._page(dm, f"?session={session.pk}")
-        self.assertIn('placeholder="What do you do?"', page)
-        self.assertNotIn('placeholder="Ask the aide"', page)
+        box = self._page(dm, f"?session={session.pk}").split('id="user-input"')[1]
+        box = box.split(">")[0]
+        self.assertIn('placeholder="What do you do?"', box)
+        self.assertNotIn('placeholder="Ask the aide"', box)
 
     def test_a_player_in_aide_mode_gets_the_aides_chrome(self):
         player = self.create_player()
         session = GMSession.objects.create(name="Quest", user=player, mode=MODE_AIDE)
-        page = self._page(player, f"?session={session.pk}")
-        self.assertIn('placeholder="Ask the aide"', page)
+        box = self._page(player, f"?session={session.pk}").split('id="user-input"')[1]
+        self.assertIn('placeholder="Ask the aide"', box.split(">")[0])
 
     def _page_response(self, user, query: str = ""):
         self.login_as(user)
