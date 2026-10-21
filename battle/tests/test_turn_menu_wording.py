@@ -15,6 +15,11 @@ inline (the engine's every-target menu on the seated magic rules, the
 forecast fields for the odds, the classic attack forecast's "about N a hit"),
 and the frozen words gained that code's new fragments.
 
+Recaptured for tarmar-engine 0.9.20 (#153), one line: the Tarmar close
+strike's "about 2 a hit" reads "about 3", the engine's expected damage for a
+strike in close now counting a natural 20's extra damage roll as every other
+attack's did.
+
 The shipped file is Spencer's to reword, so this test reads the frozen copy,
 never the shipped tables, and goes on passing when he does. The boards seat
 invented magic rules and real catalog weapons, so the lines are the same

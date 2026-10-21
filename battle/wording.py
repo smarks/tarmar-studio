@@ -286,6 +286,13 @@ class CastStageWords:
     )
     under_fumble_floor: str = sentence("floor")
     dex_to_land: str = sentence()
+    less_injury: str = sentence("attribute", "injury", required=("attribute",))
+    less_off_balance: str = sentence(
+        "attribute", "off_balance", required=("attribute",)
+    )
+    less_both: str = sentence(
+        "attribute", "injury", "off_balance", required=("attribute",)
+    )
     strength_pool: str = sentence()
     strength_cost: str = sentence("kind", "strength")
     nothing_to_cast_at: str = sentence()

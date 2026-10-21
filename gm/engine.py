@@ -34,6 +34,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
+from tarmar_engine.combat_math import with_article
 from tarmar_engine.magic import (
     CastingFailureRules,
     CastingSuccessTier,
@@ -904,23 +905,6 @@ NO_BORROWING_SENTENCE = (
 )
 
 
-#: The letters that take "an" before a word rather than "a".
-_VOWELS = frozenset("aeiou")
-
-
-def _with_article(noun: str) -> str:
-    """A noun with its indefinite article: "a Backlash", "an Arcane surge".
-
-    Chosen from the noun's first letter, which suits the canons' labels; a
-    label opening on a silent consonant or a "you" sound would be misread.
-
-    Args:
-        noun: The noun, as the canon spells it.
-    """
-    article = "an" if noun[:1].casefold() in _VOWELS else "a"
-    return f"{article} {noun}"
-
-
 class MagicSectionError(ValueError):
     """The canon's magic section cannot take the subsections the engine builds.
 
@@ -1047,9 +1031,9 @@ def render_borrowing(rules: MagicRules) -> str:
             "always fails."
         )
     failure = borrowing.failure
-    named = _with_article(failure.label)
+    named = with_article(failure.label)
     if failure.is_runaway and failure.label.casefold() != _RUNAWAY.casefold():
-        named += f", {_with_article(_RUNAWAY)}"
+        named += f", {with_article(_RUNAWAY)}"
     sentences.append(f"A failed Debt Roll is {named}; the spell has already resolved.")
     sentences.append(
         "Mana handed back pays the Debt before it refills the pool."
@@ -1107,7 +1091,7 @@ def _named_runaway(label: str) -> str:
     """
     if label.casefold() == _RUNAWAY.casefold():
         return label
-    return f"{label}, {_with_article(_RUNAWAY)}"
+    return f"{label}, {with_article(_RUNAWAY)}"
 
 
 def _control_target(push: PushRules) -> str:

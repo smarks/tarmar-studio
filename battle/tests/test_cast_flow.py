@@ -176,6 +176,50 @@ class CasterMagicTest(SimpleTestCase):
             by_key["heal"]["note"], chance_note(policy.three_d6_at_most(12), "WIS")
         )
 
+    def test_a_hurt_off_balance_caster_is_shown_the_roll_it_makes(self):
+        """#153: the odds are under the attribute less the injury band and the
+        owed off-balance, as the engine's menu prices the cast and the board
+        rolls it (``policy.action_roll_penalties``, tarmar-engine #56); they
+        were worked on the raw attribute."""
+        state = wizard_state(fatigue=10, off_balance=True)
+        injury, off_balance = policy.action_roll_penalties(state.by_id(1))
+        self.assertGreater(injury, 0)
+        self.assertGreater(off_balance, 0)
+        magic = caster_magic(state, 1)
+        assert magic is not None
+        by_key = {spell["key"]: spell for spell in magic["spells"]}
+        # The note says why the chance dropped, in the engine's words for it.
+        self.assertEqual(
+            by_key["heal"]["note"],
+            chance_note(
+                policy.three_d6_at_most(12 - injury - off_balance),
+                f"cast_stage.less_both WIS {injury} {off_balance}",
+            ),
+        )
+        # The chance the engine's own menu prices the cast at.
+        menu = policy.choose_option(state, state.by_id(1)).candidates
+        heal = next(candidate for candidate in menu if candidate.spell_key == "heal")
+        self.assertIn(f"WIS 12 less {injury} injury", heal.rationale)
+
+    def test_one_penalty_alone_is_named_alone(self):
+        """Hurt and owing nothing, or unhurt and off balance (#153)."""
+        hurt = wizard_state(fatigue=10)
+        injury, _none = policy.action_roll_penalties(hurt.by_id(1))
+        unbalanced = wizard_state(off_balance=True)
+        _none, off_balance = policy.action_roll_penalties(unbalanced.by_id(1))
+        for state, words, taken in (
+            (hurt, f"cast_stage.less_injury WIS {injury}", injury),
+            (unbalanced, f"cast_stage.less_off_balance WIS {off_balance}", off_balance),
+        ):
+            with self.subTest(words=words):
+                magic = caster_magic(state, 1)
+                assert magic is not None
+                heal = next(row for row in magic["spells"] if row["key"] == "heal")
+                self.assertEqual(
+                    heal["note"],
+                    chance_note(policy.three_d6_at_most(12 - taken), words),
+                )
+
     def test_the_casting_chance_includes_the_fumble_floor(self):
         """#46: the odds shown are the engine's, the casting floor included,
         and the note names the floor where it lowers the chance."""
@@ -767,7 +811,8 @@ class CastStageWordsAreReadFromTheConfigurationTest(SimpleTestCase):
             r"cast_stage\.strength_cost cast_stage\.[a-z]+_spell \d+",
         ),
         "note": (
-            r"cast_stage\.mana_chance (?:cast_stage\.dex_to_land)? (?:INT|WIS) "
+            r"cast_stage\.mana_chance (?:cast_stage\.dex_to_land)? "
+            r"(?:INT|WIS|cast_stage\.less_\w+ (?:INT|WIS)(?: \d+){1,2}) "
             r"\d+% (?:cast_stage\.under_fumble_floor \d+)?",
             r"cast_stage\.strength_chance \d+% \d+ (?:cast_stage\.before_range)?",
         ),
@@ -800,6 +845,7 @@ class CastStageWordsAreReadFromTheConfigurationTest(SimpleTestCase):
                 wizard_state(),
                 wizard_state(mana=1),
                 wizard_state(mana=0, debt=3),
+                wizard_state(fatigue=10, off_balance=True),
                 wizard_state(active_spells=["shield"]),
                 wizard_state(
                     spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}

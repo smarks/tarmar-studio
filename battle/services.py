@@ -3413,13 +3413,16 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         else:
             reason = other_reason
         castable = not reason
-        attribute = actor.intelligence if spell.attribute == "INT" else actor.wisdom
+        # The attribute the casting roll is made under: less the injury band
+        # and any owed off-balance penalty, the engine's one reading of them
+        # (``policy.action_roll_penalties``, tarmar-engine #56), as its menu
+        # prices the cast and the board rolls it (#153).
+        injury, off_balance = policy.action_roll_penalties(actor)
+        attribute = (
+            actor.intelligence if spell.attribute == "INT" else actor.wisdom
+        ) - (injury + off_balance)
         # The chance the engine prices the cast by, the casting fumble floor
-        # included (#46, tarmar-engine #47). It is worked on the raw
-        # attribute, as the engine's menu works it; the roll on the board is
-        # made under the attribute less the injury band and any owed
-        # off-balance penalty, so the two agree only for an unhurt caster
-        # until tarmar-engine #56 lands.
+        # included (#46, tarmar-engine #47).
         chance = policy.cast_success_chance(attribute, rules.casting_failure)
         # The floor named where it lowers the highest total that succeeds,
         # as the engine's own cast working names it
@@ -3432,6 +3435,22 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
             else ""
         )
         aim = stage.dex_to_land if spell.targeted else ""
+        # The attribute named with what came off it, in the words the engine's
+        # own cast note uses, so a lower chance says why (#153).
+        if injury and off_balance:
+            rolled_under = stage.less_both.format(
+                attribute=spell.attribute, injury=injury, off_balance=off_balance
+            )
+        elif injury:
+            rolled_under = stage.less_injury.format(
+                attribute=spell.attribute, injury=injury
+            )
+        elif off_balance:
+            rolled_under = stage.less_off_balance.format(
+                attribute=spell.attribute, off_balance=off_balance
+            )
+        else:
+            rolled_under = spell.attribute
         targets: list[CombatantState | None] = (
             list(enemies) if aimed and enemies else [None]
         )
@@ -3447,7 +3466,7 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                 "cost": stage.mana_cost.format(school=spell.school, level=spell.level),
                 "note": stage.mana_chance.format(
                     chance=f"{chance:.0%}",
-                    attribute=spell.attribute,
+                    attribute=rolled_under,
                     floor=floor,
                     aim=aim,
                 ),

@@ -55,12 +55,11 @@ from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.options import spec as classic_spec
 from tarmar_engine.classic.state import GameState
 from tarmar_engine.classic.state import IllegalAction as ClassicIllegalAction
-from tarmar_engine.engine import RUN_FATIGUE_COST, SPRINT_FATIGUE_COST
+from tarmar_engine.movement import RUN_FATIGUE_COST, SPRINT_FATIGUE_COST
 from tarmar_engine.policy import (
     ANCHOR_OPTION,
     Candidate,
     Forecast,
-    _hth_partners,
     best_weapon,
     weapons_in_reach,
 )
@@ -96,19 +95,6 @@ def _classic() -> ClassicMenuWords:
 #: where it takes them, so a route that goes nowhere is read as standing
 #: (issue #57). A CHARGE says its reach instead.
 STANDING_MOVERS: frozenset[str] = frozenset({"a", "sprint", "c"})
-
-
-def _adjacent_enemies(
-    state: BattleState, actor: CombatantState
-) -> list[CombatantState]:
-    """The enemies beside ``actor``, in the state's order: those a DISENGAGE
-    steps away from, the first of them when no hex is picked
-    (``TurnRunner.disengage_step``)."""
-    return [
-        enemy
-        for enemy in state.enemies_of(actor)
-        if combat_math.figures_adjacent(actor, enemy)
-    ]
 
 
 def _odds(forecast: Forecast | None) -> str:
@@ -232,31 +218,31 @@ def _cast_line(spell_name: str, aimed: str) -> str:
     return shared.cast.format(spell=spell_name)
 
 
-def _no_step_away(
-    state: BattleState, actor: CombatantState, threats: list[CombatantState]
-) -> str:
+def _no_step_away(state: BattleState, actor: CombatantState, letter: str) -> str:
     """Why a step away the engine would not take stays put, or "".
 
     With no hex picked, a DISENGAGE (n) or a break away from hand-to-hand
-    (v) steps straight back from the first of ``threats``, else to either
-    flank, the engine's own choice
-    (:func:`tarmar_engine.movement.step_away_hex`), and the engine logs
-    "nowhere to disengage to" (n) or "nowhere to step to" (v) when none of
-    the three is clear. A hex the player picks is stepped to as picked.
+    (v) steps straight back from the figure the engine names
+    (:func:`tarmar_engine.movement.step_away_from`, tarmar-engine #62), else
+    to either flank (:func:`tarmar_engine.movement.step_away_hex`), and the
+    engine logs "nowhere to disengage to" (n) or "nowhere to step to" (v)
+    when none of the three is clear. A hex the player picks is stepped to as
+    picked.
 
     Args:
         state: The live state the menu was built from.
         actor: The figure choosing.
-        threats: The figures it would step away from, the engine's first.
+        letter: The step option, ``n`` or ``v``.
 
     Returns:
         The reason, e.g. "with no hex picked you stay where you are, since no
         hex straight back from Foe or to either flank is clear", or "" when
         the engine has a hex to step to (or nothing to step away from).
     """
-    if not threats or movement.step_away_hex(state, actor, threats[0]) is not None:
+    threat = movement.step_away_from(state, actor, letter)
+    if threat is None or movement.step_away_hex(state, actor, threat) is not None:
         return ""
-    return _tarmar().no_step_away.format(threat=threats[0].name)
+    return _tarmar().no_step_away.format(threat=threat.name)
 
 
 def _mover_line(
@@ -547,9 +533,7 @@ def _plain_line(
             cost = shared.dropped.format(weapon=actor.weapon.name)
     elif option == "n":
         plain = tarmar.step_away
-        # The engine steps away from the first adjacent enemy
-        # (``TurnRunner.disengage_step``).
-        stuck = _no_step_away(state, actor, _adjacent_enemies(state, actor))
+        stuck = _no_step_away(state, actor, option)
         if stuck:
             plain = tarmar.step_away_stuck.format(line=plain, stuck=stuck)
     elif option == "o":
@@ -569,9 +553,7 @@ def _plain_line(
     elif option == "u":
         plain = tarmar.draw_dagger
     elif option == "v" and actor.grappled_by is None:
-        # The engine steps away from the first partner it is in
-        # hand-to-hand with (``TurnRunner.hth_disengage``).
-        stuck = _no_step_away(state, actor, _hth_partners(state, actor))
+        stuck = _no_step_away(state, actor, option)
         plain = (
             tarmar.break_away_stuck.format(line=tarmar.break_away, stuck=stuck)
             if stuck

@@ -302,12 +302,19 @@ no_kind_of_magic = "the rules give it no kind of magic, so no Channel for it"
 past_channel = "costs {level} mana, past a Channel of {limit} for it"
 mana_short = "needs {level} mana, {mana} left"
 mana_borrowable = "needs {level} mana, {mana} left: borrow the {shortfall} it lacks"
-# The chance a Tarmar cast succeeds: {attribute} is INT or WIS, {floor} is
+# The chance a Tarmar cast succeeds: {attribute} is INT or WIS (or one of
+# the less_ sentences below, for a hurt or off-balance caster), {floor} is
 # under_fumble_floor where the canon's fumble floor lowers the chance, and
 # {aim} dex_to_land for a spell aimed at a figure; each is empty otherwise.
 mana_chance = "{chance} on 3d6 ≤ {attribute}{floor}{aim}"
 under_fumble_floor = ", under the fumble floor {floor}"
 dex_to_land = ", then a DEX roll to land it"
+# The {attribute} above for a caster the roll takes something off (#153): the
+# injury band and any owed off-balance penalty, as amounts, in the engine's
+# own words for them.
+less_injury = "{attribute} less {injury} injury"
+less_off_balance = "{attribute} less {off_balance} off-balance"
+less_both = "{attribute} less {injury} injury and {off_balance} off-balance"
 # A classic wizard pays ST, the pool that also holds its hit points; {kind}
 # is one of the spell kinds below.
 strength_pool = "ST"
