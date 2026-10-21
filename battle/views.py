@@ -1299,6 +1299,9 @@ def advance_control(battle, actor: Actor) -> dict | None:
         # The records moved under an unfinished fight (issue #842): it does
         # not go on until a Game Master takes the pools from the records.
         # Said on the page from stored state, so a reload says it too.
+        resnapshot_url = (
+            reverse("battle:resnapshot", args=[battle.pk]) if actor.is_dm else ""
+        )
         return {
             "label": "Pools changed on the records",
             "enabled": False,
@@ -1306,8 +1309,13 @@ def advance_control(battle, actor: Actor) -> dict | None:
             "stale": refusal_words().services.stale_pools.format(
                 names=", ".join(moved)
             ),
-            "resnapshot_url": (
-                reverse("battle:resnapshot", args=[battle.pk]) if actor.is_dm else ""
+            "resnapshot_url": resnapshot_url,
+            # The notice's key (#134): it changes only when what the notice
+            # says or offers does, unlike its HTML, whose CSRF token Django
+            # masks afresh on every render. battle.js compares this, as it
+            # compares a ruling panel's record, before repainting the notice.
+            "stale_record": json.dumps(
+                {"moved": moved, "resnapshot_url": resnapshot_url}, sort_keys=True
             ),
         }
     if battle.status == Battle.STATUS_AWAITING:
