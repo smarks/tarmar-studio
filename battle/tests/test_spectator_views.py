@@ -23,8 +23,10 @@ shape per role against the shared state endpoint.
 import json
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle.models import Battle
+from battle.refusal_words import refusal_words
 from battle.services import (
     advance_turn,
     claim_seat,
@@ -237,7 +239,9 @@ class SpectatorWriteRefusalTest(SpectatorTestMixin):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("not your combatant", response.json()["error"])
+        self.assertIn(
+            refusal_words().services.not_your_combatant, response.json()["error"]
+        )
 
     def test_no_seat_business_once_the_battle_started(self):
         battle, seat = self.awaiting_battle()
@@ -248,7 +252,11 @@ class SpectatorWriteRefusalTest(SpectatorTestMixin):
         )
         # A refused form post comes back as the page with the reason on it
         # rather than raw JSON (#339, item 2).
-        self.assertContains(claim, "no longer open", status_code=400)
+        self.assertContains(
+            claim,
+            escape(refusal_words().services.not_open_for_joining),
+            status_code=400,
+        )
         ready = self.client.post(
             reverse("battle:seat-ready", args=[battle.pk, seat.pk]),
             {"ready": "true"},

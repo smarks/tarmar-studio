@@ -16,6 +16,7 @@ from tarmar_engine.policy import ANCHOR_OPTION, Candidate
 from battle.engine.state import BattleState, RunawayState
 from battle.models import Battle, BattleCombatant
 from battle.persistence import TARMAR_PROFILE, dump_state, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
     _match_candidate,
     _take_off_board,
@@ -170,7 +171,9 @@ class SelfAnchorMenuTest(BaseTestCase):
         ):
             with (
                 self.subTest(choice=choice),
-                self.assertRaisesMessage(ValueError, "not on the pending menu"),
+                self.assertRaisesMessage(
+                    ValueError, refusal_words().services.option_not_on_menu
+                ),
             ):
                 self.record(**choice)
 
@@ -186,7 +189,7 @@ class SelfAnchorMenuTest(BaseTestCase):
         response = self.post_json(url, {**body, "anchor_target": "mine"})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            response.json()["error"], "A numeric anchor_target is required"
+            response.json()["error"], refusal_words().views.numeric_anchor_target
         )
         response = self.post_json(url, body)
         self.assertEqual(response.status_code, 400)
@@ -320,7 +323,9 @@ class GameMasterAnchorsForAFoeTest(BaseTestCase):
                 anchor_target=anchor_target,
             )
 
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             choose(other.pk)
         battle, _events = choose(foe.pk)
         self.assertTrue(

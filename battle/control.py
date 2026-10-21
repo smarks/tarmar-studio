@@ -34,6 +34,7 @@ unseated figure would name an owner who does not exist.
 
 from __future__ import annotations
 
+from .refusal_words import refusal_words
 from .refusals import BattleRefusal
 
 #: The AI decides this combatant's action.
@@ -76,7 +77,7 @@ def clean_mode(value) -> str:
     """
     mode = str(value or "").strip()
     if mode not in MODES:
-        raise BattleRefusal("Control mode must be automatic or manual")
+        raise BattleRefusal(refusal_words().control.battle_mode)
     return mode
 
 
@@ -88,7 +89,7 @@ def clean_combatant_mode(value) -> str:
     """
     mode = str(value or "").strip()
     if mode not in COMBATANT_MODES:
-        raise BattleRefusal("Control mode must be automatic, manual, or inherited")
+        raise BattleRefusal(refusal_words().control.combatant_mode)
     return mode
 
 

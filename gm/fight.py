@@ -77,6 +77,7 @@ from .battle_report import battle_entry, pending_battle_entries
 from .character_schema import SCHEMA_IN_PROMPT_PREAMBLE, parse_extraction_reply
 from .foe_people import FOE_NAME_MAX_LENGTH, PERSON_ARCHETYPES, person_foe
 from .models import GMSession
+from .refusal_words import refusal_words
 from .retrieval import ChatMessage
 from .services import extract_structured_json, messages_for_model
 
@@ -329,7 +330,7 @@ def parse_foe_text(text: str) -> list[FoeRequest]:
             FoeRequest(name=name, count=max(1, min(count, MAX_FOES_PER_KIND)))
         )
     if not requests:
-        raise FightError("Name at least one foe, or leave it blank to ask the GM")
+        raise FightError(refusal_words().fight.name_a_foe)
     return requests
 
 
@@ -427,12 +428,10 @@ def request_foes_from_model(
         ]
     except (ValueError, TypeError, KeyError) as error:
         logger.warning("GM foe answer was not a foe list: %r", answer)
-        raise FightError(
-            "The GM could not say who you face — try naming the foes"
-        ) from error
+        raise FightError(refusal_words().fight.could_not_say_who) from error
     requests = [request for request in requests if request.name]
     if not requests:
-        raise FightError("The GM found nobody to fight — try naming the foes")
+        raise FightError(refusal_words().fight.found_nobody)
     return requests
 
 
@@ -608,10 +607,7 @@ def request_set_foes(
         if requests:
             return requests
         logger.warning("GM set_foes answer was not usable: %s; %r", errors, answer)
-    raise FightError(
-        "The Game Master could not find foes for that in the bestiary — try "
-        "asking again"
-    )
+    raise FightError(refusal_words().fight.no_foes_in_bestiary)
 
 
 def foe_requests_for(
@@ -756,7 +752,7 @@ def stand_in_beast(
         except Beast.DoesNotExist:
             continue
     if base is None:
-        raise FightError("The bestiary is empty — load the catalog before fighting")
+        raise FightError(refusal_words().fight.bestiary_empty)
     # The stand-in keeps what was asked for as its own name, so a name past
     # the bestiary's column is refused, not cut to fit (#938).
     name = request.name.strip()
@@ -792,7 +788,11 @@ def resolve_foes(
             # against the callings when it was read, never a catalog beast.
             person = person_foe(request.calling)
             if person is None:
-                raise FightError(f"{request.calling!r} is not a calling")
+                raise FightError(
+                    refusal_words().fight.not_a_calling.format(
+                        calling=repr(request.calling)
+                    )
+                )
             resolved.append(
                 ResolvedFoe(
                     None,
@@ -1014,7 +1014,7 @@ def start_fight(
             ``stop_at``; nothing was started.
     """
     if fight_in_progress(session):
-        raise FightError("A fight is already under way — finish it on the board first")
+        raise FightError(refusal_words().fight.fight_under_way)
     # Only a complete character can fight (issue #571): one still missing
     # attributes or its Fatigue roll has no pools to put on the board.
     living = [
@@ -1032,17 +1032,12 @@ def start_fight(
         character for character in living if is_owner_or_manager(owner, character.user)
     ]
     if not party and living:
-        raise FightError(
-            "The characters in this session belong to other players; only a "
-            "Game Master fights with another player's character"
-        )
+        raise FightError(refusal_words().fight.other_players_characters)
     if not party:
-        raise FightError("Attach a living character before starting a fight")
+        raise FightError(refusal_words().fight.attach_living_character)
     room = MAX_COMBATANTS - len(party)
     if room < 1:
-        raise FightError(
-            f"The field holds {MAX_COMBATANTS} figures and the party fills it"
-        )
+        raise FightError(refusal_words().fight.field_full.format(most=MAX_COMBATANTS))
     # Outside the transaction: asking the model can take half a minute, and
     # nothing should hold the session's row for that.
     requests, chosen_by_game_master = foe_requests_for(
@@ -1062,9 +1057,7 @@ def start_fight(
         # two fights were on the board (issue #671).
         locked = GMSession.objects.select_for_update().get(pk=session.pk)
         if fight_in_progress(locked):
-            raise FightError(
-                "A fight is already under way — finish it on the board first"
-            )
+            raise FightError(refusal_words().fight.fight_under_way)
         # Resolving inside the transaction too: a request the catalog cannot
         # match saves a generated Beast row, and a fight that is then trimmed
         # away, found to have no foes, or refused left those rows behind with
@@ -1079,7 +1072,7 @@ def start_fight(
             resolve_foes(requests, rng=stand_in_rng(seed)), room
         )
         if not foes:
-            raise FightError("No foes to fight")
+            raise FightError(refusal_words().fight.no_foes)
         beast_slugs = tuple(
             foe.beast.slug
             for foe in foes

@@ -32,6 +32,7 @@ from common.helpers import database_integer
 
 from .fight import fight_in_progress
 from .models import GMSession
+from .refusal_words import refusal_words
 from .retrieval import SESSION_NOTICE_KIND
 
 
@@ -110,7 +111,7 @@ def withdraw(character: Character, session_id: int, owner) -> bool:
         PermissionError: The asker does not own the character.
     """
     if character.user_id != owner.pk:
-        raise PermissionError("Only the character's owner withdraws it")
+        raise PermissionError(refusal_words().withdraw.owner_only)
     with transaction.atomic():
         session = (
             GMSession.objects.select_for_update()
@@ -160,6 +161,6 @@ def gm_character_withdraw(request: HttpRequest, character_id: int) -> HttpRespon
     try:
         session_id = database_integer(request.POST.get("session_id"))
     except ValueError:
-        return HttpResponseBadRequest("session_id must be a session's id")
+        return HttpResponseBadRequest(refusal_words().withdraw.session_id_not_id)
     withdraw(character, session_id, request.user)
     return redirect("characters:edit", pk=character.pk)

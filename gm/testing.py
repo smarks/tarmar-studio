@@ -12,8 +12,11 @@ from contextlib import AbstractContextManager
 from typing import Any
 from unittest.mock import patch
 
+from django.test import override_settings
+
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import Character
+from common.wording import fixed_wording
 
 from .ledger import (
     DRAFT_FIELDS,
@@ -23,8 +26,17 @@ from .ledger import (
 )
 from .maps import MAP_AREAS, MapScope
 from .models import GMSession, SessionCharacter
+from .refusal_words import GmRefusalWords
 from .roster import roster
 from .turn_engine.messages import PLAN_ONLY
+
+#: The Games Master app's refusals as fixed words (issue #97): every sentence
+#: is its own table and key followed by the ``{names}`` it may use, so a test
+#: that must see what filled a sentence pins no shipped wording.
+FIXED_GM_REFUSALS = fixed_wording(GmRefusalWords)
+
+#: A class or method decorator: run under :data:`FIXED_GM_REFUSALS`.
+with_fixed_gm_refusals = override_settings(GM_REFUSAL_WORDS=FIXED_GM_REFUSALS)
 
 
 def add_character(

@@ -13,6 +13,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, RequestFactory, SimpleTestCase
 from django.urls import reverse
 
+from battle.refusal_words import refusal_words
 from battle.services import create_battle
 from characters.models import Character
 from common.helpers import (
@@ -509,7 +510,9 @@ class TypedInputSiblingTest(BaseTestCase):
             b'{"field": ["name"], "value": "x"}',
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "Unknown setup field")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views.unknown_setup_field
+        )
 
     def test_battle_act_with_an_id_past_sqlite_integer(self):
         battle = create_battle(self.dm, name="Probe", count=2, seed=1)

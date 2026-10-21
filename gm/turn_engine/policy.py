@@ -16,6 +16,7 @@ from characters.skill_rules import skill_rules
 from reference.rules_file import derived_from_rules
 
 from ..engine import MODE_AIDE, MODE_PLAY
+from ..refusal_words import refusal_words
 
 #: Every action a plan may hold, in the order the schema lists them.
 ACTION_NAMES: tuple[str, ...] = (
@@ -90,67 +91,48 @@ GAME_MASTER_ONLY_ACTIONS = frozenset(
     }
 )
 
-#: What a player is told when a plan asks for a Game Master's action.
-GAME_MASTER_ONLY_REFUSAL = "only a Game Master can bring a character back or remove one"
 
-#: What a player is told when a plan records or retires a house rule.
-HOUSE_RULE_REFUSAL = (
-    "only the Game Master sets the rulings at this table; a player's house "
-    "rule is a suggestion for him, not a ruling"
-)
+#: The policy's refusals, each by its key in ``config/gm-refusals.toml``'s
+#: [policy] table (issue #97). A refusal is known by its key, never by its
+#: words: two reasons may be given the same sentence, and a sentence may be
+#: edited, without either changing what the refusal is.
+REASON_GAME_MASTER_ONLY = "game_master_only"
+REASON_HOUSE_RULE = "house_rule"
+REASON_LITERACY_RULING = "literacy_ruling"
+REASON_PLAYER_STATED_SCORES = "player_stated_scores"
+REASON_PLAYER_STATED_FATIGUE = "player_stated_fatigue"
+REASON_GAME_MASTER_RECORDS = "game_master_records"
+REASON_AIDE_UNASKED_ROLL = "aide_unasked_roll"
 
-#: What a player is told when a plan rules on literacy (issue #743). Their
-#: literacy is rolled; at "Consult GM", where there is no check, the Game
-#: Master decides, and asking again will not make it the player's call.
-LITERACY_RULING_REFUSAL = (
-    "only the Game Master rules on whether a character can read; a player's "
-    "literacy is rolled, and at an Origin of Consult GM the Game Master decides"
-)
+#: The key an action's procedure frame records its policy refusal under, so a
+#: later turn reads the reason rather than its words.
+REFUSAL_REASON = "refusal_reason"
 
-#: What a player is told when a plan states their attribute scores. Players
-#: roll; a Game Master may state values (issue #404).
-PLAYER_STATED_SCORES_REFUSAL = (
-    "a player's attribute scores are rolled, not stated; only a Game Master "
-    "can set them to chosen values"
-)
-
-#: The same for the Fatigue roll: a Game Master may state the roll made at
-#: his table, and a player's is rolled (issue #802).
-PLAYER_STATED_FATIGUE_REFUSAL = (
-    "a player's Fatigue roll is rolled, not stated; only a Game Master can "
-    "record a roll made at his table"
-)
-
-#: What a player is told when a plan marks a death, awards XP or moves coin
-#: (issue #802).
-GAME_MASTER_RECORDS_REFUSAL = (
-    "only the Game Master marks a death, awards XP, or gives or takes coin; "
-    "a player's coin moves when they buy something"
-)
-
-#: What an aide is told when a plan rolls dice nobody asked for (issue #598).
-#: A roll the Game Master did not ask for can only decide something that
-#: already happened at his table, which the dice cannot know.
-AIDE_UNASKED_ROLL_REFUSAL = (
-    "the Game Master did not ask for a roll, and dice do not decide what "
-    "happened at his table; that is his to say"
-)
-
-#: The refusals that come from who is at the table rather than from what the
-#: message said. An account's role does not change inside a session, so these
-#: will read the same on every later turn: asking again can only waste the
-#: turn (issue #614). The aide's unasked-roll refusal is deliberately not
-#: here -- it depends on the message, and the next one may ask for a roll.
-SETTLED_REFUSALS: frozenset[str] = frozenset(
+#: The refusals that come from who is at the table, not from the message. An
+#: account's role does not change inside a session, so these hold on every
+#: later turn: asking again can only waste the turn (issue #614). The aide's
+#: unasked-roll refusal is deliberately not here -- it depends on the message,
+#: and the next one may ask for a roll.
+SETTLED_REASONS: frozenset[str] = frozenset(
     {
-        PLAYER_STATED_SCORES_REFUSAL,
-        PLAYER_STATED_FATIGUE_REFUSAL,
-        GAME_MASTER_ONLY_REFUSAL,
-        GAME_MASTER_RECORDS_REFUSAL,
-        HOUSE_RULE_REFUSAL,
-        LITERACY_RULING_REFUSAL,
+        REASON_PLAYER_STATED_SCORES,
+        REASON_PLAYER_STATED_FATIGUE,
+        REASON_GAME_MASTER_ONLY,
+        REASON_GAME_MASTER_RECORDS,
+        REASON_HOUSE_RULE,
+        REASON_LITERACY_RULING,
     }
 )
+
+
+def refusal_text(reason: str) -> str:
+    """The configured words of the policy refusal ``reason``, or ``""``.
+
+    Args:
+        reason: One of the ``REASON_*`` keys, or ``""`` for no refusal.
+    """
+    return getattr(refusal_words().policy, reason) if reason else ""
+
 
 #: What to do instead, where the rules offer something. A player may not
 #: state their scores, but they may have them rolled, and saying so turns a
@@ -355,8 +337,9 @@ class TurnPolicy:
         """How the narration answers, for the narrate message."""
         return AIDE_MANNER if self.is_aide else PLAY_MANNER
 
-    def refusal_for(self, action: str, *, states_scores: bool = False) -> str:
-        """Why this turn may not run ``action``, or ``""`` when it may.
+    def refusal_reason(self, action: str, *, states_scores: bool = False) -> str:
+        """Which refusal this turn gives ``action``: a ``REASON_*`` key, or
+        ``""`` when it may run.
 
         Args:
             action: One of :data:`ACTION_NAMES`.
@@ -369,22 +352,27 @@ class TurnPolicy:
             and self.is_aide
             and action not in self.dice_asked_for
         ):
-            return AIDE_UNASKED_ROLL_REFUSAL
+            return REASON_AIDE_UNASKED_ROLL
         if self.is_game_master:
             return ""
         if action in HOUSE_RULE_ACTIONS:
-            return HOUSE_RULE_REFUSAL
+            return REASON_HOUSE_RULE
         if action == "rule_literacy":
-            return LITERACY_RULING_REFUSAL
+            return REASON_LITERACY_RULING
         if action in GAME_MASTER_RECORD_ACTIONS:
-            return GAME_MASTER_RECORDS_REFUSAL
+            return REASON_GAME_MASTER_RECORDS
         if action in GAME_MASTER_ONLY_ACTIONS:
-            return GAME_MASTER_ONLY_REFUSAL
+            return REASON_GAME_MASTER_ONLY
         if states_scores and action == "roll_fatigue":
-            return PLAYER_STATED_FATIGUE_REFUSAL
+            return REASON_PLAYER_STATED_FATIGUE
         if states_scores:
-            return PLAYER_STATED_SCORES_REFUSAL
+            return REASON_PLAYER_STATED_SCORES
         return ""
+
+    def refusal_for(self, action: str, *, states_scores: bool = False) -> str:
+        """Why this turn may not run ``action``, in the configured words, or
+        ``""`` when it may (see :meth:`refusal_reason`)."""
+        return refusal_text(self.refusal_reason(action, states_scores=states_scores))
 
     @classmethod
     def for_turn(

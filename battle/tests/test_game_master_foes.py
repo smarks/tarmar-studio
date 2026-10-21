@@ -7,9 +7,12 @@ theirs: restart it, set the foes to manual and choose their moves. The player
 still advances the fight and plays their own seats.
 """
 
+from django.utils.html import escape
+
 from battle import control
 from battle.access import Actor, can_control, commands_foes, decides_for
 from battle.models import Battle
+from battle.refusal_words import refusal_words
 from battle.services import create_battle
 from common.test_helpers import BaseTestCase, create_character
 
@@ -61,7 +64,11 @@ class GameMasterFoesTest(BaseTestCase):
             {"control_mode": control.MANUAL},
         )
         self.assertEqual(response.status_code, 403)
-        self.assertContains(response, "belong to the Game Master", status_code=403)
+        self.assertContains(
+            response,
+            escape(refusal_words().views.foes_belong_to_game_master),
+            status_code=403,
+        )
         self.foe.refresh_from_db()
         self.assertEqual(self.foe.control_mode, control.INHERIT)
 

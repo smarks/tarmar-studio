@@ -19,6 +19,7 @@ from tarmar_engine.policy import Candidate
 from battle.engine.state import BattleState, ContestState, CounterState
 from battle.models import Battle, BattleCombatant
 from battle.persistence import TARMAR_PROFILE, dump_state, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
     _match_candidate,
     _take_off_board,
@@ -212,7 +213,9 @@ class CounterMenuTest(BaseTestCase):
         ):
             with (
                 self.subTest(choice=choice),
-                self.assertRaisesMessage(ValueError, "not on the pending menu"),
+                self.assertRaisesMessage(
+                    ValueError, refusal_words().services.option_not_on_menu
+                ),
             ):
                 self.record(**choice)
 
@@ -228,7 +231,9 @@ class CounterMenuTest(BaseTestCase):
         }
         response = self.post_json(url, {**body, "counter_mana": "all of it"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "A numeric counter_mana is required")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views.numeric_counter_mana
+        )
         response = self.post_json(url, body)
         self.assertEqual(response.status_code, 400)
         response = self.post_json(
@@ -354,7 +359,9 @@ class GameMasterCountersForAFoeTest(BaseTestCase):
                 counter_mana=counter_mana,
             )
 
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             choose(COMMITMENTS[-1] + 1)
         battle, _events = choose(COMMITMENTS[0])
         (declared,) = status_events(battle, "counter_declared")

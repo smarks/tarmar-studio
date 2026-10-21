@@ -18,6 +18,7 @@ from common.test_helpers import BaseTestCase
 from . import roster
 from .engine import dm_system_prompt, system_prompt
 from .models import GMSession
+from .refusal_words import refusal_words
 from .testing import run_actions
 
 SURVIVE = patch("characters.skills.roll_survival_dice", return_value=(6, 6, 6, 18))
@@ -216,7 +217,7 @@ class GameMasterOnlyTest(BaseTestCase):
                 self.assertFalse(result.ran)
                 self.assertEqual(
                     result.error,
-                    "only a Game Master can bring a character back or remove one",
+                    refusal_words().policy.game_master_only,
                 )
 
         self.assertEqual(_everyone(session), before)

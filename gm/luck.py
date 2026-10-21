@@ -30,6 +30,7 @@ from common.decorators import rate_limit
 from common.helpers import _json_error, _parse_json_body, database_integer
 
 from .models import GMSession, SessionCharacter
+from .refusal_words import refusal_words
 
 #: The Luck skill's stored name.
 LUCK_SKILL = "luck"
@@ -135,7 +136,7 @@ def spend_luck(
         character = session.attached_characters().filter(pk=character_id).first()
         if character is None:
             raise character_services.CharacterChangeError(
-                "That character is not in this session"
+                refusal_words().luck.not_in_session
             )
         # Before a use is counted: the dead spend nothing (#932). changing()
         # below would refuse them too, after the count was saved.
@@ -143,7 +144,7 @@ def spend_luck(
         level = luck_level(character)
         if not level:
             raise character_services.CharacterChangeError(
-                f"{character.name} has no Luck to spend"
+                refusal_words().luck.no_luck.format(name=character.name)
             )
         link, _created = SessionCharacter.objects.get_or_create(
             session=session, character=character
@@ -151,8 +152,7 @@ def spend_luck(
         link = SessionCharacter.objects.select_for_update().get(pk=link.pk)
         if link.luck_spent >= level and not is_game_master:
             raise character_services.CharacterChangeError(
-                f"{character.name} has spent all {level} of this session's Luck "
-                "(once per session per level); only a Game Master grants more"
+                refusal_words().luck.luck_spent.format(name=character.name, level=level)
             )
         link.luck_spent += 1
         link.save(update_fields=["luck_spent"])
@@ -190,7 +190,7 @@ def gm_spend_luck(request: HttpRequest, session_id: int) -> JsonResponse:
     try:
         character_id = database_integer(data.get("character_id"))
     except ValueError:
-        return _json_error("character_id must be a character's id")
+        return _json_error(refusal_words().luck.character_id_not_id)
     try:
         line = spend_luck(
             session,

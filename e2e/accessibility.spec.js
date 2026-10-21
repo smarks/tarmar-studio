@@ -20,6 +20,7 @@
  * `link-in-text-block` on the footer.
  */
 
+const { refusal } = require('./refusals');
 const AxeBuilder = require('@axe-core/playwright').default;
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
@@ -474,7 +475,9 @@ print('DONE')
         // Refused: the name another figure already has.
         await page.locator('.combatant-rename-input').fill(otherName);
         await page.keyboard.press('Enter');
-        await expect(down.locator('.roster-rename-note')).toContainText('already has that name');
+        await expect(down.locator('.roster-rename-note')).toContainText(
+            refusal('battle', 'services', 'name_taken')
+        );
         const withRefusal = await rosterContrast(page, testInfo, 'refusal');
         expect(withRefusal, describe(withRefusal)).toEqual([]);
     });

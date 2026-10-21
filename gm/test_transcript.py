@@ -21,7 +21,8 @@ from gm.retrieval import CANON_KIND, PROCEDURE_KIND
 from gm.testing import add_character, gm_replies
 from gm.transcript import CHIP, HIDDEN, VISIBLE, Block, transcript_blocks
 from gm.turn_record import TurnRecorder, prompt_hash
-from gm.views import GM_SERVER_ERROR_MESSAGE
+
+from .refusal_words import refusal_words
 
 STREAM_URL = "/tarmar/gm/stream/"
 
@@ -120,12 +121,12 @@ class TurnRecordStreamTest(BaseTestCase):
 
         frames = _post_turn(self.client, {"message": "Are you there?"})
 
-        self.assertEqual(frames[-1], {"error": GM_SERVER_ERROR_MESSAGE})
+        self.assertEqual(frames[-1], {"error": refusal_words().views.server_error})
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_ERROR)
         # The record holds what the player was told (#13); the engine's
         # failed event keeps the real reason for whoever debugs the turn.
-        self.assertEqual(record.error, GM_SERVER_ERROR_MESSAGE)
+        self.assertEqual(record.error, refusal_words().views.server_error)
         failed = record.events.get(kind="failed")
         self.assertEqual(failed.payload["error"], "ollama exploded")
         self.assertEqual(record.user_message, "Are you there?")
@@ -149,10 +150,10 @@ class TurnRecordStreamTest(BaseTestCase):
     def test_a_turn_refused_before_it_starts_is_recorded(self):
         frames = _post_turn(self.client, {"message": "   "})
 
-        self.assertEqual(frames[-1]["error"], "No message provided")
+        self.assertEqual(frames[-1]["error"], refusal_words().views.no_message)
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_REJECTED)
-        self.assertEqual(record.error, "No message provided")
+        self.assertEqual(record.error, refusal_words().views.no_message)
 
     def test_a_bad_roll_expression_is_recorded_as_rejected(self):
         _post_turn(self.client, {"message": "banana", "command": "roll"})
@@ -168,7 +169,7 @@ class TurnRecordStreamTest(BaseTestCase):
 
         record = GMTurnRecord.objects.get()
         self.assertEqual(record.outcome, GMTurnRecord.OUTCOME_REJECTED)
-        self.assertEqual(record.error, "Rules directory not found")
+        self.assertEqual(record.error, refusal_words().views.rules_not_found)
 
     def test_character_with_no_session_is_recorded_as_rejected(self):
         _post_turn(self.client, {"command": "character"})

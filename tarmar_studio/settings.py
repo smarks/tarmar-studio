@@ -32,6 +32,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from battle.refusal_words import (  # noqa: E402
+    load_refusal_words as load_battle_refusal_words,
+)
 from battle.wording import load_rulings_wording  # noqa: E402
 from common.base_url import (  # noqa: E402
     BASE_URL_RULE,
@@ -51,6 +54,7 @@ from common.message_templates import (  # noqa: E402
 from common.public_paths import LOGIN_PATH  # noqa: E402
 from common.services import ollama_client  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
+from gm.refusal_words import load_refusal_words as load_gm_refusal_words  # noqa: E402
 from reference.paths import (  # noqa: E402
     CANON_NAME,
     CONFIG_DIR,
@@ -171,6 +175,19 @@ BATTLE_RULINGS_WORDING_FILE = BASE_DIR / (
     os.environ.get("BATTLE_RULINGS_WORDING_FILE") or "config/battle-rulings.toml"
 )
 BATTLE_RULINGS_WORDING = load_rulings_wording(BATTLE_RULINGS_WORDING_FILE)
+
+# The words each app refuses a request in (issues #97, #86): one TOML file per
+# app under config/, one table per module, read and checked here as the rulings'
+# words are. BATTLE_REFUSAL_WORDS_FILE and GM_REFUSAL_WORDS_FILE name other files,
+# resolved as GATE_HINTS_FILE is; empty means the default.
+BATTLE_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("BATTLE_REFUSAL_WORDS_FILE") or "config/battle-refusals.toml"
+)
+BATTLE_REFUSAL_WORDS = load_battle_refusal_words(BATTLE_REFUSAL_WORDS_FILE)
+GM_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("GM_REFUSAL_WORDS_FILE") or "config/gm-refusals.toml"
+)
+GM_REFUSAL_WORDS = load_gm_refusal_words(GM_REFUSAL_WORDS_FILE)
 
 # How many wrong guesses in a window before a hint is shown. Three because of
 # the #55 evidence, stated once beside the hints comment in common/gate.py. It

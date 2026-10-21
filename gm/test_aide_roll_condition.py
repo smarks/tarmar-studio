@@ -24,11 +24,12 @@ from common.rolling import RollRecord
 from common.test_helpers import create_character
 
 from .engine import MODE_AIDE, MODE_PLAY
+from .refusal_words import refusal_words
 from .roll_service import RollRequest, RollResolution, dice_line, roll_frame_payload
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .turn_engine import events
 from .turn_engine.plan import read_plan
-from .turn_engine.policy import ACTION_NAMES, AIDE_UNASKED_ROLL_REFUSAL, TurnPolicy
+from .turn_engine.policy import ACTION_NAMES, TurnPolicy
 
 
 def hurt_to(character: Character, *, fatigue_left: int) -> None:
@@ -296,6 +297,6 @@ class AnAideRollsNoDiceUnaskedTest(ExecutorTestCase):
         )
         self.assertEqual(
             [(result.ran, result.error) for result in outcome.results],
-            [(False, AIDE_UNASKED_ROLL_REFUSAL)] * 4,
+            [(False, refusal_words().policy.aide_unasked_roll)] * 4,
         )
         self.assertEqual(len(Character.objects.get(pk=self.gorn.pk).history), before)

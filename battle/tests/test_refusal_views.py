@@ -19,6 +19,7 @@ from django.urls import reverse
 
 from battle import control, views
 from battle.models import Battle, BattleDraft
+from battle.refusal_words import refusal_words
 from battle.refusals import BattleRefusal
 from battle.services import advance_turn, create_battle
 from common.test_helpers import BaseTestCase, logged_exception
@@ -208,7 +209,8 @@ class BattleViewRefusalTest(BaseTestCase):
                 self.assertIn(INTERNAL_TEXT, str(logged_exception(logged)))
                 if endpoint.answers_json:
                     self.assertEqual(
-                        response.json()["error"], views.BATTLE_REQUEST_FAILED_MESSAGE
+                        response.json()["error"],
+                        refusal_words().views.request_failed,
                     )
 
     def test_an_engine_error_on_a_players_choice_stays_in_the_log(self):
@@ -246,7 +248,7 @@ class BattleViewRefusalTest(BaseTestCase):
             )
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], views.BATTLE_REQUEST_FAILED_MESSAGE)
+        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
         self.assertNotIn("no-such-rules", response.content.decode())
         self.assertIn(
             "unknown rules profile 'no-such-rules'",
@@ -292,5 +294,5 @@ class BattleViewRefusalTest(BaseTestCase):
             response = self.client.post(again, {"archetype": "brawler"})
 
         self.assertContains(
-            response, "You already hold a seat in this battle", status_code=400
+            response, refusal_words().services.already_hold_a_seat, status_code=400
         )

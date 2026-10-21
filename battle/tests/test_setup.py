@@ -7,6 +7,7 @@ a draft's muster compiles into ``create_battle``'s arguments.
 
 from battle.models import Battle, BattleDraft
 from battle.persistence import CLASSIC_PROFILE
+from battle.refusal_words import refusal_words
 from battle.services import (
     MAX_COMBATANTS,
     add_draft_entry,
@@ -19,6 +20,7 @@ from battle.services import (
     seatable_characters,
     start_draft,
 )
+from battle.tests.fixed_refusals import with_fixed_refusals
 from bestiary.models import Beast
 from common.test_helpers import BaseTestCase, create_character
 
@@ -78,12 +80,13 @@ class CreateBattleWithCharactersTest(BaseTestCase):
         row = battle.combatants.get(character=self.character)
         self.assertEqual(row.display_name, "Aldwin")
 
+    @with_fixed_refusals
     def test_character_not_seatable_by_user_is_refused(self):
         stranger_character = create_character(self.player, name="Private")
         # A second plain player cannot seat someone else's character even
         # through the service directly.
         other_player = self.create_player(username="second")
-        with self.assertRaisesMessage(ValueError, "Not characters you can seat"):
+        with self.assertRaisesMessage(ValueError, "services.not_seatable_characters"):
             create_battle(
                 other_player,
                 name="Steal",
@@ -100,7 +103,9 @@ class CreateBattleWithCharactersTest(BaseTestCase):
             )
 
     def test_the_same_character_cannot_fight_twice(self):
-        with self.assertRaisesMessage(ValueError, "cannot fight twice"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.character_twice
+        ):
             create_battle(
                 self.dm,
                 name="Twins",
@@ -198,7 +203,9 @@ class ClaimSeatEligibilityTest(BaseTestCase):
 
     def test_dead_character_cannot_claim_a_seat(self):
         dead = create_character(self.player, name="Ghost", is_alive=False)
-        with self.assertRaisesMessage(ValueError, "living characters"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.not_your_living_character
+        ):
             claim_seat(self.battle.pk, self.seat.pk, self.player, character_id=dead.pk)
 
     def test_deleted_character_cannot_claim_a_seat(self):
@@ -271,7 +278,10 @@ class DraftEntryTest(BaseTestCase):
         add_draft_entry(
             self.draft, self.dm, kind="character", character_id=character.pk
         )
-        with self.assertRaisesMessage(ValueError, "already on the muster"):
+        with self.assertRaisesMessage(
+            ValueError,
+            refusal_words().services.already_on_muster.format(name="Morwen"),
+        ):
             add_draft_entry(
                 self.draft, self.dm, kind="character", character_id=character.pk
             )
@@ -279,7 +289,9 @@ class DraftEntryTest(BaseTestCase):
     def test_a_full_muster_refuses_more(self):
         for _slot in range(MAX_COMBATANTS):
             add_draft_entry(self.draft, self.dm, kind="open_seat")
-        with self.assertRaisesMessage(ValueError, "full"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.muster_full.format(most=MAX_COMBATANTS)
+        ):
             add_draft_entry(self.draft, self.dm, kind="open_seat")
 
     def test_remove_strikes_by_position(self):
@@ -336,7 +348,9 @@ class DraftCompileTest(BaseTestCase):
         draft = BattleDraft.objects.create(created_by=self.dm, name="  ")
         add_draft_entry(draft, self.dm, kind="fighter", archetype="archer")
         add_draft_entry(draft, self.dm, kind="fighter", archetype="wizard")
-        with self.assertRaisesMessage(ValueError, "needs a name"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.battle_needs_name
+        ):
             start_draft(draft)
         self.assertTrue(BattleDraft.objects.filter(pk=draft.pk).exists())
 

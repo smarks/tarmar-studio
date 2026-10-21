@@ -31,6 +31,7 @@ from battle.checks import (
 from battle.magic_rules import MagicRulesError
 from battle.models import Battle
 from battle.persistence import TARMAR_PROFILE, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
     _match_candidate,
     names_option,
@@ -532,7 +533,9 @@ class RecordPushedChoiceTest(BaseTestCase):
         most_offered = max(
             candidate.get("push_mana") or 0 for candidate in self.pending["candidates"]
         )
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             self.record(most_offered + 1)
 
     def test_the_endpoint_reads_push_mana(self) -> None:
@@ -634,7 +637,9 @@ class RecordBorrowedChoiceTest(BaseTestCase):
     def test_the_same_cast_without_borrowing_is_not_on_the_menu(self) -> None:
         # The caster cannot afford the plain cast: only the borrowing copy is
         # offered, and a choice that leaves borrow off is refused.
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             self.record(self.offered, borrow=False)
 
     def test_a_borrowing_the_menu_did_not_offer_is_refused(self) -> None:
@@ -643,7 +648,9 @@ class RecordBorrowedChoiceTest(BaseTestCase):
             for candidate in self.pending["candidates"]
             if not candidate.get("spell_key")
         )
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             self.record(not_a_cast, borrow=True)
 
     def test_the_endpoint_reads_borrow(self) -> None:
@@ -658,7 +665,9 @@ class RecordBorrowedChoiceTest(BaseTestCase):
         }
         response = self.post_json(url, {**body, "borrow": "yes"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "borrow is true or false")
+        self.assertEqual(
+            response.json()["error"], refusal_words().views.borrow_true_or_false
+        )
         response = self.post_json(url, body)
         self.assertEqual(response.status_code, 400)
         response = self.post_json(url, {**body, "borrow": True})

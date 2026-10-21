@@ -16,8 +16,6 @@ from django.utils import timezone
 from common.test_helpers import BaseTestCase
 
 from .hand_records import (
-    GAME_MASTER_ONLY,
-    RECAP_WHILE_TURN_RUNNING,
     HandEditError,
     add_ruling,
     correct_recap,
@@ -37,7 +35,8 @@ from .models import (
     StoryThread,
     TableRuling,
 )
-from .testing import run_actions
+from .refusal_words import refusal_words
+from .testing import run_actions, with_fixed_gm_refusals
 from .transcript import render_transcript_text, transcript_payload
 from .turn_engine.state import ruling_lines
 
@@ -104,7 +103,9 @@ class HandRecordsTest(BaseTestCase):
 
         self.assertFalse(TableRuling.objects.get(pk=ruling_id).active)
         self.assertEqual(ruling_lines(self.session), [])
-        with self.assertRaisesMessage(HandEditError, "no such ruling"):
+        with self.assertRaisesMessage(
+            HandEditError, refusal_words().hand_records.no_such_ruling
+        ):
             retire_ruling(self.session, self.game_master, ruling_id)
 
     def test_a_ruling_is_held_to_the_limits_a_plan_is(self):
@@ -112,7 +113,9 @@ class HandRecordsTest(BaseTestCase):
             HandEditError, "The topic must be 60 characters or fewer"
         ):
             add_ruling(self.session, self.game_master, "x" * 61, "rule")
-        with self.assertRaisesMessage(HandEditError, "The rule is needed"):
+        with self.assertRaisesMessage(
+            HandEditError, refusal_words().hand_records.needed.format(label="The rule")
+        ):
             add_ruling(self.session, self.game_master, "crits", "   ")
         self.assertFalse(GMRecordEdit.objects.exists())
 
@@ -153,7 +156,12 @@ class HandRecordsTest(BaseTestCase):
 
     def test_a_name_is_one_row(self):
         run_actions(self.session, {"action": "record_object", "name": "Iron box"})
-        with self.assertRaisesMessage(HandEditError, "already recorded"):
+        with self.assertRaisesMessage(
+            HandEditError,
+            refusal_words().hand_records.entity_already_recorded.format(
+                name="iron BOX"
+            ),
+        ):
             save_entity(
                 self.session, self.game_master, SceneEntity.THING, {"name": "iron BOX"}
             )
@@ -163,7 +171,9 @@ class HandRecordsTest(BaseTestCase):
         stranger = SceneEntity.objects.create(
             session=other, kind=SceneEntity.PERSON, name="Vane"
         )
-        with self.assertRaisesMessage(HandEditError, "no such person or thing"):
+        with self.assertRaisesMessage(
+            HandEditError, refusal_words().hand_records.no_such_entity
+        ):
             remove_entity(self.session, self.game_master, stranger.pk)
 
     # -- threads -------------------------------------------------------------
@@ -180,7 +190,12 @@ class HandRecordsTest(BaseTestCase):
         self.assertTrue(thread.resolved)
         self.assertEqual(thread.resolution, "Brannoc had it")
         self.assertEqual(edit_thread_done.edit.change, GMRecordEdit.RESOLVED)
-        with self.assertRaisesMessage(HandEditError, "already resolved"):
+        with self.assertRaisesMessage(
+            HandEditError,
+            refusal_words().hand_records.thread_already_resolved.format(
+                thread=thread_id
+            ),
+        ):
             resolve_thread(self.session, self.game_master, thread_id, "")
 
         reopen_thread(self.session, self.game_master, thread_id)
@@ -231,7 +246,9 @@ class HandRecordsTest(BaseTestCase):
             started_at=timezone.now(),
         )
 
-        with self.assertRaisesMessage(HandEditError, RECAP_WHILE_TURN_RUNNING):
+        with self.assertRaisesMessage(
+            HandEditError, refusal_words().hand_records.recap_while_turn_running
+        ):
             correct_recap(self.session, self.game_master, "Mine.")
 
         self.session.refresh_from_db()
@@ -245,7 +262,9 @@ class HandRecordsTest(BaseTestCase):
         self.assertEqual(self.session.summary, "Mine.")
 
     def test_there_is_no_recap_to_correct_before_a_fold(self):
-        with self.assertRaisesMessage(HandEditError, "not been folded"):
+        with self.assertRaisesMessage(
+            HandEditError, refusal_words().hand_records.not_folded_yet
+        ):
             correct_recap(self.session, self.game_master, "anything")
 
     # -- who may -------------------------------------------------------------
@@ -264,7 +283,9 @@ class HandRecordsTest(BaseTestCase):
         for index, attempt in enumerate(attempts):
             with (
                 self.subTest(attempt=index),
-                self.assertRaisesMessage(HandEditError, GAME_MASTER_ONLY),
+                self.assertRaisesMessage(
+                    HandEditError, refusal_words().hand_records.game_master_only
+                ),
             ):
                 attempt()
         self.assertFalse(GMRecordEdit.objects.exists())
@@ -307,13 +328,16 @@ class HandRecordEndpointsTest(BaseTestCase):
                 self.assertIn("Set by hand by endpoint-gm", response.json()["set_by"])
         self.assertEqual(GMRecordEdit.objects.filter(session=self.session).count(), 3)
 
+    @with_fixed_gm_refusals
     def test_a_refusal_says_why(self):
         response = self.post("gm:rulings", {"change": "retire", "ruling_id": 999})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("no such ruling", response.json()["error"])
+        self.assertIn(
+            refusal_words().hand_records.no_such_ruling, response.json()["error"]
+        )
         unknown = self.post("gm:threads", {"change": "burn"})
         self.assertEqual(unknown.status_code, 400)
-        self.assertIn("change must be one of", unknown.json()["error"])
+        self.assertIn("views_records.change_one_of", unknown.json()["error"])
         junk = self.post("gm:entities", {"change": "remove", "entity_id": [1]})
         self.assertEqual(junk.status_code, 400)
 
@@ -352,7 +376,10 @@ class HandRecordEndpointsTest(BaseTestCase):
             with self.subTest(endpoint=name, change=body["change"]):
                 response = self.post(name, body, session)
                 self.assertEqual(response.status_code, 403)
-                self.assertEqual(response.json()["error"], GAME_MASTER_ONLY)
+                self.assertEqual(
+                    response.json()["error"],
+                    refusal_words().hand_records.game_master_only,
+                )
 
         self.assertFalse(GMRecordEdit.objects.exists())
         ruling.refresh_from_db()
@@ -386,7 +413,9 @@ class HandRecordEndpointsTest(BaseTestCase):
 
         response = self.post("gm:threads", {"change": "open", "text": "x"}, session)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["error"], GAME_MASTER_ONLY)
+        self.assertEqual(
+            response.json()["error"], refusal_words().hand_records.game_master_only
+        )
 
         panel = self.client.get(reverse("gm:campaign_panel", args=[session.pk]))
         self.assertContains(panel, "a debt owed")

@@ -7,10 +7,12 @@ from unittest import mock
 
 from django.test import override_settings
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle.adaptation import NO_MODELLED_ATTACK_NOTE
 from battle.models import Battle, BattleDraft
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE
+from battle.refusal_words import refusal_words
 from battle.services import create_battle
 from common.test_helpers import BaseTestCase, create_character
 
@@ -255,7 +257,9 @@ class SetupRosterEndpointsTest(BaseTestCase):
     def test_bad_entry_renders_the_reason_in_place(self):
         response = self.add(kind="fighter", archetype="dragon rider")
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "Unknown archetype", status_code=400)
+        self.assertContains(
+            response, refusal_words().services.unknown_archetype, status_code=400
+        )
 
     def test_non_numeric_character_id_is_refused(self):
         response = self.add(kind="character", character_id="Morwen")
@@ -333,7 +337,11 @@ class SetupStartTest(BaseTestCase):
         self.add(kind="fighter", archetype="wizard")
         response = self.start(name="   ")
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "needs a name", status_code=400)
+        self.assertContains(
+            response,
+            escape(refusal_words().services.battle_needs_name),
+            status_code=400,
+        )
         self.assertTrue(BattleDraft.objects.filter(pk=self.draft.pk).exists())
 
     def test_a_too_small_muster_is_refused(self):
@@ -351,7 +359,7 @@ class SetupStartTest(BaseTestCase):
         response = self.start(name="Ghost Pit")
         self.assertEqual(response.status_code, 400)
         self.assertContains(
-            response, "No catalog beast matches that request", status_code=400
+            response, refusal_words().services.no_such_beast, status_code=400
         )
         self.assertTrue(BattleDraft.objects.filter(pk=self.draft.pk).exists())
 
@@ -583,10 +591,8 @@ class StaleAutosaveTest(BaseTestCase):
         )
 
     def assert_refused_as_gone(self, response):
-        from battle.views import DRAFT_GONE_MESSAGE
-
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json(), {"error": DRAFT_GONE_MESSAGE})
+        self.assertEqual(response.json(), {"error": refusal_words().views.draft_gone})
 
     def test_an_autosave_after_the_draft_is_gone_is_a_json_404(self):
         self.draft.delete()

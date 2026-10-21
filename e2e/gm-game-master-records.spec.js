@@ -10,6 +10,7 @@
  * the chip the page shows and the record the Characters pane reads.
  */
 
+const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_ADMIN, TEST_USER } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 const { loadedSkillRules } = require('./skill-rules');
@@ -160,7 +161,9 @@ print('RECORD', c.total_xp, format_purse(c), c.is_alive, c.death_cause)
         await send(page, `Award 500 xp to ${name}`);
         const refused = page.locator('.chat-messages .dice-roll').last();
         await expect(refused).toContainText('Not done: awarding XP');
-        await expect(refused).toContainText('only the Game Master marks a death, awards XP');
+        await expect(refused).toContainText(
+            refusal('gm', 'policy', 'game_master_records')
+        );
 
         const record = readDjangoShell(`
 from characters.models import Character

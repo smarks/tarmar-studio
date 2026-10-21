@@ -6,6 +6,7 @@ import time
 from django.test import SimpleTestCase
 
 from .engine import MODE_AIDE, MODE_PLAY
+from .refusal_words import refusal_words
 from .turn_engine.messages import (
     NOTHING_RAN,
     PLAN_ONLY,
@@ -26,9 +27,6 @@ from .turn_engine.plan import (
 from .turn_engine.policy import (
     AIDE_MANNER,
     AIDE_PLANNING_GUIDANCE,
-    AIDE_UNASKED_ROLL_REFUSAL,
-    GAME_MASTER_ONLY_REFUSAL,
-    PLAYER_STATED_SCORES_REFUSAL,
     TurnPolicy,
     _check_words,
 )
@@ -205,7 +203,10 @@ class ReadPlanTest(SimpleTestCase):
     def test_an_unknown_id_is_refused_not_an_error(self):
         reading = self.read(plan({"action": "roll_fatigue", "character_id": 7}))
         self.assertTrue(reading.ok)
-        self.assertIn("no character with id 7", reading.actions[0].refusal)
+        self.assertIn(
+            refusal_words().executor.no_such_character.format(id=7),
+            reading.actions[0].refusal,
+        )
 
     def test_a_players_stated_scores_are_refused(self):
         reading = self.read(
@@ -219,7 +220,9 @@ class ReadPlanTest(SimpleTestCase):
             policy=PLAYER,
         )
         self.assertTrue(reading.ok)
-        self.assertEqual(reading.actions[0].refusal, PLAYER_STATED_SCORES_REFUSAL)
+        self.assertEqual(
+            reading.actions[0].refusal, refusal_words().policy.player_stated_scores
+        )
 
     def test_a_players_rolled_attributes_are_not_refused(self):
         reading = self.read(
@@ -235,7 +238,10 @@ class ReadPlanTest(SimpleTestCase):
                     plan({"action": action, "character_id": 41}), policy=PLAYER
                 )
                 master = self.read(plan({"action": action, "character_id": 41}))
-                self.assertEqual(player.actions[0].refusal, GAME_MASTER_ONLY_REFUSAL)
+                self.assertEqual(
+                    player.actions[0].refusal,
+                    refusal_words().policy.game_master_only,
+                )
                 self.assertFalse(master.actions[0].refused)
 
     def test_every_action_reads(self):
@@ -610,7 +616,8 @@ class TurnPolicyTest(SimpleTestCase):
                         MODE_AIDE, is_game_master=authority, latest=latest
                     )
                     self.assertEqual(
-                        policy.refusal_for("roll"), AIDE_UNASKED_ROLL_REFUSAL
+                        policy.refusal_for("roll"),
+                        refusal_words().policy.aide_unasked_roll,
                     )
                     self.assertEqual(policy.refusal_for("roll_attributes"), "")
         for latest in (
@@ -651,7 +658,10 @@ class TurnPolicyTest(SimpleTestCase):
                 policy = TurnPolicy.for_turn(
                     MODE_AIDE, is_game_master=True, latest=latest
                 )
-                self.assertEqual(policy.refusal_for("roll"), AIDE_UNASKED_ROLL_REFUSAL)
+                self.assertEqual(
+                    policy.refusal_for("roll"),
+                    refusal_words().policy.aide_unasked_roll,
+                )
 
     def test_an_aide_turn_rolls_no_check_or_save_nobody_asked_for(self):
         """#906: skill_check and survival_save escaped the unasked-roll rule."""
@@ -663,7 +673,8 @@ class TurnPolicyTest(SimpleTestCase):
             for action in ("roll", "skill_check", "survival_save"):
                 with self.subTest(action=action, is_game_master=authority):
                     self.assertEqual(
-                        policy.refusal_for(action), AIDE_UNASKED_ROLL_REFUSAL
+                        policy.refusal_for(action),
+                        refusal_words().policy.aide_unasked_roll,
                     )
         for latest, action in (
             ("Check Gorn's stealth against 12", "skill_check"),
@@ -690,7 +701,8 @@ class TurnPolicyTest(SimpleTestCase):
                 )
                 for action in ("roll", "skill_check", "survival_save"):
                     self.assertEqual(
-                        policy.refusal_for(action), AIDE_UNASKED_ROLL_REFUSAL
+                        policy.refusal_for(action),
+                        refusal_words().policy.aide_unasked_roll,
                     )
         for latest, action in (
             ("A skill check for Gorn", "skill_check"),
@@ -707,9 +719,12 @@ class TurnPolicyTest(SimpleTestCase):
         checked = TurnPolicy.for_turn(
             MODE_AIDE, is_game_master=True, latest="check his stealth against 12"
         )
-        self.assertEqual(checked.refusal_for("roll"), AIDE_UNASKED_ROLL_REFUSAL)
         self.assertEqual(
-            checked.refusal_for("survival_save"), AIDE_UNASKED_ROLL_REFUSAL
+            checked.refusal_for("roll"), refusal_words().policy.aide_unasked_roll
+        )
+        self.assertEqual(
+            checked.refusal_for("survival_save"),
+            refusal_words().policy.aide_unasked_roll,
         )
         # A play turn is not gated.
         playing = TurnPolicy.for_turn(MODE_PLAY, is_game_master=True, latest=unasked)
@@ -730,7 +745,7 @@ class TurnPolicyTest(SimpleTestCase):
         )
         self.assertTrue(reading.ok)
         (action,) = reading.actions
-        self.assertEqual(action.refusal, AIDE_UNASKED_ROLL_REFUSAL)
+        self.assertEqual(action.refusal, refusal_words().policy.aide_unasked_roll)
 
 
 class NamingACharacterThePlanStartedTest(SimpleTestCase):

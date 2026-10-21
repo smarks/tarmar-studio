@@ -14,6 +14,7 @@ from django.urls import reverse
 from common.test_helpers import BaseTestCase
 
 from .models import PLACEHOLDER_SESSION_NAME, GMSession, name_from_history
+from .refusal_words import refusal_words
 from .testing import gm_replies
 from .views import (
     SESSION_MENU_OPTION_TEMPLATE,
@@ -289,7 +290,9 @@ class SessionRenameTest(BaseTestCase):
     def test_an_empty_name_is_refused_rather_than_ignored(self):
         response = self.post({"session_id": self.session.pk, "name": "   "})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("needs a name", response.json()["error"])
+        self.assertIn(
+            refusal_words().views.session_needs_name, response.json()["error"]
+        )
         self.session.refresh_from_db()
         self.assertEqual(self.session.name, "The Salt Road")
 

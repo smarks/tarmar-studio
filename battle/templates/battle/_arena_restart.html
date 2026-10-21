@@ -12,7 +12,7 @@ transient).
             class="battle-button battle-button-outline battle-restart-start"
             data-url="{% url 'battle:restart' battle.pk %}"
             {% if not can_restart %}disabled
-            title="This battle has no starting snapshot to restart from"{% else %}
+            title="{{ no_starting_snapshot }}"{% else %}
             title="Replay from turn 0 with the same roster and seed"{% endif %}>
         Restart
     </button>

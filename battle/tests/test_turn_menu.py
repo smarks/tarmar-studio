@@ -29,6 +29,7 @@ from battle.magic_rules import magic_rules
 from battle.models import Battle, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
 from battle.policy import Candidate, choose_option
+from battle.refusal_words import refusal_words
 from battle.services import (
     _catalog_weapon,
     advance_turn,
@@ -411,7 +412,9 @@ class PlayerAimsThroughTheBattleTest(BaseTestCase):
 
     def test_a_target_off_the_menu_is_refused(self):
         battle = self.pause()
-        with self.assertRaisesMessage(ValueError, "not on the pending menu"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.option_not_on_menu
+        ):
             record_player_action(
                 battle.pk,
                 self.dm,

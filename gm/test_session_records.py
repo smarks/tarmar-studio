@@ -19,6 +19,7 @@ from common.test_helpers import BaseTestCase, create_character
 from . import roster
 from .fight import FightError, start_fight
 from .models import GMSession, SessionCharacter
+from .refusal_words import refusal_words
 from .testing import add_character, gm_replies, recorded, run_actions
 from .turn_engine.state import roster_lines
 
@@ -231,7 +232,9 @@ class IncompleteCharactersDoNotFightTest(BaseTestCase):
         session = GMSession.objects.create(user=self.create_user(), name="s")
         add_character(session, recorded("Twain"))
 
-        with self.assertRaisesMessage(FightError, "Attach a living character"):
+        with self.assertRaisesMessage(
+            FightError, refusal_words().fight.attach_living_character
+        ):
             start_fight(session, foes_text="two wolves")
 
 

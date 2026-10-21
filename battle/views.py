@@ -96,13 +96,13 @@ from .persistence import (
     storable_profile,
 )
 from .pickers import SETUP_PICKER_KINDS, claim_picker, setup_picker
+from .refusal_words import refusal_words
 from .refusals import BattleRefusal
 from .services import (
     BARE_HANDED_KEY,
     MAX_COMBATANTS,
     MAX_TEAM_NAME,
     MIN_COMBATANTS,
-    STALE_POOLS_REFUSAL,
     StalePools,
     add_draft_entry,
     add_draft_team,
@@ -144,29 +144,6 @@ MAX_SEED = SEED_RANGE
 #: and so does :func:`_detail_with_error`, which re-renders the page under a
 #: refused post (#339, item 2).
 BATTLE_DETAIL_TEMPLATE = "battle/battle_detail.html"
-
-#: What the control endpoints tell a viewer who may read a battle but not run
-#: it. One sentence, in one place: eleven endpoints answer with it and they
-#: must not describe the same rule five different ways.
-CONTROL_DENIED_MESSAGE = "Only this battle's DM or the person who made it can do that"
-
-#: Why a player may not command the foes of their own session's fight (#762).
-FOES_BELONG_TO_GAME_MASTER = (
-    "This fight came from a Games Master session: its foes belong to the Game "
-    "Master, so only a Game Master can restart it or change who decides"
-)
-
-#: What a battle endpoint's script caller is told when the request fails for
-#: a reason that is not a rule refusing it: the advance's every exception
-#: (issue #13), and any other endpoint's ``ValueError`` that is not a
-#: :class:`~battle.refusals.BattleRefusal` (issue #39). The exception's own
-#: text can carry file paths, SQL, rules profiles or combatant ids, and players
-#: run battles too, so it goes to the log with its traceback and the page gets
-#: this sentence.
-BATTLE_REQUEST_FAILED_MESSAGE = (
-    "That could not be done because of an error on the server. It has been "
-    "logged; reload the page and try again."
-)
 
 #: The spellings a checkbox or a form-posted flag arrives as. A browser sends
 #: "on" for a checked box, script tends to send "1" or "true", and all three
@@ -215,7 +192,7 @@ def _control_denied(actor: Actor, battle: Battle) -> JsonResponse | None:
     """
     if can_control(actor, battle):
         return None
-    return _json_error(CONTROL_DENIED_MESSAGE, status=403)
+    return _json_error(refusal_words().views.control_denied, status=403)
 
 
 def _wants_json(request) -> bool:
@@ -242,7 +219,7 @@ def _internal_errors_logged(
     A battle view catches :class:`~battle.refusals.BattleRefusal` around its
     service call and shows the player those words. Any other ``ValueError``
     is an internal check failing, and its text is not the player's to read.
-    A script caller gets :data:`BATTLE_REQUEST_FAILED_MESSAGE` as JSON, with
+    A script caller gets ``refusal_words().views.request_failed`` as JSON, with
     the error logged here with its traceback, as the advance answers (#13).
     A form post gets the error raised on, so Django logs it once with its
     traceback and renders the site's own error page.
@@ -264,38 +241,11 @@ def _internal_errors_logged(
                 if not (json_only or _wants_json(request)):
                     raise
                 logger.exception("Battle endpoint %s failed", request.path)
-                return _json_error(BATTLE_REQUEST_FAILED_MESSAGE, status=500)
+                return _json_error(refusal_words().views.request_failed, status=500)
 
         return guarded
 
     return decorate
-
-
-#: What a guest is told, at the control the limit applies to. Each is a
-#: plain sentence naming the limit and the way past it; the templates render
-#: them beside a disabled control, and they stay on the page (house rule:
-#: nothing transient). One table so the same words appear wherever a given
-#: limit bites.
-GUEST_NOTES = {
-    "saved_characters": (
-        "Signed-in players can seat their saved characters here. As a guest "
-        "you fight with generated fighters and catalog beasts."
-    ),
-    "claim_character": (
-        "Signed-in players can bring one of their own characters to a seat. "
-        "As a guest, generate a fighter below — it fights exactly the same, "
-        "it just is not kept afterwards."
-    ),
-    "parties": (
-        "Parties are saved teams, and saving needs an account. Teams you "
-        "name on this muster still work — they last as long as the battle."
-    ),
-    "keep": (
-        "Nothing here is saved to an account: the fighters this battle "
-        "rolls exist only inside it. Sign in before you start and the "
-        "battle is kept under your name."
-    ),
-}
 
 
 class BattleListView(
@@ -422,7 +372,7 @@ class BattleListView(
         # its own. Everyone gets both now, guests included (#305).
         context["drafts"] = own_drafts(actor)
         context["is_guest"] = actor.is_guest
-        context["guest_keep_note"] = GUEST_NOTES["keep"]
+        context["guest_keep_note"] = refusal_words().guest_notes.keep
         # Why the New battle button is disabled, when it is. Rendered from
         # the same sentence the create endpoint refuses on, so the page
         # cannot promise something the server will decline.
@@ -465,18 +415,20 @@ def _clean_draft_seed(value) -> int | None:
     try:
         seed = parse_seed(value or "")
     except InvalidSeed:
-        raise BattleRefusal("Seed must be a whole number") from None
+        raise BattleRefusal(refusal_words().views.seed_not_whole_number) from None
     if seed is None:
         return None
     if not 0 <= seed < MAX_SEED:
-        raise BattleRefusal(f"Seed must be between 0 and {MAX_SEED - 1}")
+        raise BattleRefusal(
+            refusal_words().views.seed_out_of_range.format(highest=MAX_SEED - 1)
+        )
     return seed
 
 
 def _clean_draft_profile(value) -> str:
     profile = str(value or TARMAR_PROFILE).strip()
     if profile not in dict(PROFILE_CHOICES):
-        raise BattleRefusal("Unknown rules profile")
+        raise BattleRefusal(refusal_words().views.unknown_rules_profile)
     return profile
 
 
@@ -713,7 +665,7 @@ def _setup_context(
         "is_guest": actor.is_guest,
         # The "This battle counts" choice is a Game Master's (#750, #751).
         "is_dm": actor.is_dm,
-        "guest_notes": GUEST_NOTES,
+        "guest_notes": refusal_words().guest_notes,
         "notice": notice,
         "muster_total": total,
         "min_combatants": MIN_COMBATANTS,
@@ -817,12 +769,6 @@ def battle_setup_picker(request, pk, kind: str) -> HttpResponse:
     )
 
 
-#: What a stale autosave hears once its draft is gone (#465). Starting a draft
-#: deletes it, and so does discarding one, so a blur autosave sent just before
-#: either arrives to find nothing. The setup page's autosave shows this text.
-DRAFT_GONE_MESSAGE = "This battle has already started, or its setup was discarded"
-
-
 def _draft_gone_is_404(view):
     """Answer 404 when the draft goes while the request is under way (#832).
 
@@ -838,7 +784,7 @@ def _draft_gone_is_404(view):
         try:
             return view(request, pk)
         except (BattleDraft.DoesNotExist, BattleDraft.NotUpdated):
-            raise Http404(DRAFT_GONE_MESSAGE) from None
+            raise Http404(refusal_words().views.draft_gone) from None
 
     return guarded
 
@@ -855,20 +801,20 @@ def battle_setup_update(request, pk):
     try:
         draft = _own_draft_or_404(request, pk)
     except Http404:
-        return _json_error(DRAFT_GONE_MESSAGE, status=404)
+        return _json_error(refusal_words().views.draft_gone, status=404)
     data, err = _parse_json_body(request)
     if err:
         return err
     field = data.get("field")
     # A list is unhashable, so ``in`` the dict raised TypeError (#767).
     if not isinstance(field, str) or field not in DRAFT_FIELD_CLEANERS:
-        return _json_error("Unknown setup field")
+        return _json_error(refusal_words().views.unknown_setup_field)
     try:
         _apply_draft_terms(draft, {field: data.get("value")})
     except BattleRefusal as field_error:
         return _json_error(str(field_error))
     except BattleDraft.NotUpdated:
-        return _json_error(DRAFT_GONE_MESSAGE, status=404)
+        return _json_error(refusal_words().views.draft_gone, status=404)
     return JsonResponse({"success": True, "value": getattr(draft, field)})
 
 
@@ -887,7 +833,9 @@ def battle_setup_add(request, pk):
             return render(
                 request,
                 SETUP_TEMPLATE,
-                _setup_context(request, draft, "A numeric character_id is required"),
+                _setup_context(
+                    request, draft, refusal_words().views.numeric_character_id
+                ),
                 status=400,
             )
     actor = actor_of(request)
@@ -895,7 +843,9 @@ def battle_setup_add(request, pk):
         return render(
             request,
             SETUP_TEMPLATE,
-            _setup_context(request, draft, GUEST_NOTES["saved_characters"]),
+            _setup_context(
+                request, draft, refusal_words().guest_notes.saved_characters
+            ),
             status=403,
         )
     try:
@@ -932,7 +882,7 @@ def battle_setup_remove(request, pk):
         return render(
             request,
             SETUP_TEMPLATE,
-            _setup_context(request, draft, "A numeric entry index is required"),
+            _setup_context(request, draft, refusal_words().views.numeric_entry_index),
             status=400,
         )
     try:
@@ -963,7 +913,7 @@ def battle_setup_import_party(request, pk):
         return render(
             request,
             SETUP_TEMPLATE,
-            _setup_context(request, draft, GUEST_NOTES["parties"]),
+            _setup_context(request, draft, refusal_words().guest_notes.parties),
             status=403,
         )
     try:
@@ -972,7 +922,7 @@ def battle_setup_import_party(request, pk):
         return render(
             request,
             SETUP_TEMPLATE,
-            _setup_context(request, draft, "A numeric party_id is required"),
+            _setup_context(request, draft, refusal_words().views.numeric_party_id),
             status=400,
         )
     try:
@@ -1055,7 +1005,7 @@ def battle_setup_entry_team(request, pk):
         return render(
             request,
             SETUP_TEMPLATE,
-            _setup_context(request, draft, "A numeric entry index is required"),
+            _setup_context(request, draft, refusal_words().views.numeric_entry_index),
             status=400,
         )
     try:
@@ -1111,7 +1061,7 @@ def battle_setup_start(request, pk):
         return render(
             request,
             SETUP_TEMPLATE,
-            _setup_context(request, draft, "No catalog beast matches that request"),
+            _setup_context(request, draft, refusal_words().services.no_such_beast),
             status=400,
         )
     return redirect("battle:detail", pk=battle.pk)
@@ -1351,7 +1301,9 @@ def advance_control(battle, actor: Actor) -> dict | None:
             "label": "Pools changed on the records",
             "enabled": False,
             "waiting_on": "",
-            "stale": STALE_POOLS_REFUSAL.format(names=", ".join(moved)),
+            "stale": refusal_words().services.stale_pools.format(
+                names=", ".join(moved)
+            ),
             "resnapshot_url": (
                 reverse("battle:resnapshot", args=[battle.pk]) if actor.is_dm else ""
             ),
@@ -1546,6 +1498,8 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
         ),
         # Battles predating the turn-0 snapshot cannot be rewound (#188).
         "can_restart": bool(battle.initial_state_json),
+        # The disabled Restart button says why, in the refusal's own words.
+        "no_starting_snapshot": refusal_words().services.no_starting_snapshot,
         # Restart and the control desk command the side nobody sits in: in a
         # Games Master session's fight, a Game Master only (#762). Whether a
         # fight that has marked a record may be restarted is the endpoint's
@@ -1736,7 +1690,7 @@ class BattleDetailView(
         context["combatants"] = battle.combatants.select_related("character", "beast")
         context["is_dm"] = actor.is_dm
         context["is_guest"] = actor.is_guest
-        context["guest_notes"] = GUEST_NOTES
+        context["guest_notes"] = refusal_words().guest_notes
         # The control desk (#308): the battle's default, and how many
         # combatants are ignoring it. Both are read off stored state, so
         # the panel says the same thing on a reload as it did before one.
@@ -1891,7 +1845,7 @@ def battle_advance(request, pk):
         return _json_error(str(refusal))
     except Exception:  # noqa: BLE001 — logged with its traceback, never shown
         logger.exception("Advancing battle %s failed", pk)
-        return _json_error(BATTLE_REQUEST_FAILED_MESSAGE, status=500)
+        return _json_error(refusal_words().views.request_failed, status=500)
     return JsonResponse(battle_payload(battle, actor, events, request))
 
 
@@ -1908,9 +1862,16 @@ def battle_control(request, pk):
     """
     actor, battle = _actor_and_readable_battle(request, pk)
     if not can_control(actor, battle):
-        return _refuse(request, battle, CONTROL_DENIED_MESSAGE, status=403)
+        return _refuse(
+            request, battle, refusal_words().views.control_denied, status=403
+        )
     if not commands_foes(actor, battle):
-        return _refuse(request, battle, FOES_BELONG_TO_GAME_MASTER, status=403)
+        return _refuse(
+            request,
+            battle,
+            refusal_words().views.foes_belong_to_game_master,
+            status=403,
+        )
     data, err = (
         _parse_json_body(request) if _wants_json(request) else (request.POST, None)
     )
@@ -2034,18 +1995,22 @@ def combatant_control(request, pk, combatant_id):
     actor, battle = _actor_and_readable_battle(request, pk)
     combatant = battle.combatants.filter(pk=combatant_id).first()
     if combatant is None:
-        return _json_error("No such combatant in this battle", status=404)
+        return _json_error(refusal_words().services.no_such_combatant, status=404)
     # Whoever runs the battle sets any combatant's mode; a seated player
     # sets their own, which is what "hand my fighter to the AI" needs. In a
     # Games Master session's fight the foes are the Game Master's (#762).
     if not (commands_foes(actor, battle) or actor.holds_seat(combatant)):
         if can_control(actor, battle):
-            return _refuse(request, battle, FOES_BELONG_TO_GAME_MASTER, status=403)
+            return _refuse(
+                request,
+                battle,
+                refusal_words().views.foes_belong_to_game_master,
+                status=403,
+            )
         return _refuse(
             request,
             battle,
-            "Only this battle's DM, the person who made it, or the "
-            "combatant's own player can do that",
+            refusal_words().views.combatant_control_denied,
             status=403,
         )
     data, err = (
@@ -2128,7 +2093,7 @@ def battle_restart(request, pk):
     if denied is not None:
         return denied
     if not commands_foes(actor, battle):
-        return _json_error(FOES_BELONG_TO_GAME_MASTER, status=403)
+        return _json_error(refusal_words().views.foes_belong_to_game_master, status=403)
     try:
         battle = restart_battle(battle.pk, is_game_master=actor.is_dm)
     except BattleRefusal as restart_error:
@@ -2201,30 +2166,29 @@ def battle_rename(request, pk):
         return err
     combatant_id_raw = data.get("combatant_id")
     if combatant_id_raw is None:
-        return _json_error("A numeric combatant_id is required")
+        return _json_error(refusal_words().views.numeric_combatant_id)
     try:
         combatant_id = whole_number(combatant_id_raw)
     except ValueError:
-        return _json_error("A numeric combatant_id is required")
+        return _json_error(refusal_words().views.numeric_combatant_id)
     if not commands_foes(actor, battle):
         seat = battle.combatants.filter(pk=combatant_id).first()
         if not actor.holds_seat(seat):
-            return _json_error(FOES_BELONG_TO_GAME_MASTER, status=403)
+            return _json_error(
+                refusal_words().views.foes_belong_to_game_master, status=403
+            )
     name = data.get("name") or ""
     # A list has no strip(); it raised AttributeError, a 500 (#767).
     if not isinstance(name, str):
-        return _json_error("A combatant needs a name")
+        return _json_error(refusal_words().views.combatant_needs_name)
     name = name.strip()
     if not name:
-        return _json_error("A combatant needs a name")
+        return _json_error(refusal_words().views.combatant_needs_name)
     refusal = too_long("Name", name, COMBATANT_NAME_MAX_LENGTH)
     if refusal:
         return _json_error(refusal)
     if not COMBATANT_NAME_PATTERN.match(name):
-        return _json_error(
-            "Names may only use letters, numbers, spaces, hyphens, "
-            "periods, apostrophes, and parentheses"
-        )
+        return _json_error(refusal_words().views.name_characters)
     try:
         battle, combatant = rename_combatant(battle.pk, combatant_id, name)
     except BattleRefusal as rename_error:
@@ -2249,7 +2213,7 @@ def battle_start(request, pk):
         return _detail_with_error(
             request,
             battle,
-            "Only this battle's DM or the person who made it can start it",
+            refusal_words().views.start_denied,
             status=403,
         )
     try:
@@ -2276,7 +2240,7 @@ def seat_claim(request, pk, combatant_id):
             character_id = int(character_id_raw)
         except ValueError:
             return _detail_with_error(
-                request, battle, "A numeric character_id is required"
+                request, battle, refusal_words().views.numeric_character_id
             )
     archetype = (request.POST.get("archetype") or "").strip()
     try:
@@ -2401,56 +2365,51 @@ def battle_act(request, pk):
     try:
         combatant_id = whole_number(data["combatant_id"])
     except (KeyError, ValueError):
-        return _json_error(
-            "A numeric combatant_id is required: name the combatant this "
-            "choice was made for"
-        )
+        return _json_error(refusal_words().views.choice_combatant_id)
     try:
         turn = whole_number(data["turn"])
     except (KeyError, ValueError):
-        return _json_error(
-            "A numeric turn is required: name the turn this choice was made on"
-        )
+        return _json_error(refusal_words().views.choice_turn)
     target_id_raw = data.get("target_id")
     target_id = None
     if target_id_raw is not None:
         try:
             target_id = whole_number(target_id_raw)
         except ValueError:
-            return _json_error("A numeric target_id is required")
+            return _json_error(refusal_words().views.numeric_target_id)
     try:
         push_mana = whole_number(data.get("push_mana") or 0)
     except ValueError:
-        return _json_error("A numeric push_mana is required")
+        return _json_error(refusal_words().views.numeric_push_mana)
     borrow = data.get("borrow", False)
     if not isinstance(borrow, bool):
-        return _json_error("borrow is true or false")
+        return _json_error(refusal_words().views.borrow_true_or_false)
     anchor_target_raw = data.get("anchor_target")
     anchor_target = None
     if anchor_target_raw is not None:
         try:
             anchor_target = whole_number(anchor_target_raw)
         except ValueError:
-            return _json_error("A numeric anchor_target is required")
+            return _json_error(refusal_words().views.numeric_anchor_target)
     counter_mana_raw = data.get("counter_mana")
     counter_mana = None
     if counter_mana_raw is not None:
         try:
             counter_mana = whole_number(counter_mana_raw)
         except ValueError:
-            return _json_error("A numeric counter_mana is required")
+            return _json_error(refusal_words().views.numeric_counter_mana)
     destination_raw = data.get("destination")
     destination = None
     if destination_raw is not None:
         if not isinstance(destination_raw, list) or len(destination_raw) != 2:
-            return _json_error("A destination is a hex: [q, r]")
+            return _json_error(refusal_words().views.destination_is_hex)
         try:
             destination = (
                 whole_number(destination_raw[0]),
                 whole_number(destination_raw[1]),
             )
         except ValueError:
-            return _json_error("A destination is a hex: [q, r]")
+            return _json_error(refusal_words().views.destination_is_hex)
     try:
         battle, events = record_player_action(
             battle.pk,
@@ -2488,6 +2447,6 @@ def battle_state(request, pk):
         try:
             after = int(after_raw)
         except ValueError:
-            return _json_error("A numeric after marker is required")
+            return _json_error(refusal_words().views.numeric_after_marker)
         events = list(battle.events.filter(sequence__gt=after))
     return JsonResponse(battle_payload(battle, actor, events, request))

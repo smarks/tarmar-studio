@@ -10,6 +10,7 @@
  * message back instead of swallowing it.
  */
 
+const { refusal } = require('./refusals');
 const {
     test, expect, TEST_USER, TEST_ADMIN, loginAs, submitPassphrase,
     createBattleViaSetup, battleRowOnList, chooseToAttach,
@@ -76,7 +77,9 @@ test.describe('Battles are reachable and manageable (#339)', () => {
             form.submit();
         }, [battleUrl, seatId]);
 
-        await expect(rivalPage.locator('.setup-error')).toContainText('already taken');
+        await expect(rivalPage.locator('.setup-error')).toContainText(
+            refusal('battle', 'services', 'seat_already_taken')
+        );
         await expect(rivalPage.locator('.lobby-seats')).toBeVisible();
         await expect(rivalPage.locator('body')).not.toContainText('{"error"');
 
@@ -224,7 +227,9 @@ test.describe('The GM chat keeps what the player typed (#339)', () => {
         // An empty name is refused, and the field says so where it stands.
         await field.fill('   ');
         await page.locator('#user-input').click();
-        await expect(page.locator('.autosave-error')).toContainText('needs a name');
+        await expect(page.locator('.autosave-error')).toContainText(
+            refusal('gm', 'views', 'session_needs_name')
+        );
         await expect(page.locator('.session-item.active .session-name'))
             .toHaveText('The One-Handed Thief');
 
