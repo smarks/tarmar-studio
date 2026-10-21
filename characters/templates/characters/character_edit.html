@@ -561,6 +561,14 @@ runs.
     <div id="magic" class="stats-section">
         <h2>Magic{% help_for "free_spell_points" %}</h2>
         <p class="mana-pool">Mana: <strong id="mana-current">{{ current_mana }}</strong> of a Pool of <strong id="mana-pool">{{ character.free_spell_points }}</strong></p>
+        {% comment %}The school of magic (issue #18): rolled on the canon's table, chosen
+        from the row the roll lands on. A canon with no table gates no spell by
+        school, and the row is left out.{% endcomment %}
+        {% if magic_schools %}
+        <p class="magic-school" id="magic-school-row">School of magic: <strong id="magic-school">{{ character.magic_school|default:"not chosen" }}</strong>
+            {% if rolled_school_row %}<span class="detail" id="magic-school-roll">(d100 {{ character.magic_school_roll }}: {{ rolled_school_row.label }}, {{ rolled_school_row.schools|join:", " }})</span>{% endif %}
+        </p>
+        {% endif %}
         {% if known_spells %}
         <table class="known-spells" id="known-spells">
             <tr><th>Spell</th><th>School</th><th>Level (mana)</th><th>Roll</th><th>Mastery</th></tr>
@@ -582,6 +590,23 @@ runs.
         kills the character in place hides it from the saved record (issue #903),
         as a reload would.{% endcomment %}
         <div class="magic-controls" id="magic-controls" data-alive-only{% if not character.is_alive %} hidden{% endif %}>
+        {% if sheet_rolls.magic_school.available %}
+        <button type="button" class="button secondary sheet-roll-btn" id="roll-magic-school-btn" data-roll-kind="magic_school" data-roll-url="{% url 'characters:roll' character.pk 'magic_school' %}"{% if sheet_rolls.magic_school.confirm %} data-confirm="{{ sheet_rolls.magic_school.confirm }}"{% endif %}>Roll school of magic (d100)</button>
+        {% endif %}
+        {% if schools_to_choose %}
+        <div class="choose-school" data-mechanics-form="chooseSchoolUrl" data-reload="true">
+            <label>{% if is_game_master %}Set the school (Game Master){% else %}Choose your school from the roll's list{% endif %}
+                <select name="school" id="choose-school-select" aria-label="School of magic">
+                    {% for school in schools_to_choose %}
+                    <option value="{{ school }}">{{ school }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="button" class="button secondary mechanics-submit" id="choose-school-btn">Choose</button>
+            <span class="mechanics-error" role="alert" hidden></span>
+        </div>
+        {% endif %}
+        {% if learnable_spells %}
         {% comment %}A player's control spends a free point: hidden, not left out, at
         none, so a run that earns one shows it (issue #792).{% endcomment %}
         <div class="learn-spell{% if not is_game_master %} needs-free-points{% endif %}" data-mechanics-form="learnSpellUrl" data-reload="true"{% if not is_game_master and character.free_skill_points <= 0 %} hidden{% endif %}>
@@ -595,6 +620,11 @@ runs.
             <button type="button" class="button secondary mechanics-submit" id="learn-spell-btn">Learn / raise</button>
             <span class="mechanics-error" role="alert" hidden></span>
         </div>
+        {% elif magic_schools and not character.magic_school %}
+        <p class="learn-spell-note" id="learn-spell-note">Roll and choose a school of magic to learn its spells.</p>
+        {% else %}
+        <p class="learn-spell-note" id="learn-spell-note">The battle's spells hold none of the {{ character.magic_school }} school yet; a Game Master may teach a spell of another.</p>
+        {% endif %}
         {% if is_game_master %}
         <div class="grant-mana" data-mechanics-form="grantManaUrl" data-reload="true">
             <label>Raise the Mana Pool's maximum (Game Master). Mana a fight spent is restored with the Game Master's pool setting, not here.

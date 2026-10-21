@@ -28,6 +28,7 @@ from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView
 
 from accounts.models import User
+from battle.magic_rules import magic_schools
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from common.audit import audit_logger
 from common.breadcrumbs import BreadcrumbMixin, step, trail
@@ -72,7 +73,14 @@ from ..import_service import (
     save_imported_character,
     validate_import_payload,
 )
-from ..magic import MAX_MANA_GRANT, current_mana, known_spells, learnable_spells
+from ..magic import (
+    MAX_MANA_GRANT,
+    current_mana,
+    known_spells,
+    rolled_school_row,
+    schools_to_choose,
+    spells_open_to,
+)
 from ..models import (
     CHARACTER_FIELDS,
     MAX_COMBAT_LOG_ENTRIES,
@@ -870,7 +878,12 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
         "coin_adjustment": format_coin(character.coin_adjustment),
         "known_spells": known_spells(character),
         "current_mana": current_mana(character),
-        "learnable_spells": learnable_spells(),
+        "learnable_spells": spells_open_to(character, is_game_master=is_game_master),
+        "magic_schools": magic_schools(),
+        "rolled_school_row": rolled_school_row(character),
+        "schools_to_choose": schools_to_choose(
+            character, is_game_master=is_game_master
+        ),
         "mechanics_config": {
             "skillCheckUrl": reverse("characters:skill_check", args=[character.pk]),
             "weaponSkillUrl": reverse(
@@ -879,6 +892,7 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
             "coinUrl": reverse("characters:move_coin", args=[character.pk]),
             "learnSpellUrl": reverse("characters:learn_spell", args=[character.pk]),
             "grantManaUrl": reverse("characters:grant_mana", args=[character.pk]),
+            "chooseSchoolUrl": reverse("characters:choose_school", args=[character.pk]),
         },
     }
 

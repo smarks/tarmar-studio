@@ -9,7 +9,9 @@ answer. The rules live in the modules they call:
 * the skill check — :func:`characters.skill_checks.skill_check` (issue #756);
 * coin — :func:`characters.purse.move_coin_for_reason` (issues #757, #928);
 * spells and mana — :func:`characters.magic.learn_spell` and
-  :func:`characters.magic.grant_mana` (issues #774, #755).
+  :func:`characters.magic.grant_mana` (issues #774, #755);
+* the school of magic chosen after its roll —
+  :func:`characters.magic.choose_school` (issue #18).
 
 Every one is a Game Master override where the rule allows one, decided
 server-side from ``can_manage_users``; nothing the browser sends says who
@@ -30,7 +32,7 @@ from common.decorators import rate_limit
 from common.helpers import _parse_json_body, whole_number
 
 from .. import services
-from ..magic import grant_mana, learn_spell
+from ..magic import choose_school, grant_mana, learn_spell
 from ..models import Character
 from ..purse import (
     MAX_COIN_MOVEMENT,
@@ -198,6 +200,21 @@ def character_learn_spell(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
     return _change(request, pk, "spells", apply)
+
+
+@login_required
+@require_POST
+@rate_limit("choose_school", max_requests=30, window_seconds=60)
+def character_choose_school(request: HttpRequest, pk: int) -> HttpResponse:
+    """Choose the school of magic the school roll opened (issue #18)."""
+    is_game_master = request.user.can_manage_users
+
+    def apply(character: Character, data: dict) -> str:
+        return choose_school(
+            character, _required_text(data, "school"), is_game_master=is_game_master
+        )
+
+    return _change(request, pk, "magic_school", apply)
 
 
 @login_required

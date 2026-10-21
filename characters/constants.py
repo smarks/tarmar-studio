@@ -15,6 +15,11 @@ import re
 # ``character-rules.json``, read by ``characters.rules.character_rules()``
 # (issue #59). None of them is restated here.
 
+# The most characters a school of magic's name may run to: the column a
+# character's school is kept in (``Character.magic_school``), and the bound the
+# canon's ``magic-rules.json`` holds each school's name to (issue #18).
+MAX_MAGIC_SCHOOL_LENGTH = 40
+
 # The "_format" marker on a character export document; the importer (and the
 # GM's /character command, issue #344) accept only documents carrying it.
 CHARACTER_EXPORT_FORMAT = "tarmar-character"

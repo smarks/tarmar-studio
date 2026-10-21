@@ -17,13 +17,20 @@ The rules, from ``reference/content``:
   it; a Game Master may grant mana.
 * ``public-rules/magic/casting-spells.md``: "Spells cost mana equal to the
   spell's level" — the engine's own rule, unchanged here.
+* ``public-rules/magic/schools-of-magic.md`` (issue #18): a caster's school is
+  rolled on the canon's ``schools`` table (``services.apply_school_roll``) and
+  chosen from the row it lands on (:func:`choose_school`); a player learns a
+  new spell only from that school (:func:`school_refusal`), and a Game Master
+  may teach any.
 """
 
 from dataclasses import dataclass
 
 from tarmar_engine.spells import SPELLS, Spell
 
-from .models import CHARACTER_INT_FIELD_MAX, Character
+from battle.magic_rules import SchoolRow, magic_schools
+
+from .models import CHARACTER_INT_FIELD_MAX, Character, magic_school_refusal
 from .services import CharacterChangeError
 from .skills import MAX_SKILL_POINTS, format_skill_level, get_skill_level
 
@@ -71,6 +78,142 @@ class SpellLoadout:
 def learnable_spells() -> list[Spell]:
     """Every spell the battle can cast, by school and level."""
     return sorted(SPELLS.values(), key=lambda spell: (spell.school, spell.level))
+
+
+def school_refusal(character: Character, spell: Spell) -> str | None:
+    """Why a player may not put points into ``spell``, by school (issue #18).
+
+    The canon's reading of schools-of-magic.md and spell-descriptions.md (its
+    ``school_gates_a_new_spell`` ruling): a player learns a spell they do not
+    yet know only from their own school, rolled and chosen first. A spell
+    already on the record, which a Game Master taught or which was learned
+    before schools were rolled, may be raised whatever its school. A canon
+    with no school table gates nothing. A Game Master is never asked this.
+
+    Args:
+        character: The character.
+        spell: A spell of the catalog.
+
+    Returns:
+        The refusal, or ``None`` when the school allows it.
+    """
+    if magic_schools() is None:
+        return None
+    if int((character.spells or {}).get(spell.key, 0) or 0) > 0:
+        return None
+    school = character.magic_school
+    if not school:
+        return (
+            "Roll and choose a school of magic first; a player learns only the "
+            "spells of their school"
+        )
+    if spell.school != school:
+        return (
+            f"{spell.name} is of the {spell.school} school and this character's is "
+            f"{school}; only a Game Master can teach a spell of another school"
+        )
+    return None
+
+
+def spells_open_to(character: Character, *, is_game_master: bool) -> list[Spell]:
+    """The spells this asker may put points into, in catalog order (#18).
+
+    The sheet's learn control lists these; :func:`learn_spell` refuses the
+    rest with :func:`school_refusal`'s reason.
+    """
+    return [
+        spell
+        for spell in learnable_spells()
+        if is_game_master or school_refusal(character, spell) is None
+    ]
+
+
+def rolled_school_row(character: Character) -> SchoolRow | None:
+    """The row of the canon's school table the character's roll landed on.
+
+    ``None`` with no roll, or under a canon with no school table (#18).
+    """
+    table = magic_schools()
+    roll = character.magic_school_roll
+    if table is None or roll is None:
+        return None
+    return table.row_for(roll)
+
+
+def schools_to_choose(character: Character, *, is_game_master: bool) -> tuple[str, ...]:
+    """The schools this asker may make the character's school now (#18).
+
+    A Game Master: any the canon's table names but the one held. A player:
+    the schools the rolled row names, until one is chosen; none before the
+    roll, and none once chosen.
+    """
+    table = magic_schools()
+    if table is None:
+        return ()
+    if is_game_master:
+        return tuple(
+            school for school in table.schools if school != character.magic_school
+        )
+    opened = rolled_school_row(character)
+    if character.magic_school or opened is None:
+        return ()
+    return opened.schools
+
+
+def choose_school(character: Character, school: str, *, is_game_master: bool) -> str:
+    """Make ``school`` the character's school of magic (issue #18).
+
+    The canon's ``school_roll_opens_a_list`` ruling: the school roll lands on
+    a row of the canon's table, and the player chooses one of the schools it
+    names, once. A Game Master may set any school the table names, rolled or
+    not, which the history records as his choice where the roll did not open
+    it.
+
+    Args:
+        character: The character, changed in memory and not saved.
+        school: The school chosen.
+        is_game_master: Whether a Game Master asked.
+
+    Returns:
+        The history line.
+
+    Raises:
+        CharacterChangeError: The canon has no school table, the school is not
+            one it names or is already held; or a player before the roll,
+            after choosing, or naming a school the roll did not open.
+    """
+    if refusal := magic_school_refusal(school):
+        raise CharacterChangeError(refusal)
+    held = character.magic_school
+    if school == held:
+        raise CharacterChangeError(f"The school of magic is already {school}")
+    opened = rolled_school_row(character)
+    if not is_game_master:
+        if opened is None:
+            raise CharacterChangeError(
+                "Roll the school of magic first; the roll opens the list a "
+                "school is chosen from"
+            )
+        if held:
+            raise CharacterChangeError(
+                f"The {held} school is chosen; only a Game Master can change it"
+            )
+        if school not in opened.schools:
+            raise CharacterChangeError(
+                f"The school roll ({character.magic_school_roll}, {opened.label}) opens "
+                f"{', '.join(opened.schools)}; only a Game Master can set another "
+                "school"
+            )
+    character.magic_school = school
+    line = f"school of magic {held or 'unchosen'} → {school}"
+    if opened is None and is_game_master:
+        return f"{line} (Game Master's choice, with no school roll)"
+    if opened is not None and school not in opened.schools:
+        return (
+            f"{line} (Game Master's choice, outside the {opened.label} schools the "
+            "roll opened)"
+        )
+    return line
 
 
 def known_spells(character: Character) -> list[KnownSpell]:
@@ -160,7 +303,9 @@ def learn_spell(
     in a spell grant additional abilities ... 1: Can cast the spell". The
     points come from the character's free skill points, the way a skill's
     do. A Game Master teaching a spell spends none of them (coordinator's
-    ruling on the #774 review, marked for Spencer).
+    ruling on the #774 review, marked for Spencer). A player learns a new
+    spell only from their school of magic (:func:`school_refusal`, issue
+    #18); a Game Master teaching one from another school is recorded as such.
 
     Args:
         character: The character, changed in memory and not saved.
@@ -173,7 +318,7 @@ def learn_spell(
 
     Raises:
         CharacterChangeError: An unknown spell, a bad amount, or a player
-            without the free points.
+            without the free points or learning outside their school.
     """
     spell = SPELLS.get(spell_key)
     if spell is None:
@@ -185,7 +330,14 @@ def learn_spell(
     if held + points > MAX_SKILL_POINTS:
         raise CharacterChangeError(f"A spell holds at most {MAX_SKILL_POINTS} points")
     free = character.free_skill_points
-    if not is_game_master:
+    outside_school = ""
+    if is_game_master:
+        if held == 0 and school_refusal(character, spell) is not None:
+            school = character.magic_school or "unchosen"
+            outside_school = f" (Game Master, outside the caster's school: {school})"
+    else:
+        if refusal := school_refusal(character, spell):
+            raise CharacterChangeError(refusal)
         if points > free:
             raise CharacterChangeError(
                 f"Not enough free skill points: {spell.name} needs {points}, "
@@ -196,7 +348,7 @@ def learn_spell(
     character.spells = spells
     return (
         f"{spell.name}: {held} → {held + points} points, mastery "
-        f"{format_skill_level(held + points)}"
+        f"{format_skill_level(held + points)}{outside_school}"
     )
 
 

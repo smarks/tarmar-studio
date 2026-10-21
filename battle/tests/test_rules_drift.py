@@ -12,9 +12,14 @@ from django.test import SimpleTestCase
 
 from battle.engine import actions, engine, hexes
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
+from battle.magic_rules import load_magic_schools
 from battle.spells import SPELLS
 from reference.markdown_tables import table_rows_under_heading as _table_rows
-from reference.paths import PUBLIC_RULES_DIR
+from reference.paths import (
+    CANON_MAGIC_RULES_FILE_NAME,
+    DEFAULT_CANON_DIR,
+    PUBLIC_RULES_DIR,
+)
 
 RULES = PUBLIC_RULES_DIR
 COMBAT = RULES / "combat"
@@ -340,6 +345,33 @@ class SpellCatalogDriftGuard(SimpleTestCase):
                 level_lines[spell.level],
                 f"{spell.name} is not a level-{spell.level} {spell.school} spell",
             )
+
+    def test_the_default_canon_school_table_is_the_page_lists(self):
+        # Issue #18: schools-of-magic.md heads its lists "Common Schools
+        # (0-70%)" and "Less Common Schools (71-100%)"; the default canon's
+        # school table must give each list its band and its schools, the
+        # Elemental line's flavours left off.
+        markdown = (RULES / "magic" / "schools-of-magic.md").read_text()
+        documented = [
+            (
+                int(match.group(3)),
+                match.group(1),
+                tuple(
+                    re.sub(r"\s*\(.*\)$", "", bullet)
+                    for bullet in re.findall(r"^- (.+)$", match.group(4), re.M)
+                ),
+            )
+            for match in re.finditer(
+                r"^## ([^\n]+) Schools \((\d+)-(\d+)%\)\n(.*?)(?=^## )",
+                markdown,
+                re.MULTILINE | re.DOTALL,
+            )
+        ]
+        table = load_magic_schools(DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME)
+        assert table is not None
+        self.assertEqual(
+            [(row.up_to, row.label, row.schools) for row in table.rows], documented
+        )
 
     def test_mana_cost_equals_spell_level(self):
         # casting-spells.md: "Spells cost mana equal to the spell's level."

@@ -15,6 +15,7 @@ from unittest import mock
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from tarmar_engine.spells import SPELLS
 
 from battle.services import _seated_arms, _shield_bonus
 from character_export.export_utils import generate_character_json
@@ -236,6 +237,9 @@ class PointControlsAndLogsTest(SheetTestCase):
         self.as_player()
         self.character.free_skill_points = 0
         self.character.free_spell_points = 0
+        # A caster of a school the battle has spells for (issue #18): without
+        # one a player has no spell to learn, and a note stands in its place.
+        self.character.magic_school = next(iter(SPELLS.values())).school
         self.character.save()
         page = self.client.get(self.url("edit")).content.decode()
         self.assertIn('<div class="add-skill-control" style="display: none;">', page)

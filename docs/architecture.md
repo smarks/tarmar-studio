@@ -261,7 +261,12 @@ Notes on the edges, each checkable:
 - `battle/magic_rules.py` reads the canon's `magic-rules.json`
   (`reference.paths.MAGIC_RULES_FILE`) into the engine's `MagicRules`: the
   casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell and
-  casting failure numbers. It is the only path that sets them.
+  casting failure numbers. It is the only path that sets them. It also reads
+  the file's `schools` block, which the engine takes nothing from, into a
+  `SchoolTable` (`magic_schools()`): the percentile table a caster's school of
+  magic is rolled on, which `characters.services.apply_school_roll`,
+  `characters.magic` (the choice and the gate on learning a new spell) and the
+  record's validator read (issue #18).
 - `characters/rules.py` reads the canon's `character-rules.json`
   (`reference.paths.CHARACTER_RULES_FILE`) into `CharacterRules`: every number
   character creation uses (the attribute ceiling and point buy, the starting

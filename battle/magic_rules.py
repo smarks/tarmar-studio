@@ -64,8 +64,23 @@ The file is a JSON object::
         "fumble_floor": int, "mana_lost_totals": [int, ...],
         "runaway_total": int | null
       },
+      "schools": null | [
+        {"up_to": int, "label": str, "schools": [str, ...]}
+      ],
       "rulings": [{"key": str, "reading": str, ...}]
     }
+
+``schools`` is the studio's, not the engine's (issue #18): the percentile
+table a caster's school of magic is rolled on, ``schools-of-magic.md``'s
+"Common Schools (0-70%)" and "Less Common Schools (71-100%)". A d100 roll
+takes the first row whose ``up_to`` it does not pass, as every percentile
+table in ``character-rules.json`` does (``characters.rules.PercentileTable``),
+and the caster's school is one of that row's ``schools``: the only one, or
+the one the player chooses among several. Each school is named once in the
+whole table, in at most ``MAX_MAGIC_SCHOOL_LENGTH`` characters, and every
+school the engine's spell catalog files a spell under must be named, or no
+caster could ever learn that spell. ``null`` gates no spell by school: there
+is nothing to roll, and any caster may learn any spell.
 
 Field names are the engine dataclass fields they fill, and every one of them
 is required: a canon states each number rather than inheriting an engine
@@ -78,7 +93,7 @@ is checked for shape and not otherwise read (``reference.rules_file``).
 """
 
 import functools
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -100,8 +115,10 @@ from tarmar_engine.magic import (
 )
 from tarmar_engine.spells import SPELLS
 
+from characters.constants import MAX_MAGIC_SCHOOL_LENGTH
+from characters.rules import PercentileTable, TableRow
 from reference.paths import MAGIC_RULES_FILE
-from reference.rules_file import RulesFileError, RulesFileReader
+from reference.rules_file import RulesFileError, RulesFileReader, repeats_problem
 
 TIER_FIELDS = ("key", "label", "natural_totals", "effect_bonus", "mana_refund")
 BAND_FIELDS = (
@@ -157,6 +174,9 @@ COUNTERSPELL_FIELDS = (
     "defender_max_mana",
 )
 CASTING_FAILURE_FIELDS = ("fumble_floor", "mana_lost_totals", "runaway_total")
+SCHOOL_ROW_FIELDS = ("up_to", "label", "schools")
+#: The block :func:`magic_schools` reads; the engine's ``MagicRules`` has none.
+SCHOOLS_BLOCK = "schools"
 TOP_LEVEL_FIELDS = (
     "casting_success_tiers",
     "push",
@@ -165,7 +185,46 @@ TOP_LEVEL_FIELDS = (
     "runaway",
     "counterspell",
     "casting_failure",
+    SCHOOLS_BLOCK,
 )
+
+
+@dataclass(frozen=True)
+class SchoolRow(TableRow):
+    """One row of the school roll's table (issue #18).
+
+    Attributes:
+        schools: The schools a caster whose roll lands here may hold: one is
+            the caster's outright, several are the player's to choose among.
+    """
+
+    schools: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SchoolTable(PercentileTable[SchoolRow]):
+    """The table a caster's school of magic is rolled on (issue #18).
+
+    Rows rise as every percentile table's do; each names at least one school,
+    and no school is named twice in the whole table.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for row in self.rows:
+            if not row.schools:
+                raise ValueError(f"the {row.label!r} row names no school")
+        if problem := repeats_problem("school", self.schools):
+            raise ValueError(problem)
+
+    @property
+    def schools(self) -> tuple[str, ...]:
+        """Every school the table names, row by row, in order."""
+        return tuple(school for row in self.rows for school in row.schools)
+
+    def row_holding(self, school: str) -> SchoolRow | None:
+        """The row naming ``school``, or ``None`` when no row does."""
+        return next((row for row in self.rows if school in row.schools), None)
 
 
 class MagicRulesError(RulesFileError):
@@ -474,9 +533,55 @@ class _MagicRulesFileReader(RulesFileReader):
                 ),
             )
 
+    def school_row(self, value: Any, field_path: str) -> SchoolRow:
+        """One row of ``schools``."""
+        fields = self.json_object(value, field_path, SCHOOL_ROW_FIELDS)
+        schools_path = f"{field_path}.schools"
+        schools = self.text_list(fields["schools"], schools_path)
+        for index, school in enumerate(schools):
+            if len(school) > MAX_MAGIC_SCHOOL_LENGTH:
+                self.fail(
+                    f"{schools_path}[{index}]",
+                    f"is longer than {MAX_MAGIC_SCHOOL_LENGTH} characters, the "
+                    "most a character's record holds",
+                )
+        return SchoolRow(
+            up_to=self.integer(fields["up_to"], f"{field_path}.up_to"),
+            label=self.text(fields["label"], f"{field_path}.label"),
+            schools=schools,
+        )
+
+    def schools(self, value: Any, field_path: str) -> SchoolTable | None:
+        """``schools``, or ``None`` when the canon gates no spell by school."""
+        if value is None:
+            return None
+        rows = self.entries(value, field_path, self.school_row)
+        with self.wrapped_value_errors(field_path):
+            table = SchoolTable(rows=rows)
+        unnamed = sorted({spell.school for spell in SPELLS.values()} - {*table.schools})
+        if unnamed:
+            self.fail(
+                field_path,
+                f"names no row for the engine spells' schools {unnamed}, so no "
+                "caster could learn their spells",
+            )
+        return table
+
+    def magic_schools(self, value: Any) -> SchoolTable | None:
+        """The whole file, checked as :meth:`magic_rules` checks it, for its
+        ``schools`` block."""
+        self.magic_rules(value)
+        return self.schools(value[SCHOOLS_BLOCK], SCHOOLS_BLOCK)
+
     def magic_rules(self, value: Any) -> MagicRules:
-        """The whole file."""
+        """The whole file.
+
+        ``schools`` is read here too, though the engine takes nothing from it,
+        so a malformed table is refused wherever the file is read (the
+        system check reads it through :func:`magic_rules`).
+        """
         fields = self.file_object(value, TOP_LEVEL_FIELDS)
+        self.schools(fields[SCHOOLS_BLOCK], SCHOOLS_BLOCK)
         tiers = self.entries(
             fields["casting_success_tiers"],
             "casting_success_tiers",
@@ -541,3 +646,38 @@ def magic_rules() -> MagicRules:
         MagicRulesError: The file is missing or malformed.
     """
     return load_magic_rules(MAGIC_RULES_FILE)
+
+
+def load_magic_schools(path: Path) -> SchoolTable | None:
+    """Read a canon's ``magic-rules.json`` for its school roll (issue #18).
+
+    The whole file is checked, as :func:`load_magic_rules` checks it.
+
+    Args:
+        path: The ``magic-rules.json`` file.
+
+    Returns:
+        The ``schools`` table, or ``None`` when the canon gates no spell by
+        school.
+
+    Raises:
+        MagicRulesError: As :func:`load_magic_rules` does.
+    """
+    reader = _MagicRulesFileReader(path)
+    return reader.magic_schools(reader.parsed_file())
+
+
+@functools.cache
+def magic_schools() -> SchoolTable | None:
+    """The loaded canon's school roll table, read once per process.
+
+    Tests that need a fresh read call ``magic_schools.cache_clear()``.
+
+    Returns:
+        The table read from :data:`reference.paths.MAGIC_RULES_FILE`, or
+        ``None`` when the canon gates no spell by school.
+
+    Raises:
+        MagicRulesError: The file is missing or malformed.
+    """
+    return load_magic_schools(MAGIC_RULES_FILE)

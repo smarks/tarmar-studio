@@ -32,8 +32,15 @@ class LearnSpellTest(BaseTestCase):
     def setUp(self):
         super().setUp()
         self.owner = self.create_user("caster")
+        # An Elemental caster: a player learns a new spell only from their
+        # school (issue #18; characters/tests/test_magic_school.py).
         self.character = create_character(
-            self.owner, name="Caster", free_skill_points=3, free_spell_points=4
+            self.owner,
+            name="Caster",
+            free_skill_points=3,
+            free_spell_points=4,
+            magic_school_roll=12,
+            magic_school="Elemental",
         )
 
     def test_a_skill_point_learns_a_spell_at_mastery_one(self):
@@ -115,7 +122,13 @@ class ManaTest(BaseTestCase):
 
     def test_the_endpoints_hold_players_to_the_rules(self):
         owner = self.create_user("learner")
-        character = create_character(owner, name="Learner", free_skill_points=1)
+        character = create_character(
+            owner,
+            name="Learner",
+            free_skill_points=1,
+            magic_school_roll=12,
+            magic_school="Elemental",
+        )
         learn_url = reverse("characters:learn_spell", args=[character.pk])
         mana_url = reverse("characters:grant_mana", args=[character.pk])
         self.login_as(owner)
