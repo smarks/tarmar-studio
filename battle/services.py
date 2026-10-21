@@ -1789,6 +1789,17 @@ def _note_withheld(battle: Battle) -> None:
     battle.save(update_fields=["state_json", "updated_at"])
 
 
+def _pools_answer_to_records(battle: Battle) -> bool:
+    """Whether the fight's pools must match its characters' records (#842).
+
+    Only a fight that writes to records holds its figures to them. Classic
+    rules carry no Fatigue or Body the record holds (their ST track is the
+    figure's own, FigureVitals says so), so a classic fight writes only a
+    death, and has no pools that could go stale. Intended; noted on #842.
+    """
+    return battle.writes_to_records and battle.rules_profile != CLASSIC_PROFILE
+
+
 def _moved_figures(battle: Battle, state) -> list[tuple[BattleCombatant, object]]:
     """Seated characters whose record moved since the board last wrote it (#842).
 
@@ -1804,11 +1815,7 @@ def _moved_figures(battle: Battle, state) -> list[tuple[BattleCombatant, object]
     Returns:
         ``(combatant, figure state)`` for each that moved, in roster order.
     """
-    # Classic rules carry no Fatigue or Body the record holds (their ST track
-    # is the figure's own, FigureVitals says so), so a classic fight writes
-    # only a death, and has no pools that could go stale. Intended; noted on
-    # #842.
-    if not battle.writes_to_records or battle.rules_profile == CLASSIC_PROFILE:
+    if not _pools_answer_to_records(battle):
         return []
     figures = {figure.combatant_id: figure for figure in state.combatants}
     moved = []
@@ -1827,6 +1834,30 @@ def _moved_figures(battle: Battle, state) -> list[tuple[BattleCombatant, object]
         if _figure_pools(figure) != _record_pools(figure, character):
             moved.append((combatant, figure))
     return moved
+
+
+def stale_pools_refusal(names: Collection[str]) -> str:
+    """The stale-pools refusal naming ``names`` (#842): the one place it is
+    worded, for the refusal and for the page's readout alike."""
+    return refusal_words().services.stale_pools.format(names=", ".join(names))
+
+
+def _refuse_moved_figures(battle: Battle, state) -> None:
+    """Refuse to go on from pools the records no longer hold (#842).
+
+    A fight that writes to records goes on only from what the records hold
+    (coordinator's ruling under the standing rule). The advance asks before
+    it runs a turn, and a player's choice asks before it is stored (#133),
+    so a refused choice leaves nothing to replay.
+
+    Raises:
+        StalePools: naming every figure :func:`_moved_figures` finds.
+    """
+    moved = _moved_figures(battle, state)
+    if moved:
+        raise StalePools(
+            stale_pools_refusal([combatant.display_name for combatant, _ in moved])
+        )
 
 
 def stale_pools(battle: Battle) -> list[str]:
@@ -3143,15 +3174,7 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
             else profiles.decider(battle)
         )
         state = profile.load(battle.state_json)
-        # A fight that writes to records goes on only from what the records
-        # hold (issue #842, coordinator's ruling under the standing rule).
-        moved = _moved_figures(battle, state)
-        if moved:
-            raise StalePools(
-                refusal_words().services.stale_pools.format(
-                    names=", ".join(combatant.display_name for combatant, _ in moved)
-                )
-            )
+        _refuse_moved_figures(battle, state)
         vitals_before = profile.vitals(state)
         figures_before = profile.figure_vitals(state)
         raw_events = profile.run_turn(state, profile.roller(), decide)
@@ -3542,6 +3565,8 @@ def record_player_action(
         ValueError: nothing pending, a choice composed for a different
             combatant or turn, not your combatant, an option that is not
             on the pending menu, or a hex that option cannot take.
+        StalePools: a record-writing fight whose records moved; the choice
+            is not left stored, so nothing replays it (#133).
     """
     with transaction.atomic():
         battle = Battle.objects.select_for_update().get(pk=battle_id)
@@ -3631,8 +3656,17 @@ def record_player_action(
                         hex=tuple(destination),
                     )
                 )
+        # Asked under the lock, before the choice is stored (#133): the
+        # resumed advance would refuse it, and a stored choice outlived the
+        # refusal and played once the pools were taken from the records.
+        # The state is loaded only for a fight whose pools answer to records.
+        if _pools_answer_to_records(battle):
+            _refuse_moved_figures(
+                battle, profiles.for_battle(battle).load(battle.state_json)
+            )
+        choice_key = str(combatant_id)
         inputs = dict(battle.turn_inputs_json or {})
-        inputs[str(combatant_id)] = {
+        inputs[choice_key] = {
             "letter": letter,
             "target_id": target_id,
             "spell_key": spell_key or "",
@@ -3641,7 +3675,36 @@ def record_player_action(
         }
         battle.turn_inputs_json = inputs
         battle.save(update_fields=["turn_inputs_json", "updated_at"])
-    return advance_turn(battle_id)
+    try:
+        return advance_turn(battle_id)
+    except StalePools:
+        # A record moved between the two transactions: the choice was
+        # stored, and the refusal must not leave it to replay (#133).
+        _drop_refused_choice(battle_id, choice_key, inputs[choice_key])
+        raise
+
+
+def _drop_refused_choice(battle_id: int, choice_key: str, choice: dict) -> None:
+    """Take back a stored choice the resumed advance refused (#133).
+
+    Only the choice this submission stored is taken: one a later submission
+    wrote in its place is that submission's to keep or lose. A later
+    submission of the very same choice cannot be told apart from this one
+    (two equal dicts), and is taken with it.
+
+    The advance's refusal and this transaction are two, so a submission can
+    land between them; only one transaction around the store and the advance
+    would close that window, and the turn's committed-before-``battle_ended``
+    contract keeps them apart (accepted in the review of #133).
+    """
+    with transaction.atomic():
+        battle = Battle.objects.select_for_update().get(pk=battle_id)
+        inputs = dict(battle.turn_inputs_json or {})
+        if inputs.get(choice_key) != choice:
+            return
+        inputs.pop(choice_key)
+        battle.turn_inputs_json = inputs
+        battle.save(update_fields=["turn_inputs_json", "updated_at"])
 
 
 def rename_combatant(

@@ -133,6 +133,7 @@ from .services import (
     set_magic_bounds_lifted,
     set_seat_ready,
     stale_pools,
+    stale_pools_refusal,
     start_battle,
     start_draft,
     take_seat,
@@ -1303,9 +1304,7 @@ def advance_control(battle, actor: Actor) -> dict | None:
             "label": "Pools changed on the records",
             "enabled": False,
             "waiting_on": "",
-            "stale": refusal_words().services.stale_pools.format(
-                names=", ".join(moved)
-            ),
+            "stale": stale_pools_refusal(moved),
             "resnapshot_url": (
                 reverse("battle:resnapshot", args=[battle.pk]) if actor.is_dm else ""
             ),
