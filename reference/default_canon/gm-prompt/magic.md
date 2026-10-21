@@ -11,15 +11,11 @@ Spell lists by level — Elemental: 1 Missile, 2 Ball, 3 Bolt, 4 Shield, 5 Barri
 Level 1: can cast. Level 2: no hand gestures. Level 3: no verbal incantation; unlocks protection from the same spell (separate skill). Level 4: reduced mana cost; unlocks halt. Level 5: further reduced cost; unlocks reflect back onto the caster.
 
 ### Push (Boosting)
-Invest extra mana for greater effect. Pushing needs a Control Roll: 3d6 ≤ INT, with a penalty that grows with the mana invested. Fail badly enough, or roll an 18, and the spell slips the caster's grasp: Runaway.
 
 ### Channel
-The more mana a caster channels into one casting, the harder it is to keep control; that is what the Control Roll measures. This canon sets no separate limit on Channel.
 
 ### Borrowing
 
 ### Runaway
-The spell feeds on the caster: first mana, then, once the pool is empty and the caster has fallen unconscious, Body. When the Body fails, the caster dies. Anchor: the caster rolls 3d6 ≤ WIS each round to regain control. Another mage may try to help; if the intervention fails, both are caught in the Runaway. Survivors often bear marks: white streaks in the hair, strange scars, a haunted look.
 
 ### Counterspell
-The defender commits mana and both make opposed INT rolls; the more mana committed, the better the defender's chance. Caster wins: spell goes off. Defender wins: spell countered, and only the caster can escalate on later turns; the defender gets one chance to stop each casting. A failed Control Roll during escalation can trigger Runaway.
