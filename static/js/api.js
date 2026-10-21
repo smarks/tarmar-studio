@@ -222,6 +222,98 @@
     }
 
     /**
+     * The requests on their way, by the key of the control that sent them.
+     *
+     * Held here, by a key that names what the control changes, rather than
+     * on the control: a panel's refetch replaces its forms and buttons while
+     * a request is out, and a press on the fresh control used to send a
+     * second one -- a Luck spend (issue #105), a hand-made record or a new
+     * session (issue #142). One press sends one request.
+     */
+    const heldRequests = new Set();
+
+    /**
+     * Whether a request sent under ``key`` is still on its way.
+     * @param {string} key
+     * @returns {boolean}
+     */
+    function requestHeld(key) {
+        return heldRequests.has(key);
+    }
+
+    /**
+     * Run ``work`` as the one request under ``key``, and say whether it ran.
+     *
+     * A second call while the first is out does nothing and answers false.
+     * ``repaint`` is called once the key is held and again once it is freed,
+     * so the page paints its controls from :func:`requestHeld`.
+     *
+     * @param {string} key - What the request changes, as one string.
+     * @param {Function} work - Sends the request; its answer is returned.
+     * @param {Function} [repaint] - Paints the page's held controls.
+     * @returns {Promise<*>} ``work``'s answer, or false when one was out.
+     */
+    async function holdRequest(key, work, repaint) {
+        if (heldRequests.has(key)) return false;
+        heldRequests.add(key);
+        if (repaint) repaint();
+        try {
+            return await work();
+        } finally {
+            heldRequests.delete(key);
+            if (repaint) repaint();
+        }
+    }
+
+    /**
+     * Where a held button keeps the state the server rendered it in, so
+     * freeing it puts that back rather than switching it on (as
+     * battle-setup.js's guard keeps its renderedDisabled).
+     */
+    const RENDERED_DISABLED = 'renderedDisabled';
+
+    /**
+     * Hold ``control`` (a button or a field) while its request is out, or
+     * free it to the state it was rendered in.
+     * @param {HTMLButtonElement|HTMLInputElement} control
+     * @param {boolean} held
+     */
+    function paintHeldControl(control, held) {
+        const kept = RENDERED_DISABLED in control.dataset;
+        if (held) {
+            if (!kept) control.dataset[RENDERED_DISABLED] = String(control.disabled);
+            control.disabled = true;
+        } else if (kept) {
+            control.disabled = control.dataset[RENDERED_DISABLED] === 'true';
+            delete control.dataset[RENDERED_DISABLED];
+        }
+    }
+
+    /**
+     * The buttons ``form`` is submitted with: each button with no type or
+     * with type "submit", as a browser counts them (issue #142's review).
+     * @param {HTMLFormElement} form
+     * @returns {HTMLButtonElement[]}
+     */
+    function submitButtonsOf(form) {
+        return Array.from(form.querySelectorAll('button:not([type]), button[type="submit"]'));
+    }
+
+    /**
+     * Set the state ``control`` is drawn in from the page's state: at once,
+     * or, while a request holds it, as the state it is freed to.
+     * @param {HTMLButtonElement|HTMLInputElement} control
+     * @param {boolean} disabled
+     */
+    function setRenderedDisabled(control, disabled) {
+        if (RENDERED_DISABLED in control.dataset) {
+            control.dataset[RENDERED_DISABLED] = String(disabled);
+        } else {
+            control.disabled = disabled;
+        }
+    }
+
+    /**
      * A modifier with its sign, the way the character sheet's tiles show one:
      * `+2`, `+0`, `-3`.
      *
@@ -445,6 +537,11 @@
     root.putCaret = putCaret;
     root.elementByFocusKey = elementByFocusKey;
     root.formatSigned = formatSigned;
+    root.requestHeld = requestHeld;
+    root.holdRequest = holdRequest;
+    root.paintHeldControl = paintHeldControl;
+    root.setRenderedDisabled = setRenderedDisabled;
+    root.submitButtonsOf = submitButtonsOf;
     root.uiNotify = uiNotify;
     root.uiConfirm = uiConfirm;
     root.uiPrompt = uiPrompt;
@@ -457,6 +554,7 @@
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
             csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
+            requestHeld, holdRequest, paintHeldControl, setRenderedDisabled, submitButtonsOf,
             uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation, filledWords, appendFilledWords,
             showFieldError, clearFieldError, FIELD_NETWORK_ERROR
         };

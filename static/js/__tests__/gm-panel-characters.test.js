@@ -130,6 +130,27 @@ describe('attach', () => {
         expect(pageNavigation.go).toHaveBeenCalledWith('/tarmar/gm/?session=12');
     });
 
+    test('a second press while the first attach is out makes no second session (#142)', async () => {
+        // With no session yet each attach makes one, so a double press made two.
+        setUpDom();
+        let answer;
+        global.fetch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+        loadTab();
+        const picker = document.getElementById('gm-character-picker');
+        document.getElementById('gm-character-select').value = '7';
+
+        picker.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        expect(picker.querySelector('button').disabled).toBe(true);
+        picker.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await flushPromises();
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        answer({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, session_id: 12, characters: [] }) });
+        await flushPromises();
+        expect(pageNavigation.go).toHaveBeenCalledTimes(1);
+        expect(picker.querySelector('button').disabled).toBe(false);
+    });
+
     test('an empty pick is reported in the tab and nothing is posted', () => {
         setUpDom();
         loadTab();
@@ -201,6 +222,28 @@ describe('detach', () => {
         expect(JSON.parse(options.body)).toEqual({ session_id: 5, character_id: 3 });
         expect(pageNavigation.reload).not.toHaveBeenCalled();
         expect(pageNavigation.go).not.toHaveBeenCalled();
+    });
+
+    test('a second click while the detach is out sends nothing (#142 sweep)', async () => {
+        setUpDom({ sessionId: 5 });
+        let answer;
+        global.fetch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+        loadTab();
+        const button = document.querySelector('.gm-sheet-detach');
+
+        // A disabled button takes no click in a browser; the event reaches
+        // the handler here anyway, so the held key is what is tested.
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        expect(button.disabled).toBe(true);
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flushPromises();
+        const detaches = () => global.fetch.mock.calls
+            .filter(([url]) => url === '/tarmar/gm/characters/detach/').length;
+        expect(detaches()).toBe(1);
+
+        answer({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, session_id: 5, characters: [] }) });
+        await flushPromises();
+        expect(detaches()).toBe(1);
     });
 
     test('a click elsewhere in the sheets does nothing', () => {

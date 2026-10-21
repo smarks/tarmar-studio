@@ -585,6 +585,125 @@ describe('the tab drawn again in place (#89)', () => {
         expect(pageNavigation.reload).not.toHaveBeenCalled();
     });
 
+    /** A request left on its way until the test answers it. */
+    function pending() {
+        let answer;
+        const promise = new Promise((resolve) => { answer = resolve; });
+        return { promise, answer: (body) => answer({ ok: true, status: 200, json: () => Promise.resolve(body) }) };
+    }
+
+    /** Ask for a restart elsewhere to draw the tab again, and let it land. */
+    async function redrawFromElsewhere() {
+        section.querySelector('#gm-battle').dispatchEvent(
+            new CustomEvent('battle-rewound', { bubbles: true, cancelable: true })
+        );
+        await flushPromises();
+        await flushPromises();
+    }
+
+    const FIGHT_URL = '/tarmar/gm/fight/';
+    const RULING_URL = 'http://localhost/tarmar/battles/4/hth-agreement/';
+
+    function sentTo(url) {
+        return global.fetch.mock.calls.filter(([called]) => called === url).length;
+    }
+
+    function fightControls() {
+        return ['gm-fight-start', 'gm-fight-foes', 'gm-fight-button']
+            .map((id) => document.getElementById(id));
+    }
+
+    test('a fight on its way keeps its controls held through a repaint and a redraw (#142)', async () => {
+        setUpSession({ withBoard: true });
+        // The board on the tab is over: its form is open.
+        panelBattle.paintFightForm(false);
+        const fight = pending();
+        global.fetch.mockImplementation((url) => (url === FIGHT_URL
+            ? fight.promise
+            : htmlResponse(renderedTab({ live: false }))));
+
+        const started = panelBattle.startFight('two gray wolves');
+        expect(fightControls().every((control) => control.disabled)).toBe(true);
+
+        // A board response says the fight is not on: the form stays held.
+        document.dispatchEvent(new CustomEvent('battle-applied', { detail: { live: false } }));
+        expect(fightControls().every((control) => control.disabled)).toBe(true);
+        // A restart elsewhere draws the tab again: the fresh form is held.
+        const before = document.getElementById('gm-fight-start');
+        await redrawFromElsewhere();
+        expect(document.getElementById('gm-fight-start')).not.toBe(before);
+        expect(fightControls().every((control) => control.disabled)).toBe(true);
+        // A second press, from the command bar or /fight, sends nothing.
+        expect(await panelBattle.startFight('')).toBe(false);
+        expect(sentTo(FIGHT_URL)).toBe(1);
+
+        // The answer frees them, to the state the board was drawn in.
+        fight.answer({ ok: false, error: 'Attach a character first' });
+        expect(await started).toBe(false);
+        expect(fightControls().every((control) => !control.disabled)).toBe(true);
+        expect(sentTo(FIGHT_URL)).toBe(1);
+    });
+
+    test('a ruling on its way keeps its button held through a redraw (#142)', async () => {
+        setUpSession({ withBoard: true });
+        const ruling = pending();
+        global.fetch.mockImplementation((url) => (url === RULING_URL
+            ? ruling.promise
+            : htmlResponse(renderedTab())));
+
+        section.querySelector('.agreement-battle-form').requestSubmit(document.getElementById('agree'));
+        await flushPromises();
+        expect(document.getElementById('agree').disabled).toBe(true);
+
+        const before = document.getElementById('agree');
+        await redrawFromElsewhere();
+        const fresh = document.getElementById('agree');
+        expect(fresh).not.toBe(before);
+        expect(fresh.disabled).toBe(true);
+        // The fresh form, submitted all the same, sends nothing.
+        fresh.closest('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await flushPromises();
+        expect(sentTo(RULING_URL)).toBe(1);
+
+        // Recorded: the tab is drawn from the answer and the button is free.
+        ruling.answer({ status: 'paused', turn: 1 });
+        await flushPromises();
+        await flushPromises();
+        await flushPromises();
+        expect(document.getElementById('agree').disabled).toBe(false);
+        expect(sentTo(RULING_URL)).toBe(1);
+    });
+
+    test.each([
+        ['the chat input', () => {
+            document.body.insertAdjacentHTML('beforeend', '<textarea id="message-input"></textarea>');
+            return 'message-input';
+        }],
+        ['the Fight form\'s foes', () => 'gm-fight-foes'],
+    ])('a field the Game Master moved to keeps the focus when the ruling is freed: %s (#142)', async (_, field) => {
+        setUpSession({ withBoard: true });
+        panelBattle.paintFightForm(false);
+        const fieldId = field();
+        const ruling = pending();
+        global.fetch.mockImplementation((url) => (url === RULING_URL
+            ? ruling.promise
+            : htmlResponse(renderedTab({ live: false }))));
+
+        const button = document.getElementById('agree');
+        button.focus();
+        section.querySelector('.agreement-battle-form').requestSubmit(button);
+        await flushPromises();
+        document.getElementById(fieldId).focus();
+
+        ruling.answer({ status: 'paused', turn: 1 });
+        await flushPromises();
+        await flushPromises();
+        await flushPromises();
+
+        expect(document.getElementById('agree').disabled).toBe(false);
+        expect(document.activeElement).toBe(document.getElementById(fieldId));
+    });
+
     test('a restart made elsewhere draws the tab again, not the page', async () => {
         setUpSession({ withBoard: true });
         global.fetch.mockReturnValueOnce(htmlResponse(renderedTab({ live: false })));
