@@ -25,10 +25,9 @@ from battle.engine.state import (
     GroundWeapon,
     WeaponState,
 )
-from battle.magic_rules import magic_rules
 from battle.models import Battle, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, dump_state
-from battle.policy import Candidate, choose_option
+from battle.policy import Candidate, Forecast, choose_option
 from battle.services import (
     _catalog_weapon,
     advance_turn,
@@ -38,7 +37,7 @@ from battle.services import (
 )
 from common.test_helpers import BaseTestCase
 
-from .magic_fixtures import CASTING_FAILURE, seated_rules
+from .magic_fixtures import CASTING_FAILURE, INVENTED_RULES, seated_rules
 
 
 def figure(combatant_id: int, name: str, position: tuple[int, int], **fields):
@@ -70,8 +69,10 @@ class EveryTargetTest(BaseTestCase):
     """The engine's menu, with each attack also aimed at every legal target."""
 
     def menu(self, state: BattleState, actor: CombatantState):
+        """The AI's own menu, and the engine's every-target menu a seated
+        player is offered (tarmar-engine #21)."""
         advice = choose_option(state, actor)
-        return advice, turn_menu.every_target(state, actor, advice.candidates)
+        return advice, choose_option(state, actor, every_target=True).candidates
 
     def test_an_attack_is_offered_at_each_adjacent_enemy(self):
         fighter = figure(1, "Aldwin", (0, 0))
@@ -86,8 +87,9 @@ class EveryTargetTest(BaseTestCase):
         # nobody who is out of reach.
         self.assertEqual(len(engine_strikes), 1)
         self.assertEqual({c.target_id for c in strikes}, {2, 3})
-        # The engine's own candidate keeps its place, first.
-        self.assertIs(strikes[0], engine_strikes[0])
+        # The engine's own candidate keeps its place, first: an equal one,
+        # since the every-target menu is built apart from the AI's.
+        self.assertEqual(strikes[0], engine_strikes[0])
         other = strikes[1]
         self.assertEqual(other.name, "ATTACK")
         self.assertTrue(
@@ -178,6 +180,57 @@ class EveryTargetTest(BaseTestCase):
         advice, menu = self.menu(state, held)
         self.assertEqual(menu, advice.candidates)
 
+    def test_each_target_s_row_reads_its_own_forecast(self):
+        """An extra row carries the engine's forecast for its own target, so
+        its plain line names that target's armour, not the AI target's."""
+        fighter = figure(1, "Aldwin", (0, 0))
+        gray = figure(2, "Gray Wolf", (1, 0), stops=3, armour_tier="Medium")
+        dire = figure(3, "Dire Wolf", (0, 1))
+        state = BattleState(arena_radius=4, combatants=[fighter, gray, dire])
+        strikes = {
+            entry.target_id: entry
+            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, fighter)
+            if entry.letter == "j"
+        }
+        self.assertEqual(set(strikes), {2, 3})
+        for target_id, stops in ((2, 3), (3, 0)):
+            with self.subTest(target_id=target_id):
+                strike = strikes[target_id]
+                assert strike.forecast is not None
+                self.assertEqual(strike.forecast.armour_stops, stops)
+                armour = f" less {stops} armour" if stops else ""
+                self.assertIn(
+                    f"{strike.forecast.winning_faces} in 20 to hit, 2d6{armour} (",
+                    strike.plain,
+                )
+
+    def test_a_cast_is_offered_at_every_enemy_nearest_first(self):
+        wizard = figure(
+            1,
+            "Morwen",
+            (0, 0),
+            spells=["fire_missile"],
+            mana=8,
+            max_mana=8,
+            intelligence=14,
+        )
+        near = figure(2, "Near", (2, 0))
+        far = figure(3, "Far", (-4, 0))
+        state = BattleState(arena_radius=6, combatants=[wizard, near, far])
+        advice, menu = self.menu(state, wizard)
+        casts = [
+            c
+            for c in menu
+            if c.spell_key == "fire_missile" and not c.push_mana and not c.borrow
+        ]
+        self.assertEqual([c.target_id for c in casts], [2, 3])
+        self.assertTrue(all(c.forecast is not None for c in casts))
+        # The AI's own cast stays aimed at the nearest.
+        self.assertEqual(
+            [c.target_id for c in advice.candidates if c.spell_key == "fire_missile"],
+            [2],
+        )
+
     def test_teammates_are_never_offered(self):
         fighter = figure(1, "Aldwin", (0, 0), team="Red")
         friend = figure(2, "Friend", (1, 0), team="Red")
@@ -191,8 +244,7 @@ class MenuEntryTest(BaseTestCase):
     """What each option says to the player who reads it (#788)."""
 
     def entries(self, state: BattleState, actor: CombatantState) -> list[dict]:
-        advice = choose_option(state, actor)
-        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         return [candidate.to_payload() for candidate in menu]
 
     def test_an_attack_reads_as_who_it_hits_and_the_odds(self):
@@ -244,6 +296,7 @@ class MenuEntryTest(BaseTestCase):
             "Morwen",
             (0, 0),
             spells=["fire_missile"],
+            spell_skill_levels={"fire_missile": 1},
             mana=8,
             max_mana=8,
             intelligence=14,
@@ -251,12 +304,15 @@ class MenuEntryTest(BaseTestCase):
         foe = figure(2, "Foe", (3, 0))
         state = BattleState(arena_radius=6, combatants=[wizard, foe])
         # #816: a spell's mana is paid on a success, or on a failing total the
-        # canon's casting_failure block names (tarmar-engine #46).
+        # canon's casting_failure block names (tarmar-engine #46). On the
+        # invented rules, whose Channel (twice the recorded level) lets the
+        # cast through under either canon: the menu is built on the seated
+        # rules, as the turn is.
         for casting_failure, paid_when in (
             (CASTING_FAILURE, "paid only if it succeeds or the roll is 12 or 13"),
             (None, "paid only if it succeeds"),
         ):
-            loaded = replace(magic_rules(), casting_failure=casting_failure)
+            loaded = replace(INVENTED_RULES, casting_failure=casting_failure)
             with self.subTest(paid_when=paid_when), seated_rules(loaded):
                 cast = next(
                     entry for entry in self.entries(state, wizard) if entry["spell_key"]
@@ -299,7 +355,7 @@ class MenuEntryTest(BaseTestCase):
         game = classic_game()
         fighter, _foe = game.figures
         advice = classic_policy.choose_option(game, fighter)
-        menu = turn_menu.player_menu(CLASSIC_PROFILE, game, fighter, advice)
+        menu = turn_menu.player_menu(CLASSIC_PROFILE, game, fighter)
         self.assertEqual(
             [(c.letter, c.target_id, c.score) for c in menu],
             [(c.letter, c.target_id, c.score) for c in advice.candidates],
@@ -640,19 +696,36 @@ class PlainLineTest(BaseTestCase):
         self.assertEqual(self.line("q"), ("Pick up a weapon", ""))
 
     def test_the_odds_read_under_one_when_a_hit_barely_hurts(self):
-        rationale = (
-            "Strike Foe: Broadsword at 1 hex, d20 +0 vs TN 16 — P(hit) 0.250 "
-            "(5 of 20 faces) x 0.078 expected damage (1d6-1 less 5 armour stops) "
-            "= 0.020"
+        # Read from the engine's forecast fields (tarmar-engine #22), not its
+        # prose.
+        forecast = Forecast(
+            hit_chance=0.25,
+            damage_expression="1d6-1",
+            armour_stops=5,
+            expected_damage=0.078,
+            target_number=16,
+            bonus=0,
+            winning_faces=5,
         )
         self.assertEqual(
-            turn_menu._odds(rationale),
+            turn_menu._odds(forecast),
             "5 in 20 to hit, 1d6-1 less 5 armour (under 1 a hit)",
         )
-        unarmoured = rationale.replace("less 5 armour", "less 0 armour")
+        unarmoured = replace(forecast, armour_stops=0)
         self.assertEqual(
             turn_menu._odds(unarmoured), "5 in 20 to hit, 1d6-1 (under 1 a hit)"
         )
+
+    def test_a_cast_forecast_carries_no_d20_odds(self):
+        """A cast's chance is 3d6 roll-unders, not faces of the d20."""
+        cast = Forecast(
+            hit_chance=0.375,
+            damage_expression="1d6",
+            armour_stops=0,
+            expected_damage=3.5,
+        )
+        self.assertEqual(turn_menu._odds(cast), "")
+        self.assertEqual(turn_menu._odds(None), "")
 
 
 class MoversSayTheMoveTheEngineMakesTest(BaseTestCase):
@@ -666,8 +739,7 @@ class MoversSayTheMoveTheEngineMakesTest(BaseTestCase):
     """
 
     def menu(self, state: BattleState, actor: CombatantState) -> dict[str, dict]:
-        advice = choose_option(state, actor)
-        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         return {entry.letter: entry.to_payload() for entry in menu}
 
     def boxed_in(self) -> tuple[BattleState, CombatantState]:
@@ -799,10 +871,9 @@ class ChargeRowsReadTheEngineReachTest(BaseTestCase):
         )
 
     def menu(self, state: BattleState, actor: CombatantState) -> list[dict]:
-        advice = choose_option(state, actor)
         return [
             entry.to_payload()
-            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+            for entry in turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         ]
 
     def test_only_the_reachable_enemy_is_offered_a_charge(self):
@@ -896,20 +967,18 @@ class DefendAndDodgeDriftTest(SimpleTestCase):
 
 
 class EveryPlainLineCarriesItsOddsTest(BaseTestCase):
-    """Each kind of attack line reads its odds off the engine's own working.
+    """Each kind of attack line reads its odds off the engine's own forecast.
 
-    The odds come from the engine's rationale prose (``turn_menu._odds``); a
-    change to that wording must fail here rather than silently drop the odds
-    from the menu. Every kind is built from a real engine menu, not a
-    hand-written rationale. (Structured forecast fields are asked of the
-    engine in smarks/tarmar-engine#22.)
+    The odds come from the engine's ``Candidate.forecast`` fields
+    (``turn_menu._odds``, tarmar-engine #22); an option that stops carrying
+    one must fail here rather than silently drop the odds from the menu.
+    Every kind is built from a real engine menu, not a hand-written forecast.
     """
 
     ODDS = r": \d+ in 20 to hit, \S+( less \d+ armour)? \((about \d+|under 1) a hit\)"
 
     def plain_of(self, state, actor, letter: str) -> str:
-        advice = choose_option(state, actor)
-        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor, advice)
+        menu = turn_menu.player_menu(TARMAR_PROFILE, state, actor)
         entry = next(c for c in menu if c.letter == letter).to_payload()
         return entry["plain"]
 

@@ -8,6 +8,13 @@ app can store, reload and advance.
 
 from dataclasses import replace
 
+from tarmar_engine.classic.figure import SideLabel
+from tarmar_engine.classic.narrative import (
+    narrate_cascade,
+    narrate_pass,
+    narrate_victory,
+)
+
 from battle import profiles, viewmodel
 from battle.classic_adaptation import (
     ARENA_SEATS,
@@ -22,7 +29,7 @@ from battle.classic_adaptation import (
     classic_state,
     classic_team,
     classic_weapon,
-    name_sides_in_lines,
+    label_sides,
     rim_placements,
     wizard_spells,
 )
@@ -871,97 +878,166 @@ class ClassicSideLabelTest(BaseTestCase):
 
     The classic narrative prints a figure as ``"Name (side)"`` and a win as
     ``"🏆 The <side> hold the field — victory!"``. A teamless figure's side
-    is its uid, the ``BattleCombatant`` row pk, so without relabelling the
-    log reads "Yaria Hawkridge (743)" and "The 743 hold the field". The
-    label is the team's name when the side has one, else the figure's name,
-    else "Side N" by its place in the roster.
+    is its uid, the ``BattleCombatant`` row pk, so unlabelled the log reads
+    "Yaria Hawkridge (743)" and "The 743 hold the field". Each figure carries
+    the engine's ``SideLabel`` (tarmar-engine #25): the team's name when the
+    side has one, else the figure's name, else "Side N" by its place in the
+    roster. The lines below are the engine's own narrative functions.
     """
 
     def test_a_one_figure_side_is_named_for_its_figure(self):
-        figures = placed_figures((743, "Yaria Hawkridge", ""), (744, "Ulfan", ""))
+        yaria, ulfan = placed_figures((743, "Yaria Hawkridge", ""), (744, "Ulfan", ""))
+        self.assertEqual(yaria.side_label, SideLabel("Yaria Hawkridge", team=False))
         self.assertEqual(
-            name_sides_in_lines(
-                [
-                    "Yaria Hawkridge (743) swings a Saber at Ulfan (744).",
-                    "Ulfan (744) falls, slain!",
-                    "🏆 The 743 hold the field — victory!",
-                ],
-                figures,
-            ),
             [
-                "Yaria Hawkridge swings a Saber at Ulfan.",
-                "Ulfan falls, slain!",
+                narrate_cascade(yaria, ulfan, ulfan),
+                narrate_pass(ulfan),
+                narrate_victory(yaria.side, yaria.side_label),
+            ],
+            [
+                "Yaria Hawkridge's blow goes wide of Ulfan and strikes Ulfan instead!",
+                "Ulfan passes, deferring to act last.",
                 "🏆 Yaria Hawkridge holds the field — victory!",
             ],
         )
 
     def test_a_multi_figure_side_keeps_its_team_name(self):
-        figures = placed_figures((5, "Ada", "Red"), (6, "Bo", "Red"), (7, "Cy", "Blue"))
+        ada, bo, cy = placed_figures(
+            (5, "Ada", "Red"), (6, "Bo", "Red"), (7, "Cy", "Blue")
+        )
+        self.assertEqual(ada.side_label, SideLabel("Red", team=True))
+        self.assertEqual(bo.side_label, ada.side_label)
         self.assertEqual(
-            name_sides_in_lines(
-                [
-                    "Ada (team:Red) swings a Broadsword at Cy (team:Blue).",
-                    "🏆 The team:Red hold the field — victory!",
-                ],
-                figures,
-            ),
             [
-                "Ada (Red) swings a Broadsword at Cy (Blue).",
+                narrate_cascade(ada, cy, cy),
+                narrate_victory(ada.side, ada.side_label),
+            ],
+            [
+                "Ada (Red)'s blow goes wide of Cy (Blue) and strikes Cy (Blue) instead!",
                 "🏆 The Red hold the field — victory!",
             ],
         )
 
     def test_a_teamless_figure_beside_teams_is_named_for_itself(self):
-        figures = placed_figures((5, "Ada", "Red"), (6, "Bo", "Red"), (9, "Lone", ""))
+        ada, _bo, lone = placed_figures(
+            (5, "Ada", "Red"), (6, "Bo", "Red"), (9, "Lone", "")
+        )
         self.assertEqual(
-            name_sides_in_lines(
-                [
-                    "Lone (9) swings at Ada (team:Red).",
-                    "🏆 The 9 hold the field — victory!",
-                ],
-                figures,
-            ),
-            ["Lone swings at Ada (Red).", "🏆 Lone holds the field — victory!"],
+            [
+                narrate_cascade(lone, ada, ada),
+                narrate_victory(lone.side, lone.side_label),
+            ],
+            [
+                "Lone's blow goes wide of Ada (Red) and strikes Ada (Red) instead!",
+                "🏆 Lone holds the field — victory!",
+            ],
         )
 
     def test_a_nameless_figure_falls_back_to_its_roster_place(self):
-        figures = placed_figures((11, "Ada", ""), (12, "", ""))
+        _ada, nameless = placed_figures((11, "Ada", ""), (12, "", ""))
         self.assertEqual(
-            name_sides_in_lines(
-                [" (12) advances.", "🏆 The 12 hold the field — victory!"], figures
-            ),
-            ["Side 2 advances.", "🏆 Side 2 holds the field — victory!"],
+            [
+                narrate_pass(nameless),
+                narrate_victory(nameless.side, nameless.side_label),
+            ],
+            [
+                "Side 2 passes, deferring to act last.",
+                "🏆 Side 2 holds the field — victory!",
+            ],
         )
 
     def test_a_numbered_name_is_not_mistaken_for_another_figure(self):
-        """``_numbered_variant`` names a duplicate "Thorn (2)"; when another
-        "Thorn" happens to be row 2, its token sits inside the first one's."""
-        figures = placed_figures((2, "Thorn", ""), (6, "Thorn (2)", ""))
+        """``_numbered_variant`` names a duplicate "Thorn (2)"; another "Thorn"
+        in row 2 keeps its own name, since each figure is named by its own
+        label rather than by matching printed text."""
+        thorn, numbered = placed_figures((2, "Thorn", ""), (6, "Thorn (2)", ""))
         self.assertEqual(
-            name_sides_in_lines(
-                ["Thorn (2) (6) swings at Thorn (2).", "Thorn (2) falls."], figures
-            ),
-            ["Thorn (2) swings at Thorn.", "Thorn falls."],
+            narrate_cascade(numbered, thorn, thorn),
+            "Thorn (2)'s blow goes wide of Thorn and strikes Thorn instead!",
         )
 
     def test_a_numbered_name_on_a_team_is_not_mistaken_for_a_teamless_one(self):
-        """The teamed "Thorn (2)" prints as "Thorn (2) (team:Red)", which holds the
-        teamless "Thorn" in row 2's token; the teamed token must win."""
-        figures = placed_figures((2, "Thorn", ""), (6, "Thorn (2)", "Red"))
+        thorn, numbered = placed_figures((2, "Thorn", ""), (6, "Thorn (2)", "Red"))
         self.assertEqual(
-            name_sides_in_lines(["Thorn (2) (team:Red) hits Thorn (2)."], figures),
-            ["Thorn (2) (Red) hits Thorn."],
+            narrate_cascade(numbered, thorn, thorn),
+            "Thorn (2) (Red)'s blow goes wide of Thorn and strikes Thorn instead!",
         )
 
     def test_the_team_of_a_figure_is_its_side_unless_that_is_its_uid(self):
         figures = placed_figures((5, "Ada", "Red"), (9, "Lone", ""))
         self.assertEqual([classic_team(figure) for figure in figures], ["Red", ""])
 
+    def test_a_battle_saved_unlabelled_is_labelled_as_it_would_be_built(self):
+        """A snapshot from before tarmar-engine 0.9.19 loads with no labels;
+        :func:`label_sides` gives it the ones it would have been built with."""
+        from tarmar_engine.classic.state import GameState
+
+        state = team_state((5, "Ada", "Red"), (6, "Bo", "Red"), (9, "", ""))
+        built = [figure.side_label for figure in state.figures]
+        snapshot = state.to_dict()
+        for figure in snapshot["figures"]:
+            figure.pop("side_label")
+        loaded = GameState.from_dict(snapshot)
+        self.assertEqual({figure.side_label for figure in loaded.figures}, {None})
+        label_sides(loaded.figures)
+        self.assertEqual([figure.side_label for figure in loaded.figures], built)
+        self.assertEqual(built[2], SideLabel("Side 3", team=False))
+
+    def test_a_renamed_figure_is_labelled_by_its_new_name(self):
+        state = team_state((5, "Ada", ""), (6, "Bo", ""))
+        profiles.ClassicProfile(battle=None).rename(state, 5, "Adela")
+        label_sides(state.figures)
+        adela = state.figures[0]
+        self.assertEqual(narrate_pass(adela), "Adela passes, deferring to act last.")
+
+
+class ClassicRenameMidBattleTest(BaseTestCase):
+    """A figure renamed mid-battle keeps its side's labels in agreement.
+
+    ``ClassicProfile.run_turn`` labels every side before the turn, and the
+    engine's ``begin_selection`` refuses a side whose figures carry different
+    labels. A team's label is its name, so renaming one of two members leaves
+    both on "Red"; a side of one is labelled by its name, so the loner's
+    label follows its new one.
+    """
+
+    def test_a_rename_on_a_team_of_two_runs_its_turn(self):
+        from tarmar_engine.classic.state import GameState
+
+        from battle.models import Battle
+        from battle.persistence import CLASSIC_PROFILE
+        from battle.services import advance_turn, create_battle, rename_combatant
+
+        battle = create_battle(
+            self.create_dm(),
+            name="Renamed",
+            count=3,
+            seed=42,
+            rules_profile=CLASSIC_PROFILE,
+            fighter_teams=("Red", "Red", ""),
+        )
+        member = battle.combatants.filter(team="Red").first()
+        loner = battle.combatants.get(team="")
+        assert member is not None
+        rename_combatant(battle.pk, member.pk, "Renamed Red")
+        rename_combatant(battle.pk, loner.pk, "Renamed Loner")
+        battle, events = advance_turn(battle.pk)
+        self.assertIn(battle.status, (Battle.STATUS_PAUSED, Battle.STATUS_FINISHED))
+        self.assertTrue(events)
+        state = GameState.from_dict(battle.state_json)
+        labels = {figure.uid: figure.side_label for figure in state.figures}
+        red = [
+            labels[str(pk)]
+            for pk in battle.combatants.filter(team="Red").values_list("pk", flat=True)
+        ]
+        self.assertEqual(red, [SideLabel("Red", team=True)] * 2)
+        self.assertEqual(labels[str(loner.pk)], SideLabel("Renamed Loner", team=False))
+
 
 class ClassicVictoryLineTest(BaseTestCase):
     """#909 end to end: a finished classic battle's log never names a row."""
 
-    def finish(self, **kwargs):
+    def finish(self, before_first_turn=None, **kwargs):
         from battle.models import Battle
         from battle.persistence import CLASSIC_PROFILE
         from battle.services import advance_turn, create_battle
@@ -974,6 +1050,8 @@ class ClassicVictoryLineTest(BaseTestCase):
             rules_profile=CLASSIC_PROFILE,
             **kwargs,
         )
+        if before_first_turn is not None:
+            before_first_turn(battle)
         for _turn in range(300):
             if battle.status in (Battle.STATUS_FINISHED, Battle.STATUS_STALEMATE):
                 break
@@ -995,6 +1073,20 @@ class ClassicVictoryLineTest(BaseTestCase):
         messages = self.finish()
         self.assertIn("🏆 Yaria Hawkridge holds the field — victory!", messages)
         self.assertIn("Yaria Hawkridge stands victorious", messages)
+
+    def test_a_battle_saved_unlabelled_still_names_its_sides(self):
+        """A classic battle snapshotted before its figures carried labels is
+        labelled at its next turn (``ClassicProfile.run_turn``)."""
+
+        def unlabel(battle):
+            state = battle.state_json
+            for figure in state["figures"]:
+                figure.pop("side_label")
+            battle.state_json = state
+            battle.save(update_fields=["state_json"])
+
+        messages = self.finish(before_first_turn=unlabel)
+        self.assertIn("🏆 Yaria Hawkridge holds the field — victory!", messages)
 
     def test_a_team_victory_still_names_the_team(self):
         messages = self.finish(fighter_teams=("Red", "Red", "Blue", "Blue"))
@@ -1086,23 +1178,25 @@ class ClassicTeamNamedLikeRowTest(BaseTestCase):
         self.assertEqual(standing_sides(profile, team_only), {("team", "7")})
 
     def test_every_line_and_each_win_names_the_right_party(self):
-        from tarmar_engine.classic.narrative import _name, narrate_victory
+        by_name = self.by_name
 
-        figures = self.state.figures
-        engine_lines = [
-            f"{_name(self.by_name['Ada'])} swings at {_name(self.by_name['Bo'])}.",
-            f"{_name(self.by_name['Fen'])} swings at {_name(self.by_name['Eli'])}.",
-            f"{_name(self.by_name['Dee'])} falls, slain!",
-            narrate_victory(self.by_name["Ada"].side),
-            narrate_victory(self.by_name["Bo"].side),
-            narrate_victory(self.by_name["Eli"].side),
-        ]
+        def victory(name: str) -> str:
+            side = by_name[name].side
+            return narrate_victory(side, self.state.side_label(side))
+
         self.assertEqual(
-            name_sides_in_lines(engine_lines, figures),
             [
-                "Ada (7) swings at Bo.",
-                "Fen (4) swings at Eli (9).",
-                "Dee (Blue) falls, slain!",
+                narrate_cascade(by_name["Ada"], by_name["Bo"], by_name["Bo"]),
+                narrate_cascade(by_name["Fen"], by_name["Eli"], by_name["Eli"]),
+                narrate_pass(by_name["Dee"]),
+                victory("Ada"),
+                victory("Bo"),
+                victory("Eli"),
+            ],
+            [
+                "Ada (7)'s blow goes wide of Bo and strikes Bo instead!",
+                "Fen (4)'s blow goes wide of Eli (9) and strikes Eli (9) instead!",
+                "Dee (Blue) passes, deferring to act last.",
                 "🏆 The 7 hold the field — victory!",
                 "🏆 Bo holds the field — victory!",
                 "🏆 The 9 hold the field — victory!",
@@ -1123,5 +1217,6 @@ class ClassicTeamNamedLikeRowTest(BaseTestCase):
         with self.assertRaisesRegex(ValueError, "'5' has side 'Red'"):
             classic_team(figures[0])
         self.assertEqual(classic_team(figures[1]), "")
+        figures[0].side_label = None
         with self.assertRaises(ValueError):
-            name_sides_in_lines(["Ada (Red) swings at Lone (9)."], figures)
+            label_sides(figures)

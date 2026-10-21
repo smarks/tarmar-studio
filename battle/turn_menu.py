@@ -9,30 +9,29 @@ from:
   MISSILE and ONE LAST SHOT at the nearest, a hand-to-hand strike or grapple
   at one of the enemies an entry condition admits. So a player offered one
   "Strike Gray Wolf" could not strike the other wolf beside them, or shoot
-  the wizard at the back. :func:`every_target` adds the same option aimed at
-  each other legal target, scored and explained by the engine's own forecast
-  for that target. The engine's candidate already carries a target, and the
-  engine resolves whatever target the chosen candidate names (and refuses a
-  swing that no longer reaches, in its own log line), so no engine change is
-  needed for attacks. A cast is still aimed at the nearest enemy: the
-  policy prices a spell against that one enemy inside a private helper, and
-  pricing it at another is the engine's to offer (smarks/tarmar-engine#21).
+  the wizard at the back. A seated figure's menu is the engine's own
+  every-target menu (``choose_option(..., every_target=True)``, built by
+  :func:`battle.profiles.decider`; tarmar-engine #21): each aimed option,
+  casts included, at every enemy it may be aimed at, scored and forecast by
+  the engine for that target, with the AI's own choice unchanged among them.
 
 * **A choice a player can weigh** (issue #788). The menu used to lead with
   the AI's scoring sheet: "score 0.178 — Strike Gray Wolf: bare hands at 1
   hex, d20 -3 vs TN 16 — P(hit) 0.100 ...". :func:`describe` gives each
-  option a plain line built from the same figures (who it is aimed at, the
-  chance to hit as "2 in 20", the damage dice and what a hit does on
-  average), what it costs, and which option the AI would take. The score
-  and its working stay on the payload for the page to show on request.
+  option a plain line built from the same figures, the engine's own
+  ``Candidate.forecast`` (tarmar-engine #22: who it is aimed at, the chance
+  to hit as "2 in 20", the damage dice and what a hit does on average), what
+  it costs, and which option the AI would take. The score and its working
+  stay on the payload for the page to show on request.
 
 Only the Tarmar profile's menu is widened to every target. A classic
 figure's menu comes from the classic policy, whose candidates and state are
 shaped differently (a ``GameState`` of ``Figure`` s): it keeps the engine's
 own options and targets, and each option is described the same way (issue
 #890) from the classic figures' own numbers, read through the classic
-engine at the pause -- the adjDX to roll under on 3d6 (or 4d6 against a
-defender), the weapon's dice less the target's armour, the ST a spell
+engine at the pause -- its attack forecast (``GameState.attack_forecast``,
+tarmar-engine #23: the adjDX to roll under on 3d6 or 4d6, the weapon's dice
+less the target's armour, what a hit does on average), the ST a spell
 invests -- because the classic policy's rationale is a tactic label ("already
 in reach: stand and strike"), not a forecast. Either way the AI's own pick is
 marked, which both profiles' pages read.
@@ -40,45 +39,34 @@ marked, which both profiles' pages read.
 
 from __future__ import annotations
 
-import itertools
-import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields
 
 from hexarena.hex import Hex
 from tarmar_engine import actions, combat_math, movement
 from tarmar_engine.classic import ai as classic_ai
 from tarmar_engine.classic import policy as classic_policy
-from tarmar_engine.classic.data import DamageDice, WeaponKind
-from tarmar_engine.classic.facing import attack_zone
+from tarmar_engine.classic.ai import BlowKind
+from tarmar_engine.classic.combat import AttackForecast
+from tarmar_engine.classic.data import DIE_FACES as CLASSIC_DIE_FACES
+from tarmar_engine.classic.data import THREE_DICE, DamageDice
 from tarmar_engine.classic.figure import Figure
-from tarmar_engine.classic.megahex import megahex_distance
 from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.options import spec as classic_spec
 from tarmar_engine.classic.state import GameState
 from tarmar_engine.engine import RUN_FATIGUE_COST, SPRINT_FATIGUE_COST
 from tarmar_engine.policy import (
     ANCHOR_OPTION,
-    GRAPPLE_ATTEMPT_SCORE,
-    GRAPPLE_TACTICS_RATIONALE,
-    HURT_THRESHOLD,
-    PLAYER_ONLY_SCORE,
     Candidate,
-    Decision,
-    _beast_caution,
+    Forecast,
     _hth_partners,
-    _hth_strike_forecast,
-    _hth_targets,
-    _hurt_fraction,
-    _melee_score,
-    _missile_score,
     best_weapon,
-    score_text,
     weapons_in_reach,
 )
+from tarmar_engine.resolution import DIE_FACES
 from tarmar_engine.spells import get_spell
 from tarmar_engine.state import BattleState, CombatantState
 
-from . import magic_bounds
+from . import magic_bounds, profiles
 from .magic_rules import magic_rules, totals_in_words
 from .persistence import TARMAR_PROFILE
 
@@ -95,182 +83,48 @@ DEFEND_DEFENDS_AGAINST = "melee and non-missile attacks only"
 #: (issue #57). A CHARGE says its reach instead.
 STANDING_MOVERS: frozenset[str] = frozenset({"a", "sprint", "c"})
 
-#: The attack options a player aims (#775). A yielded CHARGE (``b_yield``)
-#: is aimed as its CHARGE is.
-AIMED_OPTIONS: frozenset[str] = frozenset({"j", "b", "f", "l", "t", "o"})
 
-
-def _legal_targets(
-    state: BattleState, actor: CombatantState, option: str
+def _adjacent_enemies(
+    state: BattleState, actor: CombatantState
 ) -> list[CombatantState]:
-    """Every enemy ``option`` may be aimed at, by the rules the engine applies.
-
-    ATTACK and ONE LAST SHOT reach an adjacent enemy; CHARGE an enemy its
-    jog ends beside (:func:`_charge_reaches`, the reach the policy prices it
-    by); a MISSILE any enemy on the field (the engine takes the range
-    penalty); a hand-to-hand strike or grapple an enemy an entry condition
-    admits.
-    """
-    enemies = state.enemies_of(actor)
-    if option in ("j", "l"):
-        return [
-            enemy for enemy in enemies if combat_math.figures_adjacent(actor, enemy)
-        ]
-    if option == "b":
-        # A charge the engine's jog cannot bring beside its target falls
-        # short and the AI scores it 0, so it is not aimed there; the
-        # engine's own CHARGE row says so when every enemy is out of reach
-        # (issue #56).
-        return [
-            enemy
-            for enemy in enemies
-            if _charge_reaches(_approach(state, actor, option, enemy))
-        ]
-    if option == "f":
-        return list(enemies)
-    # "t" and "o", the last of AIMED_OPTIONS.
-    return _hth_targets(state, actor)
+    """The enemies beside ``actor``, in the state's order: those a DISENGAGE
+    steps away from, the first of them when no hex is picked
+    (``TurnRunner.disengage_step``)."""
+    return [
+        enemy
+        for enemy in state.enemies_of(actor)
+        if combat_math.figures_adjacent(actor, enemy)
+    ]
 
 
-def _thrown_away_note(actor: CombatantState) -> bool:
-    """Whether a MISSILE throw would leave the figure without a hand weapon.
-
-    The engine's own condition (``tarmar_engine.policy.choose_option``, the
-    ``f`` branch): the weapon in hand is thrown, not a missile weapon, and no
-    spare hand weapon is carried, so the AI keeps it.
-    """
-    spares = [spare for spare in actor.spare_weapons if spare.item_id]
-    return (
-        actor.weapon.is_thrown
-        and not actor.weapon.is_missile
-        and not any(not spare.is_missile for spare in spares)
-    )
-
-
-def _aimed(
-    state: BattleState, actor: CombatantState, option: str, defender: CombatantState
-) -> tuple[float, str]:
-    """The engine's score and working for ``option`` aimed at ``defender``.
-
-    Each branch is the engine policy's own for that letter, so the line a
-    player reads for the second wolf is the one the AI would have written.
-    """
-    hurt = _hurt_fraction(actor) < HURT_THRESHOLD
-    if option == "j":
-        score, rationale = _beast_caution(actor, hurt, *_melee_score(actor, defender))
-        return score, f"Strike {defender.name}: {rationale}"
-    if option == "b":
-        score, rationale = _beast_caution(actor, hurt, *_melee_score(actor, defender))
-        return score, f"Charge {defender.name}: {rationale}"
-    if option == "f":
-        score, rationale = _missile_score(actor, defender)
-        if _thrown_away_note(actor):
-            score = PLAYER_ONLY_SCORE
-            rationale = (
-                f"{rationale}; but the {actor.weapon.name} is the only hand "
-                f"weapon carried, so the AI keeps it = {score_text(score)}"
-            )
-        return score, f"Shoot {defender.name}: {rationale}"
-    if option == "l":
-        score, rationale = _missile_score(actor, defender)
-        return score, (
-            f"One last shot at {defender.name}, the bow ready before the "
-            f"engagement: {rationale}"
-        )
-    if option == "t":
-        score, rationale = _hth_strike_forecast(state, actor, defender)
-        return score, f"Strike {defender.name} {rationale}"
-    # "o": a grapple is valued at 0 whoever it is aimed at (the policy's
-    # "grapple tactics out of scope").
-    return GRAPPLE_ATTEMPT_SCORE, (f"Grapple valued at 0 ({GRAPPLE_TACTICS_RATIONALE})")
-
-
-def every_target(
-    state: BattleState, actor: CombatantState, candidates: list[Candidate]
-) -> list[Candidate]:
-    """The engine's menu with each attack also aimed at every other legal target.
-
-    Each added option sits right after the engine's own, carries the same
-    letter and rules name, and is scored by the engine's forecast for its
-    target; the engine's own candidates are untouched and keep their order.
-    A figure in a grapple keeps the grapple's fixed menu, whose options all
-    name the one figure it is locked with.
-
-    Args:
-        state: The live state the menu was built from.
-        actor: The figure choosing.
-        candidates: The engine policy's menu for it.
-
-    Returns:
-        The widened menu.
-    """
-    if actor.grappled_by is not None or actor.grappling is not None:
-        return list(candidates)
-    widened: list[Candidate] = []
-    for candidate in candidates:
-        widened.append(candidate)
-        option = actions.base_option(candidate.letter)
-        if (
-            option not in AIMED_OPTIONS
-            or candidate.target_id is None
-            or candidate.spell_key
-        ):
-            continue
-        for defender in _legal_targets(state, actor, option):
-            if defender.combatant_id == candidate.target_id:
-                continue
-            score, rationale = _aimed(state, actor, option, defender)
-            if actions.is_yielded(candidate.letter):
-                rationale = (
-                    f"As {actions.option_name(option)}, moving in Final "
-                    f"Movement instead: {rationale}"
-                )
-            widened.append(
-                replace(
-                    candidate,
-                    score=score,
-                    rationale=rationale,
-                    target_id=defender.combatant_id,
-                )
-            )
-    return widened
-
-
-# Read from prose until the engine carries a forecast as fields
-# (smarks/tarmar-engine#22); EveryPlainLineCarriesItsOddsTest fails if the
-# wording moves. The figures an engine forecast is written from (tarmar_engine.policy's
-# ``_attack_forecast`` and ``_hth_strike_forecast``): the chance to hit, the
-# expected damage a hit does, and the dice less the armour stops.
-_HIT_CHANCE = re.compile(r"P\(hit\) (?P<chance>[\d.]+)")
-_DAMAGE = re.compile(
-    r"x (?P<damage>[\d.]+) expected\s+damage "
-    r"\((?P<dice>[^()]+?) less (?P<stops>\d+) armour stops\)"
-)
-#: The faces of the d20 every attack roll is made on (attack-rolls.md).
-DIE_FACES = 20
-
-
-def _odds(rationale: str) -> str:
+def _odds(forecast: Forecast | None) -> str:
     """ "2 in 20 to hit, 1d6-1 less 1 armour (about 2 a hit)", from a forecast.
 
-    Read off the engine's own working, so the plain line and the score line
-    a player can open never disagree; the winning faces are counted as the
-    engine counts them, ``round(P(hit) x 20)``. Empty when the rationale
-    carries no forecast (DEFEND, DISENGAGE, a grapple).
+    Read off the engine's own forecast (``Candidate.forecast``,
+    tarmar-engine #22), the figures its rationale is written from, so the
+    plain line and the score line a player can open never disagree. Empty
+    for an option with no d20 forecast (DEFEND, DISENGAGE, a grapple, a
+    charge that falls short).
     """
-    chance = _HIT_CHANCE.search(rationale)
-    damage = _DAMAGE.search(rationale)
-    if chance is None or damage is None:
+    if forecast is None or forecast.winning_faces is None:
         return ""
-    faces = round(float(chance.group("chance")) * DIE_FACES)
-    expected = float(damage.group("damage"))
-    average = "under 1" if expected < 0.5 else f"about {round(expected)}"
-    stops = damage.group("stops")
-    armour = f" less {stops} armour" if stops != "0" else ""
     return (
-        f"{faces} in {DIE_FACES} to hit, {damage.group('dice')}{armour} "
-        f"({average} a hit)"
+        f"{forecast.winning_faces} in {DIE_FACES} to hit, "
+        f"{forecast.damage_expression}{_armour_less(forecast.armour_stops)} "
+        f"({_average_hit(forecast.expected_damage)} a hit)"
     )
+
+
+def _armour_less(stops: int) -> str:
+    """ " less 2 armour", or "" when no armour stops anything, in either
+    profile's odds."""
+    return f" less {stops} armour" if stops else ""
+
+
+def _average_hit(expected_damage: float) -> str:
+    """ "about 4", or "under 1": what a hit does on average, in either
+    profile's odds, from the engine's own expected damage."""
+    return "under 1" if expected_damage < 0.5 else f"about {round(expected_damage)}"
 
 
 def _weapon_phrase(actor: CombatantState) -> str:
@@ -284,65 +138,9 @@ def _close_weapon_phrase(actor: CombatantState) -> str:
     return f"the {actor.weapon.name}" if actor.weapon.hth_usable else "bare hands"
 
 
-def _with_odds(sentence: str, rationale: str) -> str:
-    odds = _odds(rationale)
+def _with_odds(sentence: str, forecast: Forecast | None) -> str:
+    odds = _odds(forecast)
     return f"{sentence}: {odds}" if odds else sentence
-
-
-def _approach(
-    state: BattleState,
-    actor: CombatantState,
-    option: str,
-    target: CombatantState,
-) -> movement.Approach:
-    """Where the engine's own move for ``option`` toward ``target`` would end.
-
-    The engine walks :func:`tarmar_engine.movement.approach_route` at the
-    option's gait (``TurnRunner.move_towards_target``), and its policy prices
-    a CHARGE's reach and words a DODGE's move by that same route
-    (tarmar-engine #37), so the menu reads the route there too rather than
-    judging the board on its own.
-
-    Args:
-        state: The live state the menu was built from.
-        actor: The figure choosing.
-        option: A moving option's key (MOVE, SPRINT, CHARGE, DODGE, or a
-            yielded one).
-        target: The figure it closes on.
-
-    Returns:
-        The engine's approach: the route it would walk and the distance it
-        would end at.
-    """
-    gait = movement.MOVEMENT_GAITS[actions.base_option(option)]
-    allowance = movement.gait_allowance(actor, gait)
-    return movement.approach_route(state, actor, target, allowance)
-
-
-def _stands(
-    state: BattleState,
-    actor: CombatantState,
-    option: str,
-    target: CombatantState,
-) -> bool:
-    """Whether the engine's move for ``option`` toward ``target`` stays put.
-
-    The engine walks nothing when its route is empty: no clear path at the
-    option's gait gets nearer (tarmar-engine #37), or the figure is already
-    beside the target or held where it stands.
-    """
-    return not _approach(state, actor, option, target).route
-
-
-def _charge_reaches(approach: movement.Approach) -> bool:
-    """Whether a Tarmar CHARGE whose jog is ``approach`` reaches its target.
-
-    The policy's own reach test (``tarmar_engine.policy.choose_option``, the
-    ``b`` branch): already adjacent, or the engine's jog along a clear path
-    (:func:`_approach`) ends adjacent. The engine strikes only an adjacent
-    target after the jog and logs "charge fell short" otherwise (issue #56).
-    """
-    return approach.distance <= 1
 
 
 def _ends_from(move: str, distance: int, aimed: str) -> str:
@@ -359,8 +157,8 @@ def _no_attack_charge_line(aimed: str, reason: str) -> str:
 
 def _clear_gait(option: str) -> str:
     """ "clear jog": the move a Tarmar option makes, as :func:`_no_nearer`
-    names it."""
-    return f"clear {movement.MOVEMENT_GAITS[actions.base_option(option)]}"
+    names it, at the engine's gait for it (``movement.option_gait``)."""
+    return f"clear {movement.option_gait(option)}"
 
 
 def _no_nearer(move: str, aimed: str) -> str:
@@ -409,31 +207,34 @@ def _no_step_away(
 
 
 def _mover_line(
+    actor: CombatantState,
     letter: str,
     target: CombatantState | None,
-    allowance: int,
     fatigue: int,
     *,
     stands: bool,
 ) -> tuple[str, str]:
     """A MOVE or SPRINT's sentence and cost (issue #57).
 
-    The move the engine would make: toward the target along its own route,
-    or no move at all when that route is empty (:func:`_stands`), and then no
-    Fatigue either, since the engine charges a gait's Fatigue only for hexes
-    walked. A hex the player picks is walked, and charged, as picked.
+    The move the engine would make: toward the target along its own route
+    (``movement.default_approach``), or no move at all when that route is
+    empty, and then no Fatigue either, since the engine charges a gait's
+    Fatigue only for hexes walked. A hex the player picks is walked, and
+    charged, as picked. The gait and its allowance are the engine's for the
+    option (``movement.option_gait``, ``movement.option_allowance``).
 
     Args:
+        actor: The figure choosing.
         letter: The option's key ("a", "sprint", or a yielded one).
         target: The figure it closes on, or None when none remains.
-        allowance: The hexes the gait covers.
         fatigue: The Fatigue the gait costs.
         stands: Whether the engine's route toward ``target`` is empty.
 
     Returns:
         ``(plain, cost)``, as :func:`_plain_line` gives them.
     """
-    gait = movement.MOVEMENT_GAITS[actions.base_option(letter)]
+    gait = movement.option_gait(letter)
+    allowance = movement.option_allowance(actor, letter)
     fatigue_text = f"{fatigue} Fatigue"
     if target is not None and stands:
         return (
@@ -551,40 +352,33 @@ def _plain_line(
     option = actions.base_option(candidate.letter)
     aimed = target.name if target is not None else ""
     weapon = _weapon_phrase(actor)
-    rationale = candidate.rationale
+    forecast = candidate.forecast
     plain, cost = "", ""
-    # A mover the engine would walk nowhere says so (issue #57).
+    # A mover the engine would walk nowhere says so (issue #57): its default
+    # route toward the target is empty (``movement.default_approach``).
     stands = (
         option in STANDING_MOVERS
         and target is not None
-        and _stands(state, actor, candidate.letter, target)
+        and not movement.default_approach(state, actor, candidate.letter, target).route
     )
     # A charge the engine's jog cannot bring beside its target says so
     # (issue #56): the engine's own row when every enemy is out of reach.
     charge = (
-        _approach(state, actor, candidate.letter, target)
+        movement.default_approach(state, actor, candidate.letter, target)
         if option == "b" and target is not None
         else None
     )
-    falls_short = charge is not None and not _charge_reaches(charge)
+    falls_short = charge is not None and not movement.charge_reaches(charge)
     if option == "a":
         plain, cost = _mover_line(
-            candidate.letter,
-            target,
-            actor.move_run,
-            RUN_FATIGUE_COST,
-            stands=stands,
+            actor, candidate.letter, target, RUN_FATIGUE_COST, stands=stands
         )
     elif option == "sprint":
         plain, cost = _mover_line(
-            candidate.letter,
-            target,
-            actor.move_sprint,
-            SPRINT_FATIGUE_COST,
-            stands=stands,
+            actor, candidate.letter, target, SPRINT_FATIGUE_COST, stands=stands
         )
     elif option == "b" and charge is not None and falls_short:
-        jog = movement.gait_allowance(actor, movement.MOVEMENT_GAITS[option])
+        jog = movement.option_allowance(actor, candidate.letter)
         gait = _clear_gait(candidate.letter)
         plain = _no_attack_charge_line(
             aimed,
@@ -594,10 +388,10 @@ def _plain_line(
         )
     elif option == "b":
         plain = _with_odds(
-            f"Charge {aimed}: jog up to {movement.gait_allowance(actor, 'jog')} "
-            f"hexes and attack "
-            f"with {weapon}",
-            rationale,
+            f"Charge {aimed}: {movement.option_gait(candidate.letter)} up to "
+            f"{movement.option_allowance(actor, candidate.letter)} hexes and "
+            f"attack with {weapon}",
+            forecast,
         )
     elif option == "c":
         plain = f"Dodge: +4 to your Target Number against {DODGE_DEFENDS_AGAINST}"
@@ -606,16 +400,20 @@ def _plain_line(
         elif target is not None:
             plain += f", jogging toward {aimed}"
     elif option == "d":
+        # DROP makes no move toward a target, so ``option_allowance`` refuses
+        # it; its placed move is bounded by the engine's own gait for a
+        # placed DROP (``movement.PLACED_GAITS``, "Jog or less").
+        drop_gait = movement.PLACED_GAITS[option]
         plain = (
-            "Drop prone where you stand, or first jog up to "
-            f"{movement.gait_allowance(actor, 'jog')} hexes to a hex you pick"
+            f"Drop prone where you stand, or first {drop_gait} up to "
+            f"{movement.gait_allowance(actor, drop_gait)} hexes to a hex you pick"
         )
     elif option == "e":
         spares = [spare for spare in actor.spare_weapons if spare.item_id]
         choice = best_weapon(actor, spares)
         plain = f"Ready the {choice.name}" if choice else "Ready another weapon"
     elif option == "f":
-        plain = _with_odds(f"Shoot {aimed} with {weapon}", rationale)
+        plain = _with_odds(f"Shoot {aimed} with {weapon}", forecast)
         if actor.weapon.is_thrown and not actor.weapon.is_missile:
             cost = f"the {actor.weapon.name} leaves your hand"
     elif option in ("g", "p"):
@@ -663,11 +461,11 @@ def _plain_line(
     elif option == actions.COUNTER_OPTION and candidate.counter_mana is not None:
         plain, cost = _counter_line(candidate.counter_mana, target)
     elif option == "j":
-        plain = _with_odds(f"Attack {aimed} with {weapon}", rationale)
+        plain = _with_odds(f"Attack {aimed} with {weapon}", forecast)
     elif option == "k":
         plain = f"Defend: +4 to your Target Number against {DEFEND_DEFENDS_AGAINST}"
     elif option == "l":
-        plain = _with_odds(f"One last shot at {aimed} with {weapon}", rationale)
+        plain = _with_odds(f"One last shot at {aimed} with {weapon}", forecast)
     elif option == "m":
         spares = [
             spare
@@ -680,9 +478,9 @@ def _plain_line(
             cost = f"the {actor.weapon.name} is dropped"
     elif option == "n":
         plain = "Step one hex away instead of attacking"
-        # The engine steps away from the first adjacent enemy, the first of
-        # the enemies an ATTACK reaches (``TurnRunner.disengage_step``).
-        stuck = _no_step_away(state, actor, _legal_targets(state, actor, "j"))
+        # The engine steps away from the first adjacent enemy
+        # (``TurnRunner.disengage_step``).
+        stuck = _no_step_away(state, actor, _adjacent_enemies(state, actor))
         if stuck:
             plain += f": {stuck}"
     elif option == "o":
@@ -694,7 +492,7 @@ def _plain_line(
             cost = f"the {actor.weapon.name} is dropped"
     elif option == "t":
         plain = _with_odds(
-            f"Strike {aimed} in close with {_close_weapon_phrase(actor)}", rationale
+            f"Strike {aimed} in close with {_close_weapon_phrase(actor)}", forecast
         )
     elif option == "u":
         plain = "Try to draw your dagger: 3d6 at or under your DEX"
@@ -824,22 +622,13 @@ def borrowed_mana(actor: CombatantState, candidate: Candidate) -> int:
 
 
 def _base_fields(candidate: Candidate) -> dict:
-    """A candidate's own engine fields, to rebuild it as a described one."""
-    return {
-        "letter": candidate.letter,
-        "name": candidate.name,
-        "score": candidate.score,
-        "rationale": candidate.rationale,
-        "target_id": candidate.target_id,
-        "spell_key": candidate.spell_key,
-        "push_mana": candidate.push_mana,
-        "borrow": candidate.borrow,
-        "anchor_target": candidate.anchor_target,
-        "counter_mana": candidate.counter_mana,
-        "escalate": candidate.escalate,
-        "lifted_bounds": candidate.lifted_bounds,
-        "destination": candidate.destination,
-    }
+    """A candidate's own engine fields, to rebuild it as a described one.
+
+    Every field the engine's ``Candidate`` declares, read from the dataclass
+    itself, so a field the engine adds (``forecast``, tarmar-engine #22) is
+    carried rather than silently dropped from the menu.
+    """
+    return {field.name: getattr(candidate, field.name) for field in fields(Candidate)}
 
 
 def describe(
@@ -876,11 +665,6 @@ def describe(
     )
 
 
-#: The plain die a classic to-hit roll is made with, and how many of them a
-#: roll uses when nothing makes the target harder to hit (Melee p.20).
-CLASSIC_DIE_FACES = 6
-CLASSIC_PLAIN_DICE = 3
-
 #: The classic options that strike a blow.
 _CLASSIC_STRIKES = frozenset(
     {
@@ -914,31 +698,38 @@ class _ClassicChargeBlow:
         struck: The foe it attacks, from the live game, or None when no foe
             is in reach where it ends.
         grapples: Whether that attack is a grapple (bare hands,
-            ``GameState.hth_attack``, settled by the defender's roll) rather
+            ``BlowKind.HAND_TO_HAND``, settled by the defender's roll) rather
             than a weapon's blow.
+        forecast: The weapon blow's forecast from where the charge ends
+            (``GameState.attack_forecast`` on the rehearsal), its facing bonus
+            and a pole's charge die included; None for a grapple or no blow.
     """
 
     path: list[Hex]
     struck: Figure | None
     grapples: bool
+    forecast: AttackForecast | None
 
 
 def _classic_charge_blow(
     game: GameState, figure: Figure, candidate: Candidate
 ) -> _ClassicChargeBlow:
-    """The classic engine's charge, rehearsed: where it moves, whom it strikes.
+    """The classic engine's charge, rehearsed: where it moves, whom it strikes,
+    and what the blow faces from there.
 
-    The engine's own rule, played on a copy of the game (its snapshot
-    contract, ``to_dict``/``from_dict``) so the live one is untouched: the
-    plan the engine enacts for this charge (``classic.policy.plan_for``),
-    applied through its own verbs (``classic.ai.apply``); then the foes the
-    combat phase may strike from where it ends
-    (``GameState.attack_candidates``: a weapon's front hexes and a pole's
-    jab, any hex of a multi-hex foe), and the one the engine's attack
-    declaration picks among them (``classic.ai.queue_attack_for``, which
-    strikes a melee foe with a weapon and grapples with bare hands). A
-    charge may strike a foe other than the one it closes on, or nobody
-    (issue #56).
+    The engine's own rules throughout, played on a copy of the game (its
+    snapshot contract, ``to_dict``/``from_dict``) so the live one is
+    untouched: the plan the engine enacts for this charge
+    (``classic.policy.plan_for``), applied through its own verbs
+    (``classic.ai.apply``); the attack the combat phase would declare from
+    where it ends (``classic.ai.attack_blow``, tarmar-engine #54: a weapon's
+    front hexes and a pole's jab, any hex of a multi-hex foe, a grapple with
+    bare hands); and, for a weapon's blow, the forecast from there
+    (``GameState.attack_forecast``, tarmar-engine #23). This is
+    ``classic.ai.planned_blow``'s rehearsal, made here rather than through it
+    because the forecast must be asked of the same rehearsed board, which
+    ``planned_blow`` keeps to itself. A charge may strike a foe other than the
+    one it closes on, or nobody (issue #56).
 
     Args:
         game: The live game the menu was built from.
@@ -946,53 +737,41 @@ def _classic_charge_blow(
         candidate: Its CHARGE ATTACK option.
 
     Returns:
-        The charge's path, the foe it attacks, and whether it grapples.
+        The charge's path, the foe it attacks, whether it grapples, and the
+        blow's forecast.
 
     Raises:
-        LookupError: if the copy of the game has lost the figure, which the
-            snapshot contract rules out.
+        LookupError: if the copy of the game has lost the figure, or the live
+            game the foe it strikes, which the snapshot contract rules out
+            (as ``classic.ai.planned_blow`` raises).
     """
+    plan = classic_policy.plan_for(game, figure, candidate)
     rehearsal = GameState.from_dict(game.to_dict())
     charger = _classic_figure(rehearsal, figure.uid)
     if charger is None:
         raise LookupError(f"{figure.name} is missing from a copy of the game")
-    plan = classic_policy.plan_for(rehearsal, charger, candidate)
     classic_ai.apply(rehearsal, charger, plan)
-    reach = rehearsal.attack_candidates(charger)
-    grapples = charger.ready_weapon is None
-    foes = reach.hth if grapples else reach.melee
-    if not foes:
-        return _ClassicChargeBlow(list(plan.path), None, grapples)
-    # ``queue_attack_for`` takes a melee foe by ``_best_target`` (lowest ST,
-    # then nearest) and a grapple's by lowest ST alone; the two agree here,
-    # since a grapple is begun only from one hex off
-    # (``GameState._can_initiate_hth``), and ``min`` keeps the first of a tie
-    # in both (smarks/tarmar-engine#54 asks for the engine's own call).
-    blow = classic_ai._best_target(rehearsal, charger, foes)
-    return _ClassicChargeBlow(
-        list(plan.path), _classic_figure(game, blow.uid), grapples
+    blow = classic_ai.attack_blow(rehearsal, charger)
+    if blow is None:
+        return _ClassicChargeBlow(list(plan.path), None, False, None)
+    grapples = blow.kind is BlowKind.HAND_TO_HAND
+    forecast = (
+        None
+        if grapples
+        else _classic_forecast(
+            rehearsal, charger, ClassicOption.CHARGE_ATTACK, blow.target
+        )
     )
+    struck = _classic_figure(game, blow.target.uid)
+    if struck is None:
+        raise LookupError(f"{blow.target.name} is missing from the game")
+    return _ClassicChargeBlow(list(plan.path), struck, grapples, forecast)
 
 
 def _classic_dice(damage: DamageDice) -> str:
     """ "2d6", "1d6+2", "1d6-1": a classic damage expression in the page's words."""
     modifier = f"{damage.modifier:+d}" if damage.modifier else ""
     return f"{damage.count}d{CLASSIC_DIE_FACES}{modifier}"
-
-
-def _classic_hit_chance(game: GameState, needed: int, dice_count: int) -> int:
-    """The chance, in whole percent, that ``dice_count`` d6 hit on ``needed``.
-
-    Every total is put through the engine's own table
-    (``Ruleset.classify_roll``), so the automatic hits and misses count as the
-    engine counts them.
-    """
-    faces = range(1, CLASSIC_DIE_FACES + 1)
-    rolls = list(itertools.product(faces, repeat=dice_count))
-    hits = sum(
-        game.rules.classify_roll(sum(roll), dice_count, needed)[0] for roll in rolls
-    )
-    return round(100 * hits / len(rolls))
 
 
 def _classic_figure(game: GameState, uid: object) -> Figure | None:
@@ -1002,69 +781,55 @@ def _classic_figure(game: GameState, uid: object) -> Figure | None:
     return next((figure for figure in game.figures if figure.uid == uid), None)
 
 
-def _classic_strike(
+def _classic_forecast(
     game: GameState, figure: Figure, option: ClassicOption, target: Figure
-) -> str:
-    """ "10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour",
-    or "" for a figure off the field.
-
-    Read through the classic engine as it stands at the pause, the way
-    ``GameState.queue_attack`` would declare the blow now: the attacker's
-    adjDX with wounds, spells and the situation (``Ruleset.to_hit_number``);
-    a missile's range penalty by megahex, a hurled weapon's by hex, and no
-    facing bonus for a missile; the target's defending or dodging (the
-    four-dice rule); and the armour the blow meets from where the attacker
-    stands. A CHARGE moves before it strikes, so its line leaves out the
-    facing bonus, which depends on where it ends, and counts as a blow in
-    reach.
+) -> AttackForecast | None:
+    """The classic engine's forecast of ``figure``'s weapon blow at ``target``
+    under ``option`` from where both stand (``GameState.attack_forecast``,
+    tarmar-engine #23), or None where there is no to-hit roll to forecast:
+    no ready weapon (bare hands grapple, settled by the defender's roll) or a
+    figure off the field, the two cases the engine refuses.
     """
-    weapon = figure.ready_weapon
-    layout = game.arena.layout
-    if figure.position is None or target.position is None:
-        # Off the field: no line of attack to read odds from.
+    if (
+        figure.ready_weapon is None
+        or figure.position is None
+        or target.position is None
+    ):
+        return None
+    return game.attack_forecast(figure, target, option)
+
+
+def _classic_strike(forecast: AttackForecast | None) -> str:
+    """ "10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a
+    hit)", or "" with no forecast.
+
+    Every figure is the engine's (``AttackForecast``): the adjDX the blow
+    would be declared at, with the situation, range and facing; the dice (4
+    against a defender or a dodger); the chance through the engine's own
+    table of special totals; the weapon's dice and a pole's extra charge
+    dice; the stops of armour, shield, protection and a ready main-gauche's
+    parry (#131); and what a hit takes off on average.
+    """
+    if forecast is None:
         return ""
-    charging = option == ClassicOption.CHARGE_ATTACK
-    missile = weapon is not None and weapon.kind == WeaponKind.MISSILE
-    distance = 1 if charging else game.arena.distance(figure.position, target.position)
-    thrown = weapon is not None and not missile and weapon.throwable and distance > 1
-    ranged = missile or thrown
-    zone = None if charging else attack_zone(layout, figure, target)
-    if missile:
-        range_penalty = game.rules.missile_range_penalty(
-            megahex_distance(layout, figure.position, target.position)
-        )
-    elif thrown:
-        range_penalty = -distance
-    else:
-        range_penalty = 0
-    # Private: the classic engine offers no public forecast yet
-    # (smarks/tarmar-engine#23). These are the modifiers queue_attack applies.
-    situational, _note = game._situational_mods(
-        figure, target, weapon, ranged, is_throw=thrown
-    )
-    needed = game.rules.to_hit_number(
-        figure,
-        zone=zone,
-        ignore_facing=charging or missile,
-        range_penalty=range_penalty,
-        situational=situational,
-    )
-    dice_count = game.rules.attack_dice_count(target, ranged=ranged)
-    chance = _classic_hit_chance(game, needed, dice_count)
     odds = (
-        f"{needed} or less on {dice_count}d{CLASSIC_DIE_FACES} to hit (about {chance}%)"
+        f"{forecast.needed} or less on {forecast.dice_count}d{CLASSIC_DIE_FACES} "
+        f"to hit (about {round(100 * forecast.hit_chance)}%)"
     )
-    if charging:
-        odds += " before any flank or rear bonus"
-    if weapon is None:
-        return odds
-    stopped = game.rules.absorbed(target, zone=zone)
-    armour = f" less {stopped} armour" if stopped else ""
-    # No "about N a hit": what a hit does on average turns on the engine's
-    # special totals (3 triple, 4 double) and a pole weapon's extra dice, and
-    # the engine does not say it yet (smarks/tarmar-engine#23); the studio
-    # does not work it out on its own.
-    return f"{odds}, {_classic_dice(weapon.damage)}{armour}"
+    armour = _armour_less(forecast.armour_stops)
+    # A pole's charge die is its own clause, so the armour after it reads as
+    # coming off the whole: "1d6+1, and 1d6 more for the charge, less 2
+    # armour".
+    extra = (
+        f", and {forecast.extra_dice}d{CLASSIC_DIE_FACES} more for the charge"
+        f"{',' if armour else ''}"
+        if forecast.extra_dice
+        else ""
+    )
+    return (
+        f"{odds}, {_classic_dice(forecast.weapon.damage)}{extra}{armour} "
+        f"({_average_hit(forecast.expected_damage)} a hit)"
+    )
 
 
 def _classic_plain_line(
@@ -1101,9 +866,14 @@ def _classic_plain_line(
     charge_path: list[Hex] = []
     struck: Figure | None = target
     grapples = False
+    forecast: AttackForecast | None = None
     if option == ClassicOption.CHARGE_ATTACK and target is not None:
+        # Forecast from where the charge ends, on its rehearsal.
         blow = _classic_charge_blow(game, figure, candidate)
         charge_path, struck, grapples = blow.path, blow.struck, blow.grapples
+        forecast = blow.forecast
+    elif option in _CLASSIC_STRIKES and target is not None:
+        forecast = _classic_forecast(game, figure, option, target)
     if struck is None and target is not None and target.position is not None:
         reach = f"with no foe in reach of {wielding}"
         reason = (
@@ -1127,7 +897,7 @@ def _classic_plain_line(
             f"{_CLASSIC_GRAPPLE_WORDS}"
         )
     elif struck is not None and target is not None and struck is not target:
-        odds = _classic_strike(game, figure, option, struck)
+        odds = _classic_strike(forecast)
         sentence = (
             f"Charge toward {aimed}: move up to {budget} hexes and attack "
             f"{struck.name} with {wielding}"
@@ -1145,7 +915,7 @@ def _classic_plain_line(
             ClassicOption.MISSILE_ATTACK: f"Shoot {aimed} with {wielding}",
             ClassicOption.ONE_LAST_SHOT: f"One last shot at {aimed} with {wielding}",
         }
-        odds = _classic_strike(game, figure, option, target)
+        odds = _classic_strike(forecast)
         plain = f"{verbs[option]}: {odds}" if odds else verbs[option]
     elif option in (ClassicOption.MOVE, ClassicOption.HALF_MOVE) and stands:
         plain = _stand_line(no_nearer)
@@ -1165,7 +935,7 @@ def _classic_plain_line(
         plain = (
             f"Dodge {how}: missiles and thrown weapons roll "
             f"{dice}d{CLASSIC_DIE_FACES} to hit you, not "
-            f"{CLASSIC_PLAIN_DICE}d{CLASSIC_DIE_FACES}"
+            f"{THREE_DICE}d{CLASSIC_DIE_FACES}"
         )
     elif option == ClassicOption.SHIFT_DEFEND:
         dice = game.rules.resolution.attack_dice_count(
@@ -1174,7 +944,7 @@ def _classic_plain_line(
         plain = (
             f"Shift a hex and defend: blows in melee roll {dice}d"
             f"{CLASSIC_DIE_FACES} to hit you, not "
-            f"{CLASSIC_PLAIN_DICE}d{CLASSIC_DIE_FACES}"
+            f"{THREE_DICE}d{CLASSIC_DIE_FACES}"
         )
     elif option in (ClassicOption.READY_WEAPON, ClassicOption.CHANGE_WEAPONS):
         # The weapon the engine takes up for this option, as it will enact it.
@@ -1235,30 +1005,29 @@ def describe_classic(
     )
 
 
-def player_menu(profile_name: str, state, actor, advice: Decision) -> list[Candidate]:
+def player_menu(profile_name: str, state, actor) -> list[Candidate]:
     """The menu a seated player chooses from, every option described.
 
-    For a Tarmar figure, the engine's menu with each attack aimed at every
-    legal target (:func:`every_target`) and each option given its plain line;
-    for a classic figure, the engine's menu with each option described from
-    the classic state (:func:`describe_classic`, issue #890). Either way the
-    AI's own pick is marked, since the widened menu may hold an option that scores
-    above it. Every entry is a :class:`DescribedCandidate`; the list is typed
-    as the engine's ``Candidate`` because it becomes a ``Decision``'s.
+    Built here, from the live state, through the profile's own AI with every
+    target (:func:`battle.profiles.decider_for` with ``every_target``), the
+    one place a policy is paired with its magic rules: for a Tarmar figure
+    the engine's every-target menu (tarmar-engine #21), each option given its
+    plain line (:func:`describe`); for a classic figure, the engine's own
+    menu with each option described from the classic state
+    (:func:`describe_classic`, issue #890). Either way the AI's own pick, the
+    decision's ``chosen``, is marked, since the menu may hold an option aimed
+    elsewhere that scores above it. Every entry is a
+    :class:`DescribedCandidate`; the list is typed as the engine's
+    ``Candidate`` because it becomes a ``Decision``'s.
 
     Args:
         profile_name: The battle's rules profile.
         state: The live state the menu was built from.
         actor: The figure choosing.
-        advice: The profile's AI decision for that figure.
     """
-    tarmar = profile_name == TARMAR_PROFILE
-    if tarmar:
-        return [
-            describe(state, actor, candidate, ai_choice=candidate is advice.chosen)
-            for candidate in every_target(state, actor, advice.candidates)
-        ]
+    advice = profiles.decider_for(profile_name, every_target=True)(state, actor)
+    described = describe if profile_name == TARMAR_PROFILE else describe_classic
     return [
-        describe_classic(state, actor, candidate, ai_choice=candidate is advice.chosen)
+        described(state, actor, candidate, ai_choice=candidate is advice.chosen)
         for candidate in advice.candidates
     ]
