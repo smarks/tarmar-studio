@@ -667,6 +667,120 @@ describe('Luck (issue #861)', () => {
         expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
+    test('a press on the form a refetch put in place sends no second spend (#105)', async () => {
+        // A Game Master is let past once per level, so the page is his guard:
+        // a turn's frame fetched the tab again while his spend was out.
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        let answerSpend;
+        global.fetch.mockImplementation((url) => {
+            if (url === '/tarmar/gm/sessions/5/luck/') {
+                return new Promise((resolve) => { answerSpend = resolve; });
+            }
+            return htmlResponse(`<p id="gm-panel-characters-error" hidden></p><div id="gm-sheets">
+                <form class="gm-luck-form" data-luck-url="/tarmar/gm/sessions/5/luck/" data-character-id="3">
+                    <input type="text" class="gm-luck-roll" value="">
+                    <button type="submit">Spend Luck</button>
+                </form></div>`);
+        });
+
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await flushPromises();
+        document.dispatchEvent(new CustomEvent('gm-stream-procedure', { detail: {} }));
+        await flushPromises();
+        await flushPromises();
+        const fresh = document.querySelector('.gm-luck-form');
+        expect(fresh).not.toBe(form);
+        // The fresh control is held too, and a press on it sends nothing.
+        expect(fresh.querySelector('button').disabled).toBe(true);
+        fresh.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await flushPromises();
+
+        answerSpend({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, note: 'spent' }) });
+        await flushPromises();
+        await flushPromises();
+        await flushPromises();
+
+        const spends = global.fetch.mock.calls.filter(([url]) => url === '/tarmar/gm/sessions/5/luck/');
+        expect(spends).toHaveLength(1);
+        expect(document.querySelector('.gm-luck-form button').disabled).toBe(false);
+    });
+
+    /** The Luck endpoint's address, as addLuckForm renders it. */
+    const LUCK_URL = '/tarmar/gm/sessions/5/luck/';
+
+    /** How many spends have reached the server. */
+    function spendsSent() {
+        return global.fetch.mock.calls.filter(([url]) => url === LUCK_URL).length;
+    }
+
+    test.each([
+        ['a refusal in the body', () => jsonResponse({ ok: false, error: 'No Luck left' })],
+        ['a 4xx', () => jsonResponse(
+            { error: 'Wren has spent all 2 of this session\'s Luck' },
+            { ok: false, status: 400, statusText: 'Bad Request' },
+        )],
+        ['a network error', () => Promise.reject(new TypeError('Load failed'))],
+    ])('a spend that ends in %s frees the control for another press', async (_, answer) => {
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        global.fetch.mockReturnValueOnce(answer());
+
+        expect(await panelCharacters.spendLuck(form)).toBe(false);
+
+        expect(form.querySelector('button').disabled).toBe(false);
+        global.fetch.mockReturnValueOnce(answer());
+        await panelCharacters.spendLuck(form);
+        expect(spendsSent()).toBe(2);
+    });
+
+    test('a spend whose answer throws still frees the control', async () => {
+        // A JSON body of null: reading its fields throws out of post().
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        global.fetch.mockReturnValueOnce(jsonResponse(null));
+
+        await expect(panelCharacters.spendLuck(form)).rejects.toThrow(TypeError);
+
+        expect(form.querySelector('button').disabled).toBe(false);
+        global.fetch.mockReturnValueOnce(jsonResponse({ ok: false, error: 'No Luck left' }));
+        await panelCharacters.spendLuck(form);
+        expect(spendsSent()).toBe(2);
+    });
+
+    test('a button the server rendered disabled stays so once the spend ends', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        const button = form.querySelector('button');
+        button.disabled = true;
+        global.fetch.mockReturnValueOnce(jsonResponse({ ok: false, error: 'No Luck left' }));
+
+        await panelCharacters.spendLuck(form);
+
+        expect(button.disabled).toBe(true);
+        expect('renderedDisabled' in button.dataset).toBe(false);
+    });
+
+    test('another character\'s Luck is not held by this one\'s spend', async () => {
+        setUpDom({ sessionId: 5, live: true });
+        loadTab();
+        const form = addLuckForm();
+        document.getElementById('gm-sheets').insertAdjacentHTML('beforeend', `
+            <form class="gm-luck-form" data-luck-url="/tarmar/gm/sessions/5/luck/" data-character-id="4">
+                <button type="submit">Spend Luck</button>
+            </form>`);
+        global.fetch.mockReturnValueOnce(new Promise(() => {}));
+
+        panelCharacters.spendLuck(form);
+
+        expect(form.querySelector('button').disabled).toBe(true);
+        expect(document.querySelector('[data-character-id="4"] button').disabled).toBe(false);
+    });
+
     test('a refusal stays in the tab and nothing is refetched', async () => {
         setUpDom({ sessionId: 5, live: true });
         loadTab();
