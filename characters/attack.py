@@ -34,6 +34,7 @@ from . import combat, dice
 from .constants import MAX_ARMOR_STOPS
 from .equipment import get_item, get_shield_bonus
 from .equipment_rules import equipment_rules
+from .services import append_dice_log
 from .skill_checks import injury_penalty, unconscious_refusal
 from .weapon_skill import resolve_weapon_skill
 
@@ -184,13 +185,16 @@ def _roll_damage(roller, expression, multiplier, damage_mod):
     sheet and the board agree. The item's own ``damage_mod`` is likewise added
     once.
 
-    Returns ``(rolls, raw_total, log_lines)``. ``rolls`` is the flat list of
-    individual dice across every repetition, so the panel can show what was
-    actually thrown on a crit. A multiplier of 0 (a miss) rolls nothing.
+    Returns ``(rolls, raw_total, log_lines, rolled)``. ``rolls`` is the flat
+    list of individual dice across every repetition, so the panel can show
+    what was actually thrown on a crit. ``rolled`` is each repetition's
+    ``(label, dice)``, the dice in the dice log's shape, for the character's
+    dice log (issue #147). A multiplier of 0 (a miss) rolls nothing.
     """
     rolls: list[int] = []
     raw_total = 0
     log_lines: list[str] = []
+    rolled: list[tuple[str, str]] = []
     dice_count, dice_sides, expression_modifier = dice.parse_dice_expression(expression)
     dice_only = expression if expression_modifier == 0 else f"{dice_count}d{dice_sides}"
     for repetition in range(multiplier):
@@ -207,11 +211,12 @@ def _roll_damage(roller, expression, multiplier, damage_mod):
             else ""
         )
         log_lines.append(f"{label} {log}{note}")
+        rolled.append((label, log))
     if multiplier:
         raw_total += damage_mod
         if damage_mod:
             log_lines.append(f"weapon damage modifier: {damage_mod:+d}")
-    return rolls, max(0, raw_total), log_lines
+    return rolls, max(0, raw_total), log_lines, rolled
 
 
 class AttackRoller(Protocol):
@@ -238,6 +243,9 @@ def resolve(character, params, roller: AttackRoller | ModuleType = dice) -> dict
             function the battle board seats a fighter with (issue #753).
         roller: Anything exposing ``roll_d20_logged``, ``roll_d6_logged`` and
             ``roll_expression_logged``. Defaults to :mod:`characters.dice`.
+
+    Every die thrown is added to ``character.dice_log`` (issue #147), which
+    the caller saves; nothing else on the character changes.
 
     Returns:
         A dict with ``weapon``, ``defender``, ``target_number``, ``to_hit``,
@@ -318,29 +326,34 @@ def resolve(character, params, roller: AttackRoller | ModuleType = dice) -> dict
         fumble_roll=fumble_die,
     )
 
+    # The panel's lines read each die as its face ("attack 1d20: 17 +5 = 22
+    # vs TN 19 -> hit"); the character's dice log keeps the roller's own
+    # record of it (below, issue #147).
+    d20_face = f"{dice.D20_DICE}: {{face}}"
     injured_note = f" (includes {injured:+d} injured)" if injured else ""
     dice_log = [
-        f"attack {attack_log} {total_bonus:+d}{injured_note} = {outcome['total']} "
-        f"vs TN {total_target_number} -> {outcome['outcome']}"
+        f"attack {d20_face.format(face=attack_die)} {total_bonus:+d}{injured_note} "
+        f"= {outcome['total']} vs TN {total_target_number} -> {outcome['outcome']}"
     ]
     confirm = None
     if outcome["confirm"] is not None:
         confirm = dict(outcome["confirm"], log=confirm_log)
         dice_log.append(
-            f"confirm {confirm_log} {total_bonus:+d} = {confirm['total']} "
+            f"confirm {d20_face.format(face=confirm_die)} {total_bonus:+d} "
+            f"= {confirm['total']} "
             f"vs TN {total_target_number} -> "
             f"{'confirmed' if confirm['hit'] else 'not confirmed'}"
         )
     fumble = None
     if outcome["fumble_detail"] is not None:
         fumble = dict(outcome["fumble_detail"], log=fumble_log)
-        dice_log.append(f"fumble {fumble_log} -> {fumble['label']}")
+        dice_log.append(f"fumble {dice.D6_DICE}: {fumble_die} -> {fumble['label']}")
 
     # --- Damage -----------------------------------------------------------
     multiplier = outcome["damage_multiplier"]
     # Guaranteed parseable: _selected_weapon refused anything else.
     damage_expression = item_data["damage"]
-    damage_rolls, raw_total, damage_log = _roll_damage(
+    damage_rolls, raw_total, damage_log, damage_dice = _roll_damage(
         roller, damage_expression, multiplier, weapon_damage_mod
     )
     dice_log.extend(damage_log)
@@ -353,11 +366,24 @@ def resolve(character, params, roller: AttackRoller | ModuleType = dice) -> dict
     if multiplier:
         dice_log.append(f"armour: {raw_total} - {applied_stops} stops = {final_damage}")
 
+    # Every die the swing threw, in the character's dice log (issue #147), as
+    # the sheet's other rolls keep theirs, each as the roller logged it; the
+    # caller saves it.
+    weapon_name = item_data.get("name", attack_weapon_id)
+    rolled = [(dice.ATTACK_TO_HIT_PART, attack_log)]
+    if confirm_log is not None:
+        rolled.append((dice.ATTACK_CONFIRM_PART, confirm_log))
+    if fumble_log is not None:
+        rolled.append((dice.ATTACK_FUMBLE_PART, fumble_log))
+    for part, rolled_dice in [*rolled, *damage_dice]:
+        label = dice.ATTACK_LOG_LABEL.format(weapon=weapon_name, part=part)
+        append_dice_log(character, dice.dice_log_line(label, rolled_dice))
+
     result = {
         "weapon": {
             "index": weapon_index,
             "item_id": attack_weapon_id,
-            "name": item_data.get("name", attack_weapon_id),
+            "name": weapon_name,
             "weapon_class": weapon_class,
             "damage_expression": damage_expression,
             "str_req": item_data.get("str_req"),

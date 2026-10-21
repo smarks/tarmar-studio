@@ -825,7 +825,8 @@ class Character(models.Model):
     # provenance_recorded, for the same reason.
     wealth_recorded = models.BooleanField(default=True, db_default=True)
 
-    # Log of all dice rolls made during character creation
+    # Every die the server rolls for the character off the battle board
+    # (services.append_dice_log says which, issue #147).
     dice_log = models.TextField(blank=True, default="")
 
     # Skills data

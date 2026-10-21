@@ -417,7 +417,8 @@ class DiceExpressionTest(SimpleTestCase):
         with patch("characters.dice.random.randint", return_value=14):
             result, log = roll_d20_logged()
         self.assertEqual(result, 14)
-        self.assertEqual(log, "d20: 14")
+        # The dice log's one shape (issue #147).
+        self.assertEqual(log, "1d20: [14] = 14")
 
 
 class DiceInTextPatternTest(SimpleTestCase):

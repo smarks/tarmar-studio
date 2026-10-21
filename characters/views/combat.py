@@ -24,7 +24,7 @@ from .. import attack
 from ..equipment_service import validate_equipment_index
 from ..models import MAX_COMBAT_LOG_ENTRIES
 from .access import edit_denied, locked_character_or_404
-from .characters import _log_character_event
+from .characters import _log_character_event, sheet_repaint
 
 
 @login_required
@@ -37,7 +37,9 @@ def character_resolve_attack(request, pk):
     given and derives nothing. The resolved attack is appended to
     ``character.combat_log`` so the result survives a reload — a panel that
     forgot its own last roll would be transient UI, which this project's rules
-    forbid (``static/js/notify.js``).
+    forbid (``static/js/notify.js``). The dice go into ``character.dice_log``
+    (issue #147), and the answer carries :func:`sheet_repaint`, so the
+    sheet's Dice Log shows them without a reload.
     """
     data, err = _parse_json_body(request)
     if err:
@@ -88,7 +90,7 @@ def character_resolve_attack(request, pk):
         )
         entries.append(entry)
         character.combat_log = entries[-MAX_COMBAT_LOG_ENTRIES:]
-        character.save(update_fields=["combat_log"])
+        character.save(update_fields=["combat_log", "dice_log"])
 
     _log_character_event(request, character, "ATTACK_RESOLVE", result["weapon"]["name"])
 
@@ -100,5 +102,8 @@ def character_resolve_attack(request, pk):
             "combat_log_entry_html": render_to_string(
                 "characters/_combat_log_entry.html", {"entry": entry}
             ),
+            # The dice log the swing added to, and the rest of the sheet a
+            # change repaints (issue #147).
+            **sheet_repaint(character, request.user),
         }
     )

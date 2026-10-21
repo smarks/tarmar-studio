@@ -961,8 +961,8 @@ runs.
     {% endif %}
 
     {% comment %}Rendered always and hidden while empty: a roll made without a
-    reload (Fatigue, literacy) writes the log, and its response carries the log
-    back (issue #792).{% endcomment %}
+    reload (Fatigue, literacy, a skill check, an attack) writes the log, and its
+    response carries the log back (issues #792, #147).{% endcomment %}
     <div id="dice-log" class="stats-section dice-log"{% if not character.dice_log %} hidden{% endif %}>
         <h2>Dice Roll Log</h2>
         <pre id="dice-log-text">{{ character.dice_log }}</pre>

@@ -30,6 +30,7 @@ const {
 } = require('./fixtures');
 const { startCoverage } = require('./coverage');
 const { pinDice } = require('./dice');
+const { diceLogLine } = require('./dice-log');
 const { runDjangoShell } = require('./django');
 const { refusal, gameMasterCallNote } = require('./refusals');
 const { loadedSkillRules } = require('./skill-rules');
@@ -219,9 +220,18 @@ test.describe('Sheet mechanics', () => {
         // DEX 16 is +3 and Stealth II is +2; no difficulty, so no outcome,
         // only a natural named if the dice made one.
         await expect(result).toContainText(/^stealth: 2d6 \[\d, \d\] = \d+ \+3 DEX \(16\) \+2 level = \d+( \(natural (12|2)\))?$/);
+        // The dice join the character's dice log on this page (#147), the
+        // same faces the line shows.
+        const [, faces, diceTotal] = (await result.textContent()).match(/2d6 \[(\d, \d)\] = (\d+)/);
+        const logged = diceLogLine(
+            'SKILL_CHECK_LOG_LABEL', { skill: 'stealth' }, '2d6', faces.split(', ').map(Number), Number(diceTotal),
+        );
+        await expect(page.locator('#dice-log')).toBeVisible();
+        await expect(page.locator('#dice-log-text')).toContainText(logged);
 
         await page.reload();
         await expect(page.locator('#recent-changes')).toContainText('stealth check: 2d6');
+        await expect(page.locator('#dice-log-text')).toContainText(logged);
     });
 
     test('#70: the check rolls the canon\'s dice and its natural success succeeds', async ({ page }) => {

@@ -33,7 +33,7 @@ function attackPayload(overrides = {}) {
             total: 5,
         },
         attack_roll: {
-            die: 17, log: 'd20: 17', total: 22,
+            die: 17, log: '1d20: [17] = 17', total: 22,
             outcome: 'hit', hit: true, critical: false, fumble: false,
         },
         confirm: null,
@@ -49,7 +49,7 @@ function attackPayload(overrides = {}) {
         // so reaches_body is false here — see the dedicated severe-critical
         // test below for the true case.
         reaches_body: false,
-        dice_log: ['attack d20: 17 +5 = 22 vs TN 19 -> hit', 'damage 2d6-2: [4, 3] = 7'],
+        dice_log: ['attack 1d20: 17 +5 = 22 vs TN 19 -> hit', 'damage 2d6-2: [4, 3] = 7'],
         ...overrides,
     };
 }
@@ -239,7 +239,7 @@ describe('rendering', () => {
 
     test('renders the confirmation line on a confirmed severe critical', async () => {
         const payload = attackPayload({
-            confirm: { die: 18, log: 'd20: 18', total: 23, hit: true },
+            confirm: { die: 18, log: '1d20: [18] = 18', total: 23, hit: true },
             severe: true,
             bleeding: true,
             // Only a severe critical reaches Body (issue #293).
@@ -258,7 +258,7 @@ describe('rendering', () => {
 
     test('says so when the confirmation fails', async () => {
         const payload = attackPayload({
-            confirm: { die: 2, log: 'd20: 2', total: 7, hit: false },
+            confirm: { die: 2, log: '1d20: [2] = 2', total: 7, hit: false },
         });
         await loadPanel({ response: jsonResponse({ success: true, attack: payload }) });
         await resolve();
@@ -267,7 +267,7 @@ describe('rendering', () => {
 
     test('renders the fumble subtable result and its effect', async () => {
         const payload = attackPayload({
-            fumble: { die: 6, log: '1d6: 6', key: 'weapon_stress', label: 'Weapon takes stress', effect: 'Breaks on a second fumble' },
+            fumble: { die: 6, log: '1d6: [6] = 6', key: 'weapon_stress', label: 'Weapon takes stress', effect: 'Breaks on a second fumble' },
         });
         payload.attack_roll.outcome = 'fumble';
         payload.damage.multiplier = 0;
@@ -278,7 +278,7 @@ describe('rendering', () => {
 
     test('a fumble band with no printed effect renders no parenthetical', async () => {
         const payload = attackPayload({
-            fumble: { die: 4, log: '1d6: 4', key: 'drop_weapon', label: 'Drop weapon', effect: '' },
+            fumble: { die: 4, log: '1d6: [4] = 4', key: 'drop_weapon', label: 'Drop weapon', effect: '' },
         });
         await loadPanel({ response: jsonResponse({ success: true, attack: payload }) });
         await resolve();
@@ -287,7 +287,7 @@ describe('rendering', () => {
 
     test('a miss shows no damage rows at all', async () => {
         const payload = attackPayload();
-        payload.attack_roll = { die: 3, log: 'd20: 3', total: 8, outcome: 'miss', hit: false, critical: false, fumble: false };
+        payload.attack_roll = { die: 3, log: '1d20: [3] = 3', total: 8, outcome: 'miss', hit: false, critical: false, fumble: false };
         payload.damage = { rolls: [], multiplier: 0, raw_total: 0, weapon_mod: 0, stops: 3, applied_stops: 3, hybrid_bypass: false, final: 0 };
         payload.reaches_body = false;
         await loadPanel({ response: jsonResponse({ success: true, attack: payload }) });
@@ -306,7 +306,7 @@ describe('rendering', () => {
 
     test('a hostile weapon name is text, never markup', async () => {
         const payload = attackPayload({
-            fumble: { die: 1, log: '1d6: 1', key: 'off_balance', label: '<img src=x onerror=alert(1)>', effect: '' },
+            fumble: { die: 1, log: '1d6: [1] = 1', key: 'off_balance', label: '<img src=x onerror=alert(1)>', effect: '' },
         });
         await loadPanel({ response: jsonResponse({ success: true, attack: payload }) });
         await resolve();
@@ -400,5 +400,32 @@ describe('Recent attacks (issue #792)', () => {
         await resolve();
         expect(document.querySelectorAll('#combat-log-list li')).toHaveLength(0);
         expect(document.querySelector('.no-combat-log').hidden).toBe(false);
+    });
+});
+
+describe('The dice log (issue #147)', () => {
+    afterEach(() => {
+        delete global.paintSheet;
+    });
+
+    test("a resolved attack hands the answer to the sheet's painter, which repaints the dice log", async () => {
+        const answer = { success: true, attack: attackPayload(), dice_log: 'Attack with Saber, to hit: 1d20: [17] = 17' };
+        global.paintSheet = jest.fn();
+        await loadPanel({ response: jsonResponse(answer) });
+        await resolve();
+        expect(global.paintSheet).toHaveBeenCalledWith(answer);
+    });
+
+    test('a refused attack paints nothing', async () => {
+        global.paintSheet = jest.fn();
+        await loadPanel({ response: jsonResponse({ success: false, error: 'not complete' }, { ok: false }) });
+        await resolve();
+        expect(global.paintSheet).not.toHaveBeenCalled();
+    });
+
+    test('the panel stands alone where the sheet painter is not loaded', async () => {
+        await loadPanel();
+        await resolve();
+        expect(document.getElementById('attack-result').hidden).toBe(false);
     });
 });
