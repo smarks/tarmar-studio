@@ -3,9 +3,11 @@ Why a record-writing fight will not advance (issue #842), and the Game
 Master's control that takes the pools from the records. Rendered inside
 _arena_advance.html's #battle-stale-slot on load, and returned as stale_html
 by an advance the server refused, which battle.js puts in the same slot, so
-the page carries one copy of this markup.
+the page carries one copy of this markup. battle.js repaints it only when
+data-record (views.advance_control's stale_record) changes, never because
+the CSRF token in a fresh render differs (#134).
 {% endcomment %}
-<p class="battle-stale-pools" id="battle-stale-pools" role="status">{{ advance.stale }}.</p>
+<p class="battle-stale-pools" id="battle-stale-pools" role="status" data-record="{{ advance.stale_record }}">{{ advance.stale }}.</p>
 {% if advance.resnapshot_url %}
 <form method="post" action="{{ advance.resnapshot_url }}" class="battle-resnapshot-form">
     {% csrf_token %}

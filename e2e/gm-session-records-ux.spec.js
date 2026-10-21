@@ -212,6 +212,9 @@ run_actions(session, {'action': 'record_npc', 'name': 'Brannoc', 'where': 'the w
         await expect(rulings).toHaveCount(1);
         await expect(rulings.first()).toContainText('critical hits: a natural 20 just crits');
         await expect(rulings.first()).toContainText(`Set by hand by ${TEST_ADMIN.username}`);
+        // The refetch has landed and the add form is free again: a hold left
+        // on its key would keep it disabled (#142).
+        await expect(campaign.locator('#gm-add-ruling button[type="submit"]')).toBeEnabled();
 
         // A wrong "where", corrected.
         const brannoc = campaign.locator('li[data-entity-id]', { hasText: 'Brannoc' });

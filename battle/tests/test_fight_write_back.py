@@ -15,6 +15,7 @@ import json
 from unittest import mock
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle import control, profiles
 from battle.engine.state import BattleState
@@ -1054,3 +1055,34 @@ class StaleNoticeOnEveryPayloadTest(BaseTestCase):
         self.assertIn('id="battle-stale-pools"', payload["stale_html"])
         self.assertIn('id="resnapshot-pools"', payload["stale_html"])
         self.assertEqual(payload["advance"]["label"], "Pools changed on the records")
+
+    def test_the_notice_carries_a_key_that_holds_still_between_polls(self):
+        """#134: the notice's HTML changes on every render, its key does not.
+
+        Django masks the form's CSRF token afresh each render, so battle.js
+        compares the notice's ``data-record`` instead of its HTML.
+        """
+        character_services.record_fight(
+            FightReport(
+                character_id=self.character.pk, fight="Elsewhere", turn=1, body_lost=5
+            )
+        )
+        Battle.objects.filter(pk=self.battle.pk).update(status=Battle.STATUS_AWAITING)
+
+        first, second = self.poll(), self.poll()
+
+        self.assertNotEqual(first["stale_html"], second["stale_html"])
+        self.assertEqual(
+            first["advance"]["stale_record"], second["advance"]["stale_record"]
+        )
+        self.assertEqual(
+            json.loads(first["advance"]["stale_record"]),
+            {
+                "moved": ["Aldwin"],
+                "resnapshot_url": reverse("battle:resnapshot", args=[self.battle.pk]),
+            },
+        )
+        self.assertIn(
+            f'data-record="{escape(first["advance"]["stale_record"])}"',
+            first["stale_html"],
+        )

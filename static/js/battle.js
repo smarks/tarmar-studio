@@ -1928,6 +1928,18 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
+     * The stale-pools notice's record within ``container`` (#134): its
+     * ``data-record``, or null when there is no notice.
+     *
+     * @param {ParentNode} container
+     * @returns {string|null}
+     */
+    function staleRecord(container) {
+        const notice = container.querySelector('#battle-stale-pools');
+        return notice ? (notice.dataset.record || '') : null;
+    }
+
+    /**
      * The ruling panels a payload's ``rulings_html`` changes (#867, #37).
      *
      * The server renders each Game Master's ruling panel with its own
@@ -2030,19 +2042,50 @@ if (typeof module !== 'undefined' && module.exports) {
         const staleSlot = byId('battle-stale-slot');
 
         /**
-         * Show the stale-pools notice the server rendered, or clear it (#842).
-         * The server renders it from the advance endpoint or a poll, whose
-         * own path the Game Master's form would otherwise return to, so the
-         * form is pointed back at this page (the battle's or the GM chat's).
+         * Whether ``html``, a stale-pools notice the server rendered (or
+         * ``""`` for none), differs from the one in the slot. A poll that
+         * brings a new one -- the records moved while a player's move is
+         * awaited -- counts as a change (#892); the notice's data-record
+         * (views.advance_control's stale_record) decides it, never the HTML,
+         * whose CSRF token is masked afresh on every render, so the Game
+         * Master's control is not replaced under the pointer each poll (#134).
          */
-        // The notice last rendered, so a poll that brings a new one -- the
-        // records moved while a player's move is awaited -- counts as a
-        // change (#892).
-        let lastStaleHtml = staleSlot ? staleSlot.innerHTML.trim() : '';
+        function staleChanged(html) {
+            if (!staleSlot || typeof html !== 'string') { return false; }
+            return staleRecord(staleFragment(html)) !== staleRecord(staleSlot);
+        }
+
+        /** The notice ``html`` as nodes, not yet on the page. */
+        function staleFragment(html) {
+            const holder = document.createElement('template');
+            holder.innerHTML = html.trim();
+            return holder.content;
+        }
+
+        /**
+         * Show the stale-pools notice the server rendered, or clear it (#842).
+         * A notice whose record is the one shown keeps its nodes, so the
+         * Game Master's control is not replaced under the pointer (#134),
+         * and takes the fresh render's hidden fields: its CSRF token is the
+         * newest, should the Game Master have signed in again elsewhere and
+         * the secret turned over. The server renders it from the advance
+         * endpoint or a poll, whose own path the Game Master's form would
+         * otherwise return to, so the form is pointed back at this page (the
+         * battle's or the GM chat's).
+         */
         function renderStale(html) {
-            if (!staleSlot) { return; }
-            staleSlot.innerHTML = html || '';
-            lastStaleHtml = (html || '').trim();
+            if (!staleSlot || typeof html !== 'string') { return; }
+            const fresh = staleFragment(html);
+            if (staleRecord(fresh) === staleRecord(staleSlot)) {
+                fresh.querySelectorAll('input[type="hidden"][name]').forEach((input) => {
+                    const kept = staleSlot.querySelector(
+                        `input[type="hidden"][name="${input.name}"]`
+                    );
+                    if (kept) { kept.value = input.value; }
+                });
+            } else {
+                staleSlot.replaceChildren(fresh);
+            }
             const back = staleSlot.querySelector('input[name="next"]');
             if (back) {
                 back.value = `${window.location.pathname}${window.location.search}`;
@@ -2399,10 +2442,15 @@ if (typeof module !== 'undefined' && module.exports) {
                 || (data.events || []).length > 0
                 || seatsAndPause(data.seats || seats, data.pending || null)
                     !== lastSeatsAndPause
-                || (typeof data.stale_html === 'string'
-                    && data.stale_html.trim() !== lastStaleHtml)
+                || staleChanged(data.stale_html)
                 || rulingPanelChanges(data.rulings_html, root).length > 0;
-            if (changed) { applyBattleResponse(data); }
+            if (changed) {
+                applyBattleResponse(data);
+            } else {
+                // Nothing to repaint, but the notice's form takes the fresh
+                // token (#134 review).
+                renderStale(data.stale_html);
+            }
         }
 
         drawArena();

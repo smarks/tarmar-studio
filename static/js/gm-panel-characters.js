@@ -135,18 +135,22 @@ if (typeof module !== 'undefined' && module.exports) {
    * @returns {Promise<boolean>} Whether the attach was recorded.
    */
   async function attachCharacter(characterId) {
+    // One attach at a time (issue #142): with no session yet each attach
+    // makes one, so a double press made two.
     const sessionId = currentSessionId();
-    const data = await post(config.attachUrl, {
-      session_id: sessionId,
-      character_id: Number(characterId),
-    });
-    if (!data) return false;
-    if (data.session_id !== sessionId) {
-      root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
+    return root.holdRequest(attachKey(), async () => {
+      const data = await post(config.attachUrl, {
+        session_id: sessionId,
+        character_id: Number(characterId),
+      });
+      if (!data) return false;
+      if (data.session_id !== sessionId) {
+        root.pageNavigation.go(`${root.location.pathname}?session=${data.session_id}`);
+        return true;
+      }
+      await showAttachedChange(data);
       return true;
-    }
-    await showAttachedChange(data);
-    return true;
+    }, paintPageHeld);
   }
 
   /**
@@ -160,62 +164,80 @@ if (typeof module !== 'undefined' && module.exports) {
       showError('No active session.');
       return false;
     }
-    const data = await post(config.detachUrl, {
-      session_id: sessionId,
-      character_id: Number(characterId),
-    });
-    if (!data) return false;
-    await showAttachedChange(data);
-    return true;
+    // One detach per sheet at a time (issue #142's sweep): the server takes
+    // a second as a no-op, but it would fetch the tab twice over.
+    return root.holdRequest(detachKey(characterId), async () => {
+      const data = await post(config.detachUrl, {
+        session_id: sessionId,
+        character_id: Number(characterId),
+      });
+      if (!data) return false;
+      await showAttachedChange(data);
+      return true;
+    }, paintPageHeld);
   }
 
   /** A character's Luck control (gm/_luck_control.html). */
   const LUCK_FORM = '.gm-luck-form';
+  /** The attach picker (gm/_panel_characters_body.html). */
+  const ATTACH_FORM = '#gm-character-picker';
+  /** A sheet's detach button (gm/_panel_sheet.html). */
+  const DETACH_BUTTON = '.gm-sheet-detach';
 
   /**
-   * The Luck spends on their way, by session and character. Held here, on
-   * the panel, rather than on the form: a turn's refetch replaces the form
-   * while a spend is out, and a press on the fresh one used to send a second
-   * spend (issue #105). The server holds a player to once per level either
-   * way; a Game Master may spend past it, so for him the page is the guard.
+   * The keys this tab's requests are held under while they are on their way
+   * (api.js's holdRequest), by session and character: a turn's refetch
+   * replaces the controls while one is out, and a press on the fresh one
+   * used to send a second -- a Luck spend (issue #105), or an attach that,
+   * with no session yet, made a second session (issue #142). The server
+   * holds a player to one Luck use per level either way; a Game Master may
+   * spend past it, so for him the page is the guard.
    */
-  const spendingLuck = new Set();
-
-  /**
-   * The key ``form``'s spend is held under while it is on its way.
-   * @param {HTMLFormElement} form - A `.gm-luck-form`.
-   * @returns {string} The session and the character, as one key.
-   */
-  function luckKey(form) {
-    return `${currentSessionId()}:${form.getAttribute('data-character-id')}`;
+  function luckKey(characterId) {
+    return `luck:${currentSessionId()}:${characterId}`;
   }
 
-  /**
-   * Where a held button keeps the state the server rendered it in, so
-   * freeing it puts that back rather than switching it on (as
-   * battle-setup.js's guard keeps its renderedDisabled).
-   */
-  const RENDERED_DISABLED = 'renderedDisabled';
+  function attachKey() {
+    return `attach:${currentSessionId()}`;
+  }
+
+  function detachKey(characterId) {
+    return `detach:${currentSessionId()}:${characterId}`;
+  }
+
+  /** Each held control: where it is, its request's key, and its buttons. */
+  const HELD_CONTROLS = [
+    {
+      selector: LUCK_FORM,
+      key: (form) => luckKey(form.getAttribute('data-character-id')),
+      buttons: (form) => root.submitButtonsOf(form),
+    },
+    { selector: ATTACH_FORM, key: attachKey, buttons: (form) => root.submitButtonsOf(form) },
+    {
+      selector: DETACH_BUTTON,
+      key: (button) => detachKey(button.getAttribute('data-character-id')),
+      buttons: (button) => [button],
+    },
+  ];
 
   /**
-   * Hold the button of every Luck control in ``scope`` whose spend is on its
+   * Hold the button of every control in ``scope`` whose request is on its
    * way, and free the rest to the state they were rendered in: what the tab
-   * shows of a spend, however often it has been fetched again since.
+   * shows of a request, however often it has been fetched again since.
    * @param {ParentNode} scope
    */
-  function paintLuckControls(scope) {
-    scope.querySelectorAll(LUCK_FORM).forEach((control) => {
-      const button = control.querySelector('button[type="submit"]');
-      if (!button) return;
-      const kept = RENDERED_DISABLED in button.dataset;
-      if (spendingLuck.has(luckKey(control))) {
-        if (!kept) button.dataset[RENDERED_DISABLED] = String(button.disabled);
-        button.disabled = true;
-      } else if (kept) {
-        button.disabled = button.dataset[RENDERED_DISABLED] === 'true';
-        delete button.dataset[RENDERED_DISABLED];
-      }
+  function paintHeldControls(scope) {
+    HELD_CONTROLS.forEach(({ selector, key, buttons }) => {
+      scope.querySelectorAll(selector).forEach((control) => {
+        const held = root.requestHeld(key(control));
+        buttons(control).forEach((button) => root.paintHeldControl(button, held));
+      });
     });
+  }
+
+  /** Paint the whole page's held controls, as a held request starts or ends. */
+  function paintPageHeld() {
+    paintHeldControls(root.document);
   }
 
   /**
@@ -229,14 +251,11 @@ if (typeof module !== 'undefined' && module.exports) {
     // One spend at a time per character: a double-click must not spend twice
     // (the #861 review), on this form or on the one a refetch put in its
     // place (issue #105). The button stays disabled until the answer lands.
-    const key = luckKey(form);
-    if (spendingLuck.has(key)) return false;
-    spendingLuck.add(key);
-    paintLuckControls(root.document);
+    const characterId = form.getAttribute('data-character-id');
     const roll = form.querySelector('.gm-luck-roll');
-    try {
+    return root.holdRequest(luckKey(characterId), async () => {
       const data = await post(form.getAttribute('data-luck-url'), {
-        character_id: Number(form.getAttribute('data-character-id')),
+        character_id: Number(characterId),
         roll: roll ? roll.value : '',
       });
       if (!data) return false;
@@ -244,10 +263,7 @@ if (typeof module !== 'undefined' && module.exports) {
       root.gmPanelDrafts.discard(form);
       await refreshPanel();
       return true;
-    } finally {
-      spendingLuck.delete(key);
-      paintLuckControls(root.document);
-    }
+    }, paintPageHeld);
   }
 
   /**
@@ -374,8 +390,11 @@ if (typeof module !== 'undefined' && module.exports) {
             container.innerHTML = body;
             if (tab.keepView) tab.keepView.restore(container, liveView);
             root.gmPanelDrafts.restore(container, drafts);
-            // A spend still on its way keeps the fresh control held (#105).
-            paintLuckControls(container);
+            // A request still on its way keeps the fresh control held: a
+            // Luck spend, an attach or a detach (#105, #142), and a hand
+            // edit of the Campaign tab's records (gm-records.js).
+            paintHeldControls(container);
+            if (root.gmRecords) root.gmRecords.paintHeld(container);
             if (root.picker) {
               root.picker.initPickers(container);
               // A search typed into the attach picker is one of those drafts
