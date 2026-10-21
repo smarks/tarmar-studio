@@ -13,7 +13,7 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from accounts.models import User
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import (
     _json_error,
     _parse_json_body,
@@ -185,6 +185,7 @@ def _build_add_years_response(
 @login_required
 @require_POST
 @rate_limit("add_years", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_add_experience_years(request, pk):
     """Play a run of prior-experience years for a character (issue #221)."""
     data, err = _parse_json_body(request)
@@ -229,6 +230,7 @@ def character_add_experience_years(request, pk):
 @login_required
 @require_POST
 @rate_limit("allocate_skill", max_requests=25, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_allocate_skill_point(request, pk):
     """Allocate a free skill point to a skill."""
     data, err = _parse_json_body(request)
@@ -306,6 +308,7 @@ def character_allocate_skill_point(request, pk):
 @login_required
 @require_POST
 @rate_limit("rename_skill", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def character_rename_skill(request, pk):
     """Rename a skill."""
     data, err = _parse_json_body(request)

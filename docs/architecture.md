@@ -900,7 +900,13 @@ values only a Game Master sets, and the phrase that marks a Game Master's call
 on a history line, a check's line and the skill check's options, are
 `config/characters-refusals.toml`, read by `characters/refusal_words.py` into
 `settings.CHARACTERS_REFUSAL_WORDS` (issue #85); the sheet's script gets the
-check's call note in the skill check's answer. All these files go through one
+check's call note in the skill check's answer. The one sentence every app's
+JSON endpoints answer a server failure in is `config/common-refusals.toml`,
+read by `common/refusal_words.py` into `settings.COMMON_REFUSAL_WORDS`: the
+endpoints of `battle`, `characters`, `gm` (its views, records and Luck),
+`parties` and `accounts` share `common/decorators.py::internal_errors_logged`, which answers
+a script caller in it and logs the error with its traceback (issues #113,
+#139). All these files go through one
 loader,
 `common/wording.py::load_wording`, which refuses a missing or unknown key, a
 blank value or a `{name}` a sentence may not use at startup. Tests run under

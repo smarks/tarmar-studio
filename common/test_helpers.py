@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import skip
 from unittest.mock import patch
 
@@ -16,8 +16,13 @@ from django.test import Client, TestCase
 
 from accounts.models import User
 from common.middleware import PublicPathPassphraseMiddleware
+from common.refusal_words import refusal_words as common_refusal_words
 from common.rolling import Roller, RollRecord
 from reference.paths import CANON_TESTS_DIR_NAME, DM_RULES_DIR
+
+if TYPE_CHECKING:
+    # The test client's response type exists only in django-stubs.
+    from django.test.client import _MonkeyPatchedWSGIResponse as TestResponse
 
 # What the Tarmar-only tests expect of the loaded canon (issue #921). The
 # names they pin are the canon's secrets, so the canon supplies them in this
@@ -134,6 +139,44 @@ def logged_exception(record: logging.LogRecord) -> BaseException:
     if record.exc_info is None or record.exc_info[1] is None:
         raise AssertionError(f"logged without a traceback: {record.getMessage()}")
     return record.exc_info[1]
+
+
+def assert_failure_answered_in_json(
+    test_case: TestCase,
+    send: "Callable[[], TestResponse]",
+    *,
+    logger_name: str,
+    secret: str,
+) -> None:
+    """``send`` meets a server failure and answers it as the endpoints must.
+
+    The shape :func:`common.decorators.internal_errors_logged` gives a JSON
+    endpoint's failure (issues #113, #139): status 500, JSON carrying the
+    configured sentence and nothing of the error, which is logged under the
+    view module's logger with its traceback.
+
+    Args:
+        test_case: The running test, for its assertions.
+        send: Makes the request, with a service already set to fail with an
+            error whose text includes ``secret``.
+        logger_name: The view's module, whose logger records the failure.
+        secret: Text of the error that must reach the log and not the page.
+    """
+    with (
+        test_case.assertLogs(logger_name, "ERROR") as logs,
+        # The 500 itself, which Django logs too; captured, not leaked.
+        test_case.assertLogs("django.request", "ERROR"),
+    ):
+        response = send()
+    test_case.assertEqual(response.status_code, 500)
+    test_case.assertEqual(response["Content-Type"], "application/json")
+    test_case.assertEqual(
+        response.json()["error"], common_refusal_words().decorators.request_failed
+    )
+    test_case.assertNotIn(secret, response.content.decode())
+    (record,) = logs.records
+    test_case.assertIn(secret, str(logged_exception(record)))
+    test_case.assertIsNotNone(record.exc_info and record.exc_info[2])
 
 
 # Required fields for a test Beast, a plain four-legged biter. ``make_beast``

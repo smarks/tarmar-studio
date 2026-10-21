@@ -1779,7 +1779,7 @@ async function switchMode() {
       method: 'POST',
       body,
       credentials: 'same-origin',
-      headers: { 'X-CSRFToken': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+      headers: { 'X-CSRFToken': csrfToken(), ...SCRIPT_CALLER_HEADERS },
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.ok) {

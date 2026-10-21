@@ -19,7 +19,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import _json_error, _parse_json_body, database_integer
 
 from . import hand_records
@@ -41,6 +41,7 @@ def _own_session(request: HttpRequest, session_id: Any) -> GMSession | None:
 
 @login_required
 @require_GET
+@internal_errors_logged(json_only=True)
 def gm_fight_verdict(request: HttpRequest) -> JsonResponse:
     """The notice of how the session's fight ended, as filed (issue #785).
 
@@ -106,6 +107,7 @@ def _hand_edit(
 @login_required
 @require_POST
 @rate_limit("gm_hand_edit", max_requests=HAND_EDITS_PER_MINUTE, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_rulings(request: HttpRequest, session_id: int) -> JsonResponse:
     """Add, correct or retire a house rule by hand (issue #789).
 
@@ -136,6 +138,7 @@ def gm_rulings(request: HttpRequest, session_id: int) -> JsonResponse:
 @login_required
 @require_POST
 @rate_limit("gm_hand_edit", max_requests=HAND_EDITS_PER_MINUTE, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_entities(request: HttpRequest, session_id: int) -> JsonResponse:
     """Add, correct or remove a person or thing by hand (issue #790).
 
@@ -163,6 +166,7 @@ def gm_entities(request: HttpRequest, session_id: int) -> JsonResponse:
 @login_required
 @require_POST
 @rate_limit("gm_hand_edit", max_requests=HAND_EDITS_PER_MINUTE, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_threads(request: HttpRequest, session_id: int) -> JsonResponse:
     """Open, correct, resolve or reopen a thread by hand (issue #790).
 
@@ -192,6 +196,7 @@ def gm_threads(request: HttpRequest, session_id: int) -> JsonResponse:
 @login_required
 @require_POST
 @rate_limit("gm_hand_edit", max_requests=HAND_EDITS_PER_MINUTE, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_recap(request: HttpRequest, session_id: int) -> JsonResponse:
     """Correct the recap a long session's older turns were folded into (#791).
 

@@ -9,7 +9,7 @@
  */
 
 const {
-    csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, formatSigned,
+    csrfToken, SCRIPT_CALLER_HEADERS, postWithCsrf, postJson, postForSuccess, bindCommitKeys, formatSigned,
     readCaret, putCaret, elementByFocusKey, filledWords, appendFilledWords,
     uiNotify, uiConfirm, uiPrompt,
     showFieldError, clearFieldError, FIELD_NETWORK_ERROR
@@ -317,6 +317,19 @@ describe('postWithCsrf', () => {
         const [, options] = fetch.mock.calls[0];
         expect(options.headers['Content-Type']).toBeUndefined();
         expect(options.body).toBe(formData);
+    });
+
+    test('marks a scripted post with the header the server reads (#139)', async () => {
+        // common.helpers.wants_json answers a script in JSON when it sees
+        // this header, a server failure included.
+        expect(SCRIPT_CALLER_HEADERS).toEqual({ 'X-Requested-With': 'XMLHttpRequest' });
+
+        await postWithCsrf('/test-url/', 'test-token', null, { scripted: true });
+
+        expect(fetch).toHaveBeenCalledWith('/test-url/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': 'test-token', ...SCRIPT_CALLER_HEADERS }
+        });
     });
 
     test('resolves to the raw Response, not parsed JSON', async () => {

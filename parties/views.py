@@ -29,6 +29,7 @@ from django.views.generic import CreateView, DetailView, ListView
 
 from characters.models import characters_visible_to
 from common.breadcrumbs import BreadcrumbMixin, step, trail
+from common.decorators import internal_errors_logged
 from common.helpers import parse_json_text
 from common.mixins import ActivePageMixin
 from common.pagination import PAGE_SIZE
@@ -306,6 +307,7 @@ def _field_refusal(message):
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def party_update_field(request, pk):
     """Autosave one of a party's fields (issue #339, item 17).
 

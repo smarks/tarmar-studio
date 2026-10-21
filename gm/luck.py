@@ -26,7 +26,7 @@ from characters import services as character_services
 from characters.constants import too_long
 from characters.models import Character
 from characters.skills import get_skill_level
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import _json_error, _parse_json_body, database_integer
 
 from .models import GMSession, SessionCharacter
@@ -176,6 +176,7 @@ def spend_luck(
 @login_required
 @require_POST
 @rate_limit("gm_luck", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_spend_luck(request: HttpRequest, session_id: int) -> JsonResponse:
     """The Characters tab's "Spend Luck" control (issue #861).
 

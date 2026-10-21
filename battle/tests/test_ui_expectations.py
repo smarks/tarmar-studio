@@ -16,6 +16,7 @@ from battle.persistence import CLASSIC_PROFILE
 from battle.refusal_words import refusal_words
 from battle.services import claim_seat, create_battle, set_seat_ready, start_battle
 from battle.views import seat_summaries
+from common.helpers import SCRIPT_CALLER_HEADERS
 
 from .test_lobby_views import LobbyViewTestMixin
 
@@ -80,7 +81,7 @@ class LobbyRefusalTest(LobbyViewTestMixin):
         response = self.client.post(
             reverse("battle:control", args=[battle.pk]),
             {"control_mode": "manual"},
-            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            headers=SCRIPT_CALLER_HEADERS,
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn(refusal_words().views.control_denied, response.json()["error"])

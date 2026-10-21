@@ -2,9 +2,10 @@
  * The words the app refuses a request in, read from the running settings (#97).
  *
  * The refusals are configuration (config/battle-refusals.toml,
- * config/gm-refusals.toml and config/characters-refusals.toml, loaded into
- * settings.BATTLE_REFUSAL_WORDS, GM_REFUSAL_WORDS and CHARACTERS_REFUSAL_WORDS
- * at startup): Spencer edits them with no Python and
+ * config/gm-refusals.toml, config/characters-refusals.toml and
+ * config/common-refusals.toml, loaded into settings.BATTLE_REFUSAL_WORDS,
+ * GM_REFUSAL_WORDS, CHARACTERS_REFUSAL_WORDS and COMMON_REFUSAL_WORDS at
+ * startup): Spencer edits them with no Python and
  * no spec, so the specs read them, and have the server fill a sentence's
  * {names}, rather than typing a sentence here. The pattern is e2e/rulings.js's.
  */
@@ -16,11 +17,12 @@ const REFUSAL_WORDS_MODULES = {
     battle: 'battle.refusal_words',
     gm: 'gm.refusal_words',
     characters: 'characters.refusal_words',
+    common: 'common.refusal_words',
 };
 
 /**
  * One refusal, as the server would say it.
- * @param {'battle'|'gm'|'characters'} app The app whose file holds it.
+ * @param {'battle'|'gm'|'characters'|'common'} app The app whose file holds it.
  * @param {string} table The file's table (one per module).
  * @param {string} key The sentence's key in that table.
  * @param {Object<string, string|number>} [fields] What fills its {names}.
@@ -38,7 +40,7 @@ print('REFUSAL', json.dumps(sentence.format(**json.loads(${JSON.stringify(JSON.s
 /**
  * The words of a refusal that stay the same whatever fills its {names}, for a
  * page that shows the sentence filled with values the spec cannot know.
- * @param {'battle'|'gm'|'characters'} app
+ * @param {'battle'|'gm'|'characters'|'common'} app
  * @param {string} table
  * @param {string} key
  * @returns {string[]} The non-empty runs of text between its {names}.

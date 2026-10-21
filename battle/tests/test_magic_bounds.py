@@ -33,6 +33,7 @@ from battle.services import (
 )
 from battle.views import MAGIC_BOUNDS_PANEL_ID
 from battle.wording import game_master_name, words
+from common.helpers import SCRIPT_CALLER_HEADERS
 from common.test_helpers import BaseTestCase
 from reference.paths import DEFAULT_CANON_DIR
 
@@ -495,7 +496,7 @@ class MagicBoundsEndpointTest(CanonImposesTestCase):
                 LIFTED_FIELD: "true",
                 "next": "/tarmar/gm/",
             },
-            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            headers=SCRIPT_CALLER_HEADERS,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(

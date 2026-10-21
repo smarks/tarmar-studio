@@ -41,7 +41,9 @@ async function deleteCharacter(id, url, name, csrfToken, reload = true, anchor) 
     if (!await uiConfirm(`Delete character "${name}"?`, { danger: true, confirmLabel: "Delete", anchor })) return;
 
     try {
-        const response = await postWithCsrf(url, csrfToken);
+        // The edit page's form posts here too; marked as script, a server
+        // failure answers in JSON with the server's sentence (issue #139).
+        const response = await postWithCsrf(url, csrfToken, null, { scripted: true });
         if (response.redirected || response.ok) {
             if (reload) {
                 pageNavigation.reload();

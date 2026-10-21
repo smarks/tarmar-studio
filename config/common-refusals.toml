@@ -1,0 +1,14 @@
+# The words every app answers a script's request in when the server fails
+# rather than a rule refusing it (issues #113, #139): one table per module.
+#
+# Read once at startup (common.refusal_words.load_refusal_words); a missing key,
+# an unknown key or a {name} a sentence may not use stops the server there
+# rather than in front of a player. COMMON_REFUSAL_WORDS_FILE names another
+# file. Change the wording freely; changing a sentence never changes who is
+# refused.
+
+[decorators]
+# What a JSON endpoint's caller hears when the server fails: the battle, the
+# character sheet, the Games Master page, parties and accounts alike.
+# The error's own text stays in the log, with its traceback.
+request_failed = "That could not be done because of an error on the server. It has been logged; reload the page and try again."

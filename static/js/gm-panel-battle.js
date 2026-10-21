@@ -291,7 +291,7 @@ if (typeof module !== 'undefined' && module.exports) {
         method: 'POST',
         body,
         credentials: 'same-origin',
-        headers: { 'X-CSRFToken': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+        headers: { 'X-CSRFToken': csrfToken(), ...SCRIPT_CALLER_HEADERS },
       });
       data = await response.json().catch(() => ({}));
       if (!response.ok) {

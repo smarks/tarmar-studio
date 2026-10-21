@@ -23,6 +23,12 @@
  * refetch asks the new picker for the page the reader turned to, and the
  * answer to the old picker is dropped unwritten (issue #14).
  */
+// Under Node/Jest there is no shared script scope, so require api.js for the
+// names base.html's copy publishes in the browser (SCRIPT_CALLER_HEADERS).
+if (typeof module !== 'undefined' && module.exports) {
+    require('./api.js');
+}
+
 (function (root) {
     /** How long typing must pause before the server is asked. */
     const SEARCH_DELAY_MS = 200;
@@ -62,7 +68,7 @@
         let html;
         try {
             const response = await root.fetch(url.toString(), {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                headers: { ...root.SCRIPT_CALLER_HEADERS },
                 credentials: 'same-origin',
             });
             if (!response.ok) {

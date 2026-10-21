@@ -43,6 +43,15 @@
     }
 
     /**
+     * The header that marks a request as the page's script rather than a
+     * plain form post. ``common.helpers.wants_json`` reads it, so an endpoint
+     * that serves both answers a script in JSON, a server failure included
+     * (issues #89, #139). Named once here: a fetch that needs it spreads this
+     * in, or asks postWithCsrf for it with ``scripted``.
+     */
+    const SCRIPT_CALLER_HEADERS = Object.freeze({ 'X-Requested-With': 'XMLHttpRequest' });
+
+    /**
      * POST with Django's CSRF header attached.
      *
      * Returns the raw Response, not parsed JSON: callers need the response
@@ -56,13 +65,17 @@
      *   sent as JSON; a FormData is passed through untouched so the browser
      *   can set its own multipart Content-Type (with the boundary) — setting
      *   one here would corrupt the upload.
+     * @param {{scripted?: boolean}} [how] - ``scripted`` adds
+     *   SCRIPT_CALLER_HEADERS, for an endpoint that also serves a form post
+     *   and must know a bodyless post came from script (issue #139).
      * @returns {Promise<Response>}
      */
-    async function postWithCsrf(url, csrfToken, body = null) {
+    async function postWithCsrf(url, csrfToken, body = null, { scripted = false } = {}) {
         const options = {
             method: 'POST',
             headers: {
-                'X-CSRFToken': csrfToken
+                'X-CSRFToken': csrfToken,
+                ...(scripted ? SCRIPT_CALLER_HEADERS : {})
             }
         };
         if (body !== null) {
@@ -437,6 +450,7 @@
     root.showFieldError = showFieldError;
     root.clearFieldError = clearFieldError;
     root.FIELD_NETWORK_ERROR = FIELD_NETWORK_ERROR;
+    root.SCRIPT_CALLER_HEADERS = SCRIPT_CALLER_HEADERS;
     root.postWithCsrf = postWithCsrf;
     root.postJson = postJson;
     root.postForSuccess = postForSuccess;
@@ -456,7 +470,7 @@
     // Export for testing (Node.js environment)
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
-            csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
+            csrfToken, SCRIPT_CALLER_HEADERS, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
             uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation, filledWords, appendFilledWords,
             showFieldError, clearFieldError, FIELD_NETWORK_ERROR
         };

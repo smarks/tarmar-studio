@@ -11,6 +11,7 @@ const {
     bindCharacterRowActions
 } = require('../character-management.js');
 const { flush } = require('./test-helpers');
+const { SCRIPT_CALLER_HEADERS } = require('../api.js');
 
 // postWithCsrf moved to api.js (issue #111); its own tests live in api.test.js.
 
@@ -28,6 +29,15 @@ describe('deleteCharacter / restoreCharacter URLs', () => {
             '/tarmar/characters/123/delete/',
             expect.objectContaining({ method: 'POST' })
         );
+    });
+
+    test('deleteCharacter marks its post as the page script (#139)', async () => {
+        // The edit page's form posts to the same endpoint; marked as script,
+        // a server failure answers this caller in JSON.
+        fetch.mockResolvedValue({ ok: true });
+        await deleteCharacter(123, '/tarmar/characters/123/delete/', 'Aldwin', 'token', false);
+        const [, options] = fetch.mock.calls[0];
+        expect(options.headers).toEqual(expect.objectContaining(SCRIPT_CALLER_HEADERS));
     });
 
     test('a refused delete says why and leaves the row (#640)', async () => {

@@ -38,7 +38,7 @@ from battle.views import arena_context
 from characters.constants import too_long
 from characters.models import Character
 from common.breadcrumbs import BreadcrumbMixin, step, trail
-from common.decorators import rate_limit
+from common.decorators import internal_errors_logged, rate_limit
 from common.helpers import (
     _json_error,
     _parse_json_body,
@@ -151,6 +151,7 @@ from .turn_record import (
     TurnRecorder,
     claim_turn,
     expire_stale_running_turns,
+    released_on_failure,
     running_turn_for,
     turns_ahead_of,
 )
@@ -1143,6 +1144,7 @@ def _with_session_id(
 @login_required
 @require_POST
 @rate_limit("gm_stream", max_requests=30, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     """SSE endpoint: stream a GM response."""
     data, error_response = _parse_json_body(request)
@@ -1253,75 +1255,79 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
             status=409,
         )
 
-    # Handle special commands. /state and /rules store the line the player
-    # typed and hand the model the prompt the server writes for it, for this
-    # turn only. Stored, the rules prompt was the player's message after a
-    # reload and went to the model again on every later turn -- the whole
-    # rules tree, about 20,000 tokens a turn (issue #758).
-    if command == "state":
-        history.append({"role": "user", "content": "/state"})
-        command_prompt = build_state_request_message()["content"]
-    elif command == "rules" and user_message:
-        rules_text = load_rules()
-        if rules_text:
-            history.append({"role": "user", "content": f"/rules {user_message}"})
-            command_prompt = build_rules_lookup_message(user_message, rules_text)[
-                "content"
-            ]
+    # From here the turn is claimed: a failure before the stream is returned
+    # releases the claim as it is raised on (issue #139). The stream's own
+    # failures come later, in its generator, which answers them in a frame.
+    with released_on_failure(recorder):
+        # Handle special commands. /state and /rules store the line the player
+        # typed and hand the model the prompt the server writes for it, for this
+        # turn only. Stored, the rules prompt was the player's message after a
+        # reload and went to the model again on every later turn -- the whole
+        # rules tree, about 20,000 tokens a turn (issue #758).
+        if command == "state":
+            history.append({"role": "user", "content": "/state"})
+            command_prompt = build_state_request_message()["content"]
+        elif command == "rules" and user_message:
+            rules_text = load_rules()
+            if rules_text:
+                history.append({"role": "user", "content": f"/rules {user_message}"})
+                command_prompt = build_rules_lookup_message(user_message, rules_text)[
+                    "content"
+                ]
+            else:
+                return _rejected_turn(recorder, refusal_words().views.rules_not_found)
+        elif command == "roll":
+            try:
+                rolls, total = roll_dice(user_message)
+            except ValueError as e:
+                return _rejected_turn(recorder, str(e))
+            roll_outcome = (rolls, total)
+            # Stored as typed, with the prompt the model has always read kept as
+            # its content: later turns go on from those faces (issue #838).
+            history.append(stored_roll_message(user_message, rolls, total))
+        elif (
+            data.get("retry") is True
+            and user_message
+            and resumes_interrupted_turn(history, user_message)
+        ):
+            # A retry of a turn that broke off after the server had run its
+            # procedures or rolls (issue #410). The message, what was run for it
+            # and a note saying so are stored already; appending the message a
+            # second time would read to the model as a second request.
+            logger.info("Retrying a GM turn that broke off in session %s", session_id)
+            resumed = True
+        elif (
+            data.get("retry") is True
+            and session is not None
+            and _already_answered(session, user_message, recorder.record_id)
+        ):
+            # The turn this Retry is for ran to the end after its page lost the
+            # stream (issue #515). Sending it again would play it twice.
+            return _rejected_turn(recorder, refusal_words().views.turn_already_answered)
+        elif user_message:
+            history.append({"role": "user", "content": user_message})
+            ordinary_turn = True
         else:
-            return _rejected_turn(recorder, refusal_words().views.rules_not_found)
-    elif command == "roll":
-        try:
-            rolls, total = roll_dice(user_message)
-        except ValueError as e:
-            return _rejected_turn(recorder, str(e))
-        roll_outcome = (rolls, total)
-        # Stored as typed, with the prompt the model has always read kept as
-        # its content: later turns go on from those faces (issue #838).
-        history.append(stored_roll_message(user_message, rolls, total))
-    elif (
-        data.get("retry") is True
-        and user_message
-        and resumes_interrupted_turn(history, user_message)
-    ):
-        # A retry of a turn that broke off after the server had run its
-        # procedures or rolls (issue #410). The message, what was run for it
-        # and a note saying so are stored already; appending the message a
-        # second time would read to the model as a second request.
-        logger.info("Retrying a GM turn that broke off in session %s", session_id)
-        resumed = True
-    elif (
-        data.get("retry") is True
-        and session is not None
-        and _already_answered(session, user_message, recorder.record_id)
-    ):
-        # The turn this Retry is for ran to the end after its page lost the
-        # stream (issue #515). Sending it again would play it twice.
-        return _rejected_turn(recorder, refusal_words().views.turn_already_answered)
-    elif user_message:
-        history.append({"role": "user", "content": user_message})
-        ordinary_turn = True
-    else:
-        return _rejected_turn(recorder, refusal_words().views.no_message)
+            return _rejected_turn(recorder, refusal_words().views.no_message)
 
-    # The plan → run → narrate loop (issue #590).
-    return _plan_turn(
-        request,
-        PlannedTurn(
-            session=session,
-            history=history,
-            mode=mode,
-            recorder=recorder,
-            prior_message_count=prior_message_count,
-            user_message=user_message,
-            ordinary_turn=ordinary_turn,
-            resumed=resumed,
-            roll_outcome=roll_outcome,
-            command_prompt=command_prompt,
-            stored_from=stored_from,
-            stored_entries=stored_entries,
-        ),
-    )
+        # The plan → run → narrate loop (issue #590).
+        return _plan_turn(
+            request,
+            PlannedTurn(
+                session=session,
+                history=history,
+                mode=mode,
+                recorder=recorder,
+                prior_message_count=prior_message_count,
+                user_message=user_message,
+                ordinary_turn=ordinary_turn,
+                resumed=resumed,
+                roll_outcome=roll_outcome,
+                command_prompt=command_prompt,
+                stored_from=stored_from,
+                stored_entries=stored_entries,
+            ),
+        )
 
 
 @dataclass
@@ -1919,6 +1925,7 @@ def _already_answered(
 
 @login_required
 @require_GET
+@internal_errors_logged(json_only=True)
 def gm_turn(request: HttpRequest, turn_id: int) -> JsonResponse:
     """Where a turn stands, for a page that lost sight of it (issue #515).
 
@@ -1963,6 +1970,7 @@ def gm_turn(request: HttpRequest, turn_id: int) -> JsonResponse:
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def gm_save(request: HttpRequest) -> JsonResponse:
     """Rename a GM session.
 
@@ -2000,6 +2008,7 @@ def gm_save(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
+@internal_errors_logged()
 def gm_mode(request: HttpRequest) -> HttpResponse:
     """Change how the Game Master behaves in this session (issue #372).
 
@@ -2102,6 +2111,7 @@ def _unplayed_continuation(previous: GMSession) -> GMSession | None:
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def gm_delete(request: HttpRequest) -> JsonResponse:
     """Delete a GM session."""
     data, error_response = _parse_json_body(request)
@@ -2122,6 +2132,7 @@ def gm_delete(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def gm_characters_attach(request: HttpRequest) -> JsonResponse:
     """Attach a character to a GM session (issue #341).
 
@@ -2319,6 +2330,7 @@ def gm_campaign_panel(request: HttpRequest, session_id: int) -> HttpResponse:
 
 @login_required
 @require_POST
+@internal_errors_logged(json_only=True)
 def gm_characters_detach(request: HttpRequest) -> JsonResponse:
     """Detach a character from a GM session (issue #341).
 
@@ -2349,6 +2361,7 @@ def gm_characters_detach(request: HttpRequest) -> JsonResponse:
 @login_required
 @require_POST
 @rate_limit("gm_fight", max_requests=10, window_seconds=60)
+@internal_errors_logged(json_only=True)
 def gm_fight(request: HttpRequest) -> JsonResponse:
     """Put the session's fight on the hex board (issue #345).
 
@@ -2406,61 +2419,65 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
             },
             status=409,
         )
-    try:
-        # One deadline for every foe call, the fallback and the second ask
-        # included (issue #936). /fight is a plain POST that sends nothing
-        # until it answers, so its budget sits below nginx's 60 s
-        # proxy_read_timeout, where an SSE turn's keep-alives need not.
-        started = start_fight(
-            session,
-            foes_text=foes_text,
-            stop_at=time.monotonic() + float(settings.GM_FIGHT_BUDGET_SECONDS),
-        )
-    except FightError as fight_error:
-        recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=str(fight_error))
-        return _json_error(str(fight_error))
-    except httpx.HTTPError as model_error:
-        # The model could not be asked who the party faces -- down, or
-        # answering with an error. A player's /fight always asks it (#841),
-        # so this is the player's to read in words, not a 500.
-        logger.warning("GM fight: the foe call failed: %s", model_error)
-        # The record says what the player was told: ``gm:turn`` reads it back
-        # to the player, and the model error names the model host (#13).
+    # A failure the handlers below do not answer releases the claim as it is
+    # raised on to ``internal_errors_logged``; the record, which ``gm:turn``
+    # reads back to a page that lost sight of the fight, says the sentence
+    # the page was answered in (#13, #139).
+    with released_on_failure(recorder):
+        try:
+            # One deadline for every foe call, the fallback and the second ask
+            # included (issue #936). /fight is a plain POST that sends nothing
+            # until it answers, so its budget sits below nginx's 60 s
+            # proxy_read_timeout, where an SSE turn's keep-alives need not.
+            started = start_fight(
+                session,
+                foes_text=foes_text,
+                stop_at=time.monotonic() + float(settings.GM_FIGHT_BUDGET_SECONDS),
+            )
+        except FightError as fight_error:
+            recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=str(fight_error))
+            return _json_error(str(fight_error))
+        except httpx.HTTPError as model_error:
+            # The model could not be asked who the party faces -- down, or
+            # answering with an error. A player's /fight always asks it (#841),
+            # so this is the player's to read in words, not a 500.
+            logger.warning("GM fight: the foe call failed: %s", model_error)
+            # The record says what the player was told: ``gm:turn`` reads it back
+            # to the player, and the model error names the model host (#13).
+            recorder.finish(
+                GMTurnRecord.OUTCOME_ERROR,
+                error=refusal_words().views.fight_model_unreachable,
+            )
+            return _json_error(
+                refusal_words().views.fight_model_unreachable, status=503
+            )
+        except StreamDeadlinePassed as out_of_time:
+            logger.warning(
+                "GM fight: the foe call passed its deadline: %s", out_of_time
+            )
+            recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=str(out_of_time))
+            # When the foe call ran out of its deadline (#936); worded not to
+            # invite a resend into the model's line (issue #64).
+            return _json_error(settings.GM_FIGHT_TOO_SLOW_MESSAGE.format(), status=504)
+        stored = session.history
         recorder.finish(
-            GMTurnRecord.OUTCOME_ERROR,
-            error=refusal_words().views.fight_model_unreachable,
+            GMTurnRecord.OUTCOME_OK,
+            reply=str(stored[-1].get("content", "")) if stored else "",
+            history_end=len(stored),
         )
-        return _json_error(refusal_words().views.fight_model_unreachable, status=503)
-    except StreamDeadlinePassed as out_of_time:
-        logger.warning("GM fight: the foe call passed its deadline: %s", out_of_time)
-        recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=str(out_of_time))
-        # When the foe call ran out of its deadline (#936); worded not to
-        # invite a resend into the model's line (issue #64).
-        return _json_error(settings.GM_FIGHT_TOO_SLOW_MESSAGE.format(), status=504)
-    except Exception:
-        # Django logs the traceback of what is raised; the record, which
-        # ``gm:turn`` reads back to the player, gets the fixed sentence (#13).
-        recorder.finish(
-            GMTurnRecord.OUTCOME_ERROR, error=refusal_words().views.server_error
+        return JsonResponse(
+            {
+                "ok": True,
+                "session_id": session.pk,
+                "battle_id": started.battle.pk,
+                "battle_name": started.battle.name,
+                "party": [character.name for character in started.party],
+                "foes": [
+                    {"name": foe.name, "count": foe.count} for foe in started.foes
+                ],
+                "dropped": started.dropped,
+            }
         )
-        raise
-    stored = session.history
-    recorder.finish(
-        GMTurnRecord.OUTCOME_OK,
-        reply=str(stored[-1].get("content", "")) if stored else "",
-        history_end=len(stored),
-    )
-    return JsonResponse(
-        {
-            "ok": True,
-            "session_id": session.pk,
-            "battle_id": started.battle.pk,
-            "battle_name": started.battle.name,
-            "party": [character.name for character in started.party],
-            "foes": [{"name": foe.name, "count": foe.count} for foe in started.foes],
-            "dropped": started.dropped,
-        }
-    )
 
 
 @login_required
@@ -2496,6 +2513,7 @@ MAX_REVIEW_NOTE_CHARS = 2000
 @login_required
 @require_POST
 @rate_limit("gm_review", max_requests=20, window_seconds=3600)
+@internal_errors_logged(json_only=True)
 def gm_review_create(request: HttpRequest) -> JsonResponse:
     """Send one of the Game Master's sessions to Claude for review (issue #402).
 
@@ -2632,6 +2650,7 @@ class GMReviewListView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, Lis
 
 @login_required
 @require_GET
+@internal_errors_logged(json_only=True)
 def gm_review_statuses(request: HttpRequest) -> JsonResponse:
     """Where each of ``?ids=1,2,3`` stands, for the reviews list's poll (issue #572).
 

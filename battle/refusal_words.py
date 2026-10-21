@@ -100,7 +100,6 @@ class ViewsWords:
 
     control_denied: str = sentence()
     foes_belong_to_game_master: str = sentence()
-    request_failed: str = sentence()
     seed_not_whole_number: str = sentence()
     seed_out_of_range: str = sentence("highest")
     unknown_rules_profile: str = sentence()
