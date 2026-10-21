@@ -37,8 +37,7 @@ def facing_toward(arena: Arena, start: Hex, end: Hex) -> int:
 
 class ClassicMenuIsDescribedTest(BaseTestCase):
     def menu_for(self, game, figure) -> list[dict]:
-        advice = classic_policy.choose_option(game, figure)
-        menu = turn_menu.player_menu(CLASSIC_PROFILE, game, figure, advice)
+        menu = turn_menu.player_menu(CLASSIC_PROFILE, game, figure)
         return [candidate.to_payload() for candidate in menu]
 
     def entry(self, entries: list[dict], letter: str) -> dict:

@@ -16,7 +16,11 @@ from typing import Concatenate
 
 from django.db import transaction
 from django.utils import timezone
-from tarmar_engine.magic import ChannelRules, ChannelUnclassifiedSpell
+from tarmar_engine.magic import (
+    ChannelUnclassifiedSpell,
+    MagicRules,
+    casting_success_ceiling,
+)
 from tarmar_engine.spells import Spell
 from tarmar_engine.weapons import missile_rate_from_note
 
@@ -51,7 +55,7 @@ from .access import (
     seat_is_held,
 )
 from .adaptation import engine_gait_names, snapshot_beast
-from .classic_adaptation import classic_state
+from .classic_adaptation import cast_row_name, classic_state
 from .engine import hexes
 from .engine.state import (
     BattleState,
@@ -3050,16 +3054,15 @@ def _human_decider(profile, controllers: dict, inputs: dict):
     choose = profiles.decider(profile.battle)
 
     def decide(state, actor):
-        advice = choose(state, actor)
         combatant_id = profile.actor_id(actor)
         owner = controllers.get(combatant_id)
         if owner is None:
-            return advice
+            return choose(state, actor)
         # A person aims their own attacks (#775), and reads each option as a
-        # choice rather than as the AI's scoring (#788): the engine's menu,
-        # widened and described, built here from the live state because the
-        # rolled-back turn does not keep it.
-        menu = turn_menu.player_menu(profile.name, state, actor, advice)
+        # choice rather than as the AI's scoring (#788): the engine's menu at
+        # every target, its AI pick marked, described, built here from the
+        # live state because the rolled-back turn does not keep it.
+        menu = turn_menu.player_menu(profile.name, state, actor)
         recorded = inputs.get(str(combatant_id))
         if recorded is None:
             raise PlayerInputNeeded(combatant_id, menu)
@@ -3285,20 +3288,21 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
 
 
 def _channel_reading(
-    channel: ChannelRules | None, actor: CombatantState, spell: Spell
+    rules: MagicRules, actor: CombatantState, spell: Spell
 ) -> tuple[int | None, str]:
     """The caster's Channel for ``spell``, and why the menu withholds it, if it does.
 
-    The engine's own test (``tarmar_engine.policy._within_channel``): the
-    spell's cost past the caster's Channel for it, or a spell the Channel
-    rules give no kind of magic. Both are read from the engine's
-    :meth:`~tarmar_engine.magic.ChannelRules.bound_for`, which is ``None``
-    for a caster a Game Master has lifted Channel for (#37): such a cast is
-    not withheld, and no Channel bounds it. Only the words are the cast
+    The engine's own test, the one the menu withholds by and ``cast_spell``
+    refuses by (:meth:`~tarmar_engine.magic.MagicRules.cast_within_channel`,
+    tarmar-engine #41), and the bound it holds the casting to
+    (:meth:`~tarmar_engine.magic.MagicRules.channel_bound`): ``None`` with no
+    Channel rules, or for a caster a Game Master has lifted Channel for
+    (#37), whose cast is not withheld. A spell the Channel rules give no kind
+    of magic raises in both, and is withheld. Only the words are the cast
     stage's.
 
     Args:
-        channel: The canon's Channel rules, or ``None`` when it has none.
+        rules: The canon's magic rules.
         actor: The caster.
         spell: The spell offered.
 
@@ -3308,17 +3312,14 @@ def _channel_reading(
         reason in the player's words, or ``""`` when the Channel allows the
         cast.
     """
-    if channel is None:
-        return None, ""
     try:
-        limit = channel.bound_for(actor, spell)
+        within = rules.cast_within_channel(actor, spell)
+        limit = rules.channel_bound(actor, spell)
     except ChannelUnclassifiedSpell:
         return None, "the rules give it no kind of magic, so no Channel for it"
-    if limit is None:
-        return None, ""
-    if spell.level > limit:
-        return limit, f"costs {spell.level} mana, past a Channel of {limit} for it"
-    return limit, ""
+    if within:
+        return limit, ""
+    return limit, f"costs {spell.level} mana, past a Channel of {limit} for it"
 
 
 def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
@@ -3339,8 +3340,11 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     the same shape in :func:`battle.classic_adaptation.classic_caster_magic`.
 
     A row is keyed by *(spell, target)* rather than by spell alone, because
-    that pair is what a candidate names — classic offers the same spell at
-    several targets, and keying by spell would collapse them to one.
+    that pair is what a candidate names — a seated figure's menu offers a
+    damaging spell at every active enemy, nearest first (tarmar-engine #21),
+    as classic offers the same spell at several targets, and keying by spell
+    would collapse them to one. Where a spell has more than one target, each
+    row names its own (:func:`battle.classic_adaptation.cast_row_name`).
 
     The castability rules restate ``policy._cast_candidates``' filters —
     the engine drops the casts it will not offer, this says out loud why
@@ -3364,20 +3368,21 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         return None
     if not actor.spells:
         return None
-    # The one enemy a damage spell would be aimed at, chosen exactly as
-    # ``policy._cast_candidates`` chooses it — a spell with nobody to aim at
-    # is not offered, so the row has to say so rather than claim castable.
-    enemy = policy.nearest_enemy(state, actor)
+    # The enemies a damage spell is offered at, in the order the engine's
+    # every-target menu offers them (``policy.enemies_by_distance``, nearest
+    # first) — a spell with nobody to aim at is not offered, so the row has
+    # to say so rather than claim castable.
+    enemies = policy.enemies_by_distance(state, actor)
     rules = magic_rules()
     rows = []
     for key in actor.spells:
         spell = get_spell(key)
         aimed = spell.damage is not None and not spell.heals
-        spell_channel, channel_refusal = _channel_reading(rules.channel, actor, spell)
+        spell_channel, channel_refusal = _channel_reading(rules, actor, spell)
         other_reason = ""
         if spell.continuing and key in actor.active_spells:
             other_reason = "already up — renews itself"
-        elif aimed and enemy is None:
+        elif aimed and not enemies:
             other_reason = "nothing in reach to aim at"
         elif channel_refusal:
             other_reason = channel_refusal
@@ -3408,15 +3413,37 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
             reason = other_reason
         castable = not reason
         attribute = actor.intelligence if spell.attribute == "INT" else actor.wisdom
-        chance = policy.three_d6_at_most(attribute)
+        # The chance the engine prices the cast by, the casting fumble floor
+        # included (#46, tarmar-engine #47). It is worked on the raw
+        # attribute, as the engine's menu works it; the roll on the board is
+        # made under the attribute less the injury band and any owed
+        # off-balance penalty, so the two agree only for an unhurt caster
+        # until tarmar-engine #56 lands.
+        chance = policy.cast_success_chance(attribute, rules.casting_failure)
+        # The floor named where it lowers the highest total that succeeds,
+        # in the words of the engine's own cast working
+        # (``tarmar_engine.policy._cast_candidates``).
+        floor = (
+            f", under the fumble floor {rules.casting_failure.fumble_floor}"
+            if rules.casting_failure is not None
+            and casting_success_ceiling(attribute, rules.casting_failure) < attribute
+            else ""
+        )
         aim = ", then a DEX roll to land it" if spell.targeted else ""
-        rows.append(
+        targets: list[CombatantState | None] = (
+            list(enemies) if aimed and enemies else [None]
+        )
+        rows.extend(
             {
                 "key": key,
-                "target_id": enemy.combatant_id if aimed and enemy else None,
-                "name": spell.name,
+                "target_id": target.combatant_id if target is not None else None,
+                "name": (
+                    cast_row_name(spell.name, target.name)
+                    if target is not None and len(targets) > 1
+                    else spell.name
+                ),
                 "cost": f"{spell.school} — {spell.level} mana",
-                "note": f"{chance:.0%} on 3d6 \u2264 {spell.attribute}{aim}",
+                "note": f"{chance:.0%} on 3d6 \u2264 {spell.attribute}{floor}{aim}",
                 "castable": castable,
                 "reason": reason,
                 # Cast only by borrowing the shortfall (tarmar-engine #28).
@@ -3427,6 +3454,7 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                 # a Game Master has lifted Channel for the caster (#37).
                 "channel": spell_channel,
             }
+            for target in targets
         )
     return {
         "pool_label": "Mana",

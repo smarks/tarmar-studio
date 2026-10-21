@@ -16,6 +16,7 @@ them together the way ``test_rules_drift`` pins the rules docs.
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from django.urls import reverse
@@ -27,19 +28,25 @@ from battle.classic_adaptation import (
     classic_state,
 )
 from battle.engine.state import BattleState
-from battle.models import Battle, BattleCombatant
+from battle.models import Battle, BattleCombatant, BattleEvent
 from battle.services import (
     advance_turn,
     caster_magic,
     claim_seat,
     create_battle,
+    record_player_action,
     set_seat_ready,
     start_battle,
 )
 from battle.turn_menu import borrowed_mana
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, FacesRoller
 
-from .magic_fixtures import BORROWING_RULES, INVENTED_RULES, seated_rules
+from .magic_fixtures import (
+    BORROWING_RULES,
+    CASTING_FAILURE,
+    INVENTED_RULES,
+    seated_rules,
+)
 from .test_classic_adaptation import snapshot as classic_snapshot
 from .test_state import make_combatant
 
@@ -150,6 +157,65 @@ class CasterMagicTest(SimpleTestCase):
             f"{policy.three_d6_at_most(12):.0%} on 3d6 \u2264 WIS",
         )
 
+    def test_the_casting_chance_includes_the_fumble_floor(self):
+        """#46: the odds shown are the engine's, the casting floor included,
+        and the note names the floor where it lowers the chance."""
+        # The invented floor is 12: a roll of 12 or more fails.
+        with seated_rules(replace(INVENTED_RULES, casting_failure=CASTING_FAILURE)):
+            magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        by_key = {spell["key"]: spell for spell in magic["spells"]}
+        # INT 14 past the floor: 3d6 at most 11, not at most 14.
+        self.assertEqual(
+            by_key["fire_missile"]["note"],
+            f"{policy.three_d6_at_most(11):.0%} on 3d6 \u2264 INT, under the "
+            "fumble floor 12, then a DEX roll to land it",
+        )
+        self.assertNotEqual(
+            f"{policy.three_d6_at_most(11):.0%}", f"{policy.three_d6_at_most(14):.0%}"
+        )
+        # WIS 12 too: a 12 would pass the attribute but meets the floor.
+        self.assertEqual(
+            by_key["heal"]["note"],
+            f"{policy.three_d6_at_most(11):.0%} on 3d6 \u2264 WIS, under the "
+            "fumble floor 12",
+        )
+
+    def test_a_floor_above_the_attribute_is_not_named(self):
+        # A floor of 16 lowers neither INT 14 nor WIS 12.
+        high_floor = replace(
+            CASTING_FAILURE,
+            fumble_floor=16,
+            mana_lost_totals=frozenset({16, 17}),
+            runaway_total=17,
+        )
+        with seated_rules(replace(INVENTED_RULES, casting_failure=high_floor)):
+            magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        heal = next(spell for spell in magic["spells"] if spell["key"] == "heal")
+        self.assertEqual(
+            heal["note"], f"{policy.three_d6_at_most(12):.0%} on 3d6 \u2264 WIS"
+        )
+
+    def test_a_spell_at_two_foes_gets_a_row_each_nearest_first(self):
+        state = wizard_state()
+        far = make_combatant(3, q=-4, r=0)
+        state.combatants.append(far)
+        magic = caster_magic(state, 1)
+        assert magic is not None
+        near = state.by_id(2)
+        missiles = [row for row in magic["spells"] if row["key"] == "fire_missile"]
+        self.assertEqual([row["target_id"] for row in missiles], [2, 3])
+        self.assertEqual(
+            [row["name"] for row in missiles],
+            [f"Fire Missile → {near.name}", f"Fire Missile → {far.name}"],
+        )
+        # A spell aimed at nobody keeps its one row and its own name.
+        shield = [row for row in magic["spells"] if row["key"] == "shield"]
+        self.assertEqual(
+            [(row["target_id"], row["name"]) for row in shield], [(None, "Shield")]
+        )
+
     def test_a_dead_or_missing_combatant_has_no_magic(self):
         self.assertIsNone(caster_magic(wizard_state(), 99))
 
@@ -244,6 +310,18 @@ class BorrowableSpellTest(SimpleTestCase):
         self.assertEqual(magic["owed"], 2)
 
 
+def replace_mana(state: BattleState, mana: int) -> BattleState:
+    """``state`` with combatant 1's pool set to ``mana``, the rest shared."""
+    caster = replace(state.by_id(1), mana=mana)
+    return replace(
+        state,
+        combatants=[
+            caster if combatant.combatant_id == 1 else combatant
+            for combatant in state.combatants
+        ],
+    )
+
+
 def assert_stage_agrees_with_menu(test: SimpleTestCase, state: BattleState) -> None:
     """The cast stage's castable and borrowable rows equal the engine menu's
     plain and borrowing casts for combatant 1, on the seated rules."""
@@ -261,13 +339,14 @@ def assert_stage_agrees_with_menu(test: SimpleTestCase, state: BattleState) -> N
         for spell in magic["spells"]
         if spell["borrowable"]
     }
-    # The menu as the decider builds it, with the magic rules the turn
-    # runs on (issue #960): its Channel withholds casts too. A pushed
-    # variant is the same cast with more mana, not another row; a
-    # borrowing copy of a spell's plain cast is its borrowable row.
+    # The menu as the decider builds it for a seated player, with the magic
+    # rules the turn runs on (issue #960; its Channel withholds casts too)
+    # and every target (tarmar-engine #21: a damaging cast at each active
+    # enemy). A pushed variant is the same cast with more mana, not another
+    # row; a borrowing copy of a spell's plain cast is its borrowable row.
     actor = state.by_id(1)
     menu = policy.choose_option(
-        state, actor, magic=profiles.tarmar_engine_profile().magic
+        state, actor, magic=profiles.tarmar_engine_profile().magic, every_target=True
     )
     offered = {
         (candidate.spell_key, candidate.target_id)
@@ -336,6 +415,12 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
             )
         )
 
+    def test_agreement_with_two_foes_to_aim_at(self):
+        state = wizard_state()
+        state.combatants.append(make_combatant(3, q=-4, r=0))
+        self.assert_sets_agree(state)
+        self.assert_sets_agree(replace_mana(state, 1))
+
     def test_agreement_with_no_foe_to_aim_at(self):
         state = wizard_state(mana=0)
         state.by_id(2).alive = False
@@ -378,6 +463,104 @@ def awaiting_wizard_battle(
         Battle.objects.filter(pk=battle.pk).update(state_json=state)
     battle, _events = advance_turn(battle.pk)
     return battle, seat
+
+
+class CastAtTheFarFoeTest(BaseTestCase):
+    """A seated wizard casts at the foe the AI would not (tarmar-engine #21).
+
+    The every-target menu offers a damaging cast at each active enemy; the
+    stage rows them, the player records the far one, and the engine casts at
+    it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.dm = self.create_dm()
+        self.player = self.create_player()
+
+    def place(self, state: dict, seat: BattleCombatant) -> None:
+        """The wizard at the centre, one foe two hexes off and one four
+        hexes the other way, neither able to move before the cast."""
+        foes = [c for c in state["combatants"] if c["combatant_id"] != seat.pk]
+        self.assertEqual(len(foes), 2)
+        wizard = next(c for c in state["combatants"] if c["combatant_id"] == seat.pk)
+        self.wizard_name = wizard["name"]
+        # The generated wizard's attributes are rolled; fix the two its cast
+        # and aim are rolled under.
+        wizard["intelligence"], wizard["dexterity"] = 14, 12
+        for combatant, (q, r) in zip(
+            [wizard, *foes],
+            [(0, 0), (2, 0), (-4, 0)],
+            strict=True,
+        ):
+            combatant["q"], combatant["r"] = q, r
+        for foe in foes:
+            for gait in ("move_walk", "move_jog", "move_run", "move_sprint"):
+                foe[gait] = 0
+        self.near_id, self.far_id = (foe["combatant_id"] for foe in foes)
+        self.far_name = foes[1]["name"]
+
+    def test_the_cast_is_recorded_at_the_far_foe_and_lands_there(self):
+        battle, seat = awaiting_wizard_battle(
+            self.dm, self.player, before_turn=self.place
+        )
+        self.assertEqual(battle.pending_input_json["combatant_id"], seat.pk)
+        casts = [
+            entry
+            for entry in battle.pending_input_json["candidates"]
+            if entry.get("spell_key") == "fire_missile"
+            and not entry.get("push_mana")
+            and not entry.get("borrow")
+        ]
+        # Nearest first, the AI's own target leading.
+        self.assertEqual(
+            [entry["target_id"] for entry in casts], [self.near_id, self.far_id]
+        )
+        magic = caster_magic(BattleState.from_dict(battle.state_json), seat.pk)
+        assert magic is not None
+        rows = [row for row in magic["spells"] if row["key"] == "fire_missile"]
+        self.assertEqual(
+            [row["target_id"] for row in rows], [self.near_id, self.far_id]
+        )
+        far_cast = casts[1]
+        # Every roll on low faces, so the cast and its aim succeed whatever
+        # the generated wizard rolled up and the spell's effect shows whom
+        # it was cast at.
+        with patch.object(
+            profiles.TarmarProfile, "roller", lambda _profile: FacesRoller(2, 2, 2)
+        ):
+            battle, _events = record_player_action(
+                battle.pk,
+                self.player,
+                combatant_id=seat.pk,
+                turn=battle.pending_input_json["turn"],
+                letter=far_cast["letter"],
+                target_id=self.far_id,
+                spell_key="fire_missile",
+            )
+        decision = BattleEvent.objects.get(
+            battle=battle, event_type="decision", actor=self.wizard_name
+        )
+        self.assertEqual(decision.payload["chosen"]["target_id"], self.far_id)
+        # The engine casts it, and it lands on the far foe: the spell's damage
+        # names that foe, in its payload and its line.
+        events = list(
+            BattleEvent.objects.filter(battle=battle, actor=self.wizard_name).order_by(
+                "sequence"
+            )
+        )
+        cast_at = next(
+            index
+            for index, event in enumerate(events)
+            if event.event_type == "action"
+            and (event.payload or {}).get("spell") == "fire_missile"
+        )
+        self.assertTrue(events[cast_at].payload["success"])
+        damage = next(
+            event for event in events[cast_at:] if event.event_type == "damage"
+        )
+        self.assertEqual(damage.payload["target"], self.far_id)
+        self.assertTrue(damage.message.startswith(f"{self.far_name} takes "))
 
 
 class PendingPayloadCarriesMagicTest(BaseTestCase):

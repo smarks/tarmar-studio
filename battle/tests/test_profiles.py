@@ -127,9 +127,24 @@ class AdapterLookupTest(BaseTestCase):
         tarmar_decider = profiles.decider(tarmar)
         assert isinstance(tarmar_decider, functools.partial)
         self.assertIs(tarmar_decider.func, tarmar_policy.choose_option)
-        self.assertEqual(tarmar_decider.keywords, {"magic": magic_rules()})
+        self.assertEqual(
+            tarmar_decider.keywords, {"magic": magic_rules(), "every_target": False}
+        )
+        # A seated player's menu: the engine's own every-target menu
+        # (tarmar-engine #21), on the same magic rules.
+        seated = profiles.decider(tarmar, every_target=True)
+        assert isinstance(seated, functools.partial)
+        self.assertIs(seated.func, tarmar_policy.choose_option)
+        self.assertEqual(
+            seated.keywords, {"magic": magic_rules(), "every_target": True}
+        )
+        # The classic policy takes no such keyword: its menu names its own
+        # targets, and its decider is the same either way.
         classic = classic_battle(dm)
         self.assertIs(profiles.decider(classic), classic_policy.choose_option)
+        self.assertIs(
+            profiles.decider(classic, every_target=True), classic_policy.choose_option
+        )
 
 
 class ClassicTurnTest(BaseTestCase):

@@ -182,6 +182,17 @@ class LiftedChannelTest(SimpleTestCase):
             ),
             described.cost,
         )
+        # The engine's own line names the bound and leaves the ruling to the
+        # studio (tarmar-engine #55), so the option says it exactly once.
+        self.assertIn("past Channel 2", bolt.rationale)
+        self.assertNotIn("ruling", bolt.rationale)
+        payload = described.to_payload()
+        self.assertEqual(
+            " ".join(str(value) for value in payload.values()).count(
+                "magic_bounds.past_by_ruling"
+            ),
+            1,
+        )
         # Another figure's menu is unchanged: Fire Missile notes nothing.
         missile = next(
             candidate
