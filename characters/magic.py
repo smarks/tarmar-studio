@@ -28,10 +28,30 @@ from dataclasses import dataclass
 
 from tarmar_engine.spells import SPELLS, Spell
 
-from battle.magic_rules import SchoolRow, magic_schools
+from battle.magic_rules import (
+    SchoolRow,
+    loaded_casting_success_ceiling,
+    magic_rules,
+    magic_schools,
+)
+from common.rolling import Roller
 
+from .constants import CORE_ATTRIBUTE_FIELDS
+from .dice import roll_dice_logged
 from .models import CHARACTER_INT_FIELD_MAX, Character, magic_school_refusal
-from .services import CharacterChangeError
+from .rules import DiceRollRules
+from .services import (
+    CAST_ON_THE_BOARD,
+    CharacterChangeError,
+    seated_in_a_live_fight,
+)
+from .skill_checks import (
+    attribute_not_recorded,
+    check_stated_total,
+    effective_score,
+    injury_penalty,
+    unconscious_refusal,
+)
 from .skills import MAX_SKILL_POINTS, format_skill_level, get_skill_level
 
 #: The largest mana a Game Master grants in one step.
@@ -80,6 +100,15 @@ def learnable_spells() -> list[Spell]:
     return sorted(SPELLS.values(), key=lambda spell: (spell.school, spell.level))
 
 
+def spell_points(character: Character, spell_key: str) -> int:
+    """The skill points the record holds in one spell; 0 for none.
+
+    The record's ``spells`` may be empty, or hold a spell at 0 (a seat test's
+    record does), so every reader of one spell's points asks here.
+    """
+    return int((character.spells or {}).get(spell_key, 0) or 0)
+
+
 def school_refusal(character: Character, spell: Spell) -> str | None:
     """Why a player may not put points into ``spell``, by school (issue #18).
 
@@ -99,7 +128,7 @@ def school_refusal(character: Character, spell: Spell) -> str | None:
     """
     if magic_schools() is None:
         return None
-    if int((character.spells or {}).get(spell.key, 0) or 0) > 0:
+    if spell_points(character, spell.key) > 0:
         return None
     school = character.magic_school
     if not school:
@@ -220,7 +249,7 @@ def known_spells(character: Character) -> list[KnownSpell]:
     """The character's spells with their mastery, in catalog order."""
     rows = []
     for spell in learnable_spells():
-        points = int((character.spells or {}).get(spell.key, 0) or 0)
+        points = spell_points(character, spell.key)
         if points <= 0:
             continue
         rows.append(
@@ -285,10 +314,9 @@ def spell_mastery(character: Character, spells: tuple[str, ...]) -> dict[str, in
     Returns:
         ``{spell key: mastery level}`` for the seated spells on the record.
     """
-    held = character.spells or {}
     mastery: dict[str, int] = {}
     for key in spells:
-        points = int(held.get(key, 0) or 0)
+        points = spell_points(character, key)
         if points > 0:
             mastery[key] = get_skill_level(points)
     return mastery
@@ -326,7 +354,7 @@ def learn_spell(
     if points < 1:
         raise CharacterChangeError("Invest at least one skill point")
     spells = dict(character.spells or {})
-    held = int(spells.get(spell_key, 0) or 0)
+    held = spell_points(character, spell_key)
     if held + points > MAX_SKILL_POINTS:
         raise CharacterChangeError(f"A spell holds at most {MAX_SKILL_POINTS} points")
     free = character.free_skill_points
@@ -390,3 +418,268 @@ def grant_mana(character: Character, amount: int, *, is_game_master: bool) -> st
         )
     character.free_spell_points = after
     return f"Mana Pool {before} → {after} (Game Master grant)"
+
+
+#: The casting roll's dice. ``public-rules/magic/casting-spells.md``: "Roll:
+#: 3d6 ≤ INT or WIS (depending on the spell)". The drift test holds this
+#: constant to the page; the engine writes its own "3d6" for the board's
+#: casting roll, which no test here pins.
+CASTING_DICE = "3d6"
+#: The casting roll as a roll whose totals a stated total is held to.
+CASTING_ROLL = DiceRollRules(CASTING_DICE)
+
+#: The dice of the DEX roll a spell that must hit adds. casting-spells.md
+#: names the roll ("Magic requiring hitting a target needs an additional DEX
+#: roll") and gives it no dice; the engine reads it as the rules' standard
+#: attribute check, 3d6 ≤ DEX (``tarmar_engine.spells``), and so does this.
+AIM_DICE = "3d6"
+
+#: The refusals a cast off the board gives (issue #18), each written once.
+SPELL_NOT_CASTABLE = "{spell} is not a spell this character can cast; learn it first"
+STATED_CASTING_DICE_GAME_MASTER_ONLY = "Only a Game Master can state the dice"
+POOL_SHORT = "{spell} costs {cost} mana and the Pool holds {pool}"
+
+#: The attribute field each spell's short attribute name reads.
+_ATTRIBUTE_FIELD_BY_SHORT_NAME = {
+    short_name: field_name for field_name, short_name in CORE_ATTRIBUTE_FIELDS
+}
+
+
+@dataclass(frozen=True)
+class StoryCast:
+    """One spell cast outside a battle (issue #18), every number the line prints.
+
+    Attributes:
+        spell: The spell's catalog key.
+        spell_name: Its name.
+        attribute: The attribute the roll is made under, as the spell names it.
+        attribute_score: The character's effective (aged) score in it.
+        injury_penalty: The injury table's -1 or -2, or 0.
+        ceiling: The highest total that succeeds: the score less the injury,
+            capped under the canon's fumble floor
+            (``battle.magic_rules.loaded_casting_success_ceiling``).
+        dice: The dice as the line prints them, or the Game Master's stated
+            total.
+        total: The casting roll's total.
+        succeeded: Whether the spell is cast.
+        tier: The success tier's label (``casting_success_tiers``), or ``""``.
+        mana_cost: The spell's cost, its level.
+        mana_spent: Mana taken from the Pool, less any refund.
+        mana_refund: Mana a success tier gave back.
+        mana_left: Mana in the Pool afterwards.
+        runaway: Whether the total starts a Runaway, which the Game Master runs.
+        hit: For a spell that must hit, the DEX roll's line; ``""`` otherwise
+            or when the spell failed.
+        game_master_call: What a Game Master cast past, which a player could
+            not; ``""`` for an ordinary cast.
+    """
+
+    spell: str
+    spell_name: str
+    attribute: str
+    attribute_score: int
+    injury_penalty: int
+    ceiling: int
+    dice: str
+    total: int
+    succeeded: bool
+    tier: str
+    mana_cost: int
+    mana_spent: int
+    mana_refund: int
+    mana_left: int
+    runaway: bool
+    hit: str
+    game_master_call: str
+
+    @property
+    def line(self) -> str:
+        """The history line: the dice, the ceiling, the outcome and the mana."""
+        against = f"{self.attribute} {self.attribute_score}" + (
+            f" {self.injury_penalty:+d} injured" if self.injury_penalty else ""
+        )
+        comparison = "≤" if self.succeeded else ">"
+        outcome = "cast" if self.succeeded else "fails"
+        text = (
+            f"casts {self.spell_name}: {self.dice} {comparison} {self.ceiling} "
+            f"({against}): {outcome}"
+        )
+        if self.tier:
+            text += f", {self.tier}"
+        text += f"; {self.mana_spent} mana spent"
+        if self.mana_refund:
+            text += f" after {self.mana_refund} back"
+        text += f", {self.mana_left} left"
+        if self.runaway:
+            text += "; a Runaway starts, which the Game Master runs"
+        if self.hit:
+            text += f"; {self.hit}"
+        if self.game_master_call:
+            text += f" (a Game Master's call: {self.game_master_call})"
+        return text
+
+
+def cast_in_story(
+    character: Character,
+    spell_key: str,
+    *,
+    is_game_master: bool,
+    stated_total: int | None = None,
+    roller: Roller | None = None,
+) -> StoryCast:
+    """Cast a spell outside a battle, from the sheet (issue #18).
+
+    The rules, from ``reference/content/public-rules/magic/``:
+    casting-spells.md, "Spells cost mana equal to the spell's level" and
+    "Roll: 3d6 ≤ INT or WIS (depending on the spell)", with "Magic requiring
+    hitting a target needs an additional DEX roll"; the very high totals are
+    the canon's ``casting_failure`` block, the very low its
+    ``casting_success_tiers``, each read as the board reads them. The roll is
+    judged by the board's own ceiling
+    (``battle.magic_rules.loaded_casting_success_ceiling``), so a total
+    succeeds here exactly when it would on the board. The injury table's
+    penalty lowers the attribute, as it does every roll off the board.
+
+    The mana is spent from the record's Pool (``Character.mana_spent``, the
+    pools batch's field) on a success, and on a failure only on the canon's
+    ``mana_lost_totals``; a success tier's refund comes back, never more than
+    was spent. A Runaway the total starts is recorded on the line, and the
+    Game Master runs it: nothing off the board drains a Pool turn by turn.
+    Push, Channel and Borrowing are the board's and are not offered here.
+
+    A player is held to the rules: a spell on the record at mastery 1 or more
+    (spell-mastery.md, "Can cast the spell"), the whole cost in the Pool, a
+    conscious caster, and dice the server rolls. A Game Master may cast a
+    spell the record does not hold, past the Pool (spending only what is
+    there), for an unconscious caster, or with a total rolled at his table,
+    each named on the line. Nobody casts here for a dead character, an
+    attribute nobody has recorded (DEX too, for a spell that must hit), or a
+    character fighting on a live board, whose own turns cast. Every refusal
+    is made before any die is rolled or any mana moves.
+
+    Args:
+        character: The character, changed in memory and not saved.
+        spell_key: A key of the combat spell catalog.
+        is_game_master: Whether a Game Master asked.
+        stated_total: A Game Master's casting total from the table.
+        roller: Roll through this roller instead of the dice module default.
+
+    Returns:
+        The cast.
+
+    Raises:
+        CharacterChangeError: Any refusal above.
+    """
+    spell = SPELLS.get(spell_key)
+    if spell is None:
+        raise CharacterChangeError(f"Unknown spell: {spell_key}")
+    overridden: list[str] = []
+    unconscious = unconscious_refusal(character)
+    if unconscious is not None:
+        if not is_game_master or not character.is_alive:
+            raise CharacterChangeError(unconscious)
+        overridden.append("unconscious")
+    if seated_in_a_live_fight(character):
+        raise CharacterChangeError(f"{character.name} {CAST_ON_THE_BOARD}")
+    if not get_skill_level(spell_points(character, spell.key)):
+        if not is_game_master:
+            raise CharacterChangeError(SPELL_NOT_CASTABLE.format(spell=spell.name))
+        overridden.append(f"{spell.name} is not on the record")
+    if stated_total is not None:
+        if not is_game_master:
+            raise CharacterChangeError(STATED_CASTING_DICE_GAME_MASTER_ONLY)
+        check_stated_total(CASTING_ROLL, stated_total)
+        overridden.append("the dice stated")
+    attribute_field = _ATTRIBUTE_FIELD_BY_SHORT_NAME[spell.attribute]
+    score = effective_score(character, attribute_field)
+    if score is None:
+        raise CharacterChangeError(attribute_not_recorded(attribute_field))
+    # Every refusal comes before any die is rolled or any mana moves, so a
+    # refused cast leaves the record as it was.
+    aim_dexterity = character.combat_dexterity_without_modifiers
+    if spell.targeted and aim_dexterity is None:
+        raise CharacterChangeError(attribute_not_recorded("dexterity"))
+    pool = character.current_mana
+    cost = spell.level
+    if pool < cost:
+        if not is_game_master:
+            raise CharacterChangeError(
+                POOL_SHORT.format(spell=spell.name, cost=cost, pool=pool)
+            )
+        overridden.append(f"{cost - pool} mana past the Pool, not spent")
+    if stated_total is not None:
+        total = stated_total
+        dice = f"{CASTING_DICE} stated by a Game Master = {stated_total}"
+    else:
+        total, dice = roll_dice_logged(CASTING_DICE, roller)
+    injured = injury_penalty(character)
+    ceiling = loaded_casting_success_ceiling(score + injured)
+    succeeded = total <= ceiling
+    rules = magic_rules()
+    casting_failure = rules.casting_failure
+    pays = succeeded or (
+        casting_failure is not None and total in casting_failure.mana_lost_totals
+    )
+    spent = min(cost, pool) if pays else 0
+    tier = rules.success_tier(total) if succeeded else None
+    refund = min(tier.mana_refund, spent) if tier is not None else 0
+    character.mana_spent += spent - refund
+    runaway = (
+        not succeeded
+        and casting_failure is not None
+        and total == casting_failure.runaway_total
+    )
+    hit = ""
+    if succeeded and aim_dexterity is not None and spell.targeted:
+        hit = _hit_roll(
+            aim_dexterity + injured, roller, server_rolled=stated_total is not None
+        )
+    return StoryCast(
+        spell=spell.key,
+        spell_name=spell.name,
+        attribute=spell.attribute,
+        attribute_score=score,
+        injury_penalty=injured,
+        ceiling=ceiling,
+        dice=dice,
+        total=total,
+        succeeded=succeeded,
+        tier=tier.label if tier is not None else "",
+        mana_cost=cost,
+        mana_spent=spent - refund,
+        mana_refund=refund,
+        mana_left=character.current_mana,
+        runaway=runaway,
+        hit=hit,
+        game_master_call=", ".join(overridden),
+    )
+
+
+def _hit_roll(target: int, roller: Roller | None, *, server_rolled: bool) -> str:
+    """The DEX roll a spell that must hit adds (casting-spells.md).
+
+    "Magic requiring hitting a target needs an additional DEX roll": the aim
+    dice under the board's DEX for the caster, the effective score less worn
+    armour's own DEX penalty (``Character.combat_dexterity_without_modifiers``,
+    which the battle seats), less the injury table's penalty. The board's
+    aim adds its own situation (a dodging target, an off-balance caster),
+    which off the board is the table's. What the spell hits is the table's
+    too.
+
+    Args:
+        target: The highest total that hits.
+        roller: Roll through this roller instead of the dice module default.
+        server_rolled: Whether to say the server rolled the aim: so a Game
+            Master who stated the casting total from his table reads that
+            the aim was not his dice.
+
+    Returns:
+        The roll's part of the history line.
+    """
+    total, dice = roll_dice_logged(AIM_DICE, roller)
+    landed = total <= target
+    rolled_by = " rolled by the server" if server_rolled else ""
+    return (
+        f"to hit{rolled_by}, {dice} {'≤' if landed else '>'} {target} (DEX): "
+        f"{'hits' if landed else 'misses'}"
+    )

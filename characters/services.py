@@ -3271,11 +3271,15 @@ SURVIVAL_SAVE_ON_THE_BOARD = (
     "is fighting on the board, which rolls the survival save each turn itself"
 )
 
+#: Why nobody casts off the board for a fighting character (issue #18), after
+#: the character's name: the board's own turns cast.
+CAST_ON_THE_BOARD = "is fighting on the board, which casts on its own turns; cast there"
+
 #: The history field a survival save is kept under.
 SURVIVAL_SAVE_FIELD = "survival save"
 
 
-def _seated_in_a_live_fight(character: Character) -> bool:
+def seated_in_a_live_fight(character: Character) -> bool:
     """Whether a live record-writing fight has this character on its board.
 
     Read through the reverse relation, so this module needs no import of the
@@ -3319,7 +3323,7 @@ def survival_save_refusal(character: Character, *, is_game_master: bool) -> str 
         or condition.survival_save_target is None
     ):
         return NO_SURVIVAL_SAVE_DUE
-    if _seated_in_a_live_fight(character):
+    if seated_in_a_live_fight(character):
         return f"{character.name} {SURVIVAL_SAVE_ON_THE_BOARD}"
     if not is_game_master and _last_save_against(character) == condition.pools:
         return SURVIVAL_SAVE_ALREADY_ROLLED

@@ -144,6 +144,16 @@ def is_glossary_skill(skill_name: str) -> bool:
     return skill_rules().skill_check.names_skill(glossary_skill(skill_name))
 
 
+def attribute_not_recorded(attribute: str) -> str:
+    """The refusal of a roll under an attribute nobody has recorded.
+
+    Args:
+        attribute: A field of
+            :data:`characters.constants.CHARACTER_ATTRIBUTE_FIELDS`.
+    """
+    return f"{attribute.title()} is not recorded yet"
+
+
 def effective_score(character: Character, attribute: str) -> int | None:
     """The aged score the check reads (ruling on #773); None if unrecorded.
 
@@ -350,10 +360,10 @@ def skill_check(
         raise CharacterChangeError(f"Difficulty must be between 0 and {MAX_DIFFICULTY}")
     score = effective_score(character, used)
     if score is None:
-        raise CharacterChangeError(f"{used.title()} is not recorded yet")
+        raise CharacterChangeError(attribute_not_recorded(used))
 
     if stated_total is not None:
-        _check_stated_total(rules, stated_total)
+        check_stated_total(rules, stated_total)
         faces: tuple[int, ...] = ()
         dice_total = stated_total
     else:
@@ -407,7 +417,7 @@ def skill_check(
     )
 
 
-def _check_stated_total(roll: DiceRollRules, stated_total: int) -> None:
+def check_stated_total(roll: DiceRollRules, stated_total: int) -> None:
     """Refuse a Game Master's stated total the check's dice cannot make.
 
     Args:
@@ -553,9 +563,9 @@ def attribute_check(
         )
     score = effective_score(character, attribute)
     if score is None:
-        raise CharacterChangeError(f"{attribute.title()} is not recorded yet")
+        raise CharacterChangeError(attribute_not_recorded(attribute))
     if stated_total is not None:
-        _check_stated_total(rules, stated_total)
+        check_stated_total(rules, stated_total)
         dice_total = stated_total
         dice = f"{rules.dice} stated by a Game Master = {stated_total}"
     else:

@@ -111,6 +111,7 @@ from tarmar_engine.magic import (
     RollUnderRule,
     RunawayRules,
     SpellEffectKind,
+    casting_success_ceiling,
     spell_effect_kind,
 )
 from tarmar_engine.spells import SPELLS
@@ -646,6 +647,28 @@ def magic_rules() -> MagicRules:
         MagicRulesError: The file is missing or malformed.
     """
     return load_magic_rules(MAGIC_RULES_FILE)
+
+
+def loaded_casting_success_ceiling(attribute: int) -> int:
+    """The highest natural casting total that succeeds, under the loaded canon.
+
+    The studio's one seam onto the engine's judgement
+    (``tarmar_engine.magic.casting_success_ceiling``, tarmar-engine 0.9.19):
+    at or under the effective attribute and, where the canon's
+    ``casting_failure`` block sets one, under its fumble floor. A cast made
+    off the board (``characters.magic.cast_in_story``, issue #18) is judged
+    here, so it cannot judge a total differently from the board.
+
+    Args:
+        attribute: The effective attribute the roll is made under.
+
+    Returns:
+        The ceiling: a natural total at or under it succeeds.
+
+    Raises:
+        MagicRulesError: The canon's file is missing or malformed.
+    """
+    return casting_success_ceiling(attribute, magic_rules().casting_failure)
 
 
 def load_magic_schools(path: Path) -> SchoolTable | None:

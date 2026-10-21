@@ -14,6 +14,7 @@ from battle.engine import actions, engine, hexes
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
 from battle.magic_rules import load_magic_schools
 from battle.spells import SPELLS
+from characters.magic import CASTING_DICE
 from reference.markdown_tables import table_rows_under_heading as _table_rows
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
@@ -372,6 +373,12 @@ class SpellCatalogDriftGuard(SimpleTestCase):
         self.assertEqual(
             [(row.up_to, row.label, row.schools) for row in table.rows], documented
         )
+
+    def test_a_cast_off_the_board_rolls_the_pages_casting_dice(self):
+        # Issue #18: casting-spells.md, "Roll: 3d6 ≤ INT or WIS (depending
+        # on the spell)"; characters.magic.cast_in_story rolls CASTING_DICE.
+        markdown = (RULES / "magic" / "casting-spells.md").read_text()
+        self.assertIn(f"**Roll:** {CASTING_DICE} ≤ INT or WIS", markdown)
 
     def test_mana_cost_equals_spell_level(self):
         # casting-spells.md: "Spells cost mana equal to the spell's level."
