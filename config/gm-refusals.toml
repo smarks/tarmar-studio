@@ -35,7 +35,11 @@ game_master_only = "only a Game Master can bring a character back or remove one"
 # When a plan records or retires a house rule.
 house_rule = "only the Game Master sets the rulings at this table; a player's house rule is a suggestion for him, not a ruling"
 # When a plan rules on literacy (issue #743).
-literacy_ruling = "only the Game Master rules on whether a character can read; a player's literacy is rolled, and at an Origin of Consult GM the Game Master decides"
+literacy_ruling = "only the Game Master rules on whether a character can read; a player's literacy is rolled"
+# Added to literacy_ruling when the canon leaves an Origin to the Game Master
+# (issue #128). {origin}: that Origin's name as the canon's location table
+# gives it ("Consult GM").
+literacy_ruling_origin = ", and at an Origin of {origin} the Game Master decides"
 # When a plan states a player's attribute scores (issue #404).
 player_stated_scores = "a player's attribute scores are rolled, not stated; only a Game Master can set them to chosen values"
 # When a plan states a player's Fatigue roll (issue #802).

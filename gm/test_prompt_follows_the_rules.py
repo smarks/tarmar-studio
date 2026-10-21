@@ -18,6 +18,14 @@ from tarmar_engine.magic import (
     BorrowingRules,
     CastingFailureRules,
     CastingSuccessTier,
+    ChannelDerivation,
+    ChannelRules,
+    ControlBand,
+    CounterspellRules,
+    PushRules,
+    RollUnderRule,
+    RunawayRules,
+    SpellEffectKind,
 )
 
 from battle.tests.magic_fixtures import (
@@ -26,7 +34,7 @@ from battle.tests.magic_fixtures import (
     seated_rules,
 )
 from characters.equipment_rules import EncumbranceLevel, EncumbranceRules
-from characters.rules import FatigueRollRules
+from characters.rules import FatigueRollRules, LocationRow, LocationTable
 from characters.skill_rules import SkillRules, SkillTrackRules
 from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN
 from characters.tests.rules_fixtures import (
@@ -59,8 +67,8 @@ from .turn_engine.policy import TurnPolicy
 #: track's XP a year and the label "Hunter/Gatherer", the weapon, armour and
 #: shield lists, Heavy encumbrance's "or slow", the plan examples' track).
 #: ``section_magic`` is not here: it is the loaded canon's ``magic.md`` around
-#: the two subsections built from the rules (#48), so its text depends on which
-#: canon is loaded. Its two built bodies are pinned as text instead, below.
+#: the subsections built from the rules (#48, #127), so its text depends on
+#: which canon is loaded. Its built bodies are pinned as text instead, below.
 DEFAULT_SECTION_HASHES: dict[Callable[[], str], str] = {
     engine.section_core: (
         "da9031c648b4d17c88cd8a9cc964febf405f610c7162879660ea90f09033d464"
@@ -84,7 +92,7 @@ DEFAULT_SECTION_HASHES: dict[Callable[[], str], str] = {
 
 
 #: The magic section's built bodies under the default canon's magic rules
-#: (#48), by heading, whichever canon is loaded.
+#: (#48, #127), by heading, whichever canon is loaded.
 DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
     zip(
         engine.GENERATED_MAGIC_HEADINGS,
@@ -93,10 +101,35 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "13 or more fails whatever the attribute: 13: bad fumble (spell fails, "
             "mana lost); 14: catastrophic (spell fails, mana lost) — triggers "
             "Runaway; 15-18: fumble (spell fails, mana kept).",
+            "Invest extra mana for greater effect. No more than 3 mana may be "
+            "pushed. Control Roll: 3d6 ≤ INT − (spell "
+            "cost + mana pushed). Fail by 1-4: Slip (spell takes effect without the "
+            "push's bonus). Fail by 5+: Surge, a Runaway (spell fails). Natural 18: "
+            "always Surge, a Runaway.",
+            "There is no Channel: only the caster's mana, and the push and debt caps "
+            "where the rules set them, bound a casting.",
             "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
             "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). A natural 12 always "
             "fails. A failed Debt Roll is a Backlash; the spell has already "
             "resolved. Mana handed back pays the Debt before it refills the pool.",
+            "The spell feeds on the caster: each turn it drains mana equal to 1 more "
+            "than the original casting cost and its effect grows unpredictably (GM "
+            "decides; once anchored, the anchorer's next cast of that spell adds +2 "
+            "to its rolled effect for each turn it ran). At 0 mana the "
+            "caster falls unconscious and it drains Body instead; death when Body "
+            "reaches 0. Anchor: the conscious caster rolls 3d6 ≤ WIS each turn to "
+            "regain control. A third-party mage may intervene by investing mana "
+            "equal to 2 × the original casting cost and rolling 2d10 ≤ INT — failure "
+            "catches both in the Runaway. Survivors often bear marks: white streaks "
+            "in the hair, strange scars, a haunted look.",
+            "The defender commits 1 to 5 mana and declares a counter (on their "
+            "action); opposed 2d10 + INT rolls, each side +1 per 2 mana invested "
+            "(the caster's whole casting, the defender's commitment); ties go to the "
+            "defender. Defender wins: spell countered. Caster wins: spell goes off. "
+            "Only the caster can escalate on later turns by paying again; the "
+            "defender gets one shot per casting and may oppose again (paying again) "
+            "or let it through. A failed Control Roll during escalation can trigger "
+            "Runaway.",
         ),
         strict=True,
     )
@@ -108,7 +141,15 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
 #: floor of 10 with a lone plain total, a run of them between the specials
 #: and a run up to the dice's highest; and a Debt Roll on two attributes at 3
 #: a point, with two automatic failures, a failure that is a Runaway under
-#: another name opening on a vowel, and refunds that leave the Debt owed.
+#: another name opening on a vowel, and refunds that leave the Debt owed (#48).
+#: A Control Roll of 2d8 under WIS at 2 a mana with the spell's cost counted,
+#: a band of one margin, one where the push's bonus holds, one that fails
+#: short of a Runaway, and two automatic Runaway totals; a Channel that
+#: doubles the spell's level and adds 1 beside one read off a general skill
+#: that costs 3× to advance, less 1; a Runaway that drains 3 × the cost + 2 into
+#: Fatigue, kills at twice its maximum, grows 4 a turn and lets a helper fail
+#: alone at 3 × the cost; and a Counterspell of 2d8 + WIS at 4 mana a bonus,
+#: ties to the defender, and exactly 2 mana committed (#127).
 UNLIKE_EITHER_CANONS_MAGIC_RULES = replace(
     INVENTED_RULES,
     casting_success_tiers=(
@@ -139,7 +180,139 @@ UNLIKE_EITHER_CANONS_MAGIC_RULES = replace(
         max_debt=5,
         refunds_pay_debt_first=False,
     ),
+    push=PushRules(
+        control_dice="2d8",
+        control_attribute="WIS",
+        penalty_per_mana=2,
+        base_cost_counts_as_invested=True,
+        failure_bands=(
+            ControlBand(
+                key="flicker",
+                label="Flicker",
+                is_runaway=False,
+                lowest_margin=1,
+                highest_margin=1,
+                spell_takes_effect=True,
+                push_bonus_applies=True,
+            ),
+            ControlBand(
+                key="stagger",
+                label="Stagger",
+                is_runaway=False,
+                lowest_margin=2,
+                highest_margin=4,
+                spell_takes_effect=True,
+                push_bonus_applies=False,
+            ),
+            ControlBand(
+                key="fizzle",
+                label="Fizzle",
+                is_runaway=False,
+                lowest_margin=5,
+                highest_margin=8,
+                spell_takes_effect=False,
+                push_bonus_applies=False,
+            ),
+            ControlBand(
+                key="wild",
+                label="Wild surge",
+                is_runaway=True,
+                lowest_margin=9,
+                highest_margin=None,
+                spell_takes_effect=False,
+                push_bonus_applies=False,
+            ),
+        ),
+        automatic_runaway_totals=frozenset({16, 2}),
+        effect_bonus_per_mana_by_kind={SpellEffectKind.DAMAGE: 1},
+    ),
+    channel=ChannelRules(
+        derivations={
+            "studied": ChannelDerivation(source_skill=None, multiplier=2, offset=1),
+            "sorcerous": ChannelDerivation(
+                source_skill="sorcery", multiplier=1, offset=-1
+            ),
+        },
+        default_kind="studied",
+    ),
+    runaway=RunawayRules(
+        drain_multiplier_of_cost=3,
+        drain_flat=2,
+        overflow_pool="fatigue",
+        death_multiplier_of_max=2,
+        self_anchor=RollUnderRule(dice="2d8", attribute="INT"),
+        helper_anchor=RollUnderRule(dice="2d10", attribute="WIS"),
+        helper_cost_multiplier_of_cost=3,
+        helper_failure_catches_helper=False,
+        effect_bonus_per_turn=4,
+    ),
+    counterspell=CounterspellRules(
+        opposed_dice="2d8",
+        opposed_attribute="WIS",
+        mana_per_bonus=4,
+        ties_go_to_caster=False,
+        defender_min_mana=2,
+        defender_max_mana=2,
+    ),
 )
+
+#: :data:`UNLIKE_EITHER_CANONS_MAGIC_RULES`' Push, Runaway and Counterspell
+#: at the other end of each choice (#127): no penalty, a Runaway band named
+#: Runaway and no automatic total; a Runaway that drains the cost alone into
+#: Body, kills at its maximum below zero, does not grow and catches a failed
+#: helper paying the cost; a Counterspell whose ties go to the caster and
+#: whose least commitment is the only bound.
+OTHER_END_MAGIC_RULES = replace(
+    UNLIKE_EITHER_CANONS_MAGIC_RULES,
+    push=PushRules(
+        control_dice="3d6",
+        control_attribute="INT",
+        penalty_per_mana=0,
+        base_cost_counts_as_invested=False,
+        automatic_runaway_totals=frozenset(),
+        effect_bonus_per_mana_by_kind={SpellEffectKind.DAMAGE: 1},
+        failure_bands=(
+            ControlBand(
+                key="runaway",
+                label="Runaway",
+                is_runaway=True,
+                lowest_margin=1,
+                highest_margin=None,
+                spell_takes_effect=False,
+                push_bonus_applies=False,
+            ),
+        ),
+    ),
+    runaway=RunawayRules(
+        drain_multiplier_of_cost=1,
+        drain_flat=0,
+        overflow_pool="body",
+        death_multiplier_of_max=1,
+        self_anchor=RollUnderRule(dice="2d8", attribute="INT"),
+        helper_anchor=RollUnderRule(dice="2d10", attribute="WIS"),
+        helper_cost_multiplier_of_cost=1,
+        helper_failure_catches_helper=True,
+        effect_bonus_per_turn=0,
+    ),
+    counterspell=CounterspellRules(
+        opposed_dice="2d8",
+        opposed_attribute="WIS",
+        mana_per_bonus=4,
+        ties_go_to_caster=True,
+        defender_min_mana=2,
+    ),
+)
+
+
+#: The magic section's generated headings, in the section's order.
+(
+    SPECIAL_CASTING_RESULTS,
+    PUSH,
+    CHANNEL,
+    BORROWING,
+    RUNAWAY,
+    COUNTERSPELL,
+) = engine.GENERATED_MAGIC_HEADINGS
 
 
 def magic_body(heading: str) -> str:
@@ -150,7 +323,7 @@ def magic_body(heading: str) -> str:
     """
     section = engine.section_magic()
     start = section.index(f"{heading}\n") + len(heading) + 1
-    return section[start : section.index("\n", start)]
+    return section[start:].split("\n", 1)[0]
 
 
 def with_track_skills(sailor: list[str], smith: list[str]) -> SkillRules:
@@ -370,6 +543,86 @@ class InventedRulesTest(SimpleTestCase):
                 "Burdened: any load (Amble 3 hex max).\n", engine.section_combat()
             )
 
+    def test_the_origin_left_to_the_game_master_is_named_as_the_canon_names_it(
+        self,
+    ) -> None:
+        """#128: the row with no literacy check is "Ask the GM" here, and the
+        set_background example takes the canon's rows."""
+        creation = engine.section_character_creation()
+        plan_format = engine.section_plan_schema()
+        self.assertIn(
+            "An Origin of Ask the GM has no check: the Game Master decides. That "
+            "check decides whether a character can read",
+            creation,
+        )
+        self.assertIn(
+            "records the Game Master's ruling on whether a character whose Origin "
+            "is Ask the GM can read (false for cannot).",
+            plan_format,
+        )
+        self.assertIn(
+            '"provenance": "merchant", "location": "Port", "wealth": "Poor"}: any of '
+            "the three.",
+            plan_format,
+        )
+        for prompt in (engine.system_prompt(), engine.dm_system_prompt()):
+            with self.subTest(prompt=prompt[:40]):
+                self.assertNotIn("Consult GM", prompt)
+
+    def test_origins_left_to_the_game_master_are_named_together(self) -> None:
+        two = replace(
+            INVENTED_CHARACTER_RULES,
+            location=LocationTable(
+                rows=(
+                    LocationRow(40, "Wanderer", (), None),
+                    LocationRow(80, "Port", ("Sailing",), 1),
+                    LocationRow(100, "Ask the GM", (), None),
+                ),
+                skill_points=2,
+            ),
+        )
+        with seated_character_rules(two):
+            creation = engine.section_character_creation()
+            plan_format = engine.section_plan_schema()
+        self.assertIn("An Origin of Wanderer or Ask the GM has no check", creation)
+        self.assertIn("whose Origin is Wanderer or Ask the GM can read", plan_format)
+        self.assertIn('"location": "Port", "wealth": "Poor"', plan_format)
+
+    def test_a_canon_that_leaves_no_origin_to_the_game_master(self) -> None:
+        """No sentence about such an origin, and no rule_literacy line: a ruling
+        could never be recorded."""
+        none_left = replace(
+            INVENTED_CHARACTER_RULES,
+            location=LocationTable(
+                rows=(LocationRow(100, "Port", ("Sailing",), 1),), skill_points=2
+            ),
+        )
+        with seated_character_rules(none_left):
+            creation = engine.section_character_creation()
+            plan_format = engine.section_plan_schema()
+        self.assertIn(
+            "is fixed once it is rolled or ruled. That check decides", creation
+        )
+        self.assertNotIn("has no check", creation)
+        self.assertNotIn('"action": "rule_literacy"', plan_format)
+
+    def test_with_no_origin_a_message_may_state_the_example_is_the_default(
+        self,
+    ) -> None:
+        all_left = replace(
+            INVENTED_CHARACTER_RULES,
+            location=LocationTable(
+                rows=(
+                    LocationRow(50, "Ask the GM", (), None),
+                    LocationRow(100, "Port", (), None),
+                ),
+                skill_points=2,
+            ),
+        )
+        with seated_character_rules(all_left):
+            plan_format = engine.section_plan_schema()
+        self.assertIn('"location": "Port", "wealth": "Poor"', plan_format)
+
     def test_the_plan_format_names_the_dice_and_a_loaded_track(self) -> None:
         schema = engine.section_plan_schema()
         for sentence in (
@@ -409,9 +662,8 @@ class InventedRulesTest(SimpleTestCase):
         self.assertNotIn("65", authority)
 
     def test_the_magic_section_states_the_casting_table(self) -> None:
-        special, _ = engine.GENERATED_MAGIC_HEADINGS
         with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
-            body = magic_body(special)
+            body = magic_body(SPECIAL_CASTING_RESULTS)
         self.assertEqual(
             body,
             "5: Flare (−2 to the spell's rolled damage or healing, 3 mana handed "
@@ -425,9 +677,8 @@ class InventedRulesTest(SimpleTestCase):
         )
 
     def test_the_magic_section_states_the_borrowing(self) -> None:
-        _, borrowing = engine.GENERATED_MAGIC_HEADINGS
         with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
-            body = magic_body(borrowing)
+            body = magic_body(BORROWING)
         self.assertEqual(
             body,
             "Spend all remaining mana, borrow the rest as Debt, up to 5 owed in all. "
@@ -438,7 +689,6 @@ class InventedRulesTest(SimpleTestCase):
         )
 
     def test_a_runaway_named_runaway_is_named_once(self) -> None:
-        _, borrowing = engine.GENERATED_MAGIC_HEADINGS
         rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
         assert rules.borrowing is not None
         named_runaway = replace(
@@ -454,7 +704,7 @@ class InventedRulesTest(SimpleTestCase):
             ),
         )
         with seated_rules(named_runaway):
-            body = magic_body(borrowing)
+            body = magic_body(BORROWING)
         self.assertEqual(
             body,
             "Spend all remaining mana, borrow the rest as Debt. Debt Roll after the "
@@ -464,17 +714,16 @@ class InventedRulesTest(SimpleTestCase):
         )
 
     def test_a_debt_roll_with_no_penalty_names_the_attributes_alone(self) -> None:
-        _, borrowing = engine.GENERATED_MAGIC_HEADINGS
         rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
         assert rules.borrowing is not None
         no_penalty = replace(
             rules, borrowing=replace(rules.borrowing, penalty_per_debt=0)
         )
         with seated_rules(no_penalty):
-            body = magic_body(borrowing)
+            body = magic_body(BORROWING)
         self.assertIn(" Debt Roll after the spell: 2d8 ≤ (WIS + INT). ", body)
 
-    def test_no_tiers_no_failing_totals_and_no_borrowing(self) -> None:
+    def test_no_tiers_no_failing_totals_no_borrowing_runaway_or_counter(self) -> None:
         with seated_rules(INVENTED_RULES):
             bodies = [
                 magic_body(heading) for heading in engine.GENERATED_MAGIC_HEADINGS
@@ -484,7 +733,235 @@ class InventedRulesTest(SimpleTestCase):
             [
                 "The attribute alone judges a casting roll: no natural total fails on "
                 "its own, a failed cast keeps its mana, and no cast starts a Runaway.",
+                "Invest extra mana for greater effect. No more than 2 mana may be "
+                "pushed. Control Roll: 3d6 ≤ INT − (mana "
+                "pushed). Fail by 1-2: Waver (spell takes effect without the push's "
+                "bonus). Fail by 3+: Bolt, a Runaway (spell fails).",
+                "Hard cap on mana per casting, the spell's cost and any pushed mana "
+                "together. Studied Magic: equals 2 × skill level in that specific "
+                "spell.",
                 "A caster without the mana for a spell cannot cast it; there is no "
                 "Borrowing.",
+                "A Runaway is narrated when it starts; the rules give it no later "
+                "turns, no drain and no anchor roll.",
+                "No mage may commit mana to counter another's casting; there is no "
+                "Counterspell.",
             ],
         )
+
+    def test_the_magic_section_states_the_push(self) -> None:
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(PUSH)
+        self.assertEqual(
+            body,
+            "Invest extra mana for greater effect. Control Roll: 2d8 ≤ WIS − 2 × "
+            "(spell cost + mana pushed). Fail by 1: Flicker (spell takes effect with "
+            "the push's bonus). Fail by 2-4: Stagger (spell takes effect without the "
+            "push's bonus). Fail by 5-8: Fizzle (spell fails). Fail by 9+: Wild "
+            "surge, a Runaway (spell fails). Natural 2 or 16: always Wild surge, a "
+            "Runaway.",
+        )
+
+    def test_a_push_with_no_cap_states_none(self) -> None:
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(PUSH)
+        self.assertNotIn("No more than", body)
+        self.assertIn("Invest extra mana for greater effect. Control Roll: ", body)
+
+    def test_a_push_with_no_runaway_band_starts_no_runaway_in_escalation(
+        self,
+    ) -> None:
+        tame = replace(
+            UNLIKE_EITHER_CANONS_MAGIC_RULES,
+            push=PushRules(
+                control_dice="3d6",
+                control_attribute="INT",
+                penalty_per_mana=1,
+                base_cost_counts_as_invested=False,
+                failure_bands=(
+                    ControlBand(
+                        key="wobble",
+                        label="Wobble",
+                        is_runaway=False,
+                        lowest_margin=1,
+                        highest_margin=None,
+                        spell_takes_effect=True,
+                        push_bonus_applies=False,
+                    ),
+                ),
+                automatic_runaway_totals=frozenset(),
+                effect_bonus_per_mana_by_kind={SpellEffectKind.DAMAGE: 1},
+            ),
+        )
+        with seated_rules(tame):
+            push = magic_body(PUSH)
+            counterspell = magic_body(COUNTERSPELL)
+        self.assertTrue(
+            push.endswith(
+                "Fail by 1+: Wobble (spell takes effect without the push's bonus)."
+            )
+        )
+        self.assertNotIn("Control Roll", counterspell)
+        self.assertTrue(counterspell.endswith("or let it through."))
+
+    def test_a_kind_of_magic_named_in_two_words_from_an_ordinary_skill(
+        self,
+    ) -> None:
+        """A key's underscore is a space, and a source skill that costs the
+        ordinary price to advance carries no cost note."""
+        rules = replace(
+            UNLIKE_EITHER_CANONS_MAGIC_RULES,
+            borrowing=None,
+            channel=ChannelRules(
+                derivations={
+                    "high_elven": ChannelDerivation(
+                        source_skill="lore", multiplier=1, offset=0
+                    )
+                },
+                default_kind="high_elven",
+            ),
+        )
+        with seated_rules(rules):
+            body = magic_body(CHANNEL)
+        self.assertEqual(
+            body,
+            "Hard cap on mana per casting, the spell's cost and any pushed mana "
+            "together. High Elven Magic: equals Lore skill level.",
+        )
+
+    def test_the_magic_section_states_the_channel(self) -> None:
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(CHANNEL)
+        self.assertEqual(
+            body,
+            "Hard cap on mana per casting, the spell's cost and any pushed mana "
+            "together. Studied Magic: equals 2 × skill level in that specific spell "
+            "+ 1. Sorcerous Magic: equals Sorcery skill level − 1, never below 0 "
+            "(costs 3× the skill points to advance). Channel cannot be exceeded even "
+            "by Borrowing.",
+        )
+
+    def test_a_channel_that_reads_no_level_states_its_number(self) -> None:
+        rules = replace(
+            UNLIKE_EITHER_CANONS_MAGIC_RULES,
+            borrowing=None,
+            channel=ChannelRules(
+                derivations={
+                    "fixed": ChannelDerivation(
+                        source_skill=None, multiplier=0, offset=6
+                    )
+                },
+                default_kind="fixed",
+            ),
+        )
+        with seated_rules(rules):
+            body = magic_body(CHANNEL)
+        self.assertEqual(
+            body,
+            "Hard cap on mana per casting, the spell's cost and any pushed mana "
+            "together. Fixed Magic: is 6.",
+        )
+
+    def test_the_magic_section_states_the_runaway(self) -> None:
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(RUNAWAY)
+        self.assertEqual(
+            body,
+            "The spell feeds on the caster: each turn it drains mana equal to 3 × "
+            "the original casting cost + 2 and its effect grows unpredictably (GM "
+            "decides; once anchored, the anchorer's next cast of that spell adds +4 "
+            "to its rolled effect for each turn it ran). At 0 mana the "
+            "caster falls unconscious and it drains Fatigue instead; death when "
+            "Fatigue reaches negative 2 × full starting value. Anchor: the conscious "
+            "caster rolls 2d8 ≤ INT each turn to regain control. A third-party mage "
+            "may intervene by investing mana equal to 3 × the original casting cost "
+            "and rolling 2d10 ≤ WIS — failure costs the helper only that mana. "
+            "Survivors often bear marks: white streaks in the hair, strange scars, a "
+            "haunted look.",
+        )
+
+    def test_the_magic_section_states_the_counterspell(self) -> None:
+        with seated_rules(UNLIKE_EITHER_CANONS_MAGIC_RULES):
+            body = magic_body(COUNTERSPELL)
+        self.assertEqual(
+            body,
+            "The defender commits exactly 2 mana and declares a counter (on their "
+            "action); opposed 2d8 + WIS rolls, each side +1 per 4 mana invested (the "
+            "caster's whole casting, the defender's commitment); ties go to the "
+            "defender. Defender wins: spell countered. Caster wins: spell goes off. "
+            "Only the caster can escalate on later turns by paying again; the "
+            "defender gets one shot per casting and may oppose again (paying again) "
+            "or let it through. A failed Control Roll during escalation can trigger "
+            "Runaway.",
+        )
+
+    def test_the_other_end_of_each_push_runaway_and_counter_choice(self) -> None:
+        with seated_rules(OTHER_END_MAGIC_RULES):
+            bodies = {heading: magic_body(heading) for heading in (PUSH, RUNAWAY)}
+            counterspell = magic_body(COUNTERSPELL)
+        self.assertEqual(
+            bodies,
+            {
+                PUSH: "Invest extra mana for greater effect. Control Roll: 3d6 ≤ INT. "
+                "Fail by 1+: Runaway (spell fails).",
+                RUNAWAY: "The spell feeds on the caster: each turn it drains mana "
+                "equal to the original casting cost and its effect grows "
+                "unpredictably (GM decides). At 0 mana the caster falls unconscious "
+                "and it drains Body instead; death when Body reaches negative full "
+                "starting value. Anchor: the conscious caster rolls 2d8 ≤ INT each "
+                "turn to regain control. A third-party mage may intervene by "
+                "investing mana equal to the original casting cost and rolling 2d10 "
+                "≤ WIS — failure catches both in the Runaway. Survivors often bear "
+                "marks: white streaks in the hair, strange scars, a haunted look.",
+            },
+        )
+        self.assertTrue(
+            counterspell.startswith(
+                "The defender commits at least 2 mana and declares a counter (on "
+                "their action); opposed 2d8 + WIS rolls, each side +1 per 4 mana "
+                "invested (the caster's whole casting, the defender's commitment); "
+                "ties go to the caster. "
+            )
+        )
+
+    def test_a_drain_with_no_death_line_or_cost_and_an_unbounded_counter(
+        self,
+    ) -> None:
+        rules = UNLIKE_EITHER_CANONS_MAGIC_RULES
+        assert rules.runaway is not None and rules.counterspell is not None
+        flat = replace(
+            rules,
+            runaway=replace(
+                rules.runaway,
+                drain_multiplier_of_cost=0,
+                drain_flat=3,
+                death_multiplier_of_max=None,
+                helper_cost_multiplier_of_cost=0,
+            ),
+            counterspell=replace(
+                rules.counterspell, defender_min_mana=0, defender_max_mana=None
+            ),
+        )
+        with seated_rules(flat):
+            runaway = magic_body(RUNAWAY)
+            counterspell = magic_body(COUNTERSPELL)
+        for sentence in (
+            "each turn it drains 3 mana and its effect",
+            "drains Fatigue instead; it sets no death line of its own. ",
+            "may intervene by investing no mana and rolling 2d10",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, runaway)
+        self.assertTrue(
+            counterspell.startswith("The defender commits mana and declares a counter")
+        )
+
+    def test_no_push_no_control_roll_and_no_escalation_runaway(self) -> None:
+        with seated_rules(replace(UNLIKE_EITHER_CANONS_MAGIC_RULES, push=None)):
+            push = magic_body(PUSH)
+            counterspell = magic_body(COUNTERSPELL)
+        self.assertEqual(
+            push, "A spell is cast at its cost; there is no Push and no Control Roll."
+        )
+        self.assertNotIn("Control Roll", counterspell)
+        self.assertTrue(counterspell.endswith("or let it through."))

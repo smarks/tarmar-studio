@@ -6,8 +6,9 @@ and the rules-file loader.
 
 Every prompt sentence that states a number a canon rules file holds is built
 from the loaded rules (issue #68). The magic section is the canon's own
-``gm-prompt/magic.md`` (issue #922) but for its Special Casting Results and
-Borrowing, which are built from the canon's ``magic-rules.json`` (issue #48).
+``gm-prompt/magic.md`` (issue #922) but for its Special Casting Results,
+Borrowing (issue #48), Push, Channel, Runaway and Counterspell (issue #127),
+which are built from the canon's ``magic-rules.json``.
 Left as code, for stages 6 and 7 or because no rules file holds them yet:
 
 - the engine's own numbers: initiative 1d6, crits and fumbles, the matrix, the
@@ -22,9 +23,9 @@ Left as code, for stages 6 and 7 or because no rules file holds them yet:
   default and Tarmar canons' tracks that no rules file carries;
 - the currency line, the Appearance roll, and the d20 track table's 20
   entries (``characters.skill_rules.TRACK_TABLE_DIE_FACES``);
-- the plan format's illustrative values (a provenance, Location and Wealth, a
-  difficulty, a skill, an item), and the quoted examples in the outcomes and
-  authority sections.
+- the plan format's illustrative values (a provenance, a difficulty, a skill,
+  an item; its Location and Wealth are the canon's rows since issue #128),
+  and the quoted examples in the outcomes and authority sections.
 """
 
 import functools
@@ -36,7 +37,12 @@ from types import MappingProxyType
 from tarmar_engine.magic import (
     CastingFailureRules,
     CastingSuccessTier,
+    ChannelDerivation,
+    ControlBand,
+    CounterspellRules,
     MagicRules,
+    PushRules,
+    RunawayRules,
 )
 
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
@@ -58,7 +64,13 @@ from characters.equipment_rules import (
     equipment_catalog,
     equipment_rules,
 )
-from characters.rules import CharacterRules, character_rules, social_class_display
+from characters.rules import (
+    PROMPT_OR_WORD,
+    CharacterRules,
+    character_rules,
+    game_master_origins_in_words,
+    social_class_display,
+)
 from characters.skill_rules import skill_rules
 from characters.skills import (
     calculate_attribute_modifier,
@@ -87,13 +99,6 @@ logger = logging.getLogger(__name__)
 # (default of settings.RULES_DIR) and the offline CLI (cli/gm.py). The path
 # itself is derived once, in reference.paths.
 DEFAULT_RULES_DIR = PUBLIC_RULES_DIR
-
-#: The word between the canon's natural totals in the prompt ("17 or 18",
-#: :func:`battle.magic_rules.totals_in_words`). The prompt's own, not the
-#: battle page's configured ``common.or_word``: this module is imported by the
-#: offline CLI with no Django, and so no settings to read that word from
-#: (``GMServiceTest.test_engine_imports_without_django``).
-PROMPT_OR_WORD = "or"
 
 
 def _render_matrix_fragment(
@@ -417,9 +422,53 @@ def _render_origin_choices(rules: CharacterRules) -> str:
     """The origins the model may state, "City/Village/Rural": the canon's
     location rows that have a literacy check, the row the rules leave to the
     Game Master left out, as the prompt has always left it out (issue #66)."""
-    return "/".join(
-        row.label for row in rules.location.rows if row.literacy_modifier is not None
+    return "/".join(rules.location.checked_origins)
+
+
+def _render_game_master_origin_sentence(rules: CharacterRules) -> str:
+    """ "An Origin of Consult GM has no check: the Game Master decides. ", from
+    the canon's location rows with no literacy check; "" when it has none
+    (#128).
+
+    Args:
+        rules: The canon's character rules.
+    """
+    origins = game_master_origins_in_words(rules)
+    if not origins:
+        return ""
+    return f"An Origin of {origins} has no check: the Game Master decides. "
+
+
+def _render_rule_literacy_example(rules: CharacterRules) -> str:
+    """The plan format's ``rule_literacy`` line, naming the canon's origins
+    left to the Game Master; "" when it has none, since no ruling could be
+    recorded (#128).
+
+    Args:
+        rules: The canon's character rules.
+    """
+    origins = game_master_origins_in_words(rules)
+    if not origins:
+        return ""
+    return (
+        '- {"action": "rule_literacy", "character_id": 41, "literate": true} '
+        "records the Game Master's ruling on whether a character whose Origin "
+        f"is {origins} can read (false for cannot). Only the Game Master "
+        "rules it, and only there: every other Origin has a check to roll.\n"
     )
+
+
+def _set_background_example(rules: CharacterRules) -> str:
+    """The plan format's ``set_background`` values, from the canon's rows
+    (#128): the first Origin a message may state (the first with a literacy
+    check, else the canon's default) and the canon's default Wealth.
+
+    Args:
+        rules: The canon's character rules.
+    """
+    stated_origins = rules.location.checked_origins
+    location = stated_origins[0] if stated_origins else rules.defaults.location
+    return f'"location": "{location}", "wealth": "{rules.defaults.wealth}"'
 
 
 def _render_provenance_fragment() -> str:
@@ -540,8 +589,8 @@ def section_character_creation() -> str:
         "be literate at all, "
         f"rolled once on {rules.literacy_roll.dice} for the player like any "
         "other creation roll; a "
-        "player's Origin is fixed once it is rolled or ruled. An Origin of "
-        "Consult GM has no check: the Game Master decides. That check decides "
+        "player's Origin is fixed once it is rolled or ruled. "
+        f"{_render_game_master_origin_sentence(rules)}That check decides "
         "whether a character can read; the Literacy skill is only how well.\n"
         "4. Optional Prior Experience, bought a year at a time from age "
         f"{rules.age.starting}: each "
@@ -785,15 +834,16 @@ def _refuse_a_tarmar_canon_without(
         )
 
 
-# The magic section is canon too (issue #922): the Tarmar canon's carries the
-# GM-side prose (Control Roll bands, Channel, Runaway, Counterspell odds) that
-# the public magic pages leave out, so it lives in the canon directory as
+# The magic section is canon too (issue #922): the Tarmar canon's carried
+# GM-side prose the public magic pages leave out, so it lives in the canon
+# directory as
 # ``gm-prompt/magic.md``. A canon without one gets the default canon's, which
 # says only what the public rules say; the Tarmar canon without one is an
-# error. Its Special Casting Results and Borrowing are not the file's: they
-# state numbers the canon's ``magic-rules.json`` holds and the battle board
-# plays, so the engine builds them from that file (issue #48) and the file
-# leaves them empty.
+# error. Six of its subsections are not the file's (Special Casting Results
+# and Borrowing since issue #48; Push, Channel, Runaway and Counterspell since
+# #127): they state numbers the canon's ``magic-rules.json`` holds and the
+# battle board plays, so the engine builds them from that file
+# (:data:`GENERATED_MAGIC_SUBSECTIONS`) and the file leaves them empty.
 def load_magic_section(
     path: Path = MAGIC_PROMPT_FILE,
     fallback: Path = DEFAULT_MAGIC_PROMPT_FILE,
@@ -1009,13 +1059,327 @@ def render_borrowing(rules: MagicRules) -> str:
     return " ".join(sentences)
 
 
+#: Push when the canon has no ``push`` block: the engine offers no push.
+NO_PUSH_SENTENCE = "A spell is cast at its cost; there is no Push and no Control Roll."
+
+#: Channel when the canon has no ``channel`` block: nothing bounds a casting.
+NO_CHANNEL_SENTENCE = (
+    "There is no Channel: only the caster's mana, and the push and debt caps "
+    "where the rules set them, bound a casting."
+)
+
+#: Runaway when the canon has no ``runaway`` block: the engine narrates and
+#: flags a Runaway but gives it no later turns.
+NO_RUNAWAY_SENTENCE = (
+    f"A {_RUNAWAY} is narrated when it starts; the rules give it no later "
+    "turns, no drain and no anchor roll."
+)
+
+#: Counterspell when the canon has no ``counterspell`` block: the engine
+#: offers no counter.
+NO_COUNTERSPELL_SENTENCE = (
+    "No mage may commit mana to counter another's casting; there is no Counterspell."
+)
+
+#: What a casting's later costs are reckoned from, in the Runaway subsection.
+_ORIGINAL_COST = "the original casting cost"
+
+#: The word a kind of magic's key is named by in the Channel subsection:
+#: "recipe" is "Recipe Magic", as an encumbrance level's key is its label.
+_MAGIC_WORD = "Magic"
+
+
+def _times(multiplier: int, quantity: str) -> str:
+    """``quantity`` taken ``multiplier`` times, as the prompt writes it.
+
+    Args:
+        multiplier: How many times; 1 names the quantity alone.
+        quantity: What is multiplied, "the original casting cost".
+    """
+    return quantity if multiplier == 1 else f"{multiplier} × {quantity}"
+
+
+def _named_runaway(label: str) -> str:
+    """An outcome's label, said to be a Runaway unless it already says so.
+
+    Args:
+        label: The outcome as the canon labels it, "Surge" or "Runaway".
+    """
+    if label.casefold() == _RUNAWAY.casefold():
+        return label
+    return f"{label}, {_with_article(_RUNAWAY)}"
+
+
+def _control_target(push: PushRules) -> str:
+    """The Control Roll's target: the attribute less the penalty (#127).
+
+    The penalty counts the pushed mana alone, or the spell's cost with it
+    when the canon's ``base_cost_counts_as_invested`` says so.
+
+    Args:
+        push: The canon's Push rules.
+    """
+    if not push.penalty_per_mana:
+        return push.control_attribute
+    invested = (
+        "spell cost + mana pushed"
+        if push.base_cost_counts_as_invested
+        else "mana pushed"
+    )
+    return (
+        f"{push.control_attribute} − {_times(push.penalty_per_mana, f'({invested})')}"
+    )
+
+
+def _control_band_sentence(band: ControlBand) -> str:
+    """One failure band of the Control Roll: its margins, label and effect.
+
+    Args:
+        band: A band of the canon's ``push.failure_bands``.
+    """
+    margins = (
+        f"{band.lowest_margin}+"
+        if band.highest_margin is None
+        else _span_text(band.lowest_margin, band.highest_margin)
+    )
+    if band.spell_takes_effect:
+        bonus = "with" if band.push_bonus_applies else "without"
+        effect = f"spell takes effect {bonus} the push's bonus"
+    else:
+        effect = "spell fails"
+    label = _named_runaway(band.label) if band.is_runaway else band.label
+    return f"Fail by {margins}: {label} ({effect})."
+
+
+def render_push(rules: MagicRules) -> str:
+    """The body of ``### Push (Boosting)``, from the canon's ``push`` (#127).
+
+    The Control Roll's dice, attribute and penalty, its failure bands, and the
+    natural totals that are always a Runaway (``magic-rules.json``), as the
+    battle board settles a pushed cast.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    push = rules.push
+    if push is None:
+        return NO_PUSH_SENTENCE
+    sentences = ["Invest extra mana for greater effect."]
+    if push.max_push_mana is not None:
+        sentences.append(f"No more than {push.max_push_mana} mana may be pushed.")
+    sentences.append(f"Control Roll: {push.control_dice} ≤ {_control_target(push)}.")
+    sentences.extend(_control_band_sentence(band) for band in push.failure_bands)
+    runaway_band = push.runaway_band()
+    if push.automatic_runaway_totals and runaway_band is not None:
+        totals = totals_in_words(push.automatic_runaway_totals, or_word=PROMPT_OR_WORD)
+        sentences.append(
+            f"Natural {totals}: always {_named_runaway(runaway_band.label)}."
+        )
+    return " ".join(sentences)
+
+
+def _channel_derivation_sentence(kind: str, derivation: ChannelDerivation) -> str:
+    """How one kind of magic's Channel derives, from its skill level (#127).
+
+    A kind whose Channel reads a general skill names that skill, and what
+    advancing it costs when the canon's ``skill-rules.json`` charges a
+    multiple of the ordinary cost.
+
+    Args:
+        kind: The kind of magic's key in ``channel.derivations``.
+        derivation: How that kind's Channel derives.
+    """
+    if derivation.source_skill is None:
+        level = "skill level in that specific spell"
+    else:
+        level = f"{derivation.source_skill.title()} skill level"
+    if derivation.multiplier == 0:
+        rule = f"is {max(0, derivation.offset)}"
+    else:
+        rule = f"equals {_times(derivation.multiplier, level)}"
+        if derivation.offset > 0:
+            rule += f" + {derivation.offset}"
+        elif derivation.offset < 0:
+            rule += f" − {-derivation.offset}, never below 0"
+    if derivation.source_skill is not None:
+        cost_multiplier = skill_rules().skill_cost.multiplier_for(
+            derivation.source_skill
+        )
+        if cost_multiplier != 1:
+            rule += f" (costs {cost_multiplier}× the skill points to advance)"
+    return f"{kind.replace('_', ' ').title()} {_MAGIC_WORD}: {rule}."
+
+
+def render_channel(rules: MagicRules) -> str:
+    """The body of ``### Channel``, from the canon's ``channel`` block (#127).
+
+    The cap on one casting's mana, each kind of magic's derivation, and that
+    Borrowing cannot pass it (``magic-rules.json``; a source skill's cost from
+    ``skill-rules.json``), as the battle board bounds a cast.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    channel = rules.channel
+    if channel is None:
+        return NO_CHANNEL_SENTENCE
+    sentences = [
+        "Hard cap on mana per casting, the spell's cost and any pushed mana together."
+    ]
+    sentences.extend(
+        _channel_derivation_sentence(kind, derivation)
+        for kind, derivation in channel.derivations.items()
+    )
+    if rules.borrowing is not None:
+        sentences.append("Channel cannot be exceeded even by Borrowing.")
+    return " ".join(sentences)
+
+
+def _mana_reckoned_from_the_cost(multiplier: int, flat: int) -> str:
+    """Mana reckoned from a casting's original cost, in words (#127).
+
+    "mana equal to the original casting cost", "mana equal to 1 more than the
+    original casting cost", "mana equal to 2 × the original casting cost + 1",
+    or a flat "3 mana" when the cost does not count.
+
+    Args:
+        multiplier: Times the original cost.
+        flat: Added after.
+    """
+    if multiplier == 0:
+        return f"{flat} mana" if flat else "no mana"
+    if multiplier == 1 and flat:
+        return f"mana equal to {flat} more than {_ORIGINAL_COST}"
+    amount = _times(multiplier, _ORIGINAL_COST)
+    return f"mana equal to {amount} + {flat}" if flat else f"mana equal to {amount}"
+
+
+def _runaway_death_line(runaway: RunawayRules, pool: str) -> str:
+    """Where a Runaway's drain kills its caster, from the canon (#127).
+
+    Args:
+        runaway: The canon's Runaway rules.
+        pool: The overflow pool's name, "Body".
+    """
+    multiplier = runaway.death_multiplier_of_max
+    if multiplier is None:
+        return "it sets no death line of its own"
+    if multiplier == 0:
+        return f"death when {pool} reaches 0"
+    return f"death when {pool} reaches negative {_times(multiplier, 'full starting value')}"
+
+
+def render_runaway(rules: MagicRules) -> str:
+    """The body of ``### Runaway``, from the canon's ``runaway`` block (#127).
+
+    The drain and the effect's growth, the pool the drain moves to and the
+    death line, the caster's anchor roll, and another mage's anchor, its cost
+    and what its failure does (``magic-rules.json``), as the battle board
+    runs a Runaway's later turns.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    runaway = rules.runaway
+    if runaway is None:
+        return NO_RUNAWAY_SENTENCE
+    drain = _mana_reckoned_from_the_cost(
+        runaway.drain_multiplier_of_cost, runaway.drain_flat
+    )
+    growth = "GM decides"
+    if runaway.effect_bonus_per_turn:
+        bonus = rules_lookup.signed(runaway.effect_bonus_per_turn)
+        growth += (
+            "; once anchored, the anchorer's next cast of that spell adds "
+            f"{bonus} to its rolled effect for each turn it ran"
+        )
+    pool = runaway.overflow_pool.title()
+    self_anchor = runaway.self_anchor
+    helper_anchor = runaway.helper_anchor
+    helper_cost = _mana_reckoned_from_the_cost(
+        runaway.helper_cost_multiplier_of_cost, 0
+    )
+    helper_failure = (
+        f"failure catches both in the {_RUNAWAY}"
+        if runaway.helper_failure_catches_helper
+        else "failure costs the helper only that mana"
+    )
+    return " ".join(
+        (
+            f"The spell feeds on the caster: each turn it drains {drain} and its "
+            f"effect grows unpredictably ({growth}).",
+            "At 0 mana the caster falls unconscious and it drains "
+            f"{pool} instead; {_runaway_death_line(runaway, pool)}.",
+            f"Anchor: the conscious caster rolls {self_anchor.dice} ≤ "
+            f"{self_anchor.attribute} each turn to regain control.",
+            f"A third-party mage may intervene by investing {helper_cost} and "
+            f"rolling {helper_anchor.dice} ≤ {helper_anchor.attribute} — "
+            f"{helper_failure}.",
+            "Survivors often bear marks: white streaks in the hair, strange "
+            "scars, a haunted look.",
+        )
+    )
+
+
+def _counter_commitment(counterspell: CounterspellRules) -> str:
+    """What a defender may commit to a counter, as the canon bounds it (#127).
+
+    Args:
+        counterspell: The canon's Counterspell rules.
+    """
+    least = counterspell.defender_min_mana
+    most = counterspell.defender_max_mana
+    if most is None:
+        return f"at least {least} mana" if least else "mana"
+    if least == most:
+        return f"exactly {least} mana"
+    return f"{least} to {most} mana"
+
+
+def render_counterspell(rules: MagicRules) -> str:
+    """The body of ``### Counterspell``, from the canon's block (#127).
+
+    What the defender commits, the opposed roll's dice and attribute, the
+    bonus per mana, who wins a tie (``magic-rules.json``), and how a
+    countered spell is pressed again, as the battle board settles a counter.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    counterspell = rules.counterspell
+    if counterspell is None:
+        return NO_COUNTERSPELL_SENTENCE
+    tie_winner = "caster" if counterspell.ties_go_to_caster else "defender"
+    sentences = [
+        f"The defender commits {_counter_commitment(counterspell)} and declares a "
+        "counter (on their action); opposed "
+        f"{counterspell.opposed_dice} + {counterspell.opposed_attribute} rolls, "
+        f"each side +1 per {counterspell.mana_per_bonus} mana invested (the "
+        "caster's whole casting, the defender's commitment); ties go to the "
+        f"{tie_winner}.",
+        "Defender wins: spell countered. Caster wins: spell goes off.",
+        "Only the caster can escalate on later turns by paying again; the "
+        "defender gets one shot per casting and may oppose again (paying again) "
+        "or let it through.",
+    ]
+    if rules.push is not None and rules.push.runaway_band() is not None:
+        sentences.append(
+            f"A failed Control Roll during escalation can trigger {_RUNAWAY}."
+        )
+    return " ".join(sentences)
+
+
 #: The magic section's subsections the engine builds from the canon's
 #: ``magic-rules.json`` (issue #48), each heading with its builder: the one
 #: place that says which subsections are the engine's. The canon's
 #: ``gm-prompt/magic.md`` carries each heading with no body.
 GENERATED_MAGIC_SUBSECTIONS: tuple[tuple[str, Callable[[MagicRules], str]], ...] = (
     ("### Special Casting Results", render_special_casting_results),
+    ("### Push (Boosting)", render_push),
+    ("### Channel", render_channel),
     ("### Borrowing", render_borrowing),
+    ("### Runaway", render_runaway),
+    ("### Counterspell", render_counterspell),
 )
 
 #: The headings of :data:`GENERATED_MAGIC_SUBSECTIONS`.
@@ -1723,10 +2087,7 @@ def section_plan_schema() -> str:
         "Origin. The list gives a "
         "character's literacy once it is rolled or ruled; a character with no "
         "literacy in the list has not rolled it.\n"
-        '- {"action": "rule_literacy", "character_id": 41, "literate": true} '
-        "records the Game Master's ruling on whether a character whose Origin "
-        "is Consult GM can read (false for cannot). Only the Game Master "
-        "rules it, and only there: every other Origin has a check to roll.\n"
+        f"{_render_rule_literacy_example(rules)}"
         '- {"action": "roll_background", "character_id": 41} rolls a listed '
         "character's Location, Provenance and Wealth on their tables again. A "
         "new character's are rolled as it is made, so a plan that makes one "
@@ -1756,7 +2117,7 @@ def section_plan_schema() -> str:
         '- {"action": "rename_character", "character_id": 41, "name": '
         '"Thread"}\n'
         '- {"action": "set_background", "character_id": 41, "provenance": '
-        '"merchant", "location": "City", "wealth": "Moderate"}: any of the '
+        f'"merchant", {_set_background_example(rules)}}}: any of the '
         "three. For a character the same plan makes, name it with "
         '"new_character_ref": "Twain" instead of "character_id"; a Location '
         "the message states goes here then, before any literacy roll.\n"

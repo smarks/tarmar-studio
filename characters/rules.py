@@ -614,6 +614,15 @@ class LocationRow(TableRow):
         return self.skills[0] if self.skills else None
 
 
+#: The word between alternatives the model reads: natural totals ("17 or
+#: 18", :func:`battle.magic_rules.totals_in_words`) and the origins left to
+#: the Game Master. The prompt's own (``gm.engine`` re-exports it), not the
+#: battle page's configured ``common.or_word``: the offline CLI imports the
+#: prompt with no Django, and so no settings to read that word from
+#: (``GMServiceTest.test_engine_imports_without_django``).
+PROMPT_OR_WORD = "or"
+
+
 @dataclass(frozen=True)
 class LocationTable(PercentileTable[LocationRow]):
     """The location table and the points its granted skill starts at.
@@ -627,6 +636,38 @@ class LocationTable(PercentileTable[LocationRow]):
     def __post_init__(self) -> None:
         super().__post_init__()
         require_at_least("skill_points", self.skill_points, 0)
+
+    @property
+    def checked_origins(self) -> tuple[str, ...]:
+        """The origins with a literacy check, in table order: the ones a player
+        may roll or state, the complement of :attr:`game_master_origins`
+        (issue #128)."""
+        return tuple(
+            row.label for row in self.rows if row.literacy_modifier is not None
+        )
+
+    @property
+    def game_master_origins(self) -> tuple[str, ...]:
+        """The origins the rules leave to the Game Master, in table order.
+
+        The rows with no literacy check (``literacy_modifier`` null; "Consult
+        GM" on the public pages), read off that field and never off a label
+        (issues #66, #128). Empty when every origin has a check.
+        """
+        return tuple(row.label for row in self.rows if row.literacy_modifier is None)
+
+
+def game_master_origins_in_words(rules: "CharacterRules") -> str:
+    """The origins the rules leave to the Game Master, as the model is told
+    them: "Consult GM", or "" when every origin has a check (#128).
+
+    Here rather than in ``gm.engine`` so the character app's refusals name
+    the origin without depending on the prompt module.
+
+    Args:
+        rules: The canon's character rules.
+    """
+    return f" {PROMPT_OR_WORD} ".join(rules.location.game_master_origins)
 
 
 #: Percentile dice, which the logs write ``d100`` and the rules "percentile

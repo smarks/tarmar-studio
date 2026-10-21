@@ -27,7 +27,12 @@ from characters.constants import (
     CORE_ATTRIBUTE_FIELDS,
 )
 from characters.equipment_rules import equipment_catalog
-from characters.rules import CharacterRules, DiceRollRules, character_rules
+from characters.rules import (
+    CharacterRules,
+    DiceRollRules,
+    character_rules,
+    game_master_origins_in_words,
+)
 from characters.skills import normalize_skill_name
 from common.services.sse import strip_thinking
 from reference.rules_file import derived_from_rules
@@ -37,6 +42,38 @@ def _roll_text(name: str, roll: DiceRollRules) -> str:
     """A roll as the ask and the schema name it: "the 2d6 rolled for
     Fatigue (2-12)" on the public pages, the canon's dice and range."""
     return f"the {roll.dice} rolled for {name} ({roll.minimum}-{roll.maximum})"
+
+
+def _literacy_ruling_rule(rules: CharacterRules) -> str:
+    """What the extraction prompt says ``literacy_ruling`` is, naming the
+    canon's origins left to the Game Master (#128).
+
+    Args:
+        rules: The canon's character rules.
+    """
+    origins = game_master_origins_in_words(rules)
+    if not origins:
+        return "literacy_ruling is always null: every Origin has a check to roll"
+    return (
+        "literacy_ruling is the Game Master's ruling at an Origin of "
+        f"{origins}, or null"
+    )
+
+
+def _literacy_ruling_description(rules: CharacterRules) -> str:
+    """The schema's description of ``literacy_ruling``, naming the canon's
+    origins left to the Game Master (#128).
+
+    Args:
+        rules: The canon's character rules.
+    """
+    origins = game_master_origins_in_words(rules)
+    if not origins:
+        return "Always null: every Origin has a literacy check to roll"
+    return (
+        f"Only for an Origin of {origins}: true if the Game Master ruled the "
+        "character literate, false if illiterate; null if he did not rule"
+    )
 
 
 def extraction_prompt(*, for_game_master: bool = False) -> str:
@@ -60,8 +97,8 @@ def extraction_prompt(*, for_game_master: bool = False) -> str:
         f"Rules: fatigue_roll is only {_roll_text('Fatigue', rules.fatigue_roll)}, "
         "never the Fatigue total; literacy_roll is only "
         f"{_roll_text('the literacy check', rules.literacy_roll)}, or null when "
-        "it was never rolled; literacy_ruling is the Game Master's ruling at an "
-        "Origin of Consult GM, or null; do not report Fatigue, "
+        f"it was never rolled; {_literacy_ruling_rule(rules)}; do not report "
+        "Fatigue, "
         "Body, modifiers or whether the character can read -- they are "
         "computed from the attributes. Attributes are the values before any "
         "aging. Skills are the skills the character has with their points; "
@@ -257,8 +294,7 @@ def _character_fields(
         SchemaField(
             "literacy_ruling",
             "boolean",
-            "Only for an Origin of Consult GM: true if the Game Master ruled "
-            "the character literate, false if illiterate; null if he did not rule",
+            _literacy_ruling_description(rules),
             nullable=True,
         ),
         SchemaField(
