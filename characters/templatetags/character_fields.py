@@ -18,16 +18,22 @@ Which cells a viewer may change is decided by ``characters.services`` (issue
 the field is in ``services.update_fields_for`` for their role, the same list
 the field-update endpoint enforces. An editor who may not set a field (a
 player, for anything rolled or awarded) gets the value and the reason beside
-it, persistent, rather than an input the server would refuse. The six
-attributes share one reason, so their table states it once, under the table
-(:func:`attribute_locked_note`, issue #84), and each locked cell points to it.
+it, persistent, rather than an input the server would refuse. Fields that
+sit together and share one reason (the six attributes, issue #84; the
+provenance pair, issue #138) have it stated once, under them
+(:func:`shared_locked_note`, :data:`SHARED_LOCKED_NOTES`), and each locked
+cell points to that note.
 """
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 
 from django import template
 from django.db.models import Model
 
 from characters import services
-from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, PROVENANCE_FIELDS
 from characters.models import (
     Character,
     character_field_options,
@@ -38,6 +44,51 @@ from characters.rules import character_rules
 from common.helpers import column_length
 
 register = template.Library()
+
+
+#: The element that states, once, why a player may not change a recorded
+#: score (issue #84): the six attribute cells point to it rather than each
+#: printing the sentence, and the page reveals it when a bought score locks.
+ATTRIBUTE_LOCKED_NOTE_ID = "attribute-locked-reason"
+#: The same for the provenance roll's class and detail (issue #138).
+PROVENANCE_LOCKED_NOTE_ID = "provenance-locked-reason"
+
+
+@dataclass(frozen=True)
+class SharedLockedNote:
+    """One reason stated once for fields the sheet shows together.
+
+    Attributes:
+        note_id: The note element's id, which each locked cell's
+            ``aria-describedby`` names.
+        fields: The fields it speaks for; one rule covers them all
+            (``services.FIELD_RULES``), so they give one reason.
+    """
+
+    note_id: str
+    fields: tuple[str, ...]
+
+
+#: The sheet's shared locked notes, by the name the template asks for
+#: (``{% shared_locked_note character "provenance" can_edit %}``). A field in
+#: one of them never prints its reason beside its value; the note does.
+SHARED_LOCKED_NOTES: Mapping[str, SharedLockedNote] = MappingProxyType(
+    {
+        "attributes": SharedLockedNote(
+            ATTRIBUTE_LOCKED_NOTE_ID, CHARACTER_ATTRIBUTE_FIELDS
+        ),
+        "provenance": SharedLockedNote(PROVENANCE_LOCKED_NOTE_ID, PROVENANCE_FIELDS),
+    }
+)
+
+#: The note each grouped field points to.
+_SHARED_NOTE_ID_BY_FIELD: Mapping[str, str] = MappingProxyType(
+    {
+        field: note.note_id
+        for note in SHARED_LOCKED_NOTES.values()
+        for field in note.fields
+    }
+)
 
 
 def cell_state(
@@ -54,15 +105,19 @@ def cell_state(
         can_edit: Whether the viewer may edit this character at all.
 
     Returns:
-        ``can_edit`` (render the input) and ``locked_reason`` (the note an
-        editor sees beside a value their role may not set; empty otherwise).
+        ``can_edit`` (render the input), ``locked_reason`` (the note an
+        editor sees beside a value their role may not set; empty otherwise)
+        and ``locked_note_id`` (the shared note that states the reason
+        instead, when the field has one and is locked; empty otherwise).
     """
     is_game_master = bool(context.get("is_game_master", False))
     settable = services.can_set_field(character, field, is_game_master=is_game_master)
+    locked_reason = services.field_refusal(field) if can_edit and not settable else ""
     return {
         "can_edit": bool(can_edit) and settable,
-        "locked_reason": services.field_refusal(field)
-        if can_edit and not settable
+        "locked_reason": locked_reason,
+        "locked_note_id": _SHARED_NOTE_ID_BY_FIELD.get(field, "")
+        if locked_reason
         else "",
     }
 
@@ -99,12 +154,6 @@ def accessible_name(character: Model, field: str, label: str = "") -> str:
     return verbose[:1].upper() + verbose[1:]
 
 
-#: The element that states, once, why a player may not change a recorded
-#: score (issue #84): the six attribute cells point to it rather than each
-#: printing the sentence, and the page reveals it when a bought score locks.
-ATTRIBUTE_LOCKED_NOTE_ID = "attribute-locked-reason"
-
-
 # The least an attribute may be. The template repeated its bounds six times;
 # they are one rule about one kind of number, so they live here, the ceiling
 # being the canon's (``attributes.maximum``).
@@ -139,45 +188,48 @@ def editable_attribute(context, character, field, can_edit, label=""):
             else attribute_rules.point_buy.maximum
         ),
         "label": accessible_name(character, field, label),
-        "locked_note_id": ATTRIBUTE_LOCKED_NOTE_ID,
     }
 
 
-@register.inclusion_tag("characters/_attribute_locked_note.html", takes_context=True)
-def attribute_locked_note(
-    context: template.Context, character: Character, can_edit: bool
+@register.inclusion_tag("characters/_shared_locked_note.html", takes_context=True)
+def shared_locked_note(
+    context: template.Context, character: Character, group: str, can_edit: bool
 ) -> dict:
-    """Why a player may not change a recorded score, said once (issue #84).
+    """Why a player may not change a group of fields, said once (#84, #138).
 
-    Every attribute has the one rule and so the one reason
-    (``services.FIELD_RULES``), which the table's six cells each printed
-    until #84. The note is rendered for any editor, hidden while no score is
-    locked, so the page can show it when a player's bought score locks
-    without a reload; it names the fields it speaks for
-    (``data-locked-note-for``), which is how the page finds it.
+    The fields of a group have the one rule and so the one reason
+    (``services.FIELD_RULES``), which each of their cells printed until
+    #84 (the attributes) and #138 (the provenance pair). The note is
+    rendered for any editor, hidden while none of its fields is locked, so
+    the page can show it when a player's bought score locks without a
+    reload; it names the fields it speaks for (``data-locked-note-for``),
+    which is how the page finds it.
 
     Args:
         context: The template context; its ``is_game_master`` says the role,
             as for :func:`cell_state`.
         character: The character shown.
+        group: A key of :data:`SHARED_LOCKED_NOTES`; an unknown one raises,
+            so a mistyped tag fails the page rather than dropping the note.
         can_edit: Whether the viewer may edit this character at all; a viewer
             who may not gets no note, as they get no reason beside any other
             value.
 
     Returns:
         ``can_edit`` (render the note at all), ``note_id``, ``fields`` (the
-        attributes it speaks for) and ``reason`` (empty while no attribute
-        is locked for this viewer, which renders the note hidden).
+        fields it speaks for) and ``reason`` (empty while none of them is
+        locked for this viewer, which renders the note hidden).
     """
+    note = SHARED_LOCKED_NOTES[group]
     locked = [
         field
-        for field in CHARACTER_ATTRIBUTE_FIELDS
+        for field in note.fields
         if cell_state(context, character, field, can_edit)["locked_reason"]
     ]
     return {
         "can_edit": bool(can_edit),
-        "note_id": ATTRIBUTE_LOCKED_NOTE_ID,
-        "fields": CHARACTER_ATTRIBUTE_FIELDS,
+        "note_id": note.note_id,
+        "fields": note.fields,
         "reason": services.field_refusal(locked[0]) if locked else "",
     }
 

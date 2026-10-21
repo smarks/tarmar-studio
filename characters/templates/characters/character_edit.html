@@ -130,7 +130,7 @@ runs.
                 <td>{% editable_attribute character "charisma" can_edit %}</td>
             </tr>
         </table>
-        {% attribute_locked_note character can_edit %}
+        {% shared_locked_note character "attributes" can_edit %}
         {% comment %}The sheet's rolls (issues #748, #749): a player rolls each of
         these once and may not type them; a Game Master may roll again or type.
         Each control renders when the server would take the roll.{% endcomment %}
@@ -266,6 +266,8 @@ runs.
                 </td>
             </tr>
         </table>
+        {# The class and the detail share one reason: said once, here (#138). #}
+        {% shared_locked_note character "provenance" can_edit %}
         {% if can_edit and sheet_rolls.provenance.available %}
         <button type="button" class="button secondary sheet-roll-btn" id="roll-provenance-btn" data-roll-kind="provenance" data-roll-url="{% url 'characters:roll' character.pk 'provenance' %}"{% if sheet_rolls.provenance.confirm %} data-confirm="{{ sheet_rolls.provenance.confirm }}"{% endif %}>Roll provenance (d100)</button>
         {% endif %}

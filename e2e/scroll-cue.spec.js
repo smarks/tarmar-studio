@@ -35,8 +35,11 @@ const EDGE_STRIP = 12;
  * 5 levels, #f9f9f9 is 6 and #f7f7f7 is 8, and a tolerance above 4 passes them.
  */
 const NOISE_LEVELS = 2;
-/** The note that says once why a player's recorded attribute is locked (#84). */
-const ATTRIBUTE_LOCKED_NOTE = '#attribute-locked-reason';
+/**
+ * The note that says once why a player's recorded attribute is locked (#84),
+ * found by a field it speaks for rather than by a copy of the server's id.
+ */
+const ATTRIBUTE_LOCKED_NOTE = '[data-locked-note-for~="strength"]';
 /** A width at which the strip of GM panel tabs is wider than its box. */
 const NARROW_PHONE = { width: 320, height: 568 };
 /** Elements that scroll their own text, not a row of content sideways. */

@@ -34,7 +34,10 @@ from characters.services import (
     CharacterChangeError,
     FieldAuthor,
 )
-from characters.templatetags.character_fields import ATTRIBUTE_LOCKED_NOTE_ID
+from characters.templatetags.character_fields import (
+    ATTRIBUTE_LOCKED_NOTE_ID,
+    SHARED_LOCKED_NOTES,
+)
 from common.test_helpers import BaseTestCase, create_character
 
 MIGRATION = importlib.import_module(
@@ -120,9 +123,7 @@ class ThePageAndTheServerAgreeTest(BaseTestCase):
         page = html.replace("&#x27;", "'")
         # One of each other cell shape: choice, text and number.
         for name in (
-            "provenance_class",
             "wealth_level",
-            "provenance_detail",
             "appearance_roll",
             "total_xp",
             "starting_coin",
@@ -132,25 +133,38 @@ class ThePageAndTheServerAgreeTest(BaseTestCase):
                     f'data-locked-field="{name}">{services.field_refusal(name)}',
                     page,
                 )
-        # The six attributes share one reason (issue #84): the table states it
-        # once, under it, and each locked cell points to that note, where the
-        # sentence used to be printed in every cell.
-        attribute_reason = services.field_refusal("strength")
-        self.assertEqual(page.count(attribute_reason), 1, attribute_reason)
-        self.assertIn(
-            f'<p class="formula field-locked-reason" id="{ATTRIBUTE_LOCKED_NOTE_ID}" '
-            f'data-locked-note-for="{" ".join(CHARACTER_ATTRIBUTE_FIELDS)}">'
-            f"{attribute_reason}</p>",
-            page,
-        )
-        for name in CHARACTER_ATTRIBUTE_FIELDS:
-            with self.subTest(attribute=name):
-                self.assertEqual(services.field_refusal(name), attribute_reason)
+        # Fields that sit together and share one reason have it stated once,
+        # under them, and each locked cell points to that note, where the
+        # sentence used to be printed in every cell: the six attributes
+        # (issue #84) and the provenance class and detail (issue #138).
+        for group, note in SHARED_LOCKED_NOTES.items():
+            reason = services.field_refusal(note.fields[0])
+            with self.subTest(group=group):
+                self.assertEqual(page.count(reason), 1, reason)
                 self.assertIn(
-                    f'<span data-readonly-field="{name}" data-locked-field="{name}" '
-                    f'aria-describedby="{ATTRIBUTE_LOCKED_NOTE_ID}">',
+                    f'<p class="formula field-locked-reason" id="{note.note_id}" '
+                    f'data-locked-note-for="{" ".join(note.fields)}">{reason}</p>',
                     page,
                 )
+                self.assertEqual(
+                    page.count(f'aria-describedby="{note.note_id}"'),
+                    len(note.fields),
+                )
+            for name in note.fields:
+                with self.subTest(group=group, field=name):
+                    self.assertEqual(services.field_refusal(name), reason)
+                    self.assertIn(
+                        f'data-locked-field="{name}" '
+                        f'aria-describedby="{note.note_id}">',
+                        page,
+                    )
+        self.assertEqual(
+            page.count(
+                f'<span data-readonly-field="strength" data-locked-field="strength" '
+                f'aria-describedby="{ATTRIBUTE_LOCKED_NOTE_ID}">'
+            ),
+            1,
+        )
         # The Fatigue roll's cell is its roll readout (#636): no input for a
         # player, and no second roll once it is recorded.
         self.assertNotIn('data-field="fatigue_roll"', html)
@@ -173,22 +187,25 @@ class ThePageAndTheServerAgreeTest(BaseTestCase):
         self.character.save()
         page = self.sheet_as(self.create_user("agree-reader"))
 
-        self.assertNotIn(ATTRIBUTE_LOCKED_NOTE_ID, page)
+        for note in SHARED_LOCKED_NOTES.values():
+            self.assertNotIn(note.note_id, page)
+            self.assertNotIn(services.field_refusal(note.fields[0]), page)
         self.assertNotIn("data-locked-field", page)
-        self.assertNotIn(services.field_refusal("strength"), page)
 
     def test_a_game_masters_sheet_carries_only_the_hidden_empty_note(self):
         page = self.sheet_as(self.create_dm("agree-note-gm"))
 
-        # Nothing is locked for a Game Master, so the note is there for the
-        # page's use and says nothing (#84).
-        self.assertIn(
-            f'id="{ATTRIBUTE_LOCKED_NOTE_ID}" '
-            f'data-locked-note-for="{" ".join(CHARACTER_ATTRIBUTE_FIELDS)}" hidden></p>',
-            page,
-        )
-        self.assertEqual(page.count(ATTRIBUTE_LOCKED_NOTE_ID), 1)
-        self.assertNotIn(services.field_refusal("strength"), page)
+        # Nothing is locked for a Game Master, so each note is there for the
+        # page's use and says nothing (#84, #138).
+        for group, note in SHARED_LOCKED_NOTES.items():
+            with self.subTest(group=group):
+                self.assertIn(
+                    f'id="{note.note_id}" '
+                    f'data-locked-note-for="{" ".join(note.fields)}" hidden></p>',
+                    page,
+                )
+                self.assertEqual(page.count(note.note_id), 1)
+                self.assertNotIn(services.field_refusal(note.fields[0]), page)
         self.assertNotIn("data-locked-field", page)
 
 

@@ -139,9 +139,9 @@ function paintSheetRolls(offers) {
 /**
  * Turn an input cell into the read-only value and its reason, the way the
  * server renders a value this viewer may no longer set (issue #748). A
- * field whose reason a shared note states once (`data-locked-note-for`, the
- * attributes' table, issue #84) points to that note, which is shown, rather
- * than repeating the sentence beside the value.
+ * field whose reason a shared note states once (`data-locked-note-for`: the
+ * attributes, issue #84; the provenance pair, #138) points to that note,
+ * which is shown, rather than repeating the sentence beside the value.
  *
  * @param {string} field - The model field.
  * @param {string} value - The value just saved.

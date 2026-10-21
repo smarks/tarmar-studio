@@ -56,6 +56,11 @@ CHARACTER_ATTRIBUTE_FIELDS: tuple[str, ...] = tuple(
     field_name for field_name, _short_name in CORE_ATTRIBUTE_FIELDS
 )
 
+# What the provenance roll writes: the social class and the row's detail. One
+# rule and one reason cover both, so the sheet states the reason once, under
+# the pair (issue #138), as it does for the six attributes (#84).
+PROVENANCE_FIELDS: tuple[str, ...] = ("provenance_class", "provenance_detail")
+
 
 def point_buy_budget_note(spent: int) -> str | None:
     """How far a bought set of attributes sits off the point budget.

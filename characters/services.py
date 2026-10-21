@@ -42,6 +42,7 @@ from .constants import (
     CHARACTER_ATTRIBUTE_FIELDS,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
+    PROVENANCE_FIELDS,
     too_long,
 )
 from .dice import (
@@ -277,8 +278,7 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "entered_play_at": _nobody(),
         # What a lowered XP could not take back; the next XP pays it (#769).
         "skill_points_owed": _nobody(),
-        "provenance_class": _PROVENANCE_REASON,
-        "provenance_detail": _PROVENANCE_REASON,
+        **dict.fromkeys(PROVENANCE_FIELDS, _PROVENANCE_REASON),
         "wealth_level": _game_master(_said(lambda said: said.field_wealth_level)),
         "starting_coin": _game_master(_said(lambda said: said.field_starting_coin)),
         "total_xp": _game_master(_said(lambda said: said.field_total_xp)),
