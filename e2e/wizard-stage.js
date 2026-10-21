@@ -68,14 +68,19 @@ async function claimAWizard(page, seed) {
  * @param {import('@playwright/test').Page} adminPage
  * @param {import('@playwright/test').Browser} browser
  * @param {string} battleName
- * @param {{beforeTurn?: (battleId: number, wizardName: string) => (void|Promise<void>)}}
- *     options - what to do to the started battle before its first turn is
- *     advanced, given the battle and the seated wizard's name
+ * @param {{
+ *     beforeTurn?: (battleId: number, wizardName: string) => (void|Promise<void>),
+ *     fighters?: number,
+ * }} options - what to do to the started battle before its first turn is
+ *     advanced, given the battle and the seated wizard's name; and how many
+ *     generated fighters oppose the wizard (one unless said)
  * @returns {Promise<import('@playwright/test').Page>} the player's page
  */
-async function openTheWizardsStage(adminPage, browser, battleName, { beforeTurn } = {}) {
+async function openTheWizardsStage(
+    adminPage, browser, battleName, { beforeTurn, fighters = 1 } = {}
+) {
     await createBattleViaSetup(adminPage, {
-        name: battleName, fighters: 1, seed: BATTLE_SEED, playerSeats: 1,
+        name: battleName, fighters, seed: BATTLE_SEED, playerSeats: 1,
     });
     await expect(adminPage.locator('#battle-status')).toHaveText('Lobby');
     const battleId = Number(new URL(adminPage.url()).pathname.match(/battles\/(\d+)\//)[1]);

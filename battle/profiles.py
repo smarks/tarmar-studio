@@ -568,16 +568,36 @@ def tarmar_engine_profile() -> EngineTarmarProfile:
     return EngineTarmarProfile(magic=magic_rules())
 
 
-def decider(battle) -> Callable[[Any, Any], Decision]:
-    """This battle's AI: the profile's own policy, in one Decision shape.
+def decider(battle, *, every_target: bool = False) -> Callable[[Any, Any], Decision]:
+    """This battle's AI: :func:`decider_for` its rules profile."""
+    return decider_for(battle.rules_profile, every_target=every_target)
+
+
+def decider_for(
+    profile_name: str, *, every_target: bool = False
+) -> Callable[[Any, Any], Decision]:
+    """A rules profile's AI: the profile's own policy, in one Decision shape.
 
     A Tarmar menu is built with the same magic rules the turn runs on
     (:func:`tarmar_engine_profile`): the engine refuses a cast past the caster's
     Channel, so a menu built without them could offer one it will not run,
     and only with them does a cast gain the pushed variants a player may pick.
+
+    Args:
+        profile_name: The rules profile that decides.
+        every_target: For a seated player's menu (#775,
+            :func:`battle.turn_menu.player_menu`): the Tarmar engine
+            offers each aimed option at every enemy it may be aimed at, its
+            own choice unchanged among them (tarmar-engine #21). The classic
+            policy takes no such keyword; its menu already names its own
+            targets, so a classic battle's decider is the same either way.
     """
-    if battle.rules_profile == CLASSIC_PROFILE:
+    if profile_name == CLASSIC_PROFILE:
         from tarmar_engine.classic import policy as classic_policy
 
         return classic_policy.choose_option
-    return functools.partial(policy.choose_option, magic=tarmar_engine_profile().magic)
+    return functools.partial(
+        policy.choose_option,
+        magic=tarmar_engine_profile().magic,
+        every_target=every_target,
+    )

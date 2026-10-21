@@ -658,6 +658,13 @@ def classic_caster_magic(state, combatant_id: int) -> dict | None:
     }
 
 
+def cast_row_name(spell_name: str, target_name: str) -> str:
+    """ "Magic Fist → Bram": a cast stage row for a spell aimed at one of
+    several figures, in either profile, so the rows for its targets are told
+    apart."""
+    return f"{spell_name} → {target_name}"
+
+
 def _classic_cast_row(state, figure, spell, target, spent: int) -> dict:
     """One offered classic cast, worded for the stage.
 
@@ -677,7 +684,7 @@ def _classic_cast_row(state, figure, spell, target, spent: int) -> dict:
     return {
         "key": spell.id,
         "target_id": target.uid,
-        "name": spell.name if at_self else f"{spell.name} → {target.name}",
+        "name": spell.name if at_self else cast_row_name(spell.name, target.name),
         "cost": f"{CLASSIC_SPELL_TYPES.get(spell.type, spell.type)} — {spent} ST",
         "note": f"{chance:.0%} on 3d6 ≤ adjDX {needed}{range_note}",
         "castable": True,
