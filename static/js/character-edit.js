@@ -138,7 +138,10 @@ function paintSheetRolls(offers) {
 
 /**
  * Turn an input cell into the read-only value and its reason, the way the
- * server renders a value this viewer may no longer set (issue #748).
+ * server renders a value this viewer may no longer set (issue #748). A
+ * field whose reason a shared note states once (`data-locked-note-for`, the
+ * attributes' table, issue #84) points to that note, which is shown, rather
+ * than repeating the sentence beside the value.
  *
  * @param {string} field - The model field.
  * @param {string} value - The value just saved.
@@ -150,6 +153,15 @@ function lockFieldCell(field, value, reason) {
     const text = document.createElement('span');
     text.dataset.readonlyField = field;
     text.textContent = value;
+    const sharedNote = document.querySelector(`[data-locked-note-for~="${field}"]`);
+    if (sharedNote) {
+        text.dataset.lockedField = field;
+        text.setAttribute('aria-describedby', sharedNote.id);
+        sharedNote.textContent = reason;
+        sharedNote.hidden = false;
+        cell.replaceWith(text);
+        return;
+    }
     const note = document.createElement('span');
     note.className = 'formula field-locked-reason';
     note.dataset.lockedField = field;

@@ -1003,15 +1003,17 @@ details.help .help-body {
    .attack-form sets its own display, so [hidden] has to say it again. The
    literacy control is a .button, which sets its own display too, and hides
    while it cannot be used: rolled by a player, or no check to roll (#741).
-   The Origin's locked note is a .formula, which the narrow layout displays
-   as a block. The sheet's other roll controls hide the same way when a field
-   update says they are no longer offered (#748). */
+   The Origin's locked note and the attributes' shared one (#84) are each a
+   .formula, which the narrow layout displays as a block. The sheet's other
+   roll controls hide the same way when a field update says they are no
+   longer offered (#748). */
 #attack-form[hidden],
 #attack-no-weapons[hidden],
 #attack-gm-adjudicated[hidden],
 #roll-literacy-btn[hidden],
 .sheet-roll-btn[hidden],
 #origin-fixed-note[hidden],
+[data-locked-note-for][hidden],
 /* Rendered hidden rather than left out, so a change made without a reload
    can show them (issues #764, #792, #801): the completion-gated attack and
    skill-check blocks, the point controls, the logs, and the Game Master's

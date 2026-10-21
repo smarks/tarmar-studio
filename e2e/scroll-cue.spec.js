@@ -2,14 +2,15 @@
  * A sideways-scrolling table says that it scrolls (issue #63).
  *
  * Below 480 px the character sheet's Core Attributes table is its own
- * scroller, and for a player each of the six cells carries the sentence that
- * says a recorded score is locked. That makes the table 420 px of content in a
+ * scroller. For a player each of the six cells carried the sentence that says
+ * a recorded score is locked, which made the table 420 px of content in a
  * 311 px box: CON was cut mid-letter, CHR sat off to the right, and a phone
- * draws no scrollbar, so nothing said there was more. No layout fits six
- * attributes with that sentence under each into 375 px (its longest word is
- * wider than a 52 px column), so the fix is a cue, and one rule gives it to
- * every sideways scroller (base.css). The class that carries it is written by
- * the templates, and by chat.js for the tables and code blocks in a reply.
+ * draws no scrollbar, so nothing said there was more. The fix was a cue, and
+ * one rule gives it to every sideways scroller (base.css). Since #84 the
+ * sentence is said once, under the table, and a player's table fits; a Game
+ * Master's, whose cells are inputs, still scrolls. The class that carries the
+ * cue is written by the templates, and by chat.js for the tables and code
+ * blocks in a reply.
  *
  * The check is the same for every scroller on a page: it fits, or the edge
  * that has more to show is shadowed and the edge that has not is plain. It is
@@ -34,6 +35,8 @@ const EDGE_STRIP = 12;
  * 5 levels, #f9f9f9 is 6 and #f7f7f7 is 8, and a tolerance above 4 passes them.
  */
 const NOISE_LEVELS = 2;
+/** The note that says once why a player's recorded attribute is locked (#84). */
+const ATTRIBUTE_LOCKED_NOTE = '#attribute-locked-reason';
 /** A width at which the strip of GM panel tabs is wider than its box. */
 const NARROW_PHONE = { width: 320, height: 568 };
 /** Elements that scroll their own text, not a row of content sideways. */
@@ -146,28 +149,39 @@ async function expectEveryScrollerCued(page, within = 'body') {
 }
 
 test.describe('Sideways scrollers carry a cue (#63)', () => {
-    test("a player's Core Attributes table shows that it scrolls", async ({ page }) => {
+    test("a player's Core Attributes table fits a phone, and draws no cue", async ({ page }) => {
         await page.setViewportSize(PHONE);
         await loginAs(page, TEST_USER);
         await createCharacter(page);
 
+        // #84: with the locked reason said once under the table, rather than
+        // in each of the six cells, every attribute is in reach.
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeVisible();
         const stats = page.locator('.stats-table');
-        // The precondition the issue names: CHR is out of reach without a swipe.
         const fits = await stats.evaluate((element) => element.scrollWidth <= element.clientWidth);
-        expect(fits, 'six attributes with their locked reasons fit in 375 px').toBe(false);
+        expect(fits, "a player's six attributes fit in 375 px").toBe(true);
 
-        // The Core Attributes table is one of them, and the physical-attribute
-        // tables beside it (which fit) are held to drawing nothing.
+        // The Core Attributes table still carries the cue, and like the
+        // physical-attribute tables beside it is held to drawing nothing.
         const held = await expectEveryScrollerCued(page);
         expect(held.filter((label) => label.includes('stats-table'))).toHaveLength(1);
         expect(held.length).toBeGreaterThan(1);
     });
 
-    test("a Game Master's sheet, whose cells are inputs, is held to the same rule", async ({ page }) => {
+    test("a Game Master's Core Attributes table, whose cells are inputs, shows that it scrolls", async ({ page }) => {
         await page.setViewportSize(PHONE);
         await loginAs(page, TEST_ADMIN);
         await createCharacter(page);
-        expect((await expectEveryScrollerCued(page)).length).toBeGreaterThan(1);
+
+        // The precondition #63 names, on the sheet it still holds for: CHR is
+        // out of reach without a swipe, so the overflowing branch is checked.
+        const stats = page.locator('.stats-table');
+        const fits = await stats.evaluate((element) => element.scrollWidth <= element.clientWidth);
+        expect(fits, "a Game Master's six attribute inputs fit in 375 px").toBe(false);
+
+        const held = await expectEveryScrollerCued(page);
+        expect(held.filter((label) => label.includes('stats-table'))).toHaveLength(1);
+        expect(held.length).toBeGreaterThan(1);
     });
 
     test('the list pages wrap their tables in a scroller that carries the cue', async ({ adminPage: page }) => {

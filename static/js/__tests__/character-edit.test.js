@@ -103,6 +103,9 @@ function routeFetch(queue) {
 }
 
 /** Let queued microtasks (and the module's async init) run to completion. */
+/** The note that says once why a recorded attribute is locked (#84). */
+const ATTRIBUTE_LOCKED_NOTE_ID = 'attribute-locked-reason';
+
 /** The parts of character_edit.html the module touches. */
 function pageHtml(config) {
     return `
@@ -128,6 +131,8 @@ function pageHtml(config) {
         <div class="editable-field" data-field="strength"><input type="number" value="12" class="autosave"></div>
         <div class="editable-field" data-field="dexterity"><input type="number" value="12" class="autosave"></div>
         <div class="editable-field" data-field="constitution"><input type="number" value="12" class="autosave"></div>
+        <p class="formula field-locked-reason" id="${ATTRIBUTE_LOCKED_NOTE_ID}"
+           data-locked-note-for="strength dexterity intelligence wisdom constitution charisma" hidden></p>
 
         <span id="fatigue">30</span><span id="body">20</span>
         <span id="fatigue-roll">7</span>
@@ -3239,19 +3244,45 @@ describe("a player's sheet: rolled and awarded values (issues #748, #749, #752)"
         expect(button.hidden).toBe(true);
     });
 
-    test('a bought score turns into text and its reason once saved', async () => {
-        await loadPage({}, [jsonResponse({ success: true, locked_reason: 'Only a Game Master now.' })]);
-        const input = document.querySelector('[data-field="strength"] input');
-
-        input.value = '13';
+    /** Type a value into a field's input and leave it, as a player does. */
+    async function typeAndLeave(field, value) {
+        const input = document.querySelector(`[data-field="${field}"] input`);
+        input.value = value;
         input.dispatchEvent(new Event('change', { bubbles: true }));
         input.dispatchEvent(new Event('blur'));
         await flush();
+    }
+
+    test('a bought score turns into text and shows the table\'s one reason once saved (#84)', async () => {
+        const locked = jsonResponse({ success: true, locked_reason: 'Only a Game Master now.' });
+        await loadPage({}, [locked, locked]);
+        const note = document.getElementById(ATTRIBUTE_LOCKED_NOTE_ID);
+
+        await typeAndLeave('strength', '13');
 
         expect(document.querySelector('[data-field="strength"]')).toBeNull();
-        expect(document.querySelector('[data-readonly-field="strength"]').textContent).toBe('13');
-        expect(document.querySelector('[data-locked-field="strength"]').textContent)
-            .toBe('Only a Game Master now.');
+        const value = document.querySelector('[data-readonly-field="strength"]');
+        expect(value.textContent).toBe('13');
+        expect(value.dataset.lockedField).toBe('strength');
+        expect(value.getAttribute('aria-describedby')).toBe(ATTRIBUTE_LOCKED_NOTE_ID);
+        expect(note.hidden).toBe(false);
+        expect(note.textContent).toBe('Only a Game Master now.');
+
+        // A second score locked: still the one sentence, not one per cell.
+        await typeAndLeave('dexterity', '11');
+        expect(document.querySelector('[data-readonly-field="dexterity"]').getAttribute('aria-describedby'))
+            .toBe(ATTRIBUTE_LOCKED_NOTE_ID);
+        expect(document.querySelectorAll('.field-locked-reason')).toHaveLength(1);
+    });
+
+    test('a field no shared note speaks for gets its reason beside the value (#748)', async () => {
+        await loadPage({}, [jsonResponse({ success: true, locked_reason: 'Rolled once.' })]);
+
+        await typeAndLeave('starting_coin', '90');
+
+        expect(document.querySelector('[data-readonly-field="starting_coin"]').textContent).toBe('90');
+        expect(document.querySelector('[data-locked-field="starting_coin"]').textContent).toBe('Rolled once.');
+        expect(document.getElementById(ATTRIBUTE_LOCKED_NOTE_ID).hidden).toBe(true);
     });
 
     test('a survival save swapped in with the injury block is wired too (issue #839)', async () => {
