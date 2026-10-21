@@ -88,6 +88,13 @@ logger = logging.getLogger(__name__)
 # itself is derived once, in reference.paths.
 DEFAULT_RULES_DIR = PUBLIC_RULES_DIR
 
+#: The word between the canon's natural totals in the prompt ("17 or 18",
+#: :func:`battle.magic_rules.totals_in_words`). The prompt's own, not the
+#: battle page's configured ``common.or_word``: this module is imported by the
+#: offline CLI with no Django, and so no settings to read that word from
+#: (``GMServiceTest.test_engine_imports_without_django``).
+PROMPT_OR_WORD = "or"
+
 
 def _render_matrix_fragment(
     matrix: dict[str, dict[str, int]], tiers: tuple[str, ...]
@@ -892,7 +899,8 @@ def _render_casting_success_fragment(tiers: tuple[CastingSuccessTier, ...]) -> s
         if tier.mana_refund:
             effects.append(f"{tier.mana_refund} mana handed back")
         items.append(
-            f"{totals_in_words(tier.natural_totals)}: {tier.label} "
+            f"{totals_in_words(tier.natural_totals, or_word=PROMPT_OR_WORD)}: "
+            f"{tier.label} "
             f"({', '.join(effects) or 'no bonus'})"
         )
     return "; ".join(items) + "." if items else ""
@@ -984,7 +992,8 @@ def render_borrowing(rules: MagicRules) -> str:
     sentences.append(f"Debt Roll after the spell: {borrowing.debt_dice} ≤ ({target}).")
     if borrowing.automatic_failure_totals:
         sentences.append(
-            f"A natural {totals_in_words(borrowing.automatic_failure_totals)} "
+            "A natural "
+            f"{totals_in_words(borrowing.automatic_failure_totals, or_word=PROMPT_OR_WORD)} "
             "always fails."
         )
     failure = borrowing.failure

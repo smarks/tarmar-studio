@@ -16,6 +16,7 @@
 const {
     test, expect, createBattleViaSetup, escaped,
 } = require('./fixtures');
+const { menuWords, sentencePattern } = require('./turn-menu');
 
 const focusKeyOfActiveElement = (page) =>
     page.evaluate(() => (document.activeElement || {}).dataset?.focusKey || null);
@@ -36,7 +37,7 @@ test.describe('Taking a turn from the keyboard', () => {
 
             await adminPage.click('#advance-turn');
             const panel = adminPage.locator('#turn-panel');
-            await expect(panel).toContainText('Your move');
+            await expect(panel).toContainText(new RegExp(sentencePattern(menuWords().panel.your_move)));
 
             // Reach the second option with the keyboard only, then activate
             // it the way a keyboard user does.

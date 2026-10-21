@@ -10,8 +10,9 @@
  * turn's log shows the engine doing exactly that.
  */
 
-const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
 /**
  * Put the battle's first figure in the middle of the arena, ring it with six
@@ -20,11 +21,13 @@ const { readDjangoShell } = require('./django');
  * figures with a longbow so each is the other's missile threat.
  *
  * @param {number} battleId
- * @returns {{boxed: string, open: string}} the two archers' names
+ * @returns {{boxed: string, open: string, gait: string}} the two archers'
+ *     names, and the engine's gait for a DODGE
  */
 function boxInAnArcher(battleId) {
     const output = readDjangoShell(`
 import json
+from tarmar_engine import movement
 from battle import profiles
 from battle.engine import hexes
 from battle.models import Battle
@@ -42,7 +45,11 @@ for archer, other in ((boxed, open_archer), (open_archer, boxed)):
     archer.facing = hexes.direction_towards(archer.position, other.position)
 battle.state_json = dump_state(state)
 battle.save(update_fields=["state_json"])
-print("BOXED", json.dumps({"boxed": boxed.name, "open": open_archer.name}))
+print("BOXED", json.dumps({
+    "boxed": boxed.name,
+    "open": open_archer.name,
+    "gait": movement.MOVEMENT_GAITS["c"],
+}))
 `);
     return JSON.parse(output.split('BOXED ')[1]);
 }
@@ -73,27 +80,38 @@ test.describe('The DODGE line', () => {
             controlMode: 'manual',
         });
         const battleId = Number(new URL(page.url()).pathname.match(/battles\/(\d+)\//)[1]);
-        const { boxed, open } = boxInAnArcher(battleId);
+        const { boxed, open, gait } = boxInAnArcher(battleId);
         await page.reload();
         await page.click('#advance-turn');
 
         const panel = page.locator('#turn-panel');
-        const dodge = panel.locator('.turn-option').filter({
+        const dodgeRow = panel.locator('.turn-option').filter({
             has: page.locator('.turn-option-name', { hasText: /^DODGE$/ }),
         });
+        // The configured words: the boxed archer dodges standing, since no
+        // clear jog gets nearer to the other, and the open one jogs toward it.
+        const { shared, tarmar } = menuWords();
+        const dodge = sentencePattern(tarmar.dodge, {
+            guards: sentencePattern(tarmar.dodge_guards),
+        });
         const expected = {
-            [boxed]: `standing, since no clear jog gets nearer to ${open}`,
-            [open]: `jogging toward ${boxed}`,
+            [boxed]: menuLine(tarmar.dodge_standing, {
+                line: dodge,
+                standing: sentencePattern(shared.standing, {
+                    reason: sentencePattern(shared.no_nearer, {
+                        move: sentencePattern(tarmar.clear_gait, { gait: escaped(gait) }),
+                        aimed: escaped(open),
+                    }),
+                }),
+            }),
+            [open]: menuLine(tarmar.dodge_toward, { line: dodge, aimed: escaped(boxed) }),
         };
         let previous = '';
         for (let turn = 0; turn < 2; turn += 1) {
             const archer = await awaited(page, previous);
             expect(Object.keys(expected)).toContain(archer);
-            await expect(dodge.locator('.turn-option-plain')).toHaveText(
-                'Dodge: +4 to your Target Number against missiles and thrown '
-                + `weapons only, ${expected[archer]}`
-            );
-            await dodge.click();
+            await expect(dodgeRow.locator('.turn-option-plain')).toHaveText(expected[archer]);
+            await dodgeRow.click();
             await panel.locator('.turn-confirm').click();
             previous = archer;
         }

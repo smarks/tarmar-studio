@@ -51,6 +51,7 @@ from .magic_fixtures import (
     rules_with_channel,
     seated_rules,
 )
+from .rulings_words import with_fixed_words
 from .test_cast_flow import awaiting_wizard_battle
 from .test_state import make_combatant
 
@@ -485,6 +486,7 @@ class PushedChoiceMatchTest(SimpleTestCase):
         )
 
 
+@with_fixed_words
 class RecordPushedChoiceTest(BaseTestCase):
     """Who may set ``push_mana``: a player, to an amount the menu offered."""
 
@@ -524,9 +526,14 @@ class RecordPushedChoiceTest(BaseTestCase):
 
     def test_a_pushed_copy_says_what_it_pushes_and_costs(self) -> None:
         pushed = self.offered["push_mana"]
-        self.assertIn(f", pushing {pushed} more mana into it", self.offered["plain"])
-        self.assertIn(f"{pushed} pushed)", self.offered["cost"])
-        self.assertIn("a success makes a Control Roll", self.offered["cost"])
+        self.assertRegex(
+            self.offered["plain"],
+            rf"^tarmar_menu\.pushing turn_menu\.cast_at .+ {pushed}$",
+        )
+        # The whole cost, the base and the pushed mana, and the Control Roll.
+        self.assertRegex(
+            self.offered["cost"], rf"^tarmar_menu\.push_cost \d+ .+ {pushed} \d+$"
+        )
 
     def test_a_push_the_menu_did_not_offer_is_refused(self) -> None:
         most_offered = max(
@@ -584,6 +591,7 @@ class BorrowedChoiceMatchTest(SimpleTestCase):
         )
 
 
+@with_fixed_words
 class RecordBorrowedChoiceTest(BaseTestCase):
     """Who may set ``borrow``: a player, for a borrowing copy the menu offered."""
 
@@ -627,9 +635,15 @@ class RecordBorrowedChoiceTest(BaseTestCase):
     def test_a_borrowing_copy_says_what_it_borrows(self) -> None:
         cost = int(self.offered["borrowed"])
         self.assertGreater(cost, 0)
-        self.assertIn(f", borrowing the {cost} mana you lack", self.offered["plain"])
-        self.assertIn(f"borrows the {cost} you lack as debt", self.offered["cost"])
-        self.assertIn("a debt roll follows the spell", self.offered["cost"])
+        self.assertRegex(
+            self.offered["plain"],
+            rf"^tarmar_menu\.borrowing turn_menu\.cast_at .+ {cost}$",
+        )
+        # The debt and the debt roll that follows.
+        self.assertRegex(
+            self.offered["cost"],
+            rf"^tarmar_menu\.borrowing_cost tarmar_menu\.cast_cost .+ {cost}$",
+        )
 
     def test_the_same_cast_without_borrowing_is_not_on_the_menu(self) -> None:
         # The caster cannot afford the plain cast: only the borrowing copy is

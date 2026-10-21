@@ -10,7 +10,7 @@
 
 const {
     csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, formatSigned,
-    readCaret, putCaret, elementByFocusKey,
+    readCaret, putCaret, elementByFocusKey, filledWords, appendFilledWords,
     uiNotify, uiConfirm, uiPrompt,
     showFieldError, clearFieldError, FIELD_NETWORK_ERROR
 } = require('../api.js');
@@ -591,5 +591,27 @@ describe('elementByFocusKey (issue #16)', () => {
         expect(elementByFocusKey(scope, 'retire-ruling-3').textContent).toBe('Retire');
         expect(elementByFocusKey(scope, 'elsewhere')).toBeNull();
         document.body.innerHTML = '';
+    });
+});
+
+describe('filledWords', () => {
+    test('fills each {name} and reads {{ and }} as braces, as the server does', () => {
+        expect(filledWords('Counter {caster}: {mana} mana {{x}}', { caster: 'Bram', mana: 2 }))
+            .toBe('Counter Bram: 2 mana {x}');
+        expect(filledWords('Costs nothing.')).toBe('Costs nothing.');
+    });
+
+    test('a name with no value is a page bug, not a brace for a player', () => {
+        expect(() => filledWords('Costs {cost}.', {})).toThrow('no value for {cost}');
+    });
+});
+
+describe('appendFilledWords', () => {
+    test('places an element value as itself and the rest as text', () => {
+        const line = document.createElement('p');
+        const who = document.createElement('strong');
+        who.textContent = 'Bram';
+        appendFilledWords(line, 'Waiting for {name}, {player}.', { name: who, player: 'sam' });
+        expect(line.innerHTML).toBe('Waiting for <strong>Bram</strong>, sam.');
     });
 });

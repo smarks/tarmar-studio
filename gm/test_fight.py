@@ -694,6 +694,9 @@ class ChatPageBattleTabTest(BaseTestCase):
         self.assertNotContains(response, 'id="restart-battle"')
         self.assertContains(response, "js/battle.js")
         self.assertContains(response, "js/gm-panel-battle.js")
+        # The turn panel's words reach the tab as they reach the battle page
+        # (#94), in the arena partial's own block.
+        self.assertContains(response, 'id="battle-turn-panel-words"')
         self.assertContains(response, "css/battle.css")
         # The fight form waits while this one is under way.
         self.assertContains(response, 'id="gm-fight-start" disabled')

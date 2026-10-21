@@ -251,6 +251,11 @@ GM_SERVER_ERROR_MESSAGE = (
 )
 
 
+# "Send to Claude" from an account that is not a Game Master's (issue #402):
+# the endpoint's refusal, and the page's own when it has no endpoint to post
+# to, from this one sentence (#94).
+SEND_TO_CLAUDE_GAME_MASTER_ONLY = "Only a Game Master can send a session to Claude."
+
 # A second message to a session whose turn is still running (issue #515).
 TURN_ALREADY_RUNNING_ERROR = (
     "The Game Master is still answering your last message in this session. "
@@ -906,6 +911,10 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                         "gm:campaign_panel", args=[0]
                     ).replace("/0/", "/{session_id}/"),
                     "sessionId": active_session.pk if active_session else None,
+                    # What the Battle tab says when a fight is answered with
+                    # an error page rather than the app's JSON (#94).
+                    "fightTimeoutMessage": settings.GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE,
+                    "fightErrorPageMessage": settings.GM_FIGHT_ERROR_PAGE_MESSAGE,
                 },
                 # Everything chat.js needs from Django, in one json_script
                 # block (issue #63). It replaces the last inline <script> on
@@ -941,6 +950,8 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                     "reviewUrl": (
                         reverse("gm:reviews") if is_dm(self.request.user) else None
                     ),
+                    # What the page says when it has no reviewUrl (#94).
+                    "reviewGameMasterOnly": SEND_TO_CLAUDE_GAME_MASTER_ONLY,
                 },
             }
         )
@@ -2407,9 +2418,7 @@ def gm_review_create(request: HttpRequest) -> JsonResponse:
     a review runs a model on the LLM host, and reads every hidden entry.
     """
     if not is_dm(request.user):
-        return _json_error(
-            "Only a Game Master can send a session to Claude.", status=403
-        )
+        return _json_error(SEND_TO_CLAUDE_GAME_MASTER_ONLY, status=403)
     data, error_response = _parse_json_body(request)
     if error_response:
         return error_response

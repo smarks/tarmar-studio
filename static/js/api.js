@@ -350,6 +350,68 @@
         if (settings.title !== undefined) document.title = settings.title;
     }
 
+    /**
+     * A configured sentence in pieces: its own words, and each {name}'s value
+     * as given (#94).
+     *
+     * The server's words are Python format templates it checks at startup
+     * (battle/wording.py, settings._page_message_from_environment): bare
+     * {name} fields and the {{ and }} escapes only, which is all this reads.
+     * A name the caller gives no value for is a page bug, so it throws rather
+     * than printing a brace to a player.
+     *
+     * @param {string} sentence - e.g. "Costs {cost}."
+     * @param {Object<string, *>} [values] - each name's value
+     * @returns {Array<*>} the words and the values, in order
+     */
+    function filledPieces(sentence, values) {
+        const given = values || {};
+        const pieces = [];
+        let from = 0;
+        sentence.replace(/\{\{|\}\}|\{(\w+)\}/g, (match, name, offset) => {
+            pieces.push(sentence.slice(from, offset));
+            from = offset + match.length;
+            if (name === undefined) {
+                pieces.push(match[0]);
+            } else if (Object.hasOwn(given, name)) {
+                pieces.push(given[name]);
+            } else {
+                throw new Error(`no value for {${name}} in "${sentence}"`);
+            }
+            return match;
+        });
+        pieces.push(sentence.slice(from));
+        return pieces;
+    }
+
+    /**
+     * A sentence the server configured, with its {names} filled (#94).
+     * @param {string} sentence - e.g. "Costs {cost}."
+     * @param {Object<string, *>} [values] - each name's value
+     * @returns {string}
+     */
+    function filledWords(sentence, values) {
+        return filledPieces(sentence, values).map(String).join('');
+    }
+
+    /**
+     * Append a configured sentence to ``parent``, a value that is an element
+     * (a name in bold) placed as itself and the rest as text (#94).
+     * @param {Element} parent
+     * @param {string} sentence - e.g. "Waiting for {name} to choose an action."
+     * @param {Object<string, *>} [values] - each name's value or element
+     */
+    function appendFilledWords(parent, sentence, values) {
+        filledPieces(sentence, values).forEach((piece) => {
+            const isNode = typeof piece === 'object' && piece !== null && piece.nodeType;
+            if (isNode) {
+                parent.append(piece);
+            } else if (String(piece)) {
+                parent.append(String(piece));
+            }
+        });
+    }
+
     // What a field says when the request never reached the server. Both
     // callers said this sentence; they say it from here now.
     const FIELD_NETWORK_ERROR = 'Network error — try again';
@@ -387,13 +449,15 @@
     root.uiConfirm = uiConfirm;
     root.uiPrompt = uiPrompt;
     root.paintNameChrome = paintNameChrome;
+    root.filledWords = filledWords;
+    root.appendFilledWords = appendFilledWords;
     root.pageNavigation = pageNavigation;
 
     // Export for testing (Node.js environment)
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
             csrfToken, postWithCsrf, postJson, postForSuccess, bindCommitKeys, readCaret, putCaret, elementByFocusKey, formatSigned,
-            uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation,
+            uiNotify, uiConfirm, uiPrompt, paintNameChrome, pageNavigation, filledWords, appendFilledWords,
             showFieldError, clearFieldError, FIELD_NETWORK_ERROR
         };
     }

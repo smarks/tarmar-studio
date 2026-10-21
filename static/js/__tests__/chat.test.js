@@ -2066,12 +2066,13 @@ describe('sending the session to Claude for review (issue #402)', () => {
     });
 
     test('a player is told it is for Game Masters, and nothing is sent', async () => {
-        loadChat({ sessionId: 5, reviewUrl: null });
+        // The page says the server's sentence (#94), under a fixed word.
+        loadChat({ sessionId: 5, reviewUrl: null, reviewGameMasterOnly: 'views.game_master_only' });
 
         await chatModule.sendForReview('anything');
 
         expect(fetch).not.toHaveBeenCalled();
-        expect(alert.mock.calls[0][0]).toBe('Only a Game Master can send a session to Claude.');
+        expect(alert.mock.calls[0][0]).toBe('views.game_master_only');
     });
 
     test('with no session yet there is nothing to send', async () => {
@@ -2085,11 +2086,11 @@ describe('sending the session to Claude for review (issue #402)', () => {
 
     test('a refusal from the server is said plainly', async () => {
         loadChat({ sessionId: 5, reviewUrl: '/tarmar/gm/reviews/' });
-        fetch.mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden', json: () => Promise.resolve({ error: 'Only a Game Master can send a session to Claude.' }) });
+        fetch.mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden', json: () => Promise.resolve({ error: 'views.game_master_only' }) });
 
         await chatModule.sendForReview('x');
 
-        expect(alert.mock.calls[0][0]).toBe('The session could not be sent to Claude: Only a Game Master can send a session to Claude.');
+        expect(alert.mock.calls[0][0]).toBe('The session could not be sent to Claude: views.game_master_only');
     });
 
     test('/help lists the command', () => {

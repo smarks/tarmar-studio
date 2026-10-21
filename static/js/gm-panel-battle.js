@@ -16,7 +16,9 @@
  * the panel for the hex board, and issue #351 replaced that with a panel
  * the viewer drags to whatever width the map deserves.
  *
- * Reads #gm-panel-config (sessionId — the block the Characters tab reads)
+ * Reads #gm-panel-config (sessionId — the block the Characters tab reads —
+ * and the two error-page messages, fightTimeoutMessage and
+ * fightErrorPageMessage)
  * and the fight endpoint from the form's data-fight-url; the CSRF token comes
  * from the page, through api.js's csrfToken().
  * postWithCsrf/csrfToken come from api.js; gmPanel from gm-panel.js.
@@ -132,10 +134,12 @@ if (typeof module !== 'undefined' && module.exports) {
    * @returns {string} the line for the tab's error.
    */
   function withoutJson(response) {
+    // The server's words (settings GM_FIGHT_GATEWAY_TIMEOUT_MESSAGE and
+    // GM_FIGHT_ERROR_PAGE_MESSAGE, #94), from the panel's config block.
     if (response.status === 504) {
-      return 'The server took too long to answer (HTTP 504). Try the fight again in a moment.';
+      return root.filledWords(config.fightTimeoutMessage);
     }
-    return `The server answered with an error (HTTP ${response.status}). Try the fight again in a moment.`;
+    return root.filledWords(config.fightErrorPageMessage, { status: response.status });
   }
 
   /** Bring the tab into view: select it, and open the panel on a phone. */

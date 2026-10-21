@@ -15,6 +15,7 @@ const {
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { readDjangoShell } = require('./django');
+const { menuWords } = require('./turn-menu');
 const { openTheWizardsStage } = require('./wizard-stage');
 
 /**
@@ -128,7 +129,7 @@ test.describe('Wizard cast flow', () => {
         const castOption = playerPage.locator('#turn-panel .turn-option-cast');
         await expect(castOption).toBeVisible({ timeout: 15000 });
         await expect(castOption).toHaveCount(1);
-        await expect(castOption).toContainText('CAST SPELL');
+        await expect(castOption).toContainText(menuWords().panel.cast_option);
         await expect(castOption).toContainText('Mana');
         await expect(playerPage.locator('#turn-panel .turn-cast-stage'))
             .toHaveCount(0);
