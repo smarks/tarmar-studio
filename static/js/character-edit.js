@@ -169,8 +169,8 @@ const autosave = initAutosave({
         return true;
     },
     onSuccess: (field, value, data) => {
-        // Update derived values
-        refreshFatigueBodyInjury(data);
+        // Update derived values; the injury readout and the pools are
+        // paintSheet's, below.
         paintText('physical', data.physical);
         paintText('mental', data.mental);
         // Editing DEX moves aim and dodge (issue #634); STR, DEX and CON
@@ -471,6 +471,9 @@ function paintSheet(data) {
         if (note) note.hidden = true;
     }
     paintPointControls(data);
+    // A change that moves a pool -- a cast in the story spends Mana (#18) --
+    // answers with the injury readout re-rendered, its Mana included.
+    refreshFatigueBodyInjury(data);
     if (data.skill_check_options_html !== undefined) {
         const select = document.getElementById('skill-check-skill');
         if (select) {
@@ -2007,8 +2010,8 @@ document.getElementById('roll-fatigue-btn')?.addEventListener('click', async fun
         const { ok, data } = await postJson(CHARACTER_EDIT_CONFIG.rollFatigueUrl, {});
         if (ok && data.success) {
             document.getElementById('fatigue-roll').textContent = data.fatigue_roll;
-            refreshFatigueBodyInjury(data);
-            // The roll can complete the character (issue #764).
+            // The roll can complete the character (issue #764); paintSheet
+            // swaps in the re-rendered injury readout as well.
             paintSheet(data);
             if (data.can_roll_fatigue) {
                 this.disabled = false;
@@ -2042,8 +2045,7 @@ document.getElementById('injury-thresholds')?.addEventListener('change', async f
             { [input.dataset.pool]: input.value }
         );
         if (ok && data.success) {
-            refreshFatigueBodyInjury(data);
-            paintCurrentMana(data);
+            // The readout and the Magic section's Mana are paintSheet's.
             paintSheet(data);
             uiNotify(data.note, 'success');
         } else {

@@ -911,13 +911,11 @@ def apply_rolled_attributes(
         is_game_master,
     )
     rolled = []
-    logs = []
     for name in CHARACTER_ATTRIBUTE_FIELDS:
         total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
-        logs.append(f"{name}: {log}")
-    character.dice_log = "\n".join(part for part in (character.dice_log, *logs) if part)
+        append_dice_log(character, f"{name}: {log}")
     return "rolled the six attributes: " + "; ".join(rolled)
 
 
@@ -2545,7 +2543,7 @@ def change_field(
         # The same limits the Games Master's stated scores are held to.
         beyond = check_attribute(field_name, int(str(value)), is_game_master)
     elif field_name in CHARACTER_ATTRIBUTE_FIELDS:
-        _append_dice_log(
+        append_dice_log(
             character, check_point_buy(character, field_name, int(str(value)))
         )
     origin_was_recorded = character.location_recorded
@@ -2576,7 +2574,7 @@ def change_field(
     return notes
 
 
-def _append_dice_log(character: Character, line: str) -> None:
+def append_dice_log(character: Character, line: str) -> None:
     """Add a line to the character's dice log, where every roll is kept."""
     character.dice_log = "\n".join(part for part in (character.dice_log, line) if part)
 
@@ -2610,7 +2608,7 @@ def apply_wealth_to_coin(character: Character) -> str:
     coin, detail = starting_coin_for_wealth(character.wealth_level)
     character.starting_coin = coin
     character.wealth_recorded = True
-    _append_dice_log(
+    append_dice_log(
         character,
         f"Wealth: set to {character.wealth_level}, starting coin = {detail}",
     )
@@ -2633,7 +2631,7 @@ def apply_provenance_roll(character: Character, *, is_game_master: bool = False)
     character.provenance_class = social_class
     character.provenance_detail = detail
     character.provenance_recorded = True
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     return f"rolled provenance: {log}"
 
 
@@ -2654,7 +2652,7 @@ def apply_wealth_roll(character: Character, *, is_game_master: bool = False) -> 
     character.wealth_level = level
     character.starting_coin = coin
     character.wealth_recorded = True
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     return f"rolled wealth: {log}"
 
 
@@ -2710,7 +2708,7 @@ def apply_school_roll(character: Character, *, is_game_master: bool = False) -> 
     roll = roll_d100()
     row = table.row_for(roll)
     log = f"School of magic: d100={roll} -> {row.label} ({', '.join(row.schools)})"
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     character.magic_school_roll = roll
     held = character.magic_school
     if len(row.schools) == 1:
@@ -2748,7 +2746,7 @@ def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> 
     location, log = roll_location_logged()
     character.location = location
     character.location_recorded = True
-    _append_dice_log(character, log)
+    append_dice_log(character, log)
     followed = follow_origin(character, old_origin, was_recorded=was_recorded)
     granted = any(
         line.endswith(f"granted by the {location} origin") for *_, line in followed
@@ -2757,9 +2755,9 @@ def apply_origin_roll(character: Character, *, is_game_master: bool = False) -> 
     # Origin's grant was already held (a reroll onto the same Origin, or one
     # sharing it), the log says the point stayed rather than claiming a new one.
     if granted or not character.origin_skill:
-        _append_dice_log(character, location_effects(location)[1])
+        append_dice_log(character, location_effects(location)[1])
     else:
-        _append_dice_log(
+        append_dice_log(
             character,
             f"Location effects: {character.origin_skill} "
             f"{character_rules().location.skill_points} "
@@ -2842,7 +2840,7 @@ def apply_starting_coin_roll(
         )
     coin, detail = starting_coin_for_wealth(character.wealth_level)
     character.starting_coin = coin
-    _append_dice_log(character, f"Starting coin rerolled: {detail}")
+    append_dice_log(character, f"Starting coin rerolled: {detail}")
     return f"starting coin rerolled: {detail}"
 
 
@@ -2859,7 +2857,7 @@ def apply_appearance_roll(character: Character, *, is_game_master: bool = False)
     check_first_roll(bool(character.appearance_roll), "Appearance is", is_game_master)
     value, log = roll_d6_logged()
     character.appearance_roll = str(value)
-    _append_dice_log(character, f"Appearance: {log}")
+    append_dice_log(character, f"Appearance: {log}")
     note = f"rolled appearance, {log}"
     if value in (1, 6):
         note += "; a 1 or a 6 is for the Game Master to qualify"
@@ -2947,7 +2945,7 @@ def apply_physical_roll(
         )
     value, log = _PHYSICAL_ROLLERS[field_name]()
     setattr(character, field_name, value)
-    _append_dice_log(character, f"{label}: {log}")
+    append_dice_log(character, f"{label}: {log}")
     return f"rolled {label.lower()}, {log}"
 
 
@@ -2991,7 +2989,7 @@ def apply_sheet_attribute_roll(
         total, log = roll_attribute_logged()
         setattr(character, name, total)
         rolled.append(f"{name} {log}")
-        _append_dice_log(character, f"{name}: {log}")
+        append_dice_log(character, f"{name}: {log}")
     return "rolled the missing attributes: " + "; ".join(rolled)
 
 
@@ -3376,7 +3374,7 @@ def apply_survival_save(
     line = f"survival save, {log} {'≤' if survived else '>'} {target} ({against}): " + (
         "survives this turn" if survived else "fails, and dies"
     )
-    _append_dice_log(character, f"Survival save at {condition.pools}: {log}")
+    append_dice_log(character, f"Survival save at {condition.pools}: {log}")
     if not survived:
         character.is_alive = False
         character.death_cause = f"Failed a survival save ({total} > {target})"

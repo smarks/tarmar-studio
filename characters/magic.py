@@ -43,6 +43,7 @@ from .rules import DiceRollRules
 from .services import (
     CAST_ON_THE_BOARD,
     CharacterChangeError,
+    append_dice_log,
     seated_in_a_live_fight,
 )
 from .skill_checks import (
@@ -519,6 +520,21 @@ class StoryCast:
         return text
 
 
+def castable_spells(character: Character, *, is_game_master: bool) -> list[Spell]:
+    """The spells this asker may cast off the board, in catalog order (#18).
+
+    A player: the record's spells at mastery 1 or more (spell-mastery.md,
+    "Can cast the spell"), which :func:`cast_in_story` holds a player to. A
+    Game Master: every spell of the catalog, a spell off the record being one
+    of his overrides.
+    """
+    return [
+        spell
+        for spell in learnable_spells()
+        if is_game_master or get_skill_level(spell_points(character, spell.key))
+    ]
+
+
 def cast_in_story(
     character: Character,
     spell_key: str,
@@ -612,6 +628,10 @@ def cast_in_story(
         dice = f"{CASTING_DICE} stated by a Game Master = {stated_total}"
     else:
         total, dice = roll_dice_logged(CASTING_DICE, roller)
+        # The dice log keeps the dice the server rolled, as the sheet's
+        # creation and background rolls and the survival save do; a total
+        # stated from the table is in the history only.
+        append_dice_log(character, f"{spell.name} cast: {dice}")
     injured = injury_penalty(character)
     ceiling = loaded_casting_success_ceiling(score + injured)
     succeeded = total <= ceiling
@@ -631,9 +651,10 @@ def cast_in_story(
     )
     hit = ""
     if succeeded and aim_dexterity is not None and spell.targeted:
-        hit = _hit_roll(
+        hit, aim_dice = _hit_roll(
             aim_dexterity + injured, roller, server_rolled=stated_total is not None
         )
+        append_dice_log(character, f"{spell.name} to hit: {aim_dice}")
     return StoryCast(
         spell=spell.key,
         spell_name=spell.name,
@@ -655,7 +676,9 @@ def cast_in_story(
     )
 
 
-def _hit_roll(target: int, roller: Roller | None, *, server_rolled: bool) -> str:
+def _hit_roll(
+    target: int, roller: Roller | None, *, server_rolled: bool
+) -> tuple[str, str]:
     """The DEX roll a spell that must hit adds (casting-spells.md).
 
     "Magic requiring hitting a target needs an additional DEX roll": the aim
@@ -674,12 +697,14 @@ def _hit_roll(target: int, roller: Roller | None, *, server_rolled: bool) -> str
             the aim was not his dice.
 
     Returns:
-        The roll's part of the history line.
+        ``(line, dice)``: the roll's part of the history line, and the dice
+        as the dice log keeps them.
     """
     total, dice = roll_dice_logged(AIM_DICE, roller)
     landed = total <= target
     rolled_by = " rolled by the server" if server_rolled else ""
-    return (
+    line = (
         f"to hit{rolled_by}, {dice} {'≤' if landed else '>'} {target} (DEX): "
         f"{'hits' if landed else 'misses'}"
     )
+    return line, dice

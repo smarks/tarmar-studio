@@ -545,9 +545,7 @@ runs.
                     {% endfor %}
                 </select>
             </label>
-            <label>{{ skill_check_dice }} rolled at the table (Game Master)
-                <input type="number" name="total" min="{{ number_limits.check_total_minimum }}" max="{{ number_limits.check_total_maximum }}" aria-label="{{ skill_check_dice }} rolled at the table">
-            </label>
+            {% include "characters/_stated_total.html" with dice=skill_check_dice minimum=number_limits.check_total_minimum maximum=number_limits.check_total_maximum only %}
             {% endif %}
             <button type="button" class="button mechanics-submit" id="skill-check-btn">Roll check</button>
             <span class="mechanics-error" role="alert" hidden></span>
@@ -577,7 +575,7 @@ runs.
                 <td>{{ spell.name }}</td>
                 <td>{{ spell.school }}</td>
                 <td>{{ spell.spell_level }}</td>
-                <td>3d6 ≤ {{ spell.attribute }}</td>
+                <td>{{ casting_dice }} ≤ {{ spell.attribute }}</td>
                 <td>{{ spell.mastery_display }} ({{ spell.points }} pts)</td>
             </tr>
             {% endfor %}
@@ -624,6 +622,25 @@ runs.
         <p class="learn-spell-note" id="learn-spell-note">Roll and choose a school of magic to learn its spells.</p>
         {% else %}
         <p class="learn-spell-note" id="learn-spell-note">The battle's spells hold none of the {{ character.magic_school }} school yet; a Game Master may teach a spell of another.</p>
+        {% endif %}
+        {% comment %}A cast in the story (issue #18): the server rolls, spends the
+        mana and writes the history; the line stays until the next cast.{% endcomment %}
+        {% if castable_spells %}
+        <div class="cast-spell" id="cast-spell" data-mechanics-form="castSpellUrl" data-result="cast-spell-result">
+            <label>{% if is_game_master %}Cast (Game Master, any spell){% else %}Cast a spell you know{% endif %}
+                <select name="spell" id="cast-spell-select" aria-label="Spell to cast">
+                    {% for spell in castable_spells %}
+                    <option value="{{ spell.key }}">{{ spell.name }} ({{ spell.level }} mana, {{ casting_dice }} ≤ {{ spell.attribute }})</option>
+                    {% endfor %}
+                </select>
+            </label>
+            {% if is_game_master %}
+            {% include "characters/_stated_total.html" with dice=casting_dice minimum=number_limits.cast_total_minimum maximum=number_limits.cast_total_maximum input_id="cast-spell-total" purpose="cast" only %}
+            {% endif %}
+            <button type="button" class="button secondary mechanics-submit" id="cast-spell-btn">Cast</button>
+            <span class="mechanics-error" role="alert" hidden></span>
+            <p class="cast-spell-result" id="cast-spell-result" hidden></p>
+        </div>
         {% endif %}
         {% if is_game_master %}
         <div class="grant-mana" data-mechanics-form="grantManaUrl" data-reload="true">

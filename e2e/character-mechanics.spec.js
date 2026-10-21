@@ -13,6 +13,9 @@
  *   saved caster is seated in a battle with it and its Mana Pool.
  * - #18: the player rolls a school of magic once, chooses from the row the
  *   roll lands on, and learns only that school's spells.
+ * - #18: a spell is cast in the story from the sheet, by the player (a
+ *   spell they know, from their Pool) and by a Game Master (any spell, with
+ *   a total rolled at his table); the page shows the server's line and Mana.
  *
  * Characters are written from an export file for the player, so a retry gets
  * its own: a player's import of a hand-made file keeps only what a player
@@ -23,12 +26,13 @@
 
 const {
     test, expect, loginAs, TEST_USER, TEST_ADMIN, createBattleViaSetup, postAsGameMaster,
-    characterIdFromUrl, seedCharacterFromExport,
+    characterIdFromUrl, seedCharacterFromExport, submitPassphrase,
 } = require('./fixtures');
+const { startCoverage } = require('./coverage');
 const { pinDice } = require('./dice');
 const { loadedSkillRules } = require('./skill-rules');
 const { item, sheetValues } = require('./equipment-rules');
-const { schoolRowForPercentile } = require('./magic-rules');
+const { catalogSpells, lastStoryCast, schoolRowForPercentile } = require('./magic-rules');
 
 /** The school roll's dice pinned (issue #959) to a known face. */
 const SCHOOL_ROLL_SEED = 1;
@@ -38,6 +42,15 @@ const SCHOOL_ROLL_SEED = 1;
  * loaded canon's table's call, read from the server.
  */
 const SEEDED_SCHOOL_FACE = 18;
+
+/** The cast's dice pinned (issue #959) to known faces. */
+const STORY_CAST_SEED = 4;
+/**
+ * The casting dice that seed gives, as the server's line writes them.
+ * Asserting them in the line is what proves the pin took (see dice.js);
+ * what the total does is the loaded canon's call, read from the record.
+ */
+const SEEDED_CAST_DICE = '[2, 3, 1] = 6';
 
 /** Why the school steps are skipped under a canon with no school table. */
 const NULL_SCHOOLS_REASON =
@@ -321,5 +334,66 @@ test.describe('Sheet mechanics', () => {
         const panel = card.locator('.combatant-detail');
         await expect(panel).toContainText(spell);
         await expect(panel).toContainText('6 / 6');
+    });
+
+    test('#18: a spell is cast in the story from the sheet, by a player and a Game Master', async ({ page, browser }) => {
+        const name = `Story Caster ${Date.now()}`;
+        await loginAs(page, TEST_USER);
+        await importCharacter(page, name);
+        const characterId = characterIdFromUrl(page);
+        const spells = catalogSpells();
+        // A spell that need not hit for the player, one off the record for the
+        // Game Master; the server's catalog names both.
+        const known = spells.find((spell) => !spell.targeted).key;
+        const offRecord = spells.find((spell) => spell.key !== known).key;
+        for (const [path, body] of [
+            ['grant-mana', { amount: 6 }],
+            ['learn-spell', { spell: known }],
+        ]) {
+            const granted = await postAsGameMaster(browser, `/tarmar/characters/${characterId}/${path}/`, body);
+            expect(granted.status).toBe(200);
+        }
+        await page.reload();
+
+        // The player: only the spell they know, and no total of their own.
+        await expect(page.locator('#cast-spell-select option')).toHaveCount(1);
+        await expect(page.locator('#cast-spell-select option')).toHaveAttribute('value', known);
+        await expect(page.locator('#cast-spell input[name="total"]')).toHaveCount(0);
+        await pinDice(page, '**/cast-spell/', STORY_CAST_SEED);
+        await page.locator('#cast-spell-btn').click();
+        const result = page.locator('#cast-spell-result');
+        await expect(result).toBeVisible();
+        const playerCast = lastStoryCast(characterId);
+        expect(playerCast.line).toContain(SEEDED_CAST_DICE);
+        await expect(result).toHaveText(playerCast.line);
+        // The Mana it spent is on the page without a reload, in the Magic
+        // section and the injury readout alike.
+        await expect(page.locator('#mana-current')).toHaveText(String(playerCast.current_mana));
+        await expect(page.locator('#current-mana')).toHaveText(String(playerCast.current_mana));
+        await expect(page.locator('#recent-changes-rows')).toContainText(playerCast.line);
+
+        // A Game Master: any spell, with a total rolled at his table.
+        const context = await browser.newContext();
+        try {
+            const gameMaster = await context.newPage();
+            await startCoverage(gameMaster);
+            await submitPassphrase(gameMaster);
+            await loginAs(gameMaster, TEST_ADMIN);
+            await gameMaster.goto(`/tarmar/characters/${characterId}/`);
+            await expect(gameMaster.locator('#cast-spell-select option')).toHaveCount(spells.length);
+            await gameMaster.locator('#cast-spell-select').selectOption(offRecord);
+            await gameMaster.locator('#cast-spell-total').fill('10');
+            await gameMaster.locator('#cast-spell-btn').click();
+            const gameMasterResult = gameMaster.locator('#cast-spell-result');
+            await expect(gameMasterResult).toBeVisible();
+            const gameMasterCast = lastStoryCast(characterId);
+            expect(gameMasterCast.line).not.toBe(playerCast.line);
+            await expect(gameMasterResult).toHaveText(gameMasterCast.line);
+            await expect(gameMaster.locator('#mana-current')).toHaveText(String(gameMasterCast.current_mana));
+            // The stated total was for that cast only.
+            await expect(gameMaster.locator('#cast-spell-total')).toHaveValue('');
+        } finally {
+            await context.close();
+        }
     });
 });

@@ -1,5 +1,5 @@
 /**
- * Unit tests for mechanics.js (issues #753, #756, #757, #774).
+ * Unit tests for mechanics.js (issues #753, #756, #757, #774, #18).
  *
  * The module's contract: post a block's named controls to the URL its
  * data-mechanics-form names, print the server's skill check without
@@ -12,6 +12,7 @@ const { jsonResponse, flush } = require('./test-helpers');
 const CONFIG = {
     skillCheckUrl: '/tarmar/characters/7/skill-check/',
     coinUrl: '/tarmar/characters/7/coin/',
+    castSpellUrl: '/tarmar/characters/7/cast-spell/',
 };
 
 /** A check shaped like the endpoint's, with numbers the module must not redo. */
@@ -34,6 +35,13 @@ function pageHtml() {
             <button class="mechanics-submit" id="roll">Roll</button>
             <span class="mechanics-error" hidden></span>
             <p id="check-result" hidden></p>
+        </div>
+        <div id="cast" data-mechanics-form="castSpellUrl" data-result="cast-result">
+            <select name="spell"><option value="heal" selected>Heal</option></select>
+            <input name="total" value="">
+            <button class="mechanics-submit" id="cast-button">Cast</button>
+            <span class="mechanics-error" hidden></span>
+            <p id="cast-result" hidden></p>
         </div>
         <div id="coin" data-mechanics-form="coinUrl" data-reload="true">
             <input name="amount" value="25">
@@ -167,4 +175,63 @@ test('a refusal stays beside the control', async () => {
     expect(error.textContent).toBe('Only a Game Master can give or take coin');
     expect(pageNavigation.reload).not.toHaveBeenCalled();
     expect(document.getElementById('give').disabled).toBe(false);
+});
+
+/** A cast shaped like the endpoint's; the module prints its line and nothing else. */
+function castPayload(overrides = {}) {
+    return {
+        spell: 'heal', spell_name: 'Heal', succeeded: true, total: 6, ceiling: 99,
+        line: 'casts Heal: 3d6: [3, 2, 1] = 6 ≤ 99 (WIS 99): cast; 2 mana spent, 4 left',
+        ...overrides,
+    };
+}
+
+test("a cast in the story prints the server's line and stays on the page (#18)", async () => {
+    await load(jsonResponse({ success: true, cast: castPayload() }));
+    document.getElementById('cast-button').click();
+    await flush();
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe(CONFIG.castSpellUrl);
+    expect(JSON.parse(options.body)).toEqual({ spell: 'heal' });
+    const result = document.getElementById('cast-result');
+    expect(result.hidden).toBe(false);
+    expect(result.textContent).toBe(castPayload().line);
+    expect(result.className).toBe('cast-spell-result success');
+    expect(pageNavigation.reload).not.toHaveBeenCalled();
+});
+
+test('the next cast replaces the line, a failure marked as one (#18)', async () => {
+    await load(jsonResponse({ success: true, cast: castPayload() }));
+    document.getElementById('cast-button').click();
+    await flush();
+    const failed = castPayload({ succeeded: false, line: 'casts Heal: 3d6: [6, 6, 6] = 18 > 10 (WIS 10): fails' });
+    fetch.mockImplementation(() => Promise.resolve(jsonResponse({ success: true, cast: failed })));
+    document.getElementById('cast-button').click();
+    await flush();
+    const result = document.getElementById('cast-result');
+    expect(result.textContent).toBe(failed.line);
+    expect(result.className).toBe('cast-spell-result failure');
+});
+
+test('a refused cast leaves the last line and says why beside the control (#18)', async () => {
+    await load(jsonResponse({ success: true, cast: castPayload() }));
+    document.getElementById('cast-button').click();
+    await flush();
+    fetch.mockImplementation(() => Promise.resolve(jsonResponse(
+        { success: false, error: 'Heal costs 2 mana and the Pool holds 0' }, { ok: false }
+    )));
+    document.getElementById('cast-button').click();
+    await flush();
+    expect(document.querySelector('#cast .mechanics-error').textContent)
+        .toBe('Heal costs 2 mana and the Pool holds 0');
+    expect(document.getElementById('cast-result').textContent).toBe(castPayload().line);
+});
+
+test("a Game Master's stated total is sent with its cast and then cleared (#18)", async () => {
+    await load(jsonResponse({ success: true, cast: castPayload() }));
+    document.querySelector('#cast [name="total"]').value = '9';
+    document.getElementById('cast-button').click();
+    await flush();
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ spell: 'heal', total: '9' });
+    expect(document.querySelector('#cast [name="total"]').value).toBe('');
 });

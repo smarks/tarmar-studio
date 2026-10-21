@@ -589,6 +589,8 @@ class NumberInputBoundsTest(BaseTestCase):
         "defender_dodge_minimum": 2,
         "defender_dodge_maximum": 15,
         "situational": 21,
+        "cast_total_minimum": 4,
+        "cast_total_maximum": 17,
     }
 
     def test_every_bounded_input_reads_the_map(self):
@@ -612,6 +614,7 @@ class NumberInputBoundsTest(BaseTestCase):
         expected = {
             "skill-check-difficulty": ("0", odd["check_difficulty"]),
             "total": (odd["check_total_minimum"], odd["check_total_maximum"]),
+            "cast-spell-total": (odd["cast_total_minimum"], odd["cast_total_maximum"]),
             "amount": (-odd["mana_grant"], odd["mana_grant"]),
             "attack-stops": ("0", odd["armor_stops"]),
             "attack-dodge": (

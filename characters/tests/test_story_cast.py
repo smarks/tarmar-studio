@@ -9,9 +9,11 @@ Most tests seat invented magic rules (``battle.tests.magic_fixtures``), so the
 totals they pin hold under any canon; the last class reads the loaded canon's.
 """
 
+import re
 from dataclasses import replace
 from unittest.mock import patch
 
+from django.urls import reverse
 from tarmar_engine.magic import CastingSuccessTier
 from tarmar_engine.spells import SPELLS
 
@@ -21,6 +23,7 @@ from characters.equipment import get_item
 from characters.magic import CASTING_DICE, cast_in_story
 from characters.services import CharacterChangeError
 from characters.skill_checks import injury_penalty
+from characters.views.mechanics import CAST_HISTORY_FIELD
 from common.rolling import dice_total_range
 from common.test_helpers import BaseTestCase, FacesRoller, create_character
 
@@ -301,3 +304,136 @@ class LoadedCanonCeilingTest(BaseTestCase):
             caster, BOLT.key, is_game_master=False, roller=faces_for(floor - 1)
         )
         self.assertTrue(under.succeeded)
+
+
+class CastEndpointTest(BaseTestCase):
+    """The sheet's cast control: one locked change, saved whole or not at all."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(seated_rules(RULES))
+        self.owner = self.create_user("sheet_story_caster")
+        self.caster = create_character(
+            self.owner,
+            name="Sheet Story Caster",
+            intelligence=14,
+            wisdom=10,
+            free_spell_points=6,
+            spells={HEAL.key: 1, BOLT.key: 1},
+        )
+        self.url = reverse("characters:cast_spell", args=[self.caster.pk])
+
+    def post(self, body, total=6):
+        with patch("characters.dice._DEFAULT_ROLLER", faces_for(total)):
+            return self.post_json(self.url, body)
+
+    def test_a_player_casts_and_the_record_keeps_it(self):
+        self.login_as(self.owner)
+        response = self.post({"spell": HEAL.key})
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertTrue(data["cast"]["succeeded"])
+        self.assertEqual(data["current_mana"], 6 - HEAL.level)
+        self.assertIn(
+            f'<strong id="current-mana">{6 - HEAL.level}</strong>',
+            data["injury_thresholds_html"],
+        )
+        self.caster.refresh_from_db()
+        self.assertEqual(self.caster.mana_spent, HEAL.level)
+        entry = self.caster.history[-1]
+        self.assertEqual(entry["field"], CAST_HISTORY_FIELD)
+        self.assertEqual(entry["new"], data["cast"]["line"])
+        self.assertIn(f"{HEAL.name} cast: 3d6: [4, 1, 1] = 6", self.caster.dice_log)
+        self.assertIn(data["cast"]["line"], data["recent_changes_html"])
+
+    def test_a_refused_cast_writes_nothing(self):
+        self.login_as(self.owner)
+        before = (self.caster.history or [], self.caster.dice_log)
+        for body in ({"spell": "fire_ball"}, {"spell": HEAL.key, "total": 6}):
+            with self.subTest(body=body):
+                response = self.post(body)
+                self.assertEqual(response.status_code, 400)
+                self.caster.refresh_from_db()
+                self.assertEqual(self.caster.mana_spent, 0)
+                self.assertEqual(
+                    (self.caster.history or [], self.caster.dice_log), before
+                )
+
+    def test_a_game_master_states_the_total_and_it_stays_out_of_the_dice_log(self):
+        self.login_as(self.create_dm())
+        response = self.post({"spell": "fire_ball", "total": "13"})
+        self.assertEqual(response.status_code, 200, response.content)
+        cast = response.json()["cast"]
+        self.assertTrue(cast["runaway"])
+        self.assertIn("Fire Ball is not on the record", cast["game_master_call"])
+        self.caster.refresh_from_db()
+        self.assertNotIn("Fire Ball cast", self.caster.dice_log)
+
+    def test_another_players_character_is_refused(self):
+        self.login_as(self.create_user("stranger"))
+        self.assertEqual(self.post({"spell": HEAL.key}).status_code, 403)
+        self.caster.refresh_from_db()
+        self.assertEqual(self.caster.mana_spent, 0)
+
+    def test_a_spell_that_must_hit_logs_both_rolls(self):
+        self.login_as(self.owner)
+        response = self.post({"spell": BOLT.key}, total=9)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.caster.refresh_from_db()
+        log_lines = self.caster.dice_log.splitlines()
+        self.assertIn(f"{BOLT.name} cast: 3d6: [6, 2, 1] = 9", log_lines)
+        self.assertIn(f"{BOLT.name} to hit: 3d6: [6, 2, 1] = 9", log_lines)
+
+    def test_a_stated_total_logs_only_the_aim_the_server_rolled(self):
+        self.login_as(self.create_dm())
+        response = self.post({"spell": BOLT.key, "total": "9"}, total=9)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.caster.refresh_from_db()
+        log_lines = self.caster.dice_log.splitlines()
+        self.assertIn(f"{BOLT.name} to hit: 3d6: [6, 2, 1] = 9", log_lines)
+        self.assertFalse(
+            [line for line in log_lines if line.startswith(f"{BOLT.name} cast:")]
+        )
+        entry = self.caster.history[-1]
+        self.assertEqual(entry["field"], CAST_HISTORY_FIELD)
+        self.assertIn(f"{CASTING_DICE} stated by a Game Master = 9", entry["new"])
+        self.assertIn("to hit rolled by the server", entry["new"])
+
+    def test_a_character_on_a_live_board_is_refused_and_nothing_is_written(self):
+        self.login_as(self.owner)
+        with patch(LIVE_FIGHT, return_value=True):
+            response = self.post({"spell": HEAL.key})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("is fighting on the board", response.json()["error"])
+        self.caster.refresh_from_db()
+        self.assertEqual((self.caster.mana_spent, self.caster.dice_log), (0, ""))
+        self.assertFalse(self.caster.history)
+
+
+class CastControlOnTheSheetTest(BaseTestCase):
+    """The sheet offers a player the spells they can cast, a Game Master all."""
+
+    def test_the_control_lists_the_castable_spells(self):
+        owner = self.create_user("control_caster")
+        caster = create_character(
+            owner, name="Control Caster", spells={HEAL.key: 1, BOLT.key: 0}
+        )
+        url = reverse("characters:edit", args=[caster.pk])
+        self.login_as(owner)
+        page = self.client.get(url).content.decode()
+        options = re.findall(r'<option value="(\w+)">[^<]*mana, ', page)
+        self.assertEqual(options, [HEAL.key])
+        self.assertNotIn("rolled at the table for the cast", page)
+        self.logout()
+        self.login_as(self.create_dm())
+        page = self.client.get(url).content.decode()
+        options = re.findall(r'<option value="(\w+)">[^<]*mana, ', page)
+        self.assertEqual(sorted(options), sorted(SPELLS))
+        self.assertIn("rolled at the table for the cast", page)
+
+    def test_a_character_with_no_spell_has_no_control(self):
+        owner = self.create_user("no_spell_caster")
+        caster = create_character(owner, name="No Spells")
+        self.login_as(owner)
+        page = self.client.get(reverse("characters:edit", args=[caster.pk]))
+        self.assertNotContains(page, 'id="cast-spell"')

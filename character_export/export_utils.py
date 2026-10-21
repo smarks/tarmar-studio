@@ -8,7 +8,7 @@ import bleach
 
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, CHARACTER_EXPORT_FORMAT
 from characters.equipment import format_pounds
-from characters.magic import known_spells
+from characters.magic import CASTING_DICE, known_spells
 from characters.purse import format_purse
 from characters.skills import track_label
 from characters.templatetags.dice_display import survival_roll
@@ -357,7 +357,7 @@ def generate_character_markdown(character) -> str:
         for spell in spells:
             lines.append(
                 f"| {spell.name} | {spell.school} | {spell.spell_level} | "
-                f"3d6 ≤ {spell.attribute} | {spell.mastery_display} |"
+                f"{CASTING_DICE} ≤ {spell.attribute} | {spell.mastery_display} |"
             )
         lines.append("")
 

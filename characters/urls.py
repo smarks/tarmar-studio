@@ -31,6 +31,7 @@ from .views.equipment import (
     equipment_update,
 )
 from .views.mechanics import (
+    character_cast_spell,
     character_choose_school,
     character_grant_mana,
     character_learn_spell,
@@ -101,6 +102,7 @@ urlpatterns = [
     path("<int:pk>/learn-spell/", character_learn_spell, name="learn_spell"),
     path("<int:pk>/grant-mana/", character_grant_mana, name="grant_mana"),
     path("<int:pk>/choose-school/", character_choose_school, name="choose_school"),
+    path("<int:pk>/cast-spell/", character_cast_spell, name="cast_spell"),
     # Combat
     path("<int:pk>/attack/", character_resolve_attack, name="attack"),
     # Equipment URLs
