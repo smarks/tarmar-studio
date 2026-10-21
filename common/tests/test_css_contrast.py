@@ -20,6 +20,7 @@ from common.css_contrast import (
     DECORATIVE_COMPONENTS,
     audit_conditionals,
     audit_faded,
+    audit_modified_descendants,
     audit_text_on_ground,
     audit_theme,
     colour_literals,
@@ -1187,7 +1188,9 @@ class AFadedElementIsMeasuredAsBlendedTest(SimpleTestCase):
         )
 
         (weight,) = [
-            p for p in audit_faded(sheet) if p.selector == ".row.dropped .weight"
+            p
+            for p in audit_modified_descendants(sheet)
+            if p.selector == ".row.dropped .weight"
         ]
 
         self.assertEqual(weight.background, "#f5f5f5")
@@ -1201,3 +1204,275 @@ class AFadedElementIsMeasuredAsBlendedTest(SimpleTestCase):
         sheet = self.PAGE + ".hidden { color: #333333; opacity: 0; }"
 
         self.assertEqual(failures(sheet, "", "tarmar"), [])
+
+
+class TextInsideAModifierStandsOnTheModifiersGroundTest(SimpleTestCase):
+    """A modifier that repaints the ground moves it out from under the text (#91).
+
+    ``.equipment-row .item-equipped`` was measured on the row's white only.
+    The dropped row repaints the row grey and the label lands on the grey,
+    where nothing measured it: the fade walk #49 added re-measured the
+    descendants of modifiers that fade, and this one does not. Each sheet
+    here is built so the descendant passes on the component's ground and
+    fails on the modifier's, so only the modifier's ground can fail it.
+    """
+
+    PAGE = "body { background: #ffffff; color: #111111; }\n"
+    ROW = ".row { background: #ffffff; }\n.row .weight { color: #555555; }\n"
+
+    def test_the_descendant_passes_on_the_components_own_ground(self):
+        """The control for the tests below: without a modifier, nothing fails."""
+        self.assertGreater(contrast_ratio("#555555", "#ffffff"), 4.5)
+        self.assertEqual(failures(self.PAGE + self.ROW, "", "tarmar"), [])
+
+    def test_a_modifier_painting_a_dark_ground_fails_the_text_it_holds(self):
+        sheet = (
+            self.PAGE
+            + self.ROW
+            + ".row.dropped { background: #333333; color: #ffffff; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".row.dropped .weight"])
+        self.assertEqual(unreadable[0].background, "#333333")
+        self.assertAlmostEqual(
+            unreadable[0].ratio, contrast_ratio("#555555", "#333333"), places=6
+        )
+        self.assertEqual(unreadable[0].opacity, 1.0)
+
+    def test_a_hover_ground_is_a_modifier_of_its_component_too(self):
+        sheet = (
+            self.PAGE + self.ROW + ".row:hover { background: #333333; color: #ffffff; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".row:hover .weight"])
+        self.assertEqual(unreadable[0].background, "#333333")
+
+    def test_a_modifier_of_a_modifier_reaches_the_components_descendants(self):
+        """``.row.in-pack.dropped`` holds ``.row .weight``, the live shape."""
+        sheet = (
+            self.PAGE
+            + self.ROW
+            + ".row.in-pack.dropped { background: #333333; color: #ffffff; }"
+        )
+
+        self.assertEqual(
+            [p.selector for p in failures(sheet, "", "tarmar")],
+            [".row.in-pack.dropped .weight"],
+        )
+
+    def test_a_descendant_that_paints_its_own_ground_keeps_it(self):
+        sheet = (
+            self.PAGE
+            + ".row { background: #ffffff; }\n"
+            + ".row .badge { background: #ffffff; color: #555555; }\n"
+            + ".row.dropped { background: #333333; color: #ffffff; }"
+        )
+
+        (badge,) = [
+            p
+            for p in audit_modified_descendants(sheet)
+            if p.selector == ".row.dropped .badge"
+        ]
+
+        self.assertTrue(badge.passes)
+        self.assertEqual(badge.background, "#ffffff")
+
+    def test_a_rule_the_sheets_write_under_the_modifier_is_measured_once(self):
+        """Its own colour wins in a browser, so the component's is not measured."""
+        sheet = (
+            self.PAGE
+            + self.ROW
+            + ".row.dropped { background: #333333; color: #ffffff; }\n"
+            + ".row.dropped .weight { color: #eeeeee; }"
+        )
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+        self.assertEqual(
+            [
+                p.selector
+                for p in audit_modified_descendants(sheet)
+                if p.selector == ".row.dropped .weight"
+            ],
+            [],
+        )
+
+    def test_text_written_under_a_hovered_ancestor_stands_on_the_hover_ground(self):
+        """``.row:hover .weight`` was measured on ``.row``'s resting white."""
+        sheet = (
+            self.PAGE
+            + ".row { background: #ffffff; }\n"
+            + ".row:hover { background: #333333; color: #ffffff; }\n"
+            + ".row:hover .weight { color: #555555; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".row:hover .weight"])
+        self.assertEqual(unreadable[0].background, "#333333")
+
+    def test_text_under_a_modifier_that_paints_nothing_stands_on_the_component(self):
+        """``.row.dropped`` is a ``.row``, so it stands on the row's ground.
+
+        It was measured on the page's white, because only a selector the
+        sheets name exactly was looked up as an ancestor.
+        """
+        sheet = (
+            self.PAGE
+            + ".row { background: #333333; color: #ffffff; }\n"
+            + ".row.dropped .weight { color: #555555; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".row.dropped .weight"])
+        self.assertEqual(unreadable[0].background, "#333333")
+
+    # The page the two tests below stand on: a dark page, a white row, and a
+    # dropped row that repaints the row dark grey and fades it a little.
+    DROPPED_ON_DARK = (
+        "body { background: #000000; color: #eeeeee; }\n"
+        ".row { background: #ffffff; color: #111111; }\n"
+        ".row .weight { color: #555555; }\n"
+        ".row.dropped { background: #333333; color: #ffffff; opacity: 0.9; }\n"
+    )
+
+    def test_a_rule_under_the_modifier_that_only_fades_keeps_the_components_ink(
+        self,
+    ):
+        """The rule's fade applies; its missing colour is not the page's ink."""
+        sheet = self.DROPPED_ON_DARK + ".row.dropped .weight { opacity: 0.99; }"
+
+        reported = [
+            p for p in failures(sheet, "", "tarmar") if p.foreground == "#555555"
+        ]
+
+        self.assertEqual([p.selector for p in reported], [".row.dropped .weight"])
+        self.assertEqual(reported[0].background, "#333333")
+        self.assertAlmostEqual(reported[0].opacity, 0.891)
+        self.assertLess(reported[0].ratio, 2.0)
+
+    def test_a_rule_under_the_modifier_that_only_paints_keeps_the_components_ink(
+        self,
+    ):
+        """The rule's ground applies; the component's #555 stands on it."""
+        sheet = self.DROPPED_ON_DARK + ".row.dropped .weight { background: #444; }"
+
+        reported = [
+            p for p in failures(sheet, "", "tarmar") if p.foreground == "#555555"
+        ]
+
+        self.assertEqual([p.selector for p in reported], [".row.dropped .weight"])
+        self.assertEqual(reported[0].background, "#444")
+        self.assertAlmostEqual(reported[0].opacity, 0.9)
+
+    def test_a_modifier_that_clears_its_ground_does_not_borrow_the_components(self):
+        """A quiet button's icon stands on the page, not on the loud button's red."""
+        sheet = (
+            self.PAGE
+            + ".btn { background: #dc3545; color: #ffffff; }\n"
+            + ".btn.quiet { background: none; color: #dc3545; }\n"
+            + ".btn.quiet .icon { color: #dc3545; }"
+        )
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+        measured = {p.selector: p for p in audit_text_on_ground(sheet)}
+        self.assertEqual(measured[".btn.quiet .icon"].background, "#ffffff")
+        self.assertEqual(measured[".btn.quiet"].background, "#ffffff")
+
+    def test_a_transparent_background_colour_clears_the_ground_too(self):
+        sheet = (
+            self.PAGE
+            + ".btn { background: #dc3545; color: #ffffff; }\n"
+            + ".btn.quiet { background-color: transparent; color: #dc3545; }"
+        )
+
+        measured = {p.selector: p for p in audit_text_on_ground(sheet)}
+
+        self.assertEqual(measured[".btn.quiet"].background, "#ffffff")
+
+    def test_a_ground_painted_after_it_was_cleared_is_painted(self):
+        """The later declaration decides, as in a browser: here, the white."""
+        sheet = (
+            "body { background: #000000; color: #eeeeee; }\n"
+            ".btn.quiet { background-color: transparent; background: #ffffff;"
+            " color: #eeeeee; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".btn.quiet"])
+        self.assertEqual(unreadable[0].background, "#ffffff")
+        self.assertLess(unreadable[0].ratio, 1.2)
+
+    def test_a_ground_cleared_after_it_was_painted_is_cleared(self):
+        """``background: none`` after ``background-color: #333`` leaves no fill."""
+        sheet = (
+            self.PAGE
+            + ".btn { background: #dc3545; color: #ffffff; }\n"
+            + ".btn.quiet { background-color: #333333; background: none;"
+            + " color: #555555; }"
+        )
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+        measured = {p.selector: p for p in audit_text_on_ground(sheet)}
+        self.assertEqual(measured[".btn.quiet"].background, "#ffffff")
+
+    def test_a_modifier_that_sets_only_a_colour_stands_on_its_component(self):
+        """``.row.dropped`` is a ``.row``: its grey text is on the row's grey."""
+        sheet = (
+            self.PAGE
+            + ".row { background: #888888; color: #000000; }\n"
+            + ".row.dropped { color: #999999; }"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".row.dropped"])
+        self.assertEqual(unreadable[0].background, "#888888")
+
+    def test_a_disabled_modifier_is_not_walked(self):
+        sheet = (
+            self.PAGE
+            + self.ROW
+            + ".row.disabled { background: #333333; color: #ffffff; }"
+        )
+
+        self.assertEqual(failures(sheet, "", "tarmar"), [])
+
+    def test_a_modifier_inside_a_media_block_is_reported_under_that_block(self):
+        sheet = (
+            self.PAGE
+            + self.ROW
+            + "@media (max-width: 600px) {\n"
+            + "    .row.dropped { background: #333333; color: #ffffff; }\n"
+            + "}"
+        )
+
+        unreadable = failures(sheet, "", "tarmar")
+
+        self.assertEqual([p.selector for p in unreadable], [".row.dropped .weight"])
+        self.assertIn("max-width: 600px", unreadable[0].theme)
+
+    def test_the_live_dropped_row_measures_its_text_on_its_own_grey(self):
+        """The pairings the #49 review found, read from the sheets as they are."""
+        every_sheet = "\n".join(stylesheet(name) for name in stylesheet_names())
+        muted = custom_properties(stylesheet("base.css"))["--colour-surface-muted"]
+
+        measured = {
+            pairing.selector: pairing
+            for pairing in audit_modified_descendants(every_sheet)
+        }
+
+        for selector in (
+            ".equipment-row.in-pack.pack-dropped .item-equipped",
+            ".equipment-row.in-pack.pack-dropped .item-weight",
+        ):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, measured)
+                self.assertEqual(measured[selector].background, muted.strip())
+                self.assertTrue(measured[selector].passes)
+        self.assertIn(".choice-btn:hover .choice-key", measured)
