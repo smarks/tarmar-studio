@@ -130,7 +130,7 @@ runs.
                 <td>{% editable_attribute character "charisma" can_edit %}</td>
             </tr>
         </table>
-        {% attribute_locked_note character can_edit %}
+        {% shared_locked_note character "attributes" can_edit %}
         {% comment %}The sheet's rolls (issues #748, #749): a player rolls each of
         these once and may not type them; a Game Master may roll again or type.
         Each control renders when the server would take the roll.{% endcomment %}
@@ -266,6 +266,8 @@ runs.
                 </td>
             </tr>
         </table>
+        {# The class and the detail share one reason: said once, here (#138). #}
+        {% shared_locked_note character "provenance" can_edit %}
         {% if can_edit and sheet_rolls.provenance.available %}
         <button type="button" class="button secondary sheet-roll-btn" id="roll-provenance-btn" data-roll-kind="provenance" data-roll-url="{% url 'characters:roll' character.pk 'provenance' %}"{% if sheet_rolls.provenance.confirm %} data-confirm="{{ sheet_rolls.provenance.confirm }}"{% endif %}>Roll provenance (d100)</button>
         {% endif %}
@@ -291,11 +293,14 @@ runs.
             Origin or INT changes, and from the roll's response: rendered once, the
             row kept the old origin's check until a reload. The control renders for
             an editor and is hidden rather than left out when it cannot be used now,
-            since changing the Origin can bring it back (a "Consult GM" origin has
-            no check to roll).{% endcomment %}
-            {% comment %}The Game Master's ruling on a "Consult GM" origin (#801): his to
-            set, shown to everyone, and only at "Consult GM". Hidden rather than
-            left out elsewhere, since changing the Origin brings it back.
+            since changing the Origin can bring it back (an origin the rules leave
+            to the Game Master, the location row with no literacy check, has no
+            check to roll).{% endcomment %}
+            {% comment %}The Game Master's ruling on an origin the rules leave to him
+            (#801): his to set, shown to everyone, and only at such an origin
+            (Character.origin_defers_to_game_master, read off the canon's
+            location table, #151). Hidden rather than left out elsewhere, since
+            changing the Origin brings it back.
             Rendered only where the model carries the field (migration 0022).{% endcomment %}
             {% if sheet_fields.origin_ruling %}
             <tr id="origin-ruling-row"{% if not character.origin_defers_to_game_master %} hidden{% endif %}>
@@ -312,7 +317,7 @@ runs.
                     <button type="button" id="roll-literacy-btn" class="button secondary"{% if not can_roll_literacy %} hidden{% endif %}>Roll literacy ({{ literacy_dice }})</button>
                     {% endif %}
                     {% if may_rule_literacy %}
-                    {% comment %}The Game Master's ruling (issue #743): "Consult GM" has no check to roll, so he decides. Hidden, not left out, away from Consult GM, since changing the Origin can bring it back.{% endcomment %}
+                    {% comment %}The Game Master's ruling (issue #743): an origin the rules leave to him has no check to roll, so he decides. Hidden, not left out, at any other origin, since changing the Origin can bring it back.{% endcomment %}
                     <span id="literacy-ruling-control"{% if not can_rule_literacy %} hidden{% endif %}>
                         <label for="literacy-ruling-select">Game Master's ruling</label>
                         <select id="literacy-ruling-select">
@@ -959,8 +964,8 @@ runs.
     {% endif %}
 
     {% comment %}Rendered always and hidden while empty: a roll made without a
-    reload (Fatigue, literacy) writes the log, and its response carries the log
-    back (issue #792).{% endcomment %}
+    reload (Fatigue, literacy, a skill check, an attack) writes the log, and its
+    response carries the log back (issues #792, #147).{% endcomment %}
     <div id="dice-log" class="stats-section dice-log"{% if not character.dice_log %} hidden{% endif %}>
         <h2>Dice Roll Log</h2>
         <pre id="dice-log-text">{{ character.dice_log }}</pre>

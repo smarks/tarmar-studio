@@ -22,9 +22,23 @@ const { runDjangoShell, readDjangoShell } = require('./django');
 const { loadedCharacterRules } = require('./character-rules');
 const { refusal } = require('./refusals');
 
-/** The note that says once why a recorded attribute is locked (#84). */
-const ATTRIBUTE_LOCKED_NOTE_ID = 'attribute-locked-reason';
-const ATTRIBUTE_LOCKED_NOTE = `#${ATTRIBUTE_LOCKED_NOTE_ID}`;
+/**
+ * The note that says once why a recorded attribute is locked (#84), found by
+ * a field it speaks for rather than by a copy of the server's id.
+ */
+const ATTRIBUTE_LOCKED_NOTE = '[data-locked-note-for~="strength"]';
+/** The same for the provenance class and detail (#138). */
+const PROVENANCE_LOCKED_NOTE = '[data-locked-note-for~="provenance_class"]';
+
+/**
+ * How many locked cells point to a shared note, by the note's own id.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} note - The note's selector.
+ */
+async function cellsDescribedBy(page, note) {
+    const noteId = await page.locator(note).getAttribute('id');
+    return page.locator(`[data-locked-field][aria-describedby="${noteId}"]`);
+}
 
 /** The character id from the editor's URL. */
 function characterId(page) {
@@ -72,8 +86,14 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toHaveText(attributeReason);
         await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeVisible();
         await expect(page.getByText(attributeReason, { exact: true })).toHaveCount(1);
-        await expect(page.locator(`[data-locked-field][aria-describedby="${ATTRIBUTE_LOCKED_NOTE_ID}"]`))
-            .toHaveCount(6);
+        await expect(await cellsDescribedBy(page, ATTRIBUTE_LOCKED_NOTE)).toHaveCount(6);
+        // The provenance class and detail share one reason too: said once,
+        // under the pair, where both cells printed it (#138).
+        const provenanceReason = refusal('characters', 'services', 'field_provenance');
+        await expect(page.locator(PROVENANCE_LOCKED_NOTE)).toHaveText(provenanceReason);
+        await expect(page.locator(PROVENANCE_LOCKED_NOTE)).toBeVisible();
+        await expect(page.getByText(provenanceReason, { exact: true })).toHaveCount(1);
+        await expect(await cellsDescribedBy(page, PROVENANCE_LOCKED_NOTE)).toHaveCount(2);
         // What the rules let a player choose stays an input.
         await expect(page.locator('[data-field="name"]')).toHaveCount(1);
         // The Origin is "roll or choose", and creation rolled it: a roll is

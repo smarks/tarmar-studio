@@ -150,7 +150,11 @@ def save_session(name: str, history: list[ChatMessage], rules_text: str) -> Path
 
     data = {
         "name": name,
-        "saved_at": datetime.now().isoformat(),
+        # An aware instant with its UTC offset (issue #144): the file is read
+        # back on whatever machine and in whatever zone, and a naive clock
+        # reading names no moment there. Not common.instants.labelled_instant,
+        # which needs Django's settings that this offline CLI runs without.
+        "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "model": MODEL,
         "history": history,
     }

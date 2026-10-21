@@ -18,7 +18,12 @@ from django.db.models import F
 from django.utils import timezone
 
 from characters.constants import UNNAMED_CHARACTER, name_within_rule
-from characters.dice import roll_fatigue_logged, roll_physical_features
+from characters.dice import (
+    FATIGUE_LOG_LABEL,
+    dice_log_line,
+    roll_fatigue_logged,
+    roll_physical_features,
+)
 from characters.models import Character
 from characters.services import (
     apply_background_roll,
@@ -158,7 +163,7 @@ def start_character(
     label = who.strip()[: SessionCharacter.MAX_LABEL_CHARS]
     physical, log_entries = roll_physical_features()
     fatigue_roll, fatigue_log = roll_fatigue_logged()
-    log_entries.append(f"Fatigue: {fatigue_log}")
+    log_entries.append(dice_log_line(FATIGUE_LOG_LABEL, fatigue_log))
     character = Character(
         user=session.user,
         name=name or name_within_rule(label, fallback=UNNAMED),

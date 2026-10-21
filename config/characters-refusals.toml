@@ -26,10 +26,16 @@ field_appearance_roll = "Rolled (1d6); only a Game Master can change it or quali
 field_fatigue_roll = "Rolled ({dice}) once; only a Game Master can change it."
 # {dice}: the canon's literacy roll.
 field_literacy_roll = "Rolled ({dice}) once; only a Game Master can have it rolled again."
-# A literacy ruling at "Consult GM", which has no check (issue #743).
+# A literacy ruling at the origin the rules leave to the Game Master, the
+# location row with no literacy check (issue #743).
 literacy_ruling_game_master_only = "Only a Game Master rules on whether a character can read; a player's literacy is rolled"
-# What a "Consult GM" origin is (issue #801).
-origin_ruling_game_master_only = "Only a Game Master rules what a Consult GM origin is"
+# What an origin the rules leave to the Game Master is (issue #801).
+# {origin}: that origin's name as the canon's location table gives it
+# ("Consult GM"), read from the table (issue #151).
+origin_ruling_game_master_only = "Only a Game Master rules what an origin of {origin} is"
+# The same, under a canon whose every origin has a literacy check, so none is
+# left to the Game Master (issue #151).
+origin_ruling_no_origin = "Only a Game Master rules what an origin is, and every origin here has a literacy check"
 # The Dragonborn secret (issue #810).
 dragonborn_game_master_only = "Only a Game Master can set this."
 field_provenance = "Rolled on the provenance table; only a Game Master can change it."

@@ -166,6 +166,9 @@ if (typeof module !== 'undefined' && module.exports) {
             }
             renderAttack(data.attack);
             appendToCombatLog(data.combat_log_entry_html);
+            // The swing's dice joined the character's dice log (issue #147):
+            // character-edit.js's painter, when the sheet has loaded it.
+            if (typeof paintSheet === 'function') paintSheet(data);
         } catch (error) {
             uiNotify('Could not resolve the attack: ' + error.message);
         } finally {

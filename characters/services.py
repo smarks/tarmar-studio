@@ -42,13 +42,20 @@ from .constants import (
     CHARACTER_ATTRIBUTE_FIELDS,
     MAX_DEATH_CAUSE_LENGTH,
     MAX_EQUIPMENT_QUANTITY,
+    PROVENANCE_FIELDS,
     too_long,
 )
 from .dice import (
+    FATIGUE_LOG_LABEL,
+    LITERACY_LOG_LABEL,
     Roller,
+    dice_log_line,
+    dice_log_text,
+    is_point_buy_log_line,
     literacy_check_text,
     location_effects,
     location_skill_choices,
+    point_buy_log_line,
     roll_3d6_logged,
     roll_attribute_logged,
     roll_d6_logged,
@@ -204,6 +211,19 @@ def _literacy_roll_reason() -> str:
     )
 
 
+def _origin_ruling_reason() -> str:
+    """Why a player may not set the Game Master's ruling on an origin (#801).
+
+    Names the origins the canon leaves to the Game Master, read off its
+    location table as the Games Master's words do (issue #151), not typed.
+    """
+    words = refusal_words().services
+    origins = game_master_origins_in_words(character_rules())
+    if not origins:
+        return words.origin_ruling_no_origin
+    return words.origin_ruling_game_master_only.format(origin=origins)
+
+
 def _said(pick: Callable[[ServicesWords], str]) -> Callable[[], str]:
     """A field reason read from the configured words each time it is asked
     (``config/characters-refusals.toml``, issue #85), never once at import."""
@@ -263,10 +283,8 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "literacy_ruling": _game_master(
             _said(lambda said: said.literacy_ruling_game_master_only)
         ),
-        # What a "Consult GM" origin is (#801): the Game Master's word again.
-        "origin_ruling": _game_master(
-            _said(lambda said: said.origin_ruling_game_master_only)
-        ),
+        # What an origin left to the Game Master is (#801): his word again.
+        "origin_ruling": _game_master(_origin_ruling_reason),
         # A people is the player's choice; nobody rolls one (#810).
         "people": _player(),
         # The Game Master's secret (#810), never the player's to set or see.
@@ -277,8 +295,7 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "entered_play_at": _nobody(),
         # What a lowered XP could not take back; the next XP pays it (#769).
         "skill_points_owed": _nobody(),
-        "provenance_class": _PROVENANCE_REASON,
-        "provenance_detail": _PROVENANCE_REASON,
+        **dict.fromkeys(PROVENANCE_FIELDS, _PROVENANCE_REASON),
         "wealth_level": _game_master(_said(lambda said: said.field_wealth_level)),
         "starting_coin": _game_master(_said(lambda said: said.field_starting_coin)),
         "total_xp": _game_master(_said(lambda said: said.field_total_xp)),
@@ -421,11 +438,6 @@ def check_field_author(
         raise CharacterChangeError(field_refusal(field_name))
 
 
-#: The dice-log words a bought score is recorded with, on the creation page
-#: ("Strength: point-buy = 12") and on the sheet.
-POINT_BUY_LOG_MARKER = "point-buy = "
-
-
 def bought_not_rolled_reason() -> str:
     """Why a player who has typed a score may not roll the rest.
 
@@ -446,13 +458,17 @@ def bought_scores(character: Character) -> bool:
     typed score commits the character to the buy, and the roll is refused for
     the rest (a Game Master may still roll).
 
-    This reads the :data:`POINT_BUY_LOG_MARKER` words out of ``dice_log``, so
-    whatever a player can write into ``dice_log`` decides whether they are
-    held to the buy. A player's import must never set ``dice_log`` (the #744
-    branch drops it); keep it that way, or a player could clear the marker by
-    importing and roll the scores they had committed to buying.
+    This reads the bought-score lines out of ``dice_log``
+    (:func:`characters.dice.is_point_buy_log_line`, which reads what the
+    creation page and the sheet write), so whatever a player can write into
+    ``dice_log`` decides whether they are held to the buy. A player's import
+    must never set ``dice_log`` (the #744 branch drops it); keep it that way,
+    or a player could clear the marker by importing and roll the scores they
+    had committed to buying.
     """
-    return POINT_BUY_LOG_MARKER in (character.dice_log or "")
+    return any(
+        is_point_buy_log_line(line) for line in (character.dice_log or "").splitlines()
+    )
 
 
 def check_point_buy(character: Character, name: str, value: int) -> str:
@@ -508,7 +524,7 @@ def check_point_buy(character: Character, name: str, value: int) -> str:
             f"Typed scores are a {point_buy.total}-point buy: with the scores "
             f"recorded, {name} can be {lowest} to {highest}; {value} was given"
         )
-    return f"{name}: {POINT_BUY_LOG_MARKER}{value} (typed on the sheet)"
+    return f"{point_buy_log_line(name, value)} (typed on the sheet)"
 
 
 #: attributes.md: "Height: Choose or roll 1d6" and "Base weight is player's
@@ -926,6 +942,14 @@ def apply_fatigue_roll(character: Character, value: int | None = None) -> str:
         return f"Fatigue roll ({fatigue_roll.dice}) set to {value}"
     rolls, total = roll_expression(fatigue_roll.dice)
     character.fatigue_roll = total
+    # The dice log keeps the dice the server rolled, as creation's Fatigue
+    # roll does (issue #147); a stated roll is in the history only.
+    append_dice_log(
+        character,
+        dice_log_line(
+            FATIGUE_LOG_LABEL, dice_log_text(fatigue_roll.dice, rolls, total)
+        ),
+    )
     faces = " and ".join(str(face) for face in rolls)
     return f"Fatigue roll ({fatigue_roll.dice}) rolled {faces} = {total}"
 
@@ -1083,6 +1107,8 @@ def apply_literacy_roll(character: Character, *, is_game_master: bool = False) -
     total, log = roll_literacy_logged()
     character.literacy_roll = total
     character.literacy_rolled = True
+    # Kept in the dice log with the sheet's other rolls (issue #147).
+    append_dice_log(character, dice_log_line(LITERACY_LOG_LABEL, log))
     note = f"rolled the literacy check ({character.location_literacy_check}), {log}"
     if adopted:
         note = f"{note}; {adopted}"
@@ -2571,7 +2597,16 @@ def change_field(
 
 
 def append_dice_log(character: Character, line: str) -> None:
-    """Add a line to the character's dice log, where every roll is kept."""
+    """Add a line to the character's dice log, where every roll is kept.
+
+    Every die the server throws for the character off the battle board goes
+    here, at creation, on the sheet and through the Games Master's record
+    changes: the attribute, physical, background, Fatigue and literacy rolls,
+    the survival save, skill and attribute checks, a sheet attack and a cast
+    (issue #147). Two kinds of roll keep their own record instead: a battle's
+    in its events, and the prior-experience years' in the experience log. A
+    total a Game Master states from his table is in the history only.
+    """
     character.dice_log = "\n".join(part for part in (character.dice_log, line) if part)
 
 
