@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 from django.test import override_settings
 
+from battle.services import unarmed_line
+from battle.wording import words
 from common.test_helpers import BaseTestCase, create_character
 
 from .character_sheet import CharacterSheet
@@ -169,9 +171,8 @@ class GMCharacterEndpointsTest(BaseTestCase):
                 "characters": [{"id": self.character.pk, "name": "Mine"}],
                 # The Battle tab's warning as it now stands, which the page
                 # repaints from this answer instead of reloading (issue #15).
-                "bare_handed": (
-                    "Mine carries no weapon and would fight bare-handed. Buy gear "
-                    "on the character's sheet before the fight."
+                "bare_handed": words().services.unarmed_attached.format(
+                    unarmed=unarmed_line(["Mine"])
                 ),
             },
         )

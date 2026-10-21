@@ -34,6 +34,7 @@ from common.helpers import parse_json_text
 from common.mixins import ActivePageMixin
 from common.pagination import PAGE_SIZE
 from common.pickers import asked_for, picker_body_response
+from common.refusal_words import refusal_words as common_refusal_words
 
 from .forms import PartyForm
 from .models import (
@@ -45,6 +46,7 @@ from .models import (
     manageable_parties,
 )
 from .pickers import addable_picker
+from .refusal_words import refusal_words
 
 DETAIL_TEMPLATE = "parties/party_detail.html"
 
@@ -143,7 +145,7 @@ def party_addable_picker(request, pk):
     """
     party = get_object_or_404(Party, pk=pk, is_deleted=False)
     if not can_manage_party(request.user, party):
-        raise PermissionDenied("Only the party's owner may add members")
+        raise PermissionDenied(refusal_words().views.owner_only_add)
     query, page_number = asked_for(request)
     picker = addable_picker(request.user, party, query=query, page_number=page_number)
     return picker_body_response(request, picker, {"party": party, "user": request.user})
@@ -229,7 +231,7 @@ def party_add_member(request, pk):
         return render(
             request,
             DETAIL_TEMPLATE,
-            _detail_context(request, party, "Only the party's owner may add members"),
+            _detail_context(request, party, refusal_words().views.owner_only_add),
             status=403,
         )
     try:
@@ -238,7 +240,9 @@ def party_add_member(request, pk):
         return render(
             request,
             DETAIL_TEMPLATE,
-            _detail_context(request, party, "A numeric character_id is required"),
+            _detail_context(
+                request, party, common_refusal_words().requests.numeric_character_id
+            ),
             status=400,
         )
     character = get_object_or_404(addable_characters(request.user), pk=character_id)
@@ -253,7 +257,9 @@ def party_add_member(request, pk):
             request,
             DETAIL_TEMPLATE,
             _detail_context(
-                request, party, f"{character.name} is already in this party"
+                request,
+                party,
+                refusal_words().views.already_in_party.format(name=character.name),
             ),
             status=400,
         )
@@ -273,7 +279,9 @@ def party_remove_member(request, pk):
         return render(
             request,
             DETAIL_TEMPLATE,
-            _detail_context(request, party, "A numeric membership_id is required"),
+            _detail_context(
+                request, party, refusal_words().views.numeric_membership_id
+            ),
             status=400,
         )
     try:
@@ -286,12 +294,7 @@ def party_remove_member(request, pk):
         return render(
             request,
             DETAIL_TEMPLATE,
-            _detail_context(
-                request,
-                party,
-                "Only the party's owner or the character's owner may remove"
-                " this member",
-            ),
+            _detail_context(request, party, refusal_words().views.remove_denied),
             status=403,
         )
     membership.delete()
@@ -318,18 +321,20 @@ def party_update_field(request, pk):
     current field, so the create form and autosave refuse the same things.
     """
     party = get_object_or_404(manageable_parties(request.user), pk=pk, is_deleted=False)
+    words = refusal_words().views
     try:
         payload = parse_json_text(request.body or b"{}")
     except ValueError:
-        return _field_refusal("The request was not valid JSON")
+        # Answered as a body that is not an object is, just below.
+        payload = None
     if not isinstance(payload, dict):
-        return _field_refusal("The request was not valid JSON")
+        return _field_refusal(words.request_not_json)
     field = payload.get("field")
     if field not in PARTY_EDITABLE_FIELDS:
-        return _field_refusal("That field cannot be edited")
+        return _field_refusal(words.field_not_editable)
     value = payload.get("value")
     if not isinstance(value, str):
-        return _field_refusal("A text value is required")
+        return _field_refusal(words.text_value_required)
     data = {name: getattr(party, name) for name in PARTY_EDITABLE_FIELDS}
     data[field] = value
     form = PartyForm(data, instance=party)

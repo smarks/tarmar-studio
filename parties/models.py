@@ -26,6 +26,8 @@ from django.urls import reverse
 
 from common.helpers import is_owner_or_manager
 
+from .refusal_words import refusal_words
+
 
 class Party(models.Model):
     """A named band of characters, owned by the user who formed it."""
@@ -188,7 +190,4 @@ def live_parties():
 
 def disbanded_refusal(party: Party) -> str:
     """Why a disbanded party chosen by hand (a crafted id) is refused (#971)."""
-    return (
-        f"{party.name} was disbanded; its owner or a Game Master can restore "
-        "it from the Parties page"
-    )
+    return refusal_words().models.disbanded.format(party=party.name)

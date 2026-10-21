@@ -22,7 +22,7 @@ from character_export.export_utils import generate_character_json
 from characters import services
 from characters.import_service import CharacterImportError, validate_import_payload
 from characters.models import Character
-from characters.purse import WEALTH_FIRST_REFUSAL
+from characters.refusal_words import refusal_words as characters_words
 from characters.tests.test_incomplete_characters import incomplete_character
 from characters.views.characters import sheet_repaint
 from common.test_helpers import BaseTestCase, create_character
@@ -499,7 +499,9 @@ class WealthBeforePurchaseTest(SheetTestCase):
         self.as_player()
         response = self.post_json(self.url("equipment_add"), {"item_id": "broadsword"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], WEALTH_FIRST_REFUSAL)
+        self.assertEqual(
+            response.json()["error"], characters_words().purse.wealth_first
+        )
         self.character.refresh_from_db()
         self.assertEqual(self.character.equipment, [])
 
@@ -511,7 +513,9 @@ class WealthBeforePurchaseTest(SheetTestCase):
             self.url("equipment_update"), {"index": 0, "quantity": 3}
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], WEALTH_FIRST_REFUSAL)
+        self.assertEqual(
+            response.json()["error"], characters_words().purse.wealth_first
+        )
 
     def test_a_player_is_refused_a_priced_custom_item(self):
         self.as_player()
@@ -520,7 +524,9 @@ class WealthBeforePurchaseTest(SheetTestCase):
             {"is_custom": True, "name": "Lute", "category": "gear", "cost": 5},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], WEALTH_FIRST_REFUSAL)
+        self.assertEqual(
+            response.json()["error"], characters_words().purse.wealth_first
+        )
 
     def test_a_player_may_still_pack_and_note_what_they_have(self):
         self.character.equipment = [{"item_id": "arrows", "quantity": 1}]
@@ -549,7 +555,7 @@ class WealthBeforePurchaseTest(SheetTestCase):
     def test_a_players_chat_purchase_is_refused_the_same_way(self):
         with self.assertRaises(services.CharacterChangeError) as refusal:
             services.apply_equipment(self.character, "dagger", 1, purchase=True)
-        self.assertEqual(str(refusal.exception), WEALTH_FIRST_REFUSAL)
+        self.assertEqual(str(refusal.exception), characters_words().purse.wealth_first)
 
 
 class HeightAndWeightTest(SheetTestCase):
@@ -757,12 +763,10 @@ class ReviewFollowUpTest(SheetTestCase):
         self.assertIsNone(self.character.shield_in_use_index)
 
     def test_a_game_masters_purchase_before_the_wealth_roll_is_marked(self):
-        from characters.purse import GAME_MASTER_BEFORE_WEALTH_NOTE
-
         self.character.wealth_recorded = False
         self.character.save()
         data = self.post_json(self.url("equipment_add"), {"item_id": "dagger"}).json()
-        self.assertEqual(data["notice"], GAME_MASTER_BEFORE_WEALTH_NOTE)
+        self.assertEqual(data["notice"], characters_words().purse.before_wealth_note)
         self.assertIn("placeholder starting coin", data["recent_changes_html"])
         given = self.post_json(
             self.url("equipment_add"), {"item_id": "dagger", "free": True}

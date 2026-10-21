@@ -25,6 +25,7 @@ from common.helpers import (
 )
 from common.test_helpers import BaseTestCase, mark_gate_passed
 from gm.models import GMReviewRequest, GMSession
+from parties.refusal_words import refusal_words as parties_words
 
 COMPLETE_ATTRIBUTES = {
     "strength": 12,
@@ -442,7 +443,10 @@ class TypedInputPartyAndReviewTest(BaseTestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(
                     response.json(),
-                    {"success": False, "error": "The request was not valid JSON"},
+                    {
+                        "success": False,
+                        "error": parties_words().views.request_not_json,
+                    },
                 )
 
     def test_review_statuses_leave_out_ids_that_are_not_numbers(self):

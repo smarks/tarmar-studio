@@ -10,6 +10,7 @@ from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, CHARACTER_EXPORT_FO
 from characters.equipment import format_pounds
 from characters.magic import known_spells
 from characters.purse import format_purse
+from characters.refusal_words import refusal_words as characters_words
 from characters.rules import social_class_display
 from characters.skills import track_label
 from characters.templatetags.dice_display import survival_roll
@@ -316,8 +317,13 @@ def generate_character_markdown(character) -> str:
     lines.append(f"- **Location:** {character.location}")
     lines.append(f"- **Literacy:** {character.literacy_summary}")
     lines.append(f"- **Wealth Level:** {character.wealth_level}")
-    # A Rich character's coin is "Consult GM" until set (issue #749).
-    coin = "Consult GM" if character.starting_coin is None else character.starting_coin
+    # A Rich character's coin is the purse's "Consult GM" until set (issues
+    # #749, #136).
+    coin = (
+        characters_words().purse.consult_gm
+        if character.starting_coin is None
+        else character.starting_coin
+    )
     lines.append(f"- **Starting Coin:** {coin}")
     lines.append(f"- **Purse:** {format_purse(character)}")
     lines.append("")

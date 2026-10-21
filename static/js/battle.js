@@ -916,7 +916,9 @@ if (typeof module !== 'undefined' && module.exports) {
                 // "You" only where being asked is actually true: whoever
                 // runs the battle *would* decide for an automatic figure
                 // if it went manual, which is not the same as playing it.
-                controller.textContent = 'Manual — played by you';
+                // The server's words for it (issue #136); a payload from
+                // before them shows the line it carries.
+                controller.textContent = seat.own_control_line || seat.control_line;
             } else {
                 controller.textContent = seat.control_line;
             }

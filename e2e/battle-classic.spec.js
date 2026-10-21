@@ -15,6 +15,7 @@
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup,
 } = require('./fixtures');
+const { chosenBy, ownManualLine } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 
 test.describe('Classic-profile battle', () => {
@@ -169,7 +170,7 @@ test.describe('Classic-profile battle', () => {
         // The player's page lands on the started battle, their figure theirs.
         await expect(playerPage.locator('#battle-arena'))
             .toBeVisible({ timeout: 15000 });
-        await expect(playerPage.locator('.combatant-card', { hasText: 'Played by you' }))
+        await expect(playerPage.locator('.combatant-card', { hasText: ownManualLine() }))
             .toBeVisible();
 
         // The DM advances: the turn reaches the seated figure and parks.
@@ -189,14 +190,14 @@ test.describe('Classic-profile battle', () => {
         // The classic turn completes and the decision is credited to them.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         await expect(playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toBeVisible();
 
         // And it is in the database, not the browser: a reload rebuilds it.
         await playerPage.reload();
         await expect(playerPage.locator('.turn-group[data-turn="1"]')).toBeVisible();
         await expect(playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toBeVisible();
 
         await stopCoverage(playerPage, `${testInfo.title} (player context)`);

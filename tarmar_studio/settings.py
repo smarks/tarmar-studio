@@ -62,6 +62,9 @@ from common.refusal_words import (  # noqa: E402
 from common.services import ollama_client  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
 from gm.refusal_words import load_refusal_words as load_gm_refusal_words  # noqa: E402
+from parties.refusal_words import (  # noqa: E402
+    load_refusal_words as load_parties_refusal_words,
+)
 from reference.paths import (  # noqa: E402
     CANON_NAME,
     CONFIG_DIR,
@@ -187,8 +190,8 @@ BATTLE_RULINGS_WORDING = load_rulings_wording(BATTLE_RULINGS_WORDING_FILE)
 # app under config/, one table per module, read and checked here as the rulings'
 # words are, and the one sentence every app's JSON endpoints answer a server
 # failure in (issues #113, #139). BATTLE_REFUSAL_WORDS_FILE,
-# GM_REFUSAL_WORDS_FILE, CHARACTERS_REFUSAL_WORDS_FILE and
-# COMMON_REFUSAL_WORDS_FILE name other files,
+# GM_REFUSAL_WORDS_FILE, CHARACTERS_REFUSAL_WORDS_FILE, PARTIES_REFUSAL_WORDS_FILE
+# and COMMON_REFUSAL_WORDS_FILE name other files,
 # resolved as GATE_HINTS_FILE is; empty means the default.
 BATTLE_REFUSAL_WORDS_FILE = BASE_DIR / (
     os.environ.get("BATTLE_REFUSAL_WORDS_FILE") or "config/battle-refusals.toml"
@@ -206,6 +209,10 @@ COMMON_REFUSAL_WORDS_FILE = BASE_DIR / (
     os.environ.get("COMMON_REFUSAL_WORDS_FILE") or "config/common-refusals.toml"
 )
 COMMON_REFUSAL_WORDS = load_common_refusal_words(COMMON_REFUSAL_WORDS_FILE)
+PARTIES_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("PARTIES_REFUSAL_WORDS_FILE") or "config/parties-refusals.toml"
+)
+PARTIES_REFUSAL_WORDS = load_parties_refusal_words(PARTIES_REFUSAL_WORDS_FILE)
 
 # How many wrong guesses in a window before a hint is shown. Three because of
 # the #55 evidence, stated once beside the hints comment in common/gate.py. It

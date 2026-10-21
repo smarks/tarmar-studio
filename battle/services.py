@@ -628,21 +628,13 @@ def _record_crossing(battle: Battle, roster) -> list[BattleEvent]:
         The events written, in order (empty when nothing was lost).
     """
     notes: list[str] = []
+    said = words().services
     if roster.disarmed:
-        notes.append(
-            f"Re-armed from the classic weapon table: {', '.join(roster.disarmed)}."
-        )
+        notes.append(said.re_armed.format(names=", ".join(roster.disarmed)))
     if roster.wizards:
-        notes.append(
-            f"No spell crosses into a classic battle: "
-            f"{', '.join(roster.wizards)} enter as classic wizards, "
-            f"staff in hand and knowing the classic spells their IQ allows."
-        )
+        notes.append(said.no_spell_crosses.format(names=", ".join(roster.wizards)))
     if roster.unspelled:
-        notes.append(
-            f"{', '.join(roster.unspelled)} cast in Tarmar but reach no "
-            f"classic spell at this IQ, and fight as warriors."
-        )
+        notes.append(said.reach_no_spell.format(names=", ".join(roster.unspelled)))
     return BattleEvent.objects.bulk_create(
         BattleEvent(
             battle=battle,
@@ -967,7 +959,7 @@ def create_battle(
         BattleCombatant.objects.create(
             battle=battle,
             is_open_seat=True,
-            display_name=f"Open seat {seat_index + 1}",
+            display_name=words().services.open_seat.format(number=seat_index + 1),
             team=_team_at(seat_teams, seat_index),
         )
     if is_lobby:
@@ -1506,7 +1498,9 @@ def release_seat(
         # owner of its own and follows the battle again (#308).
         seat.control_mode = control.INHERIT
         seat.snapshot_json = {}
-        seat.display_name = _display_name_for(battle, f"Open seat {rank + 1}")
+        seat.display_name = _display_name_for(
+            battle, words().services.open_seat.format(number=rank + 1)
+        )
         seat.save()
     return seat
 
@@ -1709,23 +1703,6 @@ def _record_pools(combatant_state, character: Character) -> tuple[int, int, int,
     )
 
 
-#: Why a fight no longer writes one character's record (review of #837), as
-#: the battle log says it, once per character.
-RECORDS_WITHHELD_NOTE = (
-    "{name}'s wounds and death are no longer written to their record: {reason}"
-)
-
-#: The two reasons, by the kind of fight.
-WITHHELD_OTHER_PLAYERS = (
-    "the character belongs to another player, and the session's owner is no "
-    "longer a Game Master"
-)
-WITHHELD_NOT_GAME_MASTER = (
-    "the battle counted because a Game Master ran it, and whoever made it is no "
-    "longer a Game Master"
-)
-
-
 def withheld_characters(battle: Battle) -> dict[int, str]:
     """Characters this record-writing fight may no longer write, and why.
 
@@ -1739,7 +1716,9 @@ def withheld_characters(battle: Battle) -> dict[int, str]:
     splits them, and Spencer may overrule.
 
     Returns:
-        ``{character_id: reason}``; empty when the fight writes to no record
+        ``{character_id: reason}``, the reason in the words of
+        ``[services] withheld_other_players`` or ``withheld_not_game_master``
+        (config/battle-rulings.toml); empty when the fight writes to no record
         or its maker still holds whatever let it write.
     """
     if not battle.writes_to_records or battle.created_by_id is None:
@@ -1755,11 +1734,12 @@ def withheld_characters(battle: Battle) -> dict[int, str]:
         if is_dm(maker):
             return {}
         return {
-            character_id: WITHHELD_OTHER_PLAYERS
+            character_id: words().services.withheld_other_players
             for character_id, owner_id in seated
             if owner_id != maker.pk
         }
-    return {character_id: WITHHELD_NOT_GAME_MASTER for character_id, _owner in seated}
+    reason = words().services.withheld_not_game_master
+    return {character_id: reason for character_id, _owner in seated}
 
 
 def _note_withheld(battle: Battle) -> None:
@@ -1781,8 +1761,9 @@ def _note_withheld(battle: Battle) -> None:
             continue
         _control_event(
             battle,
-            RECORDS_WITHHELD_NOTE.format(
-                name=names.get(character_id, "A character"), reason=reason
+            words().services.records_withheld.format(
+                name=names.get(character_id, words().services.a_character),
+                reason=reason,
             ),
             {"records_withheld": character_id},
         )
@@ -1867,13 +1848,25 @@ def resnapshot_pools(battle_id: int, *, is_game_master: bool) -> Battle:
         if not moved:
             raise BattleRefusal(refusal_words().services.pools_already_held)
         lines = []
+        said = words().services
         for combatant, figure in moved:
             fatigue, body, mana, debt = _record_pools(figure, combatant.character)
             lines.append(
-                f"{combatant.display_name} Fatigue {figure.fatigue}→{fatigue}, "
-                f"Body {figure.body}→{body}, Mana {figure.mana}→{mana}"
+                said.figure_pools.format(
+                    name=combatant.display_name,
+                    fatigue_was=figure.fatigue,
+                    fatigue=fatigue,
+                    body_was=figure.body,
+                    body=body,
+                    mana_was=figure.mana,
+                    mana=mana,
+                )
                 # The debt (tarmar-engine #28) only where either side owes.
-                + (f", owed {figure.debt}→{debt}" if figure.debt or debt else "")
+                + (
+                    said.figure_owed.format(owed_was=figure.debt, owed=debt)
+                    if figure.debt or debt
+                    else ""
+                )
             )
             figure.fatigue, figure.body, figure.mana = fatigue, body, mana
             figure.debt = debt
@@ -1882,8 +1875,7 @@ def resnapshot_pools(battle_id: int, *, is_game_master: bool) -> Battle:
         battle.save(update_fields=["state_json", "updated_at"])
         _control_event(
             battle,
-            "The Game Master took the pools from the character records: "
-            + "; ".join(lines),
+            said.pools_taken.format(pools="; ".join(lines)),
             {"resnapshot": [combatant.pk for combatant, _figure in moved]},
         )
         battle.save(update_fields=["state_json", "updated_at"])
@@ -2077,21 +2069,19 @@ def restart_battle(battle_id: int, *, is_game_master: bool = False) -> Battle:
         # A restart abandons any mid-turn player input along with the turn.
         battle.turn_inputs_json = {}
         battle.pending_input_json = {}
+        said = words().services
         if laid_dead:
+            stay = said.stays_dead if len(laid_dead) == 1 else said.stay_dead
             _control_event(
                 battle,
-                f"{', '.join(laid_dead)} stay"
-                f"{'s' if len(laid_dead) == 1 else ''} dead: the record says "
-                "so, and a restart does not bring anyone back. A Game Master "
-                "revives a character on its sheet",
+                stay.format(names=", ".join(laid_dead)),
                 {"laid_dead": laid_dead},
             )
         if kept_off:
+            stay = said.stays_off if len(kept_off) == 1 else said.stay_off
             _control_event(
                 battle,
-                f"{', '.join(kept_off)} stay"
-                f"{'s' if len(kept_off) == 1 else ''} off the board: withdrawn "
-                "from the session by the player who owns the character",
+                stay.format(names=", ".join(kept_off)),
                 {"withdrawn_kept_off": kept_off},
             )
         battle.save()
@@ -2742,9 +2732,11 @@ def take_seat(
         seat.save(update_fields=["player", "guest_key"])
         event = _control_event(
             battle,
-            f"{game_master.username}, the Game Master, takes "
-            f"{seat.display_name}'s seat: {owner.username}, who owns the "
-            "character, is absent",
+            words().services.seat_taken.format(
+                game_master=game_master.username,
+                name=seat.display_name,
+                owner=owner.username,
+            ),
             {
                 "seat": "taken",
                 "combatant_id": seat.pk,
@@ -2795,8 +2787,9 @@ def return_seat(
         seat.save(update_fields=["player", "guest_key"])
         event = _control_event(
             battle,
-            f"{seat.display_name}'s seat goes back to {owner.username}, who "
-            "owns the character",
+            words().services.seat_returned.format(
+                name=seat.display_name, owner=owner.username
+            ),
             {
                 "seat": "returned",
                 "combatant_id": seat.pk,
@@ -2903,8 +2896,9 @@ def withdraw_from_fight(battle_id: int, character: Character, *, by) -> bool:
             battle.status = Battle.STATUS_PAUSED
         _control_event(
             battle,
-            f"{seat.display_name} leaves the fight: {by.username}, who owns the "
-            "character, withdrew them from the session",
+            words().services.leaves_fight.format(
+                name=seat.display_name, owner=by.username
+            ),
             {"withdrawn": seat.pk, "by": by.username},
         )
         battle.save()
@@ -2978,11 +2972,21 @@ def unarmed_attached_line(session) -> str:
     ]
     if not names:
         return ""
-    verb = "carry" if len(names) > 1 else "carries"
-    return (
-        f"{', '.join(names)} {verb} no weapon and would fight bare-handed. Buy "
-        "gear on the character's sheet before the fight."
-    )
+    return words().services.unarmed_attached.format(unarmed=unarmed_line(names))
+
+
+def unarmed_line(names: list[str]) -> str:
+    """That these characters carry no weapon and would fight bare-handed.
+
+    The sentence the session's Battle tab opens its warning with, and the
+    sheet's gear step says of its own character (issues #844, #136).
+
+    Args:
+        names: The characters' names, at least one.
+    """
+    said = words().services
+    line = said.unarmed if len(names) > 1 else said.unarmed_one
+    return line.format(names=", ".join(names))
 
 
 #: The key the bare-handed line travels under: in the board's payload, and in
@@ -3006,10 +3010,9 @@ def bare_handed_line(battle: Battle) -> str:
     names = bare_handed_figures(battle)
     if not names:
         return ""
-    verb = "are" if len(names) > 1 else "is"
-    return (
-        f"{', '.join(names)} {verb} on the board with no weapon, fighting bare-handed."
-    )
+    said = words().services
+    line = said.bare_handed if len(names) > 1 else said.bare_handed_one
+    return line.format(names=", ".join(names))
 
 
 def _human_decider(profile, controllers: dict, inputs: dict):
@@ -3055,7 +3058,9 @@ def _human_decider(profile, controllers: dict, inputs: dict):
         destination = recorded.get("destination")
         picked = replace(
             chosen,
-            rationale=f"chosen by {owner} — {chosen.rationale}",
+            rationale=words().services.chosen_by.format(
+                owner=owner, rationale=chosen.rationale
+            ),
             destination=tuple(destination) if destination is not None else None,
         )
         return policy.Decision(chosen=picked, candidates=menu)
@@ -3134,7 +3139,7 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
         if battle.status in (Battle.STATUS_FINISHED, Battle.STATUS_STALEMATE):
             return battle, []
         if battle.status == Battle.STATUS_LOBBY:
-            raise BattleInLobby("This battle is still in its lobby")
+            raise BattleInLobby(refusal_words().services.still_in_lobby)
         profile = profiles.for_battle(battle)
         controllers = manual_controllers(battle)
         decide = (
@@ -3175,9 +3180,8 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
                                     profile.actor_id(actor) for actor in survivors
                                 ],
                             },
-                            message=(
-                                f"{winning_team} stands victorious — "
-                                f"{names} left on the field"
+                            message=words().services.team_victorious.format(
+                                team=winning_team, names=names
                             ),
                         )
                     )
@@ -3191,7 +3195,9 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
                             event_type="info",
                             actor=winner_name,
                             payload={"winner": profile.actor_id(winner)},
-                            message=f"{winner_name} stands victorious",
+                            message=words().services.victorious.format(
+                                name=winner_name
+                            ),
                         )
                     )
         else:
@@ -3218,9 +3224,8 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
                                 profile.actor_id(actor) for actor in survivors
                             ],
                         },
-                        message=(
-                            f"Stalemate — {STALEMATE_TURNS} turns without "
-                            f"anyone hurt; {names} still standing"
+                        message=words().services.stalemate.format(
+                            turns=STALEMATE_TURNS, names=names
                         ),
                     )
                 )
@@ -3420,7 +3425,9 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                     if target is not None and len(targets) > 1
                     else spell.name
                 ),
-                "cost": f"{spell.school} — {spell.level} mana",
+                "cost": words().services.cast_cost.format(
+                    school=spell.school, level=spell.level
+                ),
                 "note": f"{chance:.0%} on 3d6 \u2264 {spell.attribute}{floor}{aim}",
                 "castable": castable,
                 "reason": reason,

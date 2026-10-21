@@ -4,6 +4,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from common.refusal_words import refusal_words
 from common.seeds import MAX_RANDOM_SEED, InvalidSeed, parse_seed, roll_seed
 
 
@@ -21,7 +22,8 @@ class ParseSeedTest(SimpleTestCase):
         with self.assertRaises(InvalidSeed) as refusal:
             parse_seed("abc")
         self.assertEqual(
-            str(refusal.exception), "Seed must be a whole number, not “abc”."
+            str(refusal.exception),
+            refusal_words().seeds.not_whole_number.format(text="abc"),
         )
         self.assertIsInstance(refusal.exception, ValueError)
 

@@ -18,7 +18,12 @@ from django.urls import reverse
 from battle.models import Battle
 from bestiary.models import Beast
 from characters.services import CharacterChangeError
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import (
+    BaseTestCase,
+    create_character,
+    limit_refusal_parts,
+    too_long_refusal,
+)
 
 from .fight import FOE_SCHEMA, FightError, FoeRequest, stand_in_beast
 from .foe_people import FOE_NAME_MAX_LENGTH, person_foe
@@ -253,9 +258,8 @@ class HandEditRefusalsTest(BaseTestCase):
                 endpoint, body = self.bodies(field, "x" * (limit + 1))
                 response = self.post(endpoint, body)
                 self.assertEqual(response.status_code, 400)
-                self.assertIn(
-                    f"must be {limit} characters or fewer", response.json()["error"]
-                )
+                for part in [*limit_refusal_parts(), str(limit)]:
+                    self.assertIn(part, response.json()["error"])
                 self.assertEqual(GMRecordEdit.objects.count(), edits)
 
     def test_a_text_at_each_limit_is_kept_whole(self):
@@ -304,9 +308,8 @@ class LuckRollLimitTest(BaseTestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn(
-            f"must be {MAX_ROLL_NOTE} characters or fewer", response.json()["error"]
-        )
+        for part in [*limit_refusal_parts(), str(MAX_ROLL_NOTE)]:
+            self.assertIn(part, response.json()["error"])
 
     def test_a_roll_note_at_the_limit_is_kept_whole(self):
         roll = "r" * MAX_ROLL_NOTE
@@ -321,7 +324,7 @@ class FoeNameLimitTest(BaseTestCase):
         beasts = Beast.objects.count()
         with self.assertRaisesMessage(
             FightError,
-            f"A foe's name must be {FOE_NAME_MAX_LENGTH} characters or fewer",
+            too_long_refusal("A foe's name", FOE_NAME_MAX_LENGTH),
         ):
             stand_in_beast(FoeRequest("q" * (FOE_NAME_MAX_LENGTH + 1), 1))
         self.assertEqual(Beast.objects.count(), beasts)
@@ -371,7 +374,7 @@ class FoeNameLimitThroughTheFightTest(BaseTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.json()["error"],
-            f"A foe's name must be {FOE_NAME_MAX_LENGTH} characters or fewer",
+            too_long_refusal("A foe's name", FOE_NAME_MAX_LENGTH),
         )
         session.refresh_from_db()
         self.assertIsNone(session.battle)

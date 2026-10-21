@@ -13,6 +13,7 @@
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
+const { chosenBy } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { readDjangoShell } = require('./django');
 const { menuWords } = require('./turn-menu');
@@ -76,10 +77,12 @@ print("AI_PICK " + json.dumps(pick))
  */
 function theRecordedCast(battleId) {
     const output = readDjangoShell(`
-import json
+import json, string
 from battle.models import BattleEvent
+from battle.wording import words
+credit = next(text for text, *_ in string.Formatter().parse(words().services.chosen_by) if text.strip())
 decision = BattleEvent.objects.filter(
-    battle_id=${battleId}, event_type="decision", message__contains="chosen by"
+    battle_id=${battleId}, event_type="decision", message__contains=credit.strip()
 ).get()
 chosen = decision.payload["chosen"]
 print("CHOSEN " + json.dumps({"spell_key": chosen["spell_key"], "target_id": chosen["target_id"]}))
@@ -164,7 +167,7 @@ test.describe('Wizard cast flow', () => {
         // The turn completes and the log credits the player's cast.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         const decision = playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         });
         await expect(decision).toBeVisible();
         await expect(decision).toContainText(spellName);
@@ -225,7 +228,7 @@ test.describe('Wizard cast flow', () => {
         await playerPage.click('#turn-panel .turn-confirm');
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         const decision = playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         });
         await expect(decision).toContainText('Fire Missile');
         await expect(decision).toContainText(`on ${far.name}`);

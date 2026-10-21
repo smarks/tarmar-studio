@@ -72,6 +72,7 @@ const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
     loadedCanon, DEFAULT_CANON, escaped,
 } = require('./fixtures');
+const { chosenBy } = require('./rulings');
 const { startCoverage, stopCoverage } = require('./coverage');
 const {
     BATTLE_SEED, PUSH_TURNS_SEED, WIZARD_SEED, pinTheTurns, claimAWizard, openTheWizardsStage,
@@ -304,7 +305,7 @@ test.describe('Pushing mana into a cast', () => {
         // INT, and the roll's outcome, all in the log.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         await expect(playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toContainText('Fire Missile (PUSH 2 MANA)');
         const controlRoll = playerPage.locator('.event-roll', { hasText: 'control 3d6' });
         await expect(controlRoll).toHaveCount(1);
@@ -367,7 +368,7 @@ test.describe('Pushing mana into a cast', () => {
         // went, all in the log.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         await expect(playerPage.locator('.event-decision', {
-            hasText: `chosen by ${TEST_USER.username}`,
+            hasText: chosenBy(TEST_USER.username),
         })).toContainText('Fire Missile (BORROW 1 MANA)');
         await expect(playerPage.locator('.event-action', { hasText: 'casts Fire Missile' }))
             .toContainText('borrows 1, debt 1');

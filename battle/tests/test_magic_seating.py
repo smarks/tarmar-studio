@@ -39,9 +39,10 @@ from battle.services import (
     snapshot_character,
 )
 from battle.turn_menu import borrowed_mana
+from battle.wording import words
 from characters.skills import ARCANE_SKILL_NAME, points_for_level
 from common.rolling import Roller, RollRecord
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, says
 
 from .magic_fixtures import (
     BORROWING_RULES,
@@ -523,7 +524,7 @@ class RecordPushedChoiceTest(BaseTestCase):
             if event.payload["chosen"].get("spell_key") == self.offered["spell_key"]
         ]
         self.assertEqual(chosen[0]["push_mana"], self.offered["push_mana"])
-        self.assertTrue(chosen[0]["rationale"].startswith("chosen by"))
+        self.assertTrue(says(chosen[0]["rationale"], words().services.chosen_by))
 
     def test_a_pushed_copy_says_what_it_pushes_and_costs(self) -> None:
         pushed = self.offered["push_mana"]
@@ -633,7 +634,7 @@ class RecordBorrowedChoiceTest(BaseTestCase):
             if event.payload["chosen"].get("spell_key") == self.offered["spell_key"]
         ]
         self.assertTrue(chosen[0]["borrow"])
-        self.assertTrue(chosen[0]["rationale"].startswith("chosen by"))
+        self.assertTrue(says(chosen[0]["rationale"], words().services.chosen_by))
 
     def test_a_borrowing_copy_says_what_it_borrows(self) -> None:
         cost = int(self.offered["borrowed"])

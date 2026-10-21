@@ -27,6 +27,7 @@ from characters import services
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import CHARACTER_FIELDS, Character
 from characters.refusal_words import refusal_words
+from characters.refusal_words import refusal_words as characters_words
 from characters.services import (
     FIELD_RULES,
     GAME_MASTER_UPDATE_FIELDS,
@@ -609,7 +610,9 @@ class SheetRollTest(BaseTestCase):
         markdown = generate_character_markdown(rich)
         exported = json.loads(generate_character_json(rich))
 
-        self.assertIn("- **Starting Coin:** Consult GM", markdown)
+        self.assertIn(
+            f"- **Starting Coin:** {characters_words().purse.consult_gm}", markdown
+        )
         self.assertIsNone(exported["data"]["starting_coin"])
         self.assertIsNone(Character.clean_field_value("starting_coin", None))
 

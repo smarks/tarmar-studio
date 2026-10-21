@@ -2,7 +2,9 @@
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
 headings and buttons, the battle-log lines, the refusals and the turn menu's
-lines (#90) live in ``config/battle-rulings.toml``, which Spencer edits with no
+lines (#90), and the battle log's other lines, the roster's notes and who
+decides for a figure (#136) live in ``config/battle-rulings.toml``, which
+Spencer edits with no
 Python, read once at startup into ``settings.BATTLE_RULINGS_WORDING`` by
 :func:`load_rulings_wording`. A missing or unknown key, a value that is not
 text, and a ``{name}`` a sentence may not use all stop the server then, not in
@@ -262,6 +264,64 @@ class MagicBoundsWords:
 
 
 @dataclass(frozen=True)
+class ServicesWords:
+    """``battle.services``'s words that are not refusals (issue #136): the
+    battle log's lines, the notes a fight's roster and seats carry, and a cast
+    option's cost."""
+
+    records_withheld: str = sentence("name", "reason", required=("reason",))
+    withheld_other_players: str = sentence()
+    withheld_not_game_master: str = sentence()
+    a_character: str = sentence()
+    pools_taken: str = sentence("pools", required=("pools",))
+    figure_pools: str = sentence(
+        "name", "fatigue_was", "fatigue", "body_was", "body", "mana_was", "mana"
+    )
+    figure_owed: str = sentence("owed_was", "owed")
+    stays_dead: str = sentence("names", required=("names",))
+    stay_dead: str = sentence("names", required=("names",))
+    stays_off: str = sentence("names", required=("names",))
+    stay_off: str = sentence("names", required=("names",))
+    seat_taken: str = sentence("game_master", "name", "owner")
+    seat_returned: str = sentence("name", "owner")
+    leaves_fight: str = sentence("name", "owner")
+    team_victorious: str = sentence("team", "names")
+    victorious: str = sentence("name")
+    stalemate: str = sentence("turns", "names")
+    re_armed: str = sentence("names", required=("names",))
+    no_spell_crosses: str = sentence("names", required=("names",))
+    reach_no_spell: str = sentence("names", required=("names",))
+    unarmed_one: str = sentence("names", required=("names",))
+    unarmed: str = sentence("names", required=("names",))
+    unarmed_attached: str = sentence("unarmed", required=("unarmed",))
+    bare_handed_one: str = sentence("names", required=("names",))
+    bare_handed: str = sentence("names", required=("names",))
+    chosen_by: str = sentence("owner", "rationale", required=("rationale",))
+    open_seat: str = sentence("number")
+    cast_cost: str = sentence("school", "level")
+
+
+@dataclass(frozen=True)
+class ControlWords:
+    """``battle.control``'s words (issue #136): who decides for a figure, the
+    roster card's line about it, and the log line a change of mode writes."""
+
+    ai_owner: str = sentence()
+    guest_owner: str = sentence()
+    you: str = sentence()
+    their_owners: str = sentence()
+    automatic: str = sentence()
+    manual: str = sentence()
+    manual_line: str = sentence("owner")
+    automatic_line: str = sentence("ai")
+    every_combatant_follows: str = sentence("mode", "decided_by")
+    battle_default: str = sentence("mode", "decided_by")
+    follows_again: str = sentence("name", "mode", "decided_by")
+    played_by_hand: str = sentence("name", "decided_by")
+    hands_to_ai: str = sentence("name", "ai")
+
+
+@dataclass(frozen=True)
 class RulingsWording:
     """The whole file: one table per ruling, and the words they share."""
 
@@ -272,6 +332,8 @@ class RulingsWording:
     turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
+    services: ServicesWords
+    control: ControlWords
 
 
 def load_rulings_wording(path: Path) -> RulingsWording:

@@ -224,7 +224,7 @@ class BattleAdvanceTest(BaseTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            response.json(), {"error": "This battle is still in its lobby"}
+            response.json(), {"error": refusal_words().services.still_in_lobby}
         )
 
     def test_advance_requires_post(self):

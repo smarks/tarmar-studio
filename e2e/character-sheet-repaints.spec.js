@@ -311,7 +311,7 @@ test.describe('The sheet repaints without a reload', () => {
         await page.locator('#equipment-item').selectOption('dagger');
         await page.locator('#add-equipment-btn').click();
 
-        await expect(page.locator('.notice .notice-text').first()).toContainText('Roll wealth first');
+        await expect(page.locator('.notice .notice-text').first()).toContainText(refusal('characters', 'purse', 'wealth_first'));
         await expect(page.locator('.equipment-row')).toHaveCount(0);
     });
 

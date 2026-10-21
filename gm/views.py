@@ -48,7 +48,7 @@ from common.helpers import (
 )
 from common.mixins import ActivePageMixin
 from common.pagination import query_without
-from common.pickers import asked_for, picker_body_response
+from common.pickers import NO_SUCH_PICKER, asked_for, picker_body_response
 from common.services.ollama_client import HangUp, StreamDeadlinePassed
 from reference.rendering import render_reference_markdown
 
@@ -158,6 +158,10 @@ from .turn_record import (
 from .unarmed import unarmed_notice
 
 logger = logging.getLogger(__name__)
+
+#: Why a session id that names none of the asker's sessions is a 404. Django's
+#: 404 page never shows it with DEBUG off (issue #136); it is for the debug page.
+NO_SUCH_SESSION = "No GMSession matches the given query."
 
 # The ``kind`` the chat template renders as a chip rather than a message
 # (issue #363). It exists only on the reader-facing entries
@@ -814,7 +818,7 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
             try:
                 requested_pk = int(session_id)
             except ValueError:
-                raise Http404("No GMSession matches the given query.")
+                raise Http404(NO_SUCH_SESSION)
             running = running_turn_for(self.request.user, requested_pk)
             active_session = get_object_or_404(
                 GMSession, pk=requested_pk, user=self.request.user
@@ -2171,7 +2175,7 @@ def _own_session_or_none(request: HttpRequest, raw_id: str) -> GMSession | None:
     if not raw_id:
         return None
     if not raw_id.isdigit():
-        raise Http404("No GMSession matches the given query.")
+        raise Http404(NO_SUCH_SESSION)
     return get_object_or_404(GMSession, pk=int(raw_id), user=request.user)
 
 
@@ -2184,7 +2188,7 @@ def gm_session_picker(request: HttpRequest, view: str) -> HttpResponse:
     which stays listed and marked.
     """
     if view not in SESSION_PICKER_SOURCES:
-        raise Http404("No such picker")
+        raise Http404(NO_SUCH_PICKER)
     active_session = _own_session_or_none(request, request.GET.get("active", ""))
     query, page_number = asked_for(request)
     picker = session_picker(

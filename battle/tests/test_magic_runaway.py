@@ -27,8 +27,9 @@ from battle.services import (
     set_combatant_control_mode,
 )
 from battle.viewmodel import tarmar_view
+from battle.wording import words
 from characters.models import Character
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, says
 
 from .magic_fixtures import RUNAWAY_RULES, seated_rules
 from .rulings_words import with_fixed_words
@@ -143,7 +144,7 @@ class SelfAnchorMenuTest(BaseTestCase):
             if event.payload["chosen"].get("letter") == ANCHOR_OPTION
         ]
         self.assertEqual(chosen[0]["anchor_target"], self.seat.pk)
-        self.assertTrue(chosen[0]["rationale"].startswith("chosen by"))
+        self.assertTrue(says(chosen[0]["rationale"], words().services.chosen_by))
         rolls = [
             event
             for event in battle.events.filter(event_type="roll")

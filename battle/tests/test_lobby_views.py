@@ -15,6 +15,7 @@ from battle.services import (
     start_battle,
 )
 from battle.tests.fixed_refusals import with_fixed_refusals
+from battle.wording import words
 from common.test_helpers import BaseTestCase
 
 
@@ -57,7 +58,7 @@ class LobbyPageTest(LobbyViewTestMixin):
         self.login_as(self.player)
         response = self.client.get(reverse("battle:detail", args=[battle.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Open seat 1")
+        self.assertContains(response, words().services.open_seat.format(number=1))
         self.assertContains(response, "Claim this seat")
 
     def test_the_lede_invites_a_claim_while_a_seat_is_open(self):

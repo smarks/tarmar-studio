@@ -13,6 +13,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { chosenBy } = require('./rulings');
 
 /**
  * Start a two-duelist battle played by hand and stop at the first figure.
@@ -110,7 +111,7 @@ test.describe('The 0.9.5 menu keys', () => {
 
         const lines = await turnOneLines(adminPage);
         const decision = lines.findIndex((line) => line.includes(
-            `${sprinter} chooses MOVE (SPRINT) (sprint): chosen by`
+            `${sprinter} chooses MOVE (SPRINT) (sprint): ${chosenBy()}`
         ));
         const moved = lines.findIndex((line) => new RegExp(
             `${sprinter} sprints \\d+ hex\\(es\\) toward`
@@ -131,7 +132,7 @@ test.describe('The 0.9.5 menu keys', () => {
         const lines = await turnOneLines(adminPage);
         expect(logHas(
             lines,
-            `${sprinter} chooses MOVE (SPRINT) (YIELD: MOVE IN FINAL MOVEMENT) (sprint_yield): chosen by`
+            `${sprinter} chooses MOVE (SPRINT) (YIELD: MOVE IN FINAL MOVEMENT) (sprint_yield): ${chosenBy()}`
         )).toBe(true);
         const moved = lines.findIndex((line) => new RegExp(
             `${sprinter} sprints \\d+ hex\\(es\\) toward`

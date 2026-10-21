@@ -13,6 +13,7 @@
 
 const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_USER, chooseToAttach } = require('./fixtures');
+const { battleLine } = require('./rulings');
 const { runDjangoShell, readDjangoShell } = require('./django');
 
 /** Leave a mark on the page that a reload would wipe. */
@@ -128,7 +129,9 @@ test.describe('GM panel — Battle tab', () => {
         await expect(roster).toContainText('Gray Wolf (2)');
         await expect(roster).toContainText('Party');
         await expect(roster).toContainText('Foes');
-        await expect(roster).toContainText('played by you');
+        await expect(roster).toContainText(
+            battleLine('control', 'manual_line', { owner: battleLine('control', 'you') })
+        );
         await expect(page.locator('.message.assistant').last()).toContainText('The fight moves to the board');
         // What the player typed was a request; the line says who set the foes (#841).
         await expect(page.locator('.message.assistant').last())

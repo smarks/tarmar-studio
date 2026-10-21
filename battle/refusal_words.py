@@ -92,6 +92,7 @@ class ServicesWords:
     destination_not_marked: str = sentence("option", "name", "hex")
     unnamed_option: str = sentence()
     name_taken: str = sentence()
+    still_in_lobby: str = sentence()
 
 
 @dataclass(frozen=True)
@@ -100,12 +101,10 @@ class ViewsWords:
 
     control_denied: str = sentence()
     foes_belong_to_game_master: str = sentence()
-    seed_not_whole_number: str = sentence()
     seed_out_of_range: str = sentence("highest")
     unknown_rules_profile: str = sentence()
     draft_gone: str = sentence()
     unknown_setup_field: str = sentence()
-    numeric_character_id: str = sentence()
     numeric_entry_index: str = sentence()
     numeric_party_id: str = sentence()
     combatant_control_denied: str = sentence()

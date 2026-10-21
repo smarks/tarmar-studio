@@ -27,8 +27,10 @@ from battle.services import (
     start_battle,
     start_draft,
 )
-from common.test_helpers import BaseTestCase, create_character
+from battle.wording import words
+from common.test_helpers import BaseTestCase, create_character, says
 from parties.models import Party, PartyMembership
+from parties.refusal_words import refusal_words as parties_words
 
 
 class DraftTeamLedgerTest(BaseTestCase):
@@ -188,7 +190,10 @@ class ImportPartyTest(BaseTestCase):
         filter, so a disbanded party marched in as a team."""
         draft = BattleDraft.objects.create(created_by=self.dm)
         Party.objects.filter(pk=self.party.pk).update(is_deleted=True)
-        with self.assertRaisesRegex(ValueError, "The Grey Company was disbanded"):
+        with self.assertRaisesMessage(
+            ValueError,
+            parties_words().models.disbanded.format(party="The Grey Company"),
+        ):
             import_party_into_draft(draft, self.dm, self.party.pk)
         draft.refresh_from_db()
         self.assertEqual(draft.teams_json, [])
@@ -305,7 +310,7 @@ class TeamVictoryTest(BaseTestCase):
         victory = events[-1]
         self.assertEqual(victory.payload["winner_team"], "Red")
         self.assertEqual(len(victory.payload["winners"]), 2)
-        self.assertIn("Red stands victorious", victory.message)
+        self.assertTrue(says(victory.message, words().services.team_victorious, "Red"))
 
     def test_two_teams_standing_is_not_a_finished_battle(self):
         # Two melee-only fighters on opposite rims cannot down each other on
@@ -410,7 +415,7 @@ class TeamVictoryTest(BaseTestCase):
             victory.payload,
             {"winner": battle.state_json["combatants"][0]["combatant_id"]},
         )
-        self.assertTrue(victory.message.endswith("stands victorious"))
+        self.assertTrue(says(victory.message, words().services.victorious))
 
 
 class TeamSetupViewsTest(BaseTestCase):

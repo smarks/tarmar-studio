@@ -5,7 +5,7 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from common.tests.refusal_scan import literal_refusals
+from common.tests.refusal_scan import literal_refusals, literal_returns
 
 SOURCE = """
 WORDS = "a sentence written in code"
@@ -37,3 +37,31 @@ class LiteralRefusalsTest(SimpleTestCase):
                 module, {"Refusal"}, structure_keywords=frozenset({"field"})
             )
         self.assertEqual(found, [f"refusing.py:{line}" for line in range(7, 15)])
+
+
+#: A module whose returned lines are fixed in three ways and configured in two.
+RETURNING = """
+def guest(holder, words):
+    return holder.username if holder else "guest"
+
+def purse(held, words):
+    return words.consult if held else f"{held} gp"
+
+def closed(note):
+    return note + "."
+
+def configured(words, many):
+    return words.many if many else words.one
+"""
+
+
+class LiteralReturnsTest(SimpleTestCase):
+    def test_a_conditional_expression_is_read_on_both_branches(self):
+        """``a if c else "words"`` hides a literal from a scan that reads only
+        the whole expression (#136): ``control.py``'s guest and ``purse.py``'s
+        Consult GM were missed that way."""
+        with tempfile.TemporaryDirectory() as scratch:
+            module = Path(scratch) / "returning.py"
+            module.write_text(RETURNING)
+            found = literal_returns(module, {"guest", "purse", "closed", "configured"})
+        self.assertEqual(found, ["returning.py:3", "returning.py:6"])

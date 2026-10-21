@@ -10,7 +10,7 @@
  * the chip the page shows and the record the Characters pane reads.
  */
 
-const { refusal } = require('./refusals');
+const { refusal, refusalFixedParts } = require('./refusals');
 const { test, expect, loginAs, TEST_ADMIN, TEST_USER } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 const { loadedSkillRules } = require('./skill-rules');
@@ -121,7 +121,11 @@ test.describe('GM chat — a Game Master records deaths, XP, coin and skill chec
         await expect(page.locator('.chat-messages .dice-roll').last()).toContainText('awarded 500 XP');
 
         await send(page, `Give ${name} 30 gold`);
-        await expect(page.locator('.chat-messages .dice-roll').last()).toContainText('received 30 gp');
+        const received = page.locator('.chat-messages .dice-roll').last();
+        await expect(received).toContainText('30');
+        for (const part of refusalFixedParts('characters', 'purse', 'received')) {
+            await expect(received).toContainText(part);
+        }
 
         await send(page, `Check ${name}'s stealth against 12`);
         const check = page.locator('.chat-messages .dice-roll').last();
@@ -135,11 +139,11 @@ test.describe('GM chat — a Game Master records deaths, XP, coin and skill chec
         // The record the sheet reads holds all four.
         const record = readDjangoShell(`
 from characters.models import Character
-from characters.purse import format_purse
+from characters.purse import format_coin
 c = Character.objects.get(pk=${characterId})
-print('RECORD', c.total_xp, format_purse(c), c.is_alive, c.death_cause)
+print('RECORD', c.total_xp, format_coin(c.purse), c.is_alive, c.death_cause)
 `);
-        expect(record).toContain('RECORD 500 130 gp False fell from the tower');
+        expect(record).toContain('RECORD 500 130 False fell from the tower');
 
         // The words stream before the turn is saved; Send comes back only once
         // the stream has closed, after the done frame the server sends once the

@@ -17,6 +17,7 @@
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN, chooseToAttach } = require('./fixtures');
 const { runDjangoShell, readDjangoShell } = require('./django');
+const { refusal, refusalFixedParts } = require('./refusals');
 
 /** A character for ``owner`` whose first turn on the board is their last. */
 function seedDyingCharacter(owner, name) {
@@ -146,7 +147,8 @@ test.describe('GM session — a fight on the board', () => {
         // Told at once, without a message from the player or a reload.
         const verdict = page.locator('#gm-battle-verdict');
         await expect(verdict).toBeVisible();
-        await expect(verdict).toContainText('The fight is over: The foes stand victorious');
+        const foesWon = refusalFixedParts('gm', 'battle_report', 'foes_victorious')[0];
+        await expect(verdict).toContainText(`${refusal('gm', 'battle_report', 'fight_over')}: ${foesWon}`);
         await expect(verdict).toContainText(`${name}: dead`);
         await expect(verdict).not.toContainText('Foes stands');
         const notice = page.locator('#messages .message.notice[data-battle-verdict]');
@@ -160,7 +162,7 @@ test.describe('GM session — a fight on the board', () => {
         await page.reload();
         await expect(page.locator('#messages .message.notice[data-battle-verdict]')).toHaveCount(1);
         await page.click('#gm-panel-tab-battle');
-        await expect(page.locator('#gm-battle-verdict')).toContainText('The foes stand victorious');
+        await expect(page.locator('#gm-battle-verdict')).toContainText(foesWon);
     });
 });
 

@@ -7,6 +7,7 @@ from django.test import SimpleTestCase
 
 from common.test_helpers import BaseTestCase, create_character
 from parties.models import Party, PartyMembership
+from parties.refusal_words import refusal_words as parties_words
 from ruins.generation import DEFAULT_ROOMS, generate_ruin
 from ruins.hook_generation import generate_hook
 
@@ -122,7 +123,10 @@ class GenerateHookPartyCommandTests(BaseTestCase):
         Party.objects.filter(pk=self.party.pk).update(is_deleted=True)
         for argument in ("The Torchbearers", str(self.party.pk)):
             with self.subTest(argument=argument):
-                with self.assertRaisesRegex(CommandError, "was disbanded"):
+                with self.assertRaisesMessage(
+                    CommandError,
+                    parties_words().models.disbanded.format(party="The Torchbearers"),
+                ):
                     self.run_command("--party", argument, "--seed", "9")
 
     def test_a_live_party_wins_over_a_disbanded_one_by_the_same_name(self):

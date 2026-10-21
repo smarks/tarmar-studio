@@ -39,6 +39,7 @@ from battle.services import (
     start_battle,
 )
 from battle.turn_menu import borrowed_mana
+from battle.wording import words
 from common.test_helpers import BaseTestCase, FacesRoller
 
 from .magic_fixtures import (
@@ -97,7 +98,10 @@ class CasterMagicTest(SimpleTestCase):
         self.assertEqual([spell["key"] for spell in magic["spells"]], WIZARD_SPELLS)
         missile = magic["spells"][0]
         self.assertEqual(missile["name"], "Fire Missile")
-        self.assertEqual(missile["cost"], "Elemental — 1 mana")
+        self.assertEqual(
+            missile["cost"],
+            words().services.cast_cost.format(school="Elemental", level=1),
+        )
         self.assertEqual(missile["target_id"], 2)
         self.assertTrue(missile["castable"])
         self.assertEqual(missile["reason"], "")

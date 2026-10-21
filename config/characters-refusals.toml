@@ -54,3 +54,45 @@ roll_fixed_weight = "Weight was rolled, and a roll is final; only a Game Master 
 roll_fixed_origin = "The Origin was rolled, and a roll is final; only a Game Master can change it."
 # A field nobody sets by hand; {field}: its name.
 nobody_sets = "{field} is not something anyone sets by hand."
+
+# The purse (issue #136): how it prints, the history lines a coin movement
+# writes, and why a purchase is refused. {coin} is an amount already printed
+# ("12", "12.50"), {reason} what the coin moved for, {purse} the purse after.
+[purse]
+held = "{coin} gp"
+# A Rich character's starting coin until a Game Master records it (wealth.md).
+consult_gm = "Consult GM"
+# Coin held while the starting coin is still consult_gm.
+held_and_unknown = "{held} + {unknown}"
+# {held} is what the purse holds; {unknown} is starting_coin_unknown, or nothing.
+not_enough = "Not enough coin: {reason} costs {cost} gp and the purse holds {held} gp{unknown}"
+starting_coin_unknown = " (the starting coin is Consult GM until a Game Master records it)"
+paid = "paid {coin} gp ({reason}); purse {purse}"
+received = "received {coin} gp ({reason}); purse {purse}"
+# How the length refusal names a coin movement's reason.
+label_reason = "Reason"
+# A player buying before the wealth roll (issue #851), and what a Game Master's
+# purchase then carries.
+wealth_first = "Roll wealth first: nothing is bought before the starting coin is rolled, since the roll replaces the coin a purchase would have spent"
+before_wealth_note = "Bought before the wealth roll, from the placeholder starting coin: the roll replaces that coin, and this purchase stays paid for"
+# An item and how many, as a history line names them.
+quantity_of = "{quantity} × {name}"
+# A Game Master's gift; {item} is quantity_of.
+given_by_game_master = "{item} given by a Game Master"
+# A custom item a player may not add (issues #845, #927).
+custom_combat_item = "A custom weapon, armour or shield is a Game Master's to add: the catalog publishes every item's numbers, and nothing lets a player invent better ones"
+custom_item_price = "An item the catalog does not sell is bought at the price stated for it, and none was stated; only a Game Master gives one for nothing"
+custom_item_more = "This item is carried at no cost, so more of it is a Game Master's to give"
+# A carried item stored with no name.
+an_item = "item"
+
+# The point-buy note a bought set off its budget carries, and the name a
+# character takes when nothing names it (issue #136). {off} is how far off.
+[constants]
+point_buy_over = "Point-buy total: {spent} — {off} over the {budget}-point budget."
+point_buy_under = "Point-buy total: {spent} — {off} under the {budget}-point budget."
+unnamed_character = "Unnamed character"
+
+# A character that is not there, as the sheet's fetch-only endpoints answer it.
+[views_access]
+not_found = "Character not found"

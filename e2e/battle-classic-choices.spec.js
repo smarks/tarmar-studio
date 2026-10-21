@@ -9,6 +9,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { chosenBy } = require('./rulings');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -121,6 +122,6 @@ test.describe('Choosing a classic turn by hand', () => {
             await expect(waitingOn).not.toContainText(`Waiting on ${chooser}'s move`);
         }
         await expect(page.locator('#battle-turn')).toHaveText('1');
-        await expect(page.locator('.event-decision', { hasText: 'chosen by' })).toHaveCount(2);
+        await expect(page.locator('.event-decision', { hasText: chosenBy() })).toHaveCount(2);
     });
 });

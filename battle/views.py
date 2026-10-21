@@ -68,7 +68,8 @@ from common.helpers import (
 )
 from common.mixins import ActivePageMixin
 from common.pagination import PAGE_SIZE, query_without
-from common.pickers import asked_for, picker_body_response
+from common.pickers import NO_SUCH_PICKER, asked_for, picker_body_response
+from common.refusal_words import refusal_words as common_refusal_words
 from common.seeds import InvalidSeed, parse_seed
 
 from . import agreement, control, magic_bounds, profiles
@@ -366,8 +367,8 @@ def _clean_draft_name(value) -> str:
 def _clean_draft_seed(value) -> int | None:
     try:
         seed = parse_seed(value or "")
-    except InvalidSeed:
-        raise BattleRefusal(refusal_words().views.seed_not_whole_number) from None
+    except InvalidSeed as invalid:
+        raise BattleRefusal(str(invalid)) from None
     if seed is None:
         return None
     if not 0 <= seed < MAX_SEED:
@@ -704,7 +705,7 @@ def battle_setup_picker(request, pk, kind: str) -> HttpResponse:
     """
     draft = _own_draft_or_404(request, pk)
     if kind not in SETUP_PICKER_KINDS:
-        raise Http404("No such picker")
+        raise Http404(NO_SUCH_PICKER)
     query, page_number = asked_for(request)
     actor = actor_of(request)
     picker = setup_picker(draft, actor, kind, query=query, page_number=page_number)
@@ -786,7 +787,7 @@ def battle_setup_add(request, pk):
                 request,
                 SETUP_TEMPLATE,
                 _setup_context(
-                    request, draft, refusal_words().views.numeric_character_id
+                    request, draft, common_refusal_words().requests.numeric_character_id
                 ),
                 status=400,
             )
@@ -1116,6 +1117,8 @@ def seat_summaries(battle, actor: Actor) -> list[dict]:
                 "effective_control_mode": control.effective_mode(battle, combatant),
                 "controller": control.controller_label(battle, combatant),
                 "control_line": control.mode_line(battle, combatant),
+                # What the card says instead when this viewer plays it by hand.
+                "own_control_line": control.own_manual_line(),
                 "you_decide": decides_for(actor, battle, combatant),
                 # Who may change this combatant's mode (#339, item 3). The
                 # same two-sided answer ``combatant_control`` enforces:
@@ -2242,7 +2245,7 @@ def seat_claim(request, pk, combatant_id):
             character_id = int(character_id_raw)
         except ValueError:
             return _detail_with_error(
-                request, battle, refusal_words().views.numeric_character_id
+                request, battle, common_refusal_words().requests.numeric_character_id
             )
     archetype = (request.POST.get("archetype") or "").strip()
     try:

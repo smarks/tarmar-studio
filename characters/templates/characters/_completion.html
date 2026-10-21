@@ -1,3 +1,4 @@
+{% load character_help %}
 {% comment %}The top of the sheet: the export links for a complete character, or
 what an incomplete one still needs (issue #571). A partial because recording
 the last attribute or rolling Fatigue crosses that line without a reload, and
@@ -13,7 +14,7 @@ weapon the board can seat fights bare-handed. Rendered from the equipment for
 whoever may edit the sheet, so it stays until a weapon is carried; the purchase
 goes through the Equipment picker, which charges the purse.{% endcomment %}
 <p class="gear-step" id="gear-step" role="status">
-    {{ character.name }} carries no weapon and would fight bare-handed.
+    {% unarmed_for character.name %}
     <a href="#equipment">Buy gear in Equipment</a> with the purse.
 </p>
 {% endif %}

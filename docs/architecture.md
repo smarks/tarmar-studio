@@ -906,7 +906,15 @@ read by `common/refusal_words.py` into `settings.COMMON_REFUSAL_WORDS`: the
 endpoints of `battle`, `characters`, `gm` (its views, records and Luck),
 `parties` and `accounts` share `common/decorators.py::internal_errors_logged`, which answers
 a script caller in it and logs the error with its traceback (issues #113,
-#139). All these files go through one
+#139). The same file holds the refusals every app gives alike: a free-text
+field past its length (`characters.constants.too_long`), a seed that is not a
+number, a character named by anything but its number (issue #136). The
+characters file also holds the purse's lines and refusals, the point-buy note
+and the unnamed character's name; the parties app's refusals are
+`config/parties-refusals.toml` (`parties/refusal_words.py`,
+`settings.PARTIES_REFUSAL_WORDS`); and the battle log's own lines, the roster's
+notes and who decides for a figure are the `[services]` and `[control]` tables
+of `config/battle-rulings.toml` (issue #136). All these files go through one
 loader,
 `common/wording.py::load_wording`, which refuses a missing or unknown key, a
 blank value or a `{name}` a sentence may not use at startup. Tests run under

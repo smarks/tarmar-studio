@@ -4,6 +4,7 @@ from django import template
 from django.utils.html import escape
 from django.utils.safestring import SafeString, mark_safe
 
+from battle.services import unarmed_line
 from characters.help_text import help_text
 
 register = template.Library()
@@ -28,3 +29,14 @@ def help_for(key: str) -> SafeString:
         f'title="Show help">?</summary>'
         f'<div class="help-body">{text}</div></details>'
     )
+
+
+@register.simple_tag
+def unarmed_for(name: str) -> str:
+    """That ``name`` carries no weapon and would fight bare-handed.
+
+    The sheet's gear step (issue #844), in the configured words the session's
+    Battle tab uses (``[services] unarmed_one``, issue #136). Escaped by the
+    template, as any string a simple tag returns is.
+    """
+    return unarmed_line([name])

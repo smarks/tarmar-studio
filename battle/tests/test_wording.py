@@ -9,9 +9,12 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
-from battle import wording
+from battle import control, wording
+from battle.tests.rulings_words import with_fixed_words
+from common.tests.refusal_scan import literal_refusals, literal_returns
 
-SHIPPED = Path(settings.BASE_DIR) / "config" / "battle-rulings.toml"
+ROOT = Path(settings.BASE_DIR)
+SHIPPED = ROOT / "config" / "battle-rulings.toml"
 
 
 class LoadRulingsWordingTest(SimpleTestCase):
@@ -217,3 +220,53 @@ class NoPlaceholderSentenceTest(SimpleTestCase):
             path.write_text('[common]\nplain = "a plain sentence"\n')
             loaded = load_wording(path, Wording, "WORDS_FILE")
             self.assertEqual(loaded.common.plain, "a plain sentence")
+
+
+class BattleLinesAreConfigurationTest(SimpleTestCase):
+    """The battle log's own lines, the roster's notes and who decides for a
+    figure read the configuration (issue #136)."""
+
+    def test_no_log_line_is_written_in_code(self):
+        self.assertEqual(
+            literal_refusals(
+                ROOT / "battle" / "services.py",
+                {"_control_event", "mint_event"},
+                structure_keywords=frozenset({"event_type", "actor"}),
+            ),
+            [],
+        )
+
+    def test_no_note_or_control_line_is_returned_from_code(self):
+        self.assertEqual(
+            literal_returns(
+                ROOT / "battle" / "services.py",
+                {"unarmed_attached_line", "unarmed_line", "bare_handed_line"},
+            ),
+            [],
+        )
+        self.assertEqual(
+            literal_returns(
+                ROOT / "battle" / "control.py",
+                {
+                    "seat_holder_label",
+                    "owner_label",
+                    "controller_label",
+                    "mode_line",
+                    "mode_word",
+                    "battle_change_message",
+                    "combatant_change_message",
+                },
+            ),
+            [],
+        )
+
+    @with_fixed_words
+    def test_a_change_of_mode_is_logged_in_the_configured_words(self):
+        self.assertEqual(
+            control.battle_change_message(control.AUTOMATIC, applied_to_all=True),
+            "control.every_combatant_follows control.ai_owner control.automatic",
+        )
+        self.assertEqual(
+            control.battle_change_message(control.MANUAL, applied_to_all=False),
+            "control.battle_default control.their_owners control.manual",
+        )

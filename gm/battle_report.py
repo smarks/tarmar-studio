@@ -45,6 +45,7 @@ from battle.magic_bounds import event_past_by_ruling
 from battle.models import Battle, BattleEvent
 
 from .models import GMSession
+from .refusal_words import refusal_words
 from .retrieval import (
     BATTLE_KIND,
     FIGHT_VERDICT_KIND,
@@ -201,31 +202,45 @@ def combatant_line(combatant: dict) -> str:
     return f"{combatant['name']}: {state}; {pools}{wounded}"
 
 
-#: The engine's victory line for a team: "<team> stands victorious — ...".
-VICTORY_SUFFIX = " stands victorious"
+def _session_victories() -> dict[str, str]:
+    """The verdict for each side of a session fight, by team (issue #785).
 
-
-def _session_team_phrases() -> dict[str, str]:
-    """How the verdict names a session fight's two sides (issue #785).
-
-    The engine writes "<team> stands victorious", which reads "Foes stands
-    victorious" for the side a session fight calls Foes. Imported here rather
-    than at the top: :mod:`gm.fight` imports this module.
+    The battle's own line, ``[services] team_victorious``, reads "Foes stands
+    victorious" for the side a session fight calls Foes; the session names
+    each side in words that agree with it, ``[battle_report]`` in
+    config/gm-refusals.toml (issue #136). Imported here rather than at the
+    top: :mod:`gm.fight` imports this module.
     """
     from .fight import FOE_TEAM, PARTY_TEAM
 
-    return {
-        FOE_TEAM: "The foes stand victorious",
-        PARTY_TEAM: "The party stands victorious",
-    }
+    words = refusal_words().battle_report
+    return {FOE_TEAM: words.foes_victorious, PARTY_TEAM: words.party_victorious}
+
+
+def _winner_names(battle: Battle, winners: object) -> str:
+    """The figures a victory left on the field, in the order the line names them.
+
+    Args:
+        battle: The battle.
+        winners: The victory event's ``winners``, the figures' row ids.
+    """
+    ids = (
+        [winner for winner in winners if isinstance(winner, int)]
+        if isinstance(winners, list)
+        else []
+    )
+    names = dict(battle.combatants.filter(pk__in=ids).values_list("pk", "display_name"))
+    return ", ".join(names[winner] for winner in ids if winner in names)
 
 
 def closing_line(battle: Battle) -> str:
     """The victory or stalemate line the engine wrote, or a plain fallback.
 
     A session fight's side is named in words that agree with it (issue
-    #785): "The foes stand victorious — ...", not "Foes stands ...". Any
-    other team's line is the engine's as written.
+    #785): "The foes stand victorious — ...", not "Foes stands ...", built
+    from the victory's own record -- its team and the figures it left
+    standing -- not from the line's words, which are configuration (#136).
+    Any other team's line is the battle's as written.
     """
     verdict = (
         battle.events.filter(event_type="info")
@@ -235,12 +250,11 @@ def closing_line(battle: Battle) -> str:
     )
     if verdict is None:
         return f"The battle ended ({battle.get_status_display().lower()})"
-    team = str((verdict.payload or {}).get("winner_team") or "")
-    phrase = _session_team_phrases().get(team)
-    prefix = f"{team}{VICTORY_SUFFIX}"
-    if phrase is not None and verdict.message.startswith(prefix):
-        return phrase + verdict.message[len(prefix) :]
-    return verdict.message
+    payload = verdict.payload or {}
+    sentence = _session_victories().get(str(payload.get("winner_team") or ""))
+    if sentence is None:
+        return verdict.message
+    return sentence.format(names=_winner_names(battle, payload.get("winners")))
 
 
 def summary_block(battle: Battle) -> str:
@@ -258,11 +272,6 @@ def summary_block(battle: Battle) -> str:
         "on their records; the session's character list carries them from here."
     )
     return "\n".join(lines)
-
-
-#: What a notice for an ending after a restart opens with (review of #785).
-AFTER_RESTART = "After the restart, the fight is over"
-FIGHT_OVER = "The fight is over"
 
 
 def fight_verdict(battle: Battle, *, after_restart: bool = False) -> str | None:
@@ -287,7 +296,9 @@ def fight_verdict(battle: Battle, *, after_restart: bool = False) -> str | None:
         (item for item in view["combatants"] if item["team"] == PARTY_TEAM),
         key=lambda item: item["name"],
     )
-    opening = AFTER_RESTART if after_restart else FIGHT_OVER
+    # A notice for an ending after a restart says so (review of #785).
+    words = refusal_words().battle_report
+    opening = words.after_restart if after_restart else words.fight_over
     lines = [f"{opening}: {closing_line(battle)}."]
     lines.extend(f"{combatant_line(combatant)}." for combatant in party)
     return "\n".join(lines)

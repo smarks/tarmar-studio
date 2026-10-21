@@ -15,6 +15,7 @@
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { refusalFixedParts } = require('./refusals');
 
 const PAGE_SIZE = 50;
 const TURNS = PAGE_SIZE + 2;
@@ -127,7 +128,9 @@ test.describe('GM page — a long session, a page at a time (#972)', () => {
         // The change is saved and shown: the thread is open again, so it has
         // left the resolved list. Every other thread loaded stays, the
         // earlier page among them, and the list is still open.
-        await expect(page.locator('#gm-panel-campaign-status')).toContainText('Reopened thread');
+        await expect(page.locator('#gm-panel-campaign-status')).toContainText(
+            refusalFixedParts('gm', 'hand_records', 'thread_reopened')[0]
+        );
         await expect(page.locator('#gm-campaign-threads-group')).toContainText('Settled matter 1');
         await expect(resolved.locator('summary')).toHaveText(`${TURNS - 1} resolved`);
         await expect(names).toHaveCount(TURNS - 1);

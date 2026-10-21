@@ -272,3 +272,73 @@ refuse_bounds = "Name one or more of the bounds this canon imposes, which a Game
 refuse_bounds_list = "Name the bounds as a list"
 refuse_combatant = "Name a combatant in this battle"
 refuse_classic = "Lifting a figure's magic bounds is a Tarmar ruling; a classic battle has no Channel, push or counter"
+
+# The battle's own lines that are not a ruling (issue #136): the battle log's
+# lines, the notes a fight's roster and seats carry, and a cast option's cost.
+# {names} is a list of figures, already joined; the _one keys say it of one.
+[services]
+# Why a fight stops writing one character's record, once per character.
+records_withheld = "{name}'s wounds and death are no longer written to their record: {reason}"
+# The two {reason}s, by the kind of fight.
+withheld_other_players = "the character belongs to another player, and the session's owner is no longer a Game Master"
+withheld_not_game_master = "the battle counted because a Game Master ran it, and whoever made it is no longer a Game Master"
+# {name} above when the figure is no longer on the roster.
+a_character = "A character"
+# A Game Master taking the pools from the records; {pools} is figure_pools for
+# each figure, joined.
+pools_taken = "The Game Master took the pools from the character records: {pools}"
+figure_pools = "{name} Fatigue {fatigue_was}→{fatigue}, Body {body_was}→{body}, Mana {mana_was}→{mana}"
+# Added to figure_pools where either side owes mana.
+figure_owed = ", owed {owed_was}→{owed}"
+# A restart.
+stays_dead = "{names} stays dead: the record says so, and a restart does not bring anyone back. A Game Master revives a character on its sheet"
+stay_dead = "{names} stay dead: the record says so, and a restart does not bring anyone back. A Game Master revives a character on its sheet"
+stays_off = "{names} stays off the board: withdrawn from the session by the player who owns the character"
+stay_off = "{names} stay off the board: withdrawn from the session by the player who owns the character"
+# Seats.
+seat_taken = "{game_master}, the Game Master, takes {name}'s seat: {owner}, who owns the character, is absent"
+seat_returned = "{name}'s seat goes back to {owner}, who owns the character"
+leaves_fight = "{name} leaves the fight: {owner}, who owns the character, withdrew them from the session"
+# The end of a fight; {turns} is how many turns passed with nobody hurt.
+team_victorious = "{team} stands victorious — {names} left on the field"
+victorious = "{name} stands victorious"
+stalemate = "Stalemate — {turns} turns without anyone hurt; {names} still standing"
+# What a Tarmar roster lost crossing into a classic battle.
+re_armed = "Re-armed from the classic weapon table: {names}."
+no_spell_crosses = "No spell crosses into a classic battle: {names} enter as classic wizards, staff in hand and knowing the classic spells their IQ allows."
+reach_no_spell = "{names} cast in Tarmar but reach no classic spell at this IQ, and fight as warriors."
+# Characters with no weapon: before a session's fight, and on the board.
+# The sheet's gear step says unarmed_one of its own character.
+unarmed_one = "{names} carries no weapon and would fight bare-handed."
+unarmed = "{names} carry no weapon and would fight bare-handed."
+# Before a session's fight; {unarmed} is unarmed_one or unarmed, filled.
+unarmed_attached = "{unarmed} Buy gear on the character's sheet before the fight."
+bare_handed_one = "{names} is on the board with no weapon, fighting bare-handed."
+bare_handed = "{names} are on the board with no weapon, fighting bare-handed."
+# A player's choice in the log; {rationale} is the option's own line.
+chosen_by = "chosen by {owner} — {rationale}"
+# A seat nobody has claimed; {number} counts from 1.
+open_seat = "Open seat {number}"
+# A cast option's cost on the turn menu.
+cast_cost = "{school} — {level} mana"
+
+# Who decides for a figure, the roster card's line about it, and the log line
+# a change of mode writes (issue #136). {mode} is automatic or manual below,
+# {decided_by} a person's name or ai_owner.
+[control]
+ai_owner = "the AI"
+# A guest has no name to print where a username would go.
+guest_owner = "guest"
+# The viewer, in manual_line on their own figure's card.
+you = "you"
+# Who decides in manual mode, for the whole battle.
+their_owners = "their owners"
+automatic = "automatic"
+manual = "manual"
+manual_line = "Manual — played by {owner}"
+automatic_line = "Automatic — {ai} plays it"
+every_combatant_follows = "Control: every combatant now follows the battle — {mode}, decided by {decided_by}"
+battle_default = "Control: the battle's default is now {mode} — combatants without a mode of their own are decided by {decided_by}"
+follows_again = "Control: {name} follows the battle again ({mode}) — decided by {decided_by}"
+played_by_hand = "Control: {name} is now played by hand — decided by {decided_by}"
+hands_to_ai = "Control: {name} now hands its decisions to {ai}"

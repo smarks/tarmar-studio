@@ -5,7 +5,8 @@ from urllib.parse import parse_qs, urlparse
 from django.urls import reverse
 from django.utils.html import escape
 
-from common.test_helpers import BaseTestCase, create_character
+from common.refusal_words import refusal_words as common_words
+from common.test_helpers import BaseTestCase, create_character, sentence_parts
 from parties.models import Party, PartyMembership
 from ruins.hook_generation import generate_hook
 
@@ -143,7 +144,9 @@ class GenerateFlowTest(HookViewTestCase):
         response = self.client.get(
             reverse("hooks:generate"), {"level": "1", "seed": "lucky"}
         )
-        self.assertContains(response, "Seed must be a whole number")
+        self.assertContains(
+            response, escape(sentence_parts(common_words().seeds.not_whole_number)[0])
+        )
         self.assertContains(response, 'value="lucky"')
 
     def test_non_numeric_level_is_an_error(self):

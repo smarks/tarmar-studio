@@ -44,6 +44,25 @@ class HandRecordsWords:
     thread_already_resolved: str = sentence("thread")
     thread_still_open: str = sentence("thread")
     not_folded_yet: str = sentence()
+    label_topic: str = sentence()
+    label_rule: str = sentence()
+    label_name: str = sentence()
+    label_where: str = sentence()
+    label_wants: str = sentence()
+    label_condition: str = sentence()
+    label_notes: str = sentence()
+    label_thread: str = sentence()
+    label_resolution: str = sentence()
+    label_recap: str = sentence()
+    ruling_corrected: str = sentence("old", "new", "text")
+    entity_recorded: str = sentence("line", required=("line",))
+    entity_corrected: str = sentence("line", required=("line",))
+    entity_removed: str = sentence("name")
+    thread_opened: str = sentence("thread", "text")
+    thread_corrected: str = sentence("thread", "text")
+    thread_closed: str = sentence("thread", "text")
+    thread_reopened: str = sentence("thread", "text")
+    recap_corrected: str = sentence()
 
 
 @dataclass(frozen=True)
@@ -59,6 +78,33 @@ class PolicyWords:
     player_stated_fatigue: str = sentence()
     game_master_records: str = sentence()
     aide_unasked_roll: str = sentence()
+
+
+@dataclass(frozen=True)
+class RepeatedRefusalWords:
+    """What ``gm.turn_engine.policy`` tells the model when a plan repeats a
+    refusal already settled in the session, and what to do instead (issue
+    #136). Written for the model, not a player; kept apart from
+    :class:`PolicyWords`, whose keys are exactly the policy's reasons."""
+
+    already_refused: str = sentence("action", "reason", required=("reason",))
+    with_remedy: str = sentence("said", "remedy", required=("said", "remedy"))
+    something_else: str = sentence("said", required=("said",))
+    instead_record_attributes: str = sentence()
+    instead_rule_literacy: str = sentence()
+    instead_roll_fatigue: str = sentence()
+    instead_origins: str = sentence("origins", required=("origins",))
+
+
+@dataclass(frozen=True)
+class BattleReportWords:
+    """``gm.battle_report``'s words: how the player's notice of a session
+    fight's end opens, and its verdict for each side (issues #785, #136)."""
+
+    fight_over: str = sentence()
+    after_restart: str = sentence()
+    foes_victorious: str = sentence("names")
+    party_victorious: str = sentence("names")
 
 
 @dataclass(frozen=True)
@@ -174,6 +220,8 @@ class GmRefusalWords:
 
     hand_records: HandRecordsWords
     policy: PolicyWords
+    repeated_refusal: RepeatedRefusalWords
+    battle_report: BattleReportWords
     views: ViewsWords
     views_records: ViewsRecordsWords
     views_history: ViewsHistoryWords

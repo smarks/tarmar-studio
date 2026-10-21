@@ -14,11 +14,11 @@ from pathlib import Path
 from django.conf import settings
 from django.test import SimpleTestCase
 
-from battle import control
 from battle.access import Actor
 from battle.models import Battle
 from battle.services import create_battle
 from battle.views import pending_payload, seat_summaries
+from battle.wording import words
 from common.test_helpers import BaseTestCase
 
 #: The seat fields whose being set means somebody holds it.
@@ -229,7 +229,7 @@ class SeatsNameTheirHolderTest(BaseTestCase):
         self.by_guest.save(update_fields=["guest_key"])
         self.expected = {
             self.by_account.pk: self.player.username,
-            self.by_guest.pk: control.GUEST_OWNER,
+            self.by_guest.pk: words().control.guest_owner,
             self.empty.pk: "",
         }
 

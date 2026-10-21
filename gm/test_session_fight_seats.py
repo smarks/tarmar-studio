@@ -16,6 +16,7 @@ from battle.services import (
     return_seat,
     take_seat,
 )
+from battle.wording import words
 from common.test_helpers import BaseTestCase, create_character
 from gm.testing import game_master_sets_the_foes_asked_for
 
@@ -55,7 +56,7 @@ class SessionFightSeatsTest(BaseTestCase):
             self.assertEqual(self.seat_of(character).control_mode, control.MANUAL)
         self.assertEqual(
             control.mode_line(self.battle, self.seat_of(self.aldwin)),
-            "Manual — played by alice",
+            words().control.manual_line.format(owner="alice"),
         )
 
     def test_the_owner_chooses_for_their_character_and_the_game_master_cannot(
@@ -94,8 +95,9 @@ class SessionFightSeatsTest(BaseTestCase):
         self.assertEqual(
             self.seat_lines(),
             [
-                "warden, the Game Master, takes Aldwin's seat: alice, who owns "
-                "the character, is absent"
+                words().services.seat_taken.format(
+                    game_master="warden", name="Aldwin", owner="alice"
+                )
             ],
         )
         battle = self._await(self.aldwin)
@@ -128,7 +130,7 @@ class SessionFightSeatsTest(BaseTestCase):
         self.assertEqual(seat.player, self.alice)
         self.assertEqual(
             self.seat_lines()[-1],
-            "Aldwin's seat goes back to alice, who owns the character",
+            words().services.seat_returned.format(name="Aldwin", owner="alice"),
         )
 
     def test_nobody_else_moves_a_seat(self):

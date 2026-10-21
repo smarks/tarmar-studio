@@ -110,7 +110,7 @@ class AttributesAndAgeTest(SeatedRulesTestCase):
         self.assertIsNone(point_buy_budget_note(50))
         self.assertEqual(
             point_buy_budget_note(52),
-            "Point-buy total: 52 — 2 over the 50-point budget.",
+            refusal_words().constants.point_buy_over.format(spent=52, off=2, budget=50),
         )
 
     def test_the_attribute_ceiling_is_the_canons(self) -> None:

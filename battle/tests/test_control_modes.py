@@ -46,8 +46,9 @@ from battle.services import (
 )
 from battle.tests.fixed_refusals import with_fixed_refusals
 from battle.views import advance_control
+from battle.wording import words
 from common.guest import GUEST_KEY_SESSION_FIELD
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, says
 
 # A seed whose first turn does not end the fight, so a battle has room to
 # be paused, resumed, and re-advanced inside one test.
@@ -270,7 +271,11 @@ class MixedBattleTest(BaseTestCase):
             event
             for event in events
             if event.event_type == "decision"
-            and f"chosen by {self.dm.username}" in json.dumps(event.payload)
+            and says(
+                event.payload["chosen"]["rationale"],
+                words().services.chosen_by,
+                self.dm.username,
+            )
         ]
         self.assertTrue(credited, "the manual combatant's decision credits its owner")
 
@@ -372,7 +377,11 @@ class ControlChangesAreLoggedTest(BaseTestCase):
         _battle, event = set_battle_control_mode(self.battle.pk, control.MANUAL)
         assert event is not None
         self.assertEqual(event.event_type, "status")
-        self.assertIn("the battle's default is now manual", event.message)
+        said = words().control
+        self.assertEqual(
+            event.message,
+            said.battle_default.format(mode=said.manual, decided_by=said.their_owners),
+        )
         self.assertEqual(event.payload["scope"], "battle")
         self.assertFalse(event.payload["applied_to_all"])
 
@@ -508,7 +517,9 @@ class GuestSeatsAreControlledToneTest(BaseTestCase):
         battle, _events = advance_turn(self.battle.pk)
         self.assertEqual(battle.status, Battle.STATUS_AWAITING)
         self.assertEqual(battle.pending_input_json["combatant_id"], seat.pk)
-        self.assertEqual(manual_controllers(battle)[seat.pk], control.GUEST_OWNER)
+        self.assertEqual(
+            manual_controllers(battle)[seat.pk], words().control.guest_owner
+        )
 
     def test_the_guest_who_holds_the_seat_is_the_one_who_decides(self):
         key = self.guest_key()
@@ -621,7 +632,7 @@ class ControlEndpointTest(BaseTestCase):
         self.assertTrue(payload["advance"]["enabled"])
         seat = payload["seats"][0]
         self.assertEqual(seat["effective_control_mode"], control.AUTOMATIC)
-        self.assertEqual(seat["controller"], control.AI_OWNER)
+        self.assertEqual(seat["controller"], words().control.ai_owner)
         self.assertIn("Automatic", seat["control_line"])
 
     def test_the_panel_is_offered_to_whoever_runs_the_battle_only(self):
@@ -774,9 +785,11 @@ class GuestRunsAManualBattleTest(BaseTestCase):
             control_mode=control.MANUAL,
         )
         combatant = battle.combatants.first()
-        self.assertEqual(control.owner_label(battle, combatant), control.GUEST_OWNER)
         self.assertEqual(
-            set(manual_controllers(battle).values()), {control.GUEST_OWNER}
+            control.owner_label(battle, combatant), words().control.guest_owner
+        )
+        self.assertEqual(
+            set(manual_controllers(battle).values()), {words().control.guest_owner}
         )
         self.assertTrue(
             decides_for(

@@ -59,9 +59,9 @@ from ..constants import (
     MAX_EQUIPMENT_MODIFIER,
     MAX_EQUIPMENT_QUANTITY,
     MAX_EQUIPMENT_WEIGHT_LBS,
-    UNNAMED_CHARACTER,
     name_within_rule,
     too_long,
+    unnamed_character,
 )
 from ..dice import build_point_buy_character_stats, roll_all_character_stats
 from ..equipment import ITEM_CATEGORIES, get_item
@@ -459,7 +459,7 @@ def _creation_name(
             # An account name may hold "@" or "+", which the name rule
             # refuses; the fallback keeps what it accepts, so the character's
             # own export can be imported (issue #870).
-            return name_within_rule(account_name, fallback=UNNAMED_CHARACTER), None
+            return name_within_rule(account_name, fallback=unnamed_character()), None
         return None, NAME_REQUIRED_MESSAGE
     try:
         return str(Character.clean_field_value("name", typed)), None

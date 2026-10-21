@@ -66,6 +66,7 @@ from .fight import (
 )
 from .models import GMSession, GMTurnRecord
 from .refusal_words import refusal_words
+from .refusal_words import refusal_words as gm_words
 from .retrieval import BATTLE_KIND, is_battle_message, is_hidden_message
 from .testing import game_master_sets_the_foes_asked_for, gm_replies
 from .turn_record import running_turn_for
@@ -1050,20 +1051,21 @@ class BattleReportTest(BaseTestCase):
     def test_the_verdict_line_is_the_engines_or_a_plain_fallback(self):
         battle = Battle.objects.get(pk=self.battle.pk)
         self.assertEqual(closing_line(battle), "The battle ended (setup)")
+        wolf = battle.combatants.get(display_name="Gray Wolf")
         battle.events.create(
             turn=1,
             phase=6,
             sequence=500,
             event_type="info",
             actor="Foes",
-            payload={"winner_team": "Foes", "winners": [1]},
+            payload={"winner_team": "Foes", "winners": [wolf.pk]},
             message="Foes stands victorious — Gray Wolf left on the field",
         )
         # A session fight's side is named in words that agree with it
-        # (issue #785); this asserted the engine's "Foes stands" as written.
+        # (issue #785), built from the victory's record (#136).
         self.assertEqual(
             closing_line(battle),
-            "The foes stand victorious — Gray Wolf left on the field",
+            gm_words().battle_report.foes_victorious.format(names="Gray Wolf"),
         )
 
     def test_a_restart_voids_the_earlier_log_and_refiles(self):

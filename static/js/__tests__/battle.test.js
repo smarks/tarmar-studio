@@ -3378,11 +3378,12 @@ describe('control modes', () => {
             { 1: seat({
                 effective_control_mode: 'manual',
                 control_line: 'Manual — played by spencer',
+                own_control_line: 'the server says you play it',
                 you_decide: true,
             }) }
         );
         expect(roster.querySelector('.combatant-controller').textContent)
-            .toBe('Manual — played by you');
+            .toBe('the server says you play it');
     });
 
     test('an automatic combatant says the AI plays it', () => {

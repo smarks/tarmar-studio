@@ -36,6 +36,7 @@ from battle.classic_adaptation import (
 from battle.engine.state import CombatantState, WeaponState
 from battle.models import BattleEvent
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE
+from battle.wording import words
 from common.test_helpers import BaseTestCase
 
 
@@ -1072,7 +1073,9 @@ class ClassicVictoryLineTest(BaseTestCase):
     def test_a_free_for_all_victory_names_the_winning_figure(self):
         messages = self.finish()
         self.assertIn("🏆 Yaria Hawkridge holds the field — victory!", messages)
-        self.assertIn("Yaria Hawkridge stands victorious", messages)
+        self.assertIn(
+            words().services.victorious.format(name="Yaria Hawkridge"), messages
+        )
 
     def test_a_battle_saved_unlabelled_still_names_its_sides(self):
         """A classic battle snapshotted before its figures carried labels is

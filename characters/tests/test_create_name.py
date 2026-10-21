@@ -14,7 +14,7 @@ import re
 from django.urls import reverse
 
 from characters.models import Character
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, too_long_refusal
 
 CREATE_URL = "/tarmar/characters/create/"
 
@@ -109,7 +109,7 @@ class PlayerNamesTheirCharacterTest(BaseTestCase):
 
     def test_a_name_the_sheet_would_refuse_is_refused_here(self) -> None:
         for name, reason in (
-            ("x" * 101, "Name must be 100 characters or fewer"),
+            ("x" * 101, too_long_refusal("Name", 100)),
             ("Wren\U0001f525", "Name may contain letters, numbers, spaces"),
         ):
             with self.subTest(name=name):

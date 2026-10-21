@@ -6,6 +6,8 @@ Game Master's restart used to put a dead character's figure back at its
 turn-0 snapshot, alive, while the record said dead.
 """
 
+from django.utils.html import escape
+
 from battle import profiles
 from battle.models import Battle, BattleEvent
 from battle.persistence import CLASSIC_PROFILE, load_state
@@ -16,6 +18,7 @@ from battle.services import (
     restart_battle,
 )
 from battle.tests.test_profiles import classic_battle
+from battle.wording import words
 from characters import services as character_services
 from characters.models import Character
 from common.test_helpers import BaseTestCase, create_character
@@ -100,9 +103,7 @@ class RestartKeepsTheDeadTest(BaseTestCase):
         )
         self.assertEqual(line.payload["laid_dead"], ["Aldwin"])
         self.assertEqual(
-            line.message,
-            "Aldwin stays dead: the record says so, and a restart does not "
-            "bring anyone back. A Game Master revives a character on its sheet",
+            line.message, words().services.stays_dead.format(names="Aldwin")
         )
 
     def test_the_restart_answer_carries_the_line_for_the_log(self):
@@ -110,8 +111,9 @@ class RestartKeepsTheDeadTest(BaseTestCase):
         response = self.client.post(f"/tarmar/battles/{self.battle.pk}/restart/")
         self.assertEqual(response.status_code, 200, response.content)
         (event,) = response.json()["events"]
-        self.assertTrue(event["message"].startswith("Aldwin stays dead"))
-        self.assertIn("Aldwin stays dead", response.json()["turns_html"][0]["html"])
+        line = words().services.stays_dead.format(names="Aldwin")
+        self.assertEqual(event["message"], line)
+        self.assertIn(escape(line), response.json()["turns_html"][0]["html"])
 
     def test_a_game_masters_revive_then_restart_brings_the_figure_back(self):
         # The explicit action the ledger names: revive, then the restart

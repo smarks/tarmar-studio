@@ -28,7 +28,7 @@
 const { refusal } = require('./refusals');
 const { test, expect, loginAs, submitPassphrase, chooseToAttach } = require('./fixtures');
 const { readDjangoShell, runDjangoShell } = require('./django');
-const { rulingWords } = require('./rulings');
+const { battleLine, rulingWords } = require('./rulings');
 
 const WORKER = Number(process.env.TEST_PARALLEL_INDEX || 0);
 // This worker's accounts only: another worker may still be using its own.
@@ -153,13 +153,18 @@ users.delete()
         await page.goto('/tarmar/gm/');
         await attachAndFight(page, [aldwinName], 'a gray wolf');
 
+        const ownManualLine = battleLine('control', 'manual_line', {
+            owner: battleLine('control', 'you'),
+        });
         const aldwin = card(page, aldwinName);
         await expect(aldwin.locator('.combatant-controller'))
-            .toHaveText(`Manual — played by ${run.player.username}`);
+            .toHaveText(battleLine('control', 'manual_line', { owner: run.player.username }));
         await aldwin.getByRole('button', { name: 'Take this seat (owner absent)' }).click();
-        await expect(aldwin.locator('.combatant-controller')).toHaveText('Manual — played by you');
+        await expect(aldwin.locator('.combatant-controller')).toHaveText(ownManualLine);
         await expect(page.locator('#battle-log'))
-            .toContainText(`takes ${aldwinName}'s seat: ${run.player.username}, who owns the character, is absent`);
+            .toContainText(battleLine('services', 'seat_taken', {
+                game_master: run.master.username, name: aldwinName, owner: run.player.username,
+            }));
 
         const { context, page: player } = await secondPage(browser, run.player);
         try {
@@ -172,9 +177,11 @@ users.delete()
             // The player is offered no take, only the way back.
             await expect(mine.getByRole('button', { name: 'Take this seat (owner absent)' })).toHaveCount(0);
             await mine.getByRole('button', { name: 'Give the seat back to its owner' }).click();
-            await expect(mine.locator('.combatant-controller')).toHaveText('Manual — played by you');
+            await expect(mine.locator('.combatant-controller')).toHaveText(ownManualLine);
             await expect(player.locator('#battle-log'))
-                .toContainText(`${aldwinName}'s seat goes back to ${run.player.username}`);
+                .toContainText(battleLine('services', 'seat_returned', {
+                    name: aldwinName, owner: run.player.username,
+                }));
 
             await player.goto(`/tarmar/characters/${ids.aldwin}/`);
             await Promise.all([
@@ -188,7 +195,9 @@ users.delete()
         // The withdrawal wins: the figure left the fight, the session says so.
         await page.reload();
         await expect(page.locator('#battle-log'))
-            .toContainText(`${aldwinName} leaves the fight: ${run.player.username}, who owns the character, withdrew them`);
+            .toContainText(battleLine('services', 'leaves_fight', {
+                name: aldwinName, owner: run.player.username,
+            }));
         await expect(card(page, aldwinName)).toHaveCount(0);
         await expect(page.locator('.message.assistant').last())
             .toContainText(`${run.player.username} withdrew ${aldwinName} from this session`);
@@ -207,7 +216,7 @@ users.delete()
         await expect(page.locator('#gm-panel-tab-battle')).toHaveClass(/is-live/);
         // Dain carries nothing (#844): the board says so while he is on it.
         await expect(page.locator('#gm-panel-unarmed'))
-            .toHaveText(`${dainName} is on the board with no weapon, fighting bare-handed.`);
+            .toHaveText(battleLine('services', 'bare_handed_one', { names: dainName }));
 
         await page.click('#advance-turn');
         await expect(page.locator('#battle-status')).toHaveText('Finished');
@@ -275,7 +284,8 @@ mira = create_character(master, name=name('Restart Mira'), equipment=${DAGGER})`
         await expect(page.locator('#battle-turn')).toHaveText('0');
         await expect(card(page, dainName)).toHaveClass(/is-down/);
         await expect(card(page, miraName)).not.toHaveClass(/is-down/);
-        await expect(page.locator('#battle-log')).toContainText(`${dainName} stays dead: the record says so`);
+        await expect(page.locator('#battle-log'))
+            .toContainText(battleLine('services', 'stays_dead', { names: dainName }));
         await page.reload();
         await expect(card(page, dainName)).toHaveClass(/is-down/);
     });
@@ -350,7 +360,9 @@ tam = create_character(player, name=name('Bare Tam'), equipment=[])`);
         await page.waitForURL(/\/tarmar\/gm\/\?session=\d+$/);
         await page.click('#gm-panel-tab-battle');
         await expect(page.locator('#gm-panel-unarmed'))
-            .toHaveText(`${tamName} carries no weapon and would fight bare-handed. Buy gear on the character's sheet before the fight.`);
+            .toHaveText(battleLine('services', 'unarmed_attached', {
+                unarmed: battleLine('services', 'unarmed_one', { names: tamName }),
+            }));
     });
 
     test('#840/#863: an injured character\'s rolls name the penalty, and the illiterate read nothing', async ({ page }, testInfo) => {
