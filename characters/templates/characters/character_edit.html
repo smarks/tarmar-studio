@@ -130,6 +130,7 @@ runs.
                 <td>{% editable_attribute character "charisma" can_edit %}</td>
             </tr>
         </table>
+        {% attribute_locked_note character can_edit %}
         {% comment %}The sheet's rolls (issues #748, #749): a player rolls each of
         these once and may not type them; a Game Master may roll again or type.
         Each control renders when the server would take the roll.{% endcomment %}

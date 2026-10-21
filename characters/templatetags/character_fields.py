@@ -18,13 +18,16 @@ Which cells a viewer may change is decided by ``characters.services`` (issue
 the field is in ``services.update_fields_for`` for their role, the same list
 the field-update endpoint enforces. An editor who may not set a field (a
 player, for anything rolled or awarded) gets the value and the reason beside
-it, persistent, rather than an input the server would refuse.
+it, persistent, rather than an input the server would refuse. The six
+attributes share one reason, so their table states it once, under the table
+(:func:`attribute_locked_note`, issue #84), and each locked cell points to it.
 """
 
 from django import template
 from django.db.models import Model
 
 from characters import services
+from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import (
     Character,
     character_field_options,
@@ -96,6 +99,12 @@ def accessible_name(character: Model, field: str, label: str = "") -> str:
     return verbose[:1].upper() + verbose[1:]
 
 
+#: The element that states, once, why a player may not change a recorded
+#: score (issue #84): the six attribute cells point to it rather than each
+#: printing the sentence, and the page reveals it when a bought score locks.
+ATTRIBUTE_LOCKED_NOTE_ID = "attribute-locked-reason"
+
+
 # The least an attribute may be. The template repeated its bounds six times;
 # they are one rule about one kind of number, so they live here, the ceiling
 # being the canon's (``attributes.maximum``).
@@ -130,6 +139,46 @@ def editable_attribute(context, character, field, can_edit, label=""):
             else attribute_rules.point_buy.maximum
         ),
         "label": accessible_name(character, field, label),
+        "locked_note_id": ATTRIBUTE_LOCKED_NOTE_ID,
+    }
+
+
+@register.inclusion_tag("characters/_attribute_locked_note.html", takes_context=True)
+def attribute_locked_note(
+    context: template.Context, character: Character, can_edit: bool
+) -> dict:
+    """Why a player may not change a recorded score, said once (issue #84).
+
+    Every attribute has the one rule and so the one reason
+    (``services.FIELD_RULES``), which the table's six cells each printed
+    until #84. The note is rendered for any editor, hidden while no score is
+    locked, so the page can show it when a player's bought score locks
+    without a reload; it names the fields it speaks for
+    (``data-locked-note-for``), which is how the page finds it.
+
+    Args:
+        context: The template context; its ``is_game_master`` says the role,
+            as for :func:`cell_state`.
+        character: The character shown.
+        can_edit: Whether the viewer may edit this character at all; a viewer
+            who may not gets no note, as they get no reason beside any other
+            value.
+
+    Returns:
+        ``can_edit`` (render the note at all), ``note_id``, ``fields`` (the
+        attributes it speaks for) and ``reason`` (empty while no attribute
+        is locked for this viewer, which renders the note hidden).
+    """
+    locked = [
+        field
+        for field in CHARACTER_ATTRIBUTE_FIELDS
+        if cell_state(context, character, field, can_edit)["locked_reason"]
+    ]
+    return {
+        "can_edit": bool(can_edit),
+        "note_id": ATTRIBUTE_LOCKED_NOTE_ID,
+        "fields": CHARACTER_ATTRIBUTE_FIELDS,
+        "reason": services.field_refusal(locked[0]) if locked else "",
     }
 
 

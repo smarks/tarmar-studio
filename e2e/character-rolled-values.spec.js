@@ -22,6 +22,10 @@ const { runDjangoShell, readDjangoShell } = require('./django');
 const { loadedCharacterRules } = require('./character-rules');
 const { refusal } = require('./refusals');
 
+/** The note that says once why a recorded attribute is locked (#84). */
+const ATTRIBUTE_LOCKED_NOTE_ID = 'attribute-locked-reason';
+const ATTRIBUTE_LOCKED_NOTE = `#${ATTRIBUTE_LOCKED_NOTE_ID}`;
+
 /** The character id from the editor's URL. */
 function characterId(page) {
     return Number(page.url().match(/\/characters\/(\d+)\//)[1]);
@@ -59,11 +63,17 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
             await expect(page.locator(`[data-field="${field}"]`), field).toHaveCount(0);
             await expect(page.locator(`[data-locked-field="${field}"]`), field).toBeVisible();
         }
-        await expect(page.locator('[data-locked-field="strength"]')).toHaveText(
-            refusal('characters', 'services', 'field_attribute', {
-                dice: rules.attribute_dice, points: rules.point_buy.total,
-            })
-        );
+        // The six attributes share one reason, so their table says it once,
+        // under it, and each locked cell points to it (#84): the sentence was
+        // printed in all six cells, and the table did not fit a phone.
+        const attributeReason = refusal('characters', 'services', 'field_attribute', {
+            dice: rules.attribute_dice, points: rules.point_buy.total,
+        });
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toHaveText(attributeReason);
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeVisible();
+        await expect(page.getByText(attributeReason, { exact: true })).toHaveCount(1);
+        await expect(page.locator(`[data-locked-field][aria-describedby="${ATTRIBUTE_LOCKED_NOTE_ID}"]`))
+            .toHaveCount(6);
         // What the rules let a player choose stays an input.
         await expect(page.locator('[data-field="name"]')).toHaveCount(1);
         // The Origin is "roll or choose", and creation rolled it: a roll is
@@ -182,6 +192,8 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         await page.reload();
         const roll = page.locator('#roll-attributes-btn');
         await expect(roll).toBeVisible();
+        // No score is locked, so nothing says why yet (#84).
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeHidden();
 
         const strength = page.locator('[data-field="strength"] input');
         await expect(strength).toHaveAttribute('min', '3');
@@ -193,6 +205,7 @@ test.describe('Rolled and awarded values (#748, #749, #752)', () => {
         // no longer roll the rest (#748 review): no reload needed.
         await expect(page.locator('[data-readonly-field="strength"]')).toHaveText('15');
         await expect(page.locator('[data-locked-field="strength"]')).toBeVisible();
+        await expect(page.locator(ATTRIBUTE_LOCKED_NOTE)).toBeVisible();
         await expect(roll).toBeHidden();
         await page.reload();
         await expect(roll).toHaveCount(0);

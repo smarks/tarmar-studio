@@ -18,12 +18,14 @@ from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
 from bestiary.translation import derive_pools, fixed_fatigue_roll
+from characters import services
 from characters.checks import (
     CHARACTER_LABEL_COLUMNS_CHECK_ID,
     check_character_labels_fit_their_columns,
 )
 from characters.constants import point_buy_budget_note
 from characters.dice import (
+    DICE_IN_TEXT,
     calculate_final_weight_lbs,
     demon_die_to_height_inches,
     literacy_check_text,
@@ -76,6 +78,7 @@ from characters.views.characters import (
     _point_buy_defaults,
 )
 from common.rolling import Roller
+from common.test_helpers import BaseTestCase, create_character
 from gm.character_schema import character_json_schema, extraction_prompt
 from gm.engine import MODE_AIDE
 from gm.ledger import draft_defaults
@@ -197,6 +200,46 @@ class RollsTest(SeatedRulesTestCase):
             validate_literacy_roll(1)
         character = Character(location="Port", intelligence=10)
         self.assertEqual(character.location_literacy_check, "2d10 ≤ INT − 1")
+
+
+class SeatedLiteracyServiceTest(BaseTestCase):
+    """``services.roll_literacy`` rolls the canon's dice end to end (#93).
+
+    ``RollsTest`` seats the function the service calls; this seats the
+    service itself, on a saved character, so a service that rolled dice of
+    its own, or a note that named them, would fail here.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(seated_character_rules(INVENTED_CHARACTER_RULES))
+        # Port's invented penalty is 1, so INT 10 reads on 9 or less.
+        self.character = create_character(
+            self.create_user("seated-literacy-owner"),
+            location="Port",
+            intelligence=10,
+        )
+
+    def test_the_service_rolls_and_records_the_canons_dice(self) -> None:
+        result = services.roll_literacy(self.character.pk)
+
+        found = DICE_IN_TEXT.findall(result.note)
+        self.assertEqual(len(found), 1, result.note)
+        expression, faces_text, total_text = found[0]
+        faces = [int(face) for face in faces_text.split(",")]
+        total = int(total_text)
+        self.assertEqual(expression, "2d10")
+        self.assertEqual(len(faces), 2, faces)
+        self.assertTrue(all(1 <= face <= 10 for face in faces), faces)
+        self.assertEqual(sum(faces), total)
+        self.assertIn("rolled the literacy check (2d10 ≤ INT − 1)", result.note)
+        outcome = f"{total} ≤ 9, literate" if total <= 9 else f"{total} > 9, illiterate"
+        self.assertIn(outcome, result.note)
+        self.character.refresh_from_db()
+        self.assertEqual(self.character.literacy_roll, total)
+        self.assertTrue(self.character.literacy_rolled)
+        self.assertEqual(self.character.is_literate, total <= 9)
+        validate_literacy_roll(self.character.literacy_roll)
 
 
 class HeightAndWeightTest(SeatedRulesTestCase):

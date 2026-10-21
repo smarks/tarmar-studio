@@ -289,11 +289,15 @@ class RulesFileReaderTest(SimpleTestCase):
         self.assert_refused(invented_file(motto=""), "motto", "string or null")
 
     def test_a_set_that_repeats_an_entry_is_refused(self) -> None:
+        # Issue #82: the refusal names only the repeated value, not the
+        # whole list, in the wording the other uniqueness checks share.
         self.assert_refused(
-            invented_file(lucky_totals=[3, 3]), "lucky_totals", "repeats a total"
+            invented_file(lucky_totals=[3, 5, 3]),
+            "lucky_totals repeats the total [3]",
         )
         self.assert_refused(
-            invented_file(attributes=["STR", "STR"]), "attributes", "repeats an entry"
+            invented_file(attributes=["STR", "DEX", "STR"]),
+            "attributes repeats the entry ['STR']",
         )
 
     def test_an_ordered_list_keeps_its_repeats_and_refuses_a_non_integer(
@@ -360,6 +364,12 @@ class RepeatedValuesTest(SimpleTestCase):
         # An iterator, read once; "c", given once, is not listed.
         slugs = iter(["vale", "ash", "vale", "c", "ash", "vale"])
         self.assertEqual(repeated_values(slugs), ["ash", "vale"])
+
+    def test_repeated_integers_are_listed_in_numeric_order(self) -> None:
+        # Issue #82: pins the run-time behaviour for a set of totals (10
+        # sorts after 9, as a number); that integers are accepted at all is
+        # what the new type parameter now checks statically.
+        self.assertEqual(repeated_values([10, 9, 10, 4, 9]), [9, 10])
 
 
 class RepeatsProblemTest(SimpleTestCase):
