@@ -1,7 +1,7 @@
 /**
- * The sheet's rules controls (issues #753, #756, #757, #774): tying a Weapon
- * skill to its weapon, the skill check, a Game Master's coin and mana, and
- * learning a spell.
+ * The sheet's rules controls (issues #753, #756, #757, #774, #18): tying a
+ * Weapon skill to its weapon, the skill check, a Game Master's coin and mana,
+ * learning a spell, and casting one outside a battle.
  *
  * Every control is a `[data-mechanics-form]` block naming the URL key it
  * posts to. The module reads the block's named inputs, posts them, and then
@@ -88,6 +88,16 @@ if (typeof module !== 'undefined' && module.exports) {
                 result.textContent = checkText(data.check);
                 result.className = 'skill-check-result ' + (data.check.outcome || 'rolled');
                 result.hidden = false;
+            }
+            // A cast in the story (issue #18): the server's own history
+            // line, which stays until the next cast replaces it.
+            if (result && data.cast) {
+                result.textContent = data.cast.line;
+                result.className = 'cast-spell-result ' + (data.cast.succeeded ? 'success' : 'failure');
+                result.hidden = false;
+                // A Game Master's total from the table was for that cast only.
+                const stated = block.querySelector('[name="total"]');
+                if (stated) stated.value = '';
             }
         } catch (error) {
             showError(block, 'Could not reach the server: ' + error.message);

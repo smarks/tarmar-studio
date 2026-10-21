@@ -42,6 +42,9 @@ field_death = "Only a Game Master can mark a death or revive."
 # Current Fatigue, Body and Mana and the mana owed (issue #751).
 pools_game_master_only = "Only a Game Master can set current Fatigue, Body and Mana and the mana owed; a fight on the board records them on its own"
 field_free_spell_points = "Spell Points from the Magic track; only a Game Master grants mana."
+# The caster's school of magic and its roll (issue #18).
+field_magic_school_roll = "Rolled (d100) once on the schools of magic; only a Game Master can roll it again."
+field_magic_school = "Chosen once from the schools the school roll opens; only a Game Master can change it."
 field_coin_adjustment = "Moves with purchases; only a Game Master gives or takes coin."
 # An equipment item's modifiers (issue #752).
 field_item_modifiers = "Item modifiers are a Game Master's grant; the rules give equipment none."

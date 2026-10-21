@@ -5,6 +5,7 @@ import json
 
 import bleach
 
+from battle.magic_rules import CASTING_DICE
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS, CHARACTER_EXPORT_FORMAT
 from characters.equipment import format_pounds
 from characters.magic import known_spells
@@ -97,6 +98,10 @@ EXPORTABLE_FIELDS = (
     "free_spell_points",
     # The spells known and the purse's movements (issues #774, #757).
     "spells",
+    # The school of magic and its roll (issue #18), which a Game Master's
+    # import keeps and a player's drops, as for the spells.
+    "magic_school_roll",
+    "magic_school",
     "coin_adjustment",
     "equipment",
     "pack_dropped",
@@ -341,6 +346,11 @@ def generate_character_markdown(character) -> str:
         lines.append(f"**Free Spell Points:** {character.free_spell_points}")
         lines.append("")
 
+    # The school of magic (issue #18), once one is held.
+    if character.magic_school:
+        lines.append(f"**School of Magic:** {character.magic_school}")
+        lines.append("")
+
     # The spells the character knows (issue #774), with the Mana Pool above.
     spells = known_spells(character)
     if spells:
@@ -351,7 +361,7 @@ def generate_character_markdown(character) -> str:
         for spell in spells:
             lines.append(
                 f"| {spell.name} | {spell.school} | {spell.spell_level} | "
-                f"3d6 ≤ {spell.attribute} | {spell.mastery_display} |"
+                f"{CASTING_DICE} ≤ {spell.attribute} | {spell.mastery_display} |"
             )
         lines.append("")
 

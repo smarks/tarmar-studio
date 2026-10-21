@@ -9,7 +9,11 @@ answer. The rules live in the modules they call:
 * the skill check — :func:`characters.skill_checks.skill_check` (issue #756);
 * coin — :func:`characters.purse.move_coin_for_reason` (issues #757, #928);
 * spells and mana — :func:`characters.magic.learn_spell` and
-  :func:`characters.magic.grant_mana` (issues #774, #755).
+  :func:`characters.magic.grant_mana` (issues #774, #755);
+* the school of magic chosen after its roll —
+  :func:`characters.magic.choose_school` (issue #18);
+* a spell cast outside a battle — :func:`characters.magic.cast_in_story`
+  (issue #18).
 
 Every one is a Game Master override where the rule allows one, decided
 server-side from ``can_manage_users``; nothing the browser sends says who
@@ -30,7 +34,7 @@ from common.decorators import rate_limit
 from common.helpers import _parse_json_body, whole_number
 
 from .. import services
-from ..magic import grant_mana, learn_spell
+from ..magic import cast_in_story, choose_school, grant_mana, learn_spell
 from ..models import Character
 from ..purse import (
     MAX_COIN_MOVEMENT,
@@ -43,7 +47,7 @@ from ..skill_checks import skill_check
 from ..skills import normalize_skill_name, skill_name_refusal
 from ..weapon_skill import record_weapon_skill
 from .access import answer_change, may_edit
-from .characters import sheet_repaint
+from .characters import render_injury_thresholds, sheet_repaint
 
 
 def _optional_int(data: dict, key: str) -> int | None:
@@ -214,6 +218,65 @@ def character_learn_spell(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
     return _change(request, pk, "spells", apply)
+
+
+@login_required
+@require_POST
+@rate_limit("choose_school", max_requests=30, window_seconds=60)
+def character_choose_school(request: HttpRequest, pk: int) -> HttpResponse:
+    """Choose the school of magic the school roll opened (issue #18)."""
+    is_game_master = request.user.can_manage_users
+
+    def apply(character: Character, data: dict) -> str:
+        return choose_school(
+            character, _required_text(data, "school"), is_game_master=is_game_master
+        )
+
+    return _change(request, pk, "magic_school", apply)
+
+
+#: The history field a cast off the board is kept under (issue #18).
+CAST_HISTORY_FIELD = "spell_cast"
+
+
+@login_required
+@require_POST
+@rate_limit("cast_spell", max_requests=30, window_seconds=60)
+def character_cast_spell(request: HttpRequest, pk: int) -> HttpResponse:
+    """Cast a spell outside a battle and keep it in the history (issue #18).
+
+    Through :func:`_change`, so the cast runs on the row
+    ``services.changing`` has locked (``select_for_update``), and the mana
+    spent, the dice log and the history line are saved in its one
+    transaction or not at all. The page stays where it is: the answer
+    carries the cast, which the sheet shows until the next one, and the
+    injury readout re-rendered, since its Mana moved.
+    """
+    is_game_master = request.user.can_manage_users
+    casts = []
+
+    def apply(character: Character, data: dict) -> str:
+        cast = cast_in_story(
+            character,
+            _required_text(data, "spell"),
+            is_game_master=is_game_master,
+            stated_total=_optional_int(data, "total"),
+        )
+        casts.append(cast)
+        return cast.line
+
+    return _change(
+        request,
+        pk,
+        CAST_HISTORY_FIELD,
+        apply,
+        answer=lambda character, note: {
+            "cast": {**asdict(casts[0]), "line": note},
+            "injury_thresholds_html": render_injury_thresholds(
+                character, is_game_master=is_game_master
+            ),
+        },
+    )
 
 
 @login_required

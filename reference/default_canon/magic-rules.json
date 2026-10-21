@@ -71,5 +71,31 @@
     "fumble_floor": 13,
     "mana_lost_totals": [13, 14],
     "runaway_total": 14
-  }
+  },
+  "schools": [
+    {
+      "up_to": 70,
+      "label": "Common",
+      "schools": ["Elemental", "Passage", "Protection", "Mending"]
+    },
+    {
+      "up_to": 100,
+      "label": "Less Common",
+      "schools": ["Weather", "Counter", "Arcane/True Magic", "Control"]
+    }
+  ],
+  "rulings": [
+    {
+      "key": "school_roll_opens_a_list",
+      "reading": "schools-of-magic.md heads its lists 'Common Schools (0-70%)' and 'Less Common Schools (71-100%)' and gives no share to any one school (70 does not divide among four). Ruled (tarmar-studio #18): a caster rolls d100 once on this table, the row it lands on is the list the caster's school comes from, and the player chooses one school from that list. A row naming one school would give it outright. A Game Master may roll again or set any school.",
+      "page": "public-rules/magic/schools-of-magic.md",
+      "for_spencer": true
+    },
+    {
+      "key": "school_gates_a_new_spell",
+      "reading": "The pages say a spell is learned with skill points (spell-mastery.md) and call Detect Magic 'learnable from either track' (spell-descriptions.md), so a caster learns from their own school. Ruled (tarmar-studio #18): a player puts points into a spell they do not yet know only when it is of their school, and only once the school is rolled and chosen; a spell already on the record may be raised whatever its school; a Game Master may teach any spell, which is recorded as outside the caster's school. Weather, Counter and Arcane/True Magic have no spells in the battle's catalog yet, so a caster of one of them learns spells only from a Game Master.",
+      "page": "public-rules/magic/spell-descriptions.md",
+      "for_spencer": true
+    }
+  ]
 }

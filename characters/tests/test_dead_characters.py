@@ -295,6 +295,8 @@ REFUSED_ENDPOINTS: dict[str, dict[str, Any]] = {
     "move_coin": {"body": {"amount": "5"}},
     "learn_spell": {"body": {"spell": next(iter(SPELLS))}},
     "grant_mana": {"body": {"amount": 2}},
+    "choose_school": {"body": {"school": next(iter(SPELLS.values())).school}},
+    "cast_spell": {"body": {"spell": next(iter(SPELLS))}},
     "equipment_add": {"body": {"item_id": "rope", "quantity": 1}},
     "equipment_update": {"body": {"index": 0, "quantity": 2}},
     "equipment_remove": {"body": {"index": 0}},

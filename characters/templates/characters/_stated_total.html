@@ -1,0 +1,6 @@
+{% comment %}A Game Master's total rolled at his table, for a roll the server
+otherwise makes: the skill check (#756) and a cast in the story (#18). Takes
+dice, minimum, maximum, and optionally input_id and purpose.{% endcomment %}
+<label>{{ dice }} rolled at the table (Game Master)
+    <input type="number" name="total"{% if input_id %} id="{{ input_id }}"{% endif %} min="{{ minimum }}" max="{{ maximum }}" aria-label="{{ dice }} rolled at the table{% if purpose %} for the {{ purpose }}{% endif %}">
+</label>
