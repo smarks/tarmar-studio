@@ -1168,7 +1168,8 @@ function rulingFromOption(option) {
  * a new Origin saved it and left the old origin's check on show until a
  * reload (issue #740). A response that does not carry every key is about
  * some other field and leaves the row alone. The roll control hides rather
- * than goes: a "Consult GM" origin has no check to roll, and changing the
+ * than goes: an origin the rules leave to the Game Master (the canon's
+ * location row with no literacy check) has no check to roll, and changing the
  * Origin again can make it usable (issue #741). The same response locks a
  * player's Origin select once the roll is made.
  *
@@ -1190,8 +1191,9 @@ function paintLiteracyRow(data) {
     if (origin) origin.disabled = !data.can_change_origin;
     const note = document.getElementById('origin-fixed-note');
     if (note) note.hidden = data.can_change_origin;
-    // A Game Master's ruling at "Consult GM" (#743): the control shows there
-    // and hides elsewhere, holding whatever ruling the server has.
+    // A Game Master's ruling at an origin the rules leave to him (#743): the
+    // server says where (can_rule_literacy); the control shows there and
+    // hides elsewhere, holding whatever ruling the server has.
     const rulingControl = document.getElementById('literacy-ruling-control');
     if (rulingControl) rulingControl.hidden = !data.can_rule_literacy;
     const rulingSelect = document.getElementById('literacy-ruling-select');

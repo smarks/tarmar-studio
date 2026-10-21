@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from characters.equipment_rules import equipment_rules
-from characters.rules import character_rules
+from characters.rules import character_rules, game_master_origins_in_words
 from characters.skill_rules import skill_rules
 from characters.skills import ARCANE_SKILL_NAME
 from common.number_words import number_in_words
@@ -207,24 +207,74 @@ def _origin_grant_moves() -> str:
     )
 
 
-def _location_help() -> str:
-    """The origin's help, with the grant's points and the literacy dice."""
+def _origin_grants() -> str:
+    """What each origin grants, read off the canon's location table (#151).
+
+    "City grants Street Smarts; Village grants Street Smarts or Survival —
+    your choice, rename the granted skill to switch; Rural grants Survival."
+    on the public pages; "" when no origin grants a skill.
+    """
+    grants = []
+    for row in character_rules().location.rows:
+        if not row.skills:
+            continue
+        grant = f"{row.label} grants {' or '.join(row.skills)}"
+        if len(row.skills) > 1:
+            grant += " — your choice, rename the granted skill to switch"
+        grants.append(grant)
+    return f" {'; '.join(grants)}." if grants else ""
+
+
+def _game_master_origin_help() -> str:
+    """What happens at an origin the rules leave to the Game Master, named as
+    the canon's location table names it (#151); "" when it has none."""
+    origins = game_master_origins_in_words(character_rules())
+    if not origins:
+        return ""
     return (
-        "Where your character grew up. City grants Street Smarts; Village grants "
-        "Street Smarts or Survival — your choice, rename the granted skill to "
-        "switch; Rural grants Survival. Changing the origin moves the grant: "
-        f"{_origin_grant_moves()}. Roll or choose the origin "
+        f" {origins} has no check to roll: the Game Master rules whether the "
+        "character can read, and that ruling fixes the origin the way a roll does."
+    )
+
+
+def _hardest_origin_help() -> str:
+    """Which origin makes letters hardest to come by, read off the canon's
+    location table: the one row with the largest literacy penalty (#151).
+
+    ", so the Rural origin makes letters hardest to come by" on the public
+    pages; "" when fewer than two origins have a check or the largest
+    penalty is shared, since then no one origin is hardest.
+    """
+    checked = [
+        row
+        for row in character_rules().location.rows
+        if row.literacy_modifier is not None
+    ]
+    if len(checked) < 2:
+        return ""
+    largest = max(row.literacy_modifier or 0 for row in checked)
+    hardest = [row.label for row in checked if row.literacy_modifier == largest]
+    if len(hardest) != 1:
+        return ""
+    return f", so the {hardest[0]} origin makes letters hardest to come by"
+
+
+def _location_help() -> str:
+    """The origin's help, with what each origin grants, the grant's points,
+    the literacy dice and the origin left to the Game Master, all from the
+    loaded canon."""
+    return (
+        f"Where your character grew up.{_origin_grants()} Changing the origin "
+        f"moves the grant: {_origin_grant_moves()}. Roll or choose the origin "
         "before rolling literacy; a rolled origin is final, and only a Game "
         "Master can change it. The literacy check is "
         "the check to read at all, not the Literacy skill, and the origin's "
         "number is a penalty on it — added to the "
         f"{character_rules().literacy_roll.dice} roll, equivalently taken "
-        "off INT, so letters are hardest to come by out in the country. Roll "
+        f"off INT{_hardest_origin_help()}. Roll "
         "it once with Roll literacy; a Game Master may roll it again. Once "
         "it is rolled only a Game Master can change the origin, and doing so "
-        "rolls literacy again against the new one. Consult GM has no check to "
-        "roll: the Game Master rules whether the character can read, and that "
-        "ruling fixes the origin the way a roll does."
+        f"rolls literacy again against the new one.{_game_master_origin_help()}"
     )
 
 

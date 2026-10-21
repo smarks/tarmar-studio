@@ -211,6 +211,19 @@ def _literacy_roll_reason() -> str:
     )
 
 
+def _origin_ruling_reason() -> str:
+    """Why a player may not set the Game Master's ruling on an origin (#801).
+
+    Names the origins the canon leaves to the Game Master, read off its
+    location table as the Games Master's words do (issue #151), not typed.
+    """
+    words = refusal_words().services
+    origins = game_master_origins_in_words(character_rules())
+    if not origins:
+        return words.origin_ruling_no_origin
+    return words.origin_ruling_game_master_only.format(origin=origins)
+
+
 def _said(pick: Callable[[ServicesWords], str]) -> Callable[[], str]:
     """A field reason read from the configured words each time it is asked
     (``config/characters-refusals.toml``, issue #85), never once at import."""
@@ -270,10 +283,8 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "literacy_ruling": _game_master(
             _said(lambda said: said.literacy_ruling_game_master_only)
         ),
-        # What a "Consult GM" origin is (#801): the Game Master's word again.
-        "origin_ruling": _game_master(
-            _said(lambda said: said.origin_ruling_game_master_only)
-        ),
+        # What an origin left to the Game Master is (#801): his word again.
+        "origin_ruling": _game_master(_origin_ruling_reason),
         # A people is the player's choice; nobody rolls one (#810).
         "people": _player(),
         # The Game Master's secret (#810), never the player's to set or see.
