@@ -19,6 +19,7 @@
 const {
     test, expect, loginAs, createBattleViaSetup, searchPicker, TEST_ADMIN, TEST_USER,
 } = require('./fixtures');
+const { uniqueName, uniqueStamp } = require('./unique-name');
 const { readDjangoJson } = require('./django');
 
 const ZONES = ['America/New_York', 'Asia/Kolkata'];
@@ -55,7 +56,7 @@ for (const timeZone of ZONES) {
 
         test('the battle list and the header show the instants in the reader\'s zone', async ({ page }) => {
             await loginAs(page, TEST_ADMIN);
-            const battleName = `E2E Zone ${timeZone.replace('/', ' ')} ${Date.now()}`;
+            const battleName = uniqueName(`E2E Zone ${timeZone.replace('/', ' ')}`);
             await createBattleViaSetup(page, { name: battleName, fighters: 2, seed: 42 });
             const held = readDjangoJson(`
 import json
@@ -81,7 +82,7 @@ print('HELD', json.dumps({'created': battle.created_at.isoformat(), 'signedIn': 
 
         test('without the script the list says UTC, so the fallback is not read as local time', async ({ page }) => {
             await loginAs(page, TEST_ADMIN);
-            const battleName = `E2E Fallback ${timeZone.replace('/', ' ')} ${Date.now()}`;
+            const battleName = uniqueName(`E2E Fallback ${timeZone.replace('/', ' ')}`);
             await createBattleViaSetup(page, { name: battleName, fighters: 2, seed: 42 });
             const created = readDjangoJson(`
 import json
@@ -100,8 +101,8 @@ print('HELD', json.dumps(Battle.objects.get(name=${JSON.stringify(battleName)}).
             expect(await spokenText(cell)).toBe(utcClock);
         });
 
-        test('a session a turn creates gets the server\'s rail row, in the reader\'s zone', async ({ adminPage: page }, testInfo) => {
-            const name = `Vane${testInfo.workerIndex}${Date.now()}`;
+        test('a session a turn creates gets the server\'s rail row, in the reader\'s zone', async ({ adminPage: page }) => {
+            const name = `Vane${uniqueStamp()}`;
             await page.goto('/tarmar/gm/');
             // A real turn against the fake Ollama; the session is made as it runs.
             await page.fill('#user-input', `We meet ${name} at the shrine`);
@@ -144,7 +145,7 @@ print('HELD', json.dumps(GMSession.objects.get(pk=${Number(sessionId)}).created_
 
         test('the session rail, the small-screen menu and the delete prompt say the reader\'s date, also after a search', async ({ page }) => {
             await loginAs(page, TEST_USER);
-            const sessionName = `Zoned ${timeZone.replace('/', ' ')} ${Date.now()}`;
+            const sessionName = uniqueName(`Zoned ${timeZone.replace('/', ' ')}`);
             const sessionId = readDjangoJson(`
 import json
 from django.contrib.auth import get_user_model

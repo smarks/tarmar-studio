@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { uniqueStamp } = require('./unique-name');
 const v8toIstanbul = require('v8-to-istanbul');
 
 const COVERAGE_DIR = path.join(__dirname, '..', '.nyc_output');
@@ -80,7 +81,7 @@ async function stopCoverage(page, testName) {
     // Save coverage data
     if (Object.keys(istanbulCoverage).length > 0) {
         const safeName = testName.replace(/[^a-z0-9]/gi, '_');
-        const coverageFile = path.join(COVERAGE_DIR, `coverage-${safeName}-${Date.now()}.json`);
+        const coverageFile = path.join(COVERAGE_DIR, `coverage-${safeName}-${uniqueStamp()}.json`);
         fs.writeFileSync(coverageFile, JSON.stringify(istanbulCoverage, null, 2));
     }
 }

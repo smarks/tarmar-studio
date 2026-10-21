@@ -13,6 +13,7 @@
 
 const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_USER, chooseToAttach } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { runDjangoShell, readDjangoShell } = require('./django');
 
 /** Leave a mark on the page that a reload would wipe. */
@@ -162,8 +163,8 @@ test.describe('GM panel — Battle tab', () => {
         await expect(page.locator('#restart-battle')).toHaveCount(0);
     });
 
-    test('a fight keeps the earlier turns the reader loaded: nothing reloads (#89)', async ({ page }, testInfo) => {
-        const name = `Brin ${testInfo.workerIndex}-${Date.now() % 100000}`;
+    test('a fight keeps the earlier turns the reader loaded: nothing reloads (#89)', async ({ page }) => {
+        const name = uniqueName('Brin');
         const sessionId = seedLongSessionWith(name);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
 
@@ -207,7 +208,7 @@ test.describe('GM panel — Battle tab', () => {
     });
 
     test('a death on the board is on the sheet before anyone says a word (#750)', async ({ page }, testInfo) => {
-        const name = `Dain ${testInfo.workerIndex}-${Date.now() % 100000}`;
+        const name = uniqueName('Dain');
         seedDyingCharacter(name);
         await page.goto('/tarmar/gm/');
         await chooseToAttach(page, name);

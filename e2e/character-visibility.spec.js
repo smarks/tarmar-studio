@@ -8,6 +8,7 @@
  */
 
 const { test, expect, loginAs, logout, createCharacter, TEST_USER, TEST_WATCHER } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test.describe('Character visibility', () => {
     test('owner flips public, another user reads it read-only, owner flips back', async ({ page }) => {
@@ -20,7 +21,7 @@ test.describe('Character visibility', () => {
         await expect(badge).toHaveText('Private');
 
         // Rename it so the read-only assertions look for something unique.
-        const name = `Public Figure ${Date.now()}`;
+        const name = uniqueName('Public Figure');
         const nameInput = page.locator('[data-field="name"] input');
         await nameInput.fill(name);
         await nameInput.blur();

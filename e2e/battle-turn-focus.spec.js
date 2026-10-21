@@ -16,6 +16,7 @@
 const {
     test, expect, createBattleViaSetup, escaped,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
 const focusKeyOfActiveElement = (page) =>
@@ -29,7 +30,7 @@ test.describe('Taking a turn from the keyboard', () => {
         async ({ adminPage }) => {
             test.setTimeout(120000);
             await createBattleViaSetup(adminPage, {
-                name: `E2E Turn focus ${Date.now()}`,
+                name: uniqueName('E2E Turn focus'),
                 fighters: 3,
                 seed: 42,
                 controlMode: 'manual',

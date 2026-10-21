@@ -72,6 +72,7 @@ const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
     loadedCanon, DEFAULT_CANON, escaped,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 const {
     BATTLE_SEED, PUSH_TURNS_SEED, WIZARD_SEED, pinTheTurns, claimAWizard, openTheWizardsStage,
@@ -249,7 +250,7 @@ test.describe('Pushing mana into a cast', () => {
         // canon the spec pins that this wizard is offered no push.
         await adminPage.goto('/tarmar/gm/');
         const pushOffered = (await loadedCanon(adminPage)) === DEFAULT_CANON;
-        const battleName = `E2E Push ${Date.now()}`;
+        const battleName = uniqueName('E2E Push');
 
         playerPage = await openTheWizardsStage(adminPage, browser, battleName, {
             beforeTurn: pushOffered
@@ -320,7 +321,7 @@ test.describe('Pushing mana into a cast', () => {
         await adminPage.goto('/tarmar/gm/');
         const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
         playerPage = await openTheWizardsStage(
-            adminPage, browser, `E2E Borrow ${Date.now()}`,
+            adminPage, browser, uniqueName('E2E Borrow'),
             { beforeTurn: emptyTheWizardsPool }
         );
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
@@ -388,7 +389,7 @@ test.describe('Pushing mana into a cast', () => {
         await adminPage.goto('/tarmar/gm/');
         const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
         playerPage = await openTheWizardsStage(
-            adminPage, browser, `E2E Runaway ${Date.now()}`,
+            adminPage, browser, uniqueName('E2E Runaway'),
             { beforeTurn: defaultCanon ? pinTheRunawayTurns : startARunaway }
         );
         const runawayLine = playerPage.locator('.combatant-runaway');
@@ -467,7 +468,7 @@ test.describe('Pushing mana into a cast', () => {
             const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
             const block = loadedCastingFailure();
             playerPage = await openTheWizardsStage(
-                adminPage, browser, `E2E Casting failure ${Date.now()}`,
+                adminPage, browser, uniqueName('E2E Casting failure'),
                 { beforeTurn: (battleId) => pinTheTurns(battleId, seed) }
             );
             const poolBefore = (await wizardsPool(playerPage).textContent()).trim();
@@ -512,7 +513,7 @@ test.describe('Pushing mana into a cast', () => {
         test.setTimeout(150000);
         await adminPage.goto('/tarmar/gm/');
         const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
-        const battleName = `E2E Counter ${Date.now()}`;
+        const battleName = uniqueName('E2E Counter');
         await createBattleViaSetup(adminPage, {
             name: battleName, seed: BATTLE_SEED, playerSeats: 2,
         });

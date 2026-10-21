@@ -9,11 +9,12 @@
  */
 
 const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell, runDjangoShell } = require('./django');
 
 test.describe('A dead character\'s sheet', () => {
-    test('allocating a point is refused with the reason, and nothing is spent', async ({ page }, testInfo) => {
-        const name = `Doomed${testInfo.workerIndex}x${Date.now() % 100000}`;
+    test('allocating a point is refused with the reason, and nothing is spent', async ({ page }) => {
+        const name = `Doomed${uniqueStamp()}`;
         const output = readDjangoShell(`
 from django.contrib.auth import get_user_model
 from characters.models import Character

@@ -13,6 +13,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -79,7 +80,7 @@ print("NAMES", json.dumps({
  */
 async function openTheChoosersMenu(page, withFar) {
     await createBattleViaSetup(page, {
-        name: `E2E Charge reach ${Date.now()}`,
+        name: uniqueName('E2E Charge reach'),
         fighters: Array(9).fill('unarmoured duelist'),
         seed: 42,
         controlMode: 'manual',

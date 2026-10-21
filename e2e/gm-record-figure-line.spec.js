@@ -12,10 +12,11 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 test.describe('GM chat — the record line fires beside an unrelated number', () => {
-    test('a weapon modifier in the reply does not pass for the level', async ({ adminPage: page }, testInfo) => {
-        const stamp = `${testInfo.workerIndex}${Date.now()}`;
+    test('a weapon modifier in the reply does not pass for the level', async ({ adminPage: page }) => {
+        const stamp = uniqueStamp();
         const brother = `Ledger${stamp}`;
         const sister = `Quire${stamp}`;
 

@@ -14,6 +14,7 @@
 const {
     test, expect, loginAs, TEST_USER, TEST_ADMIN, escaped,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { refusal } = require('./refusals');
 const { pinDice } = require('./dice');
@@ -40,11 +41,6 @@ print('CHARACTER', Character.objects.create(user=user, **values).pk)
     const match = output.match(/CHARACTER (\d+)/);
     expect(match, `no character id in: ${output}`).not.toBeNull();
     return match[1];
-}
-
-/** A name unique to this worker and moment. */
-function uniqueName(label, testInfo) {
-    return `${label} ${testInfo.workerIndex}${Date.now()}`;
 }
 
 /**
@@ -92,8 +88,8 @@ async function saveCell(page, field, value) {
 }
 
 test.describe('The sheet repaints without a reload', () => {
-    test('recording the last score completes the character: exports, attacks, movement (#763, #764)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Nearly', testInfo),
+    test('recording the last score completes the character: exports, attacks, movement (#763, #764)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Nearly'),
             "strength=None, equipment=[{'item_id': 'dagger', 'quantity': 1}], history=[]");
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -130,11 +126,11 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('.no-combat-log')).toBeHidden();
     });
 
-    test('a lower STR moves the encumbrance badge on the spot (#763)', async ({ page }, testInfo) => {
+    test('a lower STR moves the encumbrance badge on the spot (#763)', async ({ page }) => {
         // A tower shield against STR 14, then against STR 3: the server says
         // which level each is, and the two must differ for the test to mean
         // anything.
-        const characterId = seedCharacter(uniqueName('Laden', testInfo),
+        const characterId = seedCharacter(uniqueName('Laden'),
             "equipment=[{'item_id': 'tower_shield', 'quantity': 1}]");
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -147,7 +143,7 @@ test.describe('The sheet repaints without a reload', () => {
             .not.toBe(before.encumbrance_label);
     });
 
-    test('the picker offers the loaded catalog, and an added item moves the load and the gaits by the loaded rules (#75)', async ({ page }, testInfo) => {
+    test('the picker offers the loaded catalog, and an added item moves the load and the gaits by the loaded rules (#75)', async ({ page }) => {
         // The heaviest item the canon sells outside the armour, and a STR at
         // which carrying it costs movement and forbids a gait without
         // overloading; the server's own levels choose both.
@@ -155,7 +151,7 @@ test.describe('The sheet repaints without a reload', () => {
         expect(strength, `no STR puts ${heaviest.id} at a level that forbids a gait`).not.toBeNull();
         const equipment = loadedEquipment();
 
-        const characterId = seedCharacter(uniqueName('Loader', testInfo),
+        const characterId = seedCharacter(uniqueName('Loader'),
             `strength=${strength}, equipment=[]`);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -183,7 +179,7 @@ test.describe('The sheet repaints without a reload', () => {
         expect(sheet.movement_restriction_label).not.toBe('');
     });
 
-    test('worn armour forbids the gaits its loaded restriction code names (#75)', async ({ page }, testInfo) => {
+    test('worn armour forbids the gaits its loaded restriction code names (#75)', async ({ page }) => {
         // The lightest loaded armour whose restriction code forbids a gait.
         const codes = loadedEquipment().armour_restriction_codes;
         const restricting = group('armor').items.filter(
@@ -193,7 +189,7 @@ test.describe('The sheet repaints without a reload', () => {
             .toBeGreaterThan(0);
         const armour = [...restricting].sort((first, second) => first.weight - second.weight)[0];
         const forbidden = codes[armour.movement_restriction];
-        const characterId = seedCharacter(uniqueName('Armoured', testInfo),
+        const characterId = seedCharacter(uniqueName('Armoured'),
             `equipment=[{'item_id': '${armour.id}', 'quantity': 1, 'equipped': True}]`);
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -205,8 +201,8 @@ test.describe('The sheet repaints without a reload', () => {
         }
     });
 
-    test('a renamed skill is offered by the skill check under its new name (#765)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Herbalist', testInfo), "skills={'herbalism': 3}");
+    test('a renamed skill is offered by the skill check under its new name (#765)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Herbalist'), "skills={'herbalism': 3}");
         // A Game Master renames: the sheetrules batch holds a player's rename
         // to rules this repaint does not depend on (#768).
         await loginAs(page, TEST_ADMIN);
@@ -225,8 +221,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#skill-check-result')).toContainText('herb lore');
     });
 
-    test('an item added to an incomplete character lists at once with no error (#766)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Unfinished', testInfo),
+    test('an item added to an incomplete character lists at once with no error (#766)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Unfinished'),
             'strength=None, dexterity=None, constitution=None, fatigue_roll=None');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -241,8 +237,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#movement-modifier')).toHaveText('—');
     });
 
-    test('a failed catalog load says so, keeps the items listed, and retries (#797)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Offline', testInfo),
+    test('a failed catalog load says so, keeps the items listed, and retries (#797)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Offline'),
             "equipment=[{'item_id': 'backpack', 'quantity': 1}]");
         await loginAs(page, TEST_USER);
         await page.route('**/characters/equipment/catalog/', (route) => route.abort());
@@ -258,8 +254,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('.equipment-row .item-name')).toContainText('Backpack');
     });
 
-    test('a refused new skill keeps the name the player typed (#798)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Keeper', testInfo), 'free_skill_points=1');
+    test('a refused new skill keeps the name the player typed (#798)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Keeper'), 'free_skill_points=1');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
         await page.route('**/allocate-skill/', (route) => route.fulfill({
@@ -274,8 +270,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#new-skill-name')).toHaveValue('Herbalism');
     });
 
-    test('the weapon in hand drives the tiles and the Attack panel, and one shield counts (#804, #846)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Armed', testInfo), `equipment=[
+    test('the weapon in hand drives the tiles and the Attack panel, and one shield counts (#804, #846)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Armed'), `equipment=[
             {'item_id': 'broadsword', 'quantity': 1, 'to_hit_mod': 2},
             {'item_id': 'dagger', 'quantity': 1, 'to_hit_mod': 1},
             {'item_id': 'small_shield', 'quantity': 1},
@@ -302,8 +298,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#armor-stops')).toHaveText('1');
     });
 
-    test('a player buys nothing before the wealth roll (#851)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Unrolled Purse', testInfo), 'wealth_recorded=False');
+    test('a player buys nothing before the wealth roll (#851)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Unrolled Purse'), 'wealth_recorded=False');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
 
@@ -315,8 +311,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('.equipment-row')).toHaveCount(0);
     });
 
-    test('nonsense in Height is refused and the height stays as it was (#805)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Measured', testInfo), '');
+    test('nonsense in Height is refused and the height stays as it was (#805)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Measured'), '');
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/characters/${characterId}/`);
         const before = await page.locator('#height_display').textContent();
@@ -329,8 +325,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('#height_display')).toHaveText(before);
     });
 
-    test('an equipment edit keeps the weapon picked in the Attack panel (#846 review)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Picker', testInfo),
+    test('an equipment edit keeps the weapon picked in the Attack panel (#846 review)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Picker'),
             "equipment=[{'item_id': 'saber', 'quantity': 1}, {'item_id': 'dagger', 'quantity': 1}, {'item_id': 'torch', 'quantity': 1}]");
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -353,8 +349,8 @@ test.describe('The sheet repaints without a reload', () => {
     test.describe('in a zone away from UTC', () => {
         test.use({ timezoneId: 'America/New_York' });
 
-        test('Recent Changes rows added live read in the viewer\'s zone (#700 kept)', async ({ page }, testInfo) => {
-            const characterId = seedCharacter(uniqueName('Zoned', testInfo), 'history=[]');
+        test('Recent Changes rows added live read in the viewer\'s zone (#700 kept)', async ({ page }) => {
+            const characterId = seedCharacter(uniqueName('Zoned'), 'history=[]');
             await loginAs(page, TEST_ADMIN);
             await page.goto(`/tarmar/characters/${characterId}/`);
             await saveCell(page, 'charisma', 11);
@@ -364,11 +360,11 @@ test.describe('The sheet repaints without a reload', () => {
         });
     });
 
-    test('renaming the character renames the breadcrumb and the title (#792)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Firstname', testInfo), '');
+    test('renaming the character renames the breadcrumb and the title (#792)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Firstname'), '');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
-        const renamed = uniqueName('Secondname', testInfo);
+        const renamed = uniqueName('Secondname');
 
         await page.locator('#id_name').fill(renamed);
         await page.locator('#id_name').blur();
@@ -378,8 +374,8 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page).toHaveTitle(renamed);
     });
 
-    test('packing worn armour takes it off, and it stops counting (#869)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Packed Mail', testInfo),
+    test('packing worn armour takes it off, and it stops counting (#869)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Packed Mail'),
             "equipment=[{'item_id': 'chainmail', 'quantity': 1, 'equipped': True}]");
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -396,12 +392,12 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(page.locator('.equipment-row[data-index="0"] [data-field="in_pack"]')).not.toBeChecked();
     });
 
-    test('a fatal run of years leaves the dead character\'s controls, then a rename names the death card (#903)', async ({ page }, testInfo) => {
+    test('a fatal run of years leaves the dead character\'s controls, then a rename names the death card (#903)', async ({ page }) => {
         // Every score 3 is a best modifier of -5 against the Campaigner's 9.
         // The year's dice are pinned (issue #959): seed 3 rolls a d20 of 8,
         // then 3d6 of [5, 5, 2], and 12 - 5 = 7 misses the 9, so the first
         // year kills -- no longer a bet that twenty real years cannot all pass.
-        const characterId = seedCharacter(uniqueName('Doomed', testInfo),
+        const characterId = seedCharacter(uniqueName('Doomed'),
             'strength=3, dexterity=3, intelligence=3, wisdom=3, constitution=3, charisma=3');
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/characters/${characterId}/`);
@@ -429,14 +425,14 @@ test.describe('The sheet repaints without a reload', () => {
         await expect(playForm).toHaveCount(0);
         expect(await page.evaluate(() => window.notReloaded)).toBe(true);
 
-        const newName = uniqueName('Late', testInfo);
+        const newName = uniqueName('Late');
         await saveCell(page, 'name', newName);
         await expect(deathCard.locator('h3')).toHaveText(`${newName} died`);
         await expect(page).toHaveTitle(newName);
         expect(await page.evaluate(() => window.notReloaded)).toBe(true);
     });
 
-    test('a rename names the character in every place the sheet prints it (#903)', async ({ page }, testInfo) => {
+    test('a rename names the character in every place the sheet prints it (#903)', async ({ page }) => {
         // The player's own character, dying (the survival save offered) and
         // held at a Game Master's table (the sessions holding it listed).
         const output = readDjangoShell(`
@@ -445,7 +441,7 @@ from characters.models import Character
 from common.test_helpers import CHARACTER_DEFAULTS
 from gm.models import GMSession
 users = get_user_model().objects
-values = dict(CHARACTER_DEFAULTS, name='${uniqueName('Wounded', testInfo)}')
+values = dict(CHARACTER_DEFAULTS, name='${uniqueName('Wounded')}')
 character = Character.objects.create(user=users.get(username='${TEST_USER.username}'), **values)
 character.body_damage = character.body + (character.body + 1) // 2
 character.save()
@@ -469,7 +465,7 @@ print('CHARACTER', character.pk)
         await saveCell(page, 'height_roll', 5);
         expect(await page.evaluate((selector) => document.querySelector(selector).kept, slotSelector)).toBe(true);
 
-        const newName = uniqueName('Renamed', testInfo);
+        const newName = uniqueName('Renamed');
         await saveCell(page, 'name', newName);
 
         await expect(page).toHaveTitle(newName);
@@ -485,8 +481,8 @@ print('CHARACTER', character.pk)
         expect(await page.evaluate(() => window.notReloaded)).toBe(true);
     });
 
-    test('a player cannot start a skill no rule names (#862)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Brawler', testInfo), 'free_skill_points=1');
+    test('a player cannot start a skill no rule names (#862)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Brawler'), 'free_skill_points=1');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);
 
@@ -503,8 +499,8 @@ print('CHARACTER', character.pk)
         await expect(page.locator('#free-points')).toHaveText('0');
     });
 
-    test('a Village player\'s choice of Survival is recorded as theirs, not a Game Master\'s call (#67)', async ({ page }, testInfo) => {
-        const characterId = seedCharacter(uniqueName('Villager', testInfo),
+    test('a Village player\'s choice of Survival is recorded as theirs, not a Game Master\'s call (#67)', async ({ page }) => {
+        const characterId = seedCharacter(uniqueName('Villager'),
             "location='Village', origin_skill='street smarts', skills={'street smarts': 1}");
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/characters/${characterId}/`);

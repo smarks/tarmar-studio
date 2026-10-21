@@ -13,12 +13,13 @@ const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createNamedCharacter,
     createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
+const { uniqueName, uniqueStamp } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 
 test.describe('Battle setup', () => {
     test('DM builds a mixed roster with a saved character, round-trips the editor, and starts', async ({ adminPage }) => {
         test.setTimeout(120000);
-        const stamp = Date.now();
+        const stamp = uniqueStamp();
         const battleName = `E2E Muster ${stamp}`;
         const characterName = `E2E Morwen ${stamp}`;
         await createNamedCharacter(adminPage, characterName);
@@ -95,7 +96,7 @@ test.describe('Battle setup', () => {
         await adminPage.waitForURL(/\/tarmar\/characters\/create\/\?next=/);
         await adminPage.click('button:has-text("Roll a New Character")');
         await adminPage.waitForURL(/\/tarmar\/characters\/\d+\/\?next=/);
-        const characterName = `E2E Fresh ${Date.now()}`;
+        const characterName = uniqueName('E2E Fresh');
         await adminPage.fill('#id_name', characterName);
         await adminPage.locator('#id_name').blur();
         await expect(adminPage.locator('.name-field')).toHaveClass(/saved/);
@@ -130,7 +131,7 @@ test.describe('Battle setup', () => {
 
     test('a player claims a lobby seat with their own saved character', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);
-        const stamp = Date.now();
+        const stamp = uniqueStamp();
         const battleName = `E2E Own Character ${stamp}`;
         const characterName = `E2E Aldwin ${stamp}`;
 

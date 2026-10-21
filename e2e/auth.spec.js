@@ -3,6 +3,7 @@
  */
 
 const { test, expect, TEST_USER, loginAs, logout } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 
 test.describe('Authentication', () => {
     test('shows login page', async ({ page }) => {
@@ -69,7 +70,7 @@ test.describe('Registration', () => {
     test('rejects mismatched passwords', async ({ page }) => {
         await page.goto('/tarmar/accounts/register/');
         // Use unique username to avoid "username exists" error
-        const uniqueUsername = `testuser_${Date.now()}`;
+        const uniqueUsername = `testuser_${uniqueStamp()}`;
         await page.fill('input[name="username"]', uniqueUsername);
         await page.fill('input[name="password1"]', 'testpass123');
         await page.fill('input[name="password2"]', 'different123');

@@ -12,6 +12,7 @@
 
 const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_ADMIN, TEST_USER } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { loadedSkillRules } = require('./skill-rules');
 
@@ -68,10 +69,10 @@ print('REFUSALS ' + json.dumps(errors))
 }
 
 test.describe('GM chat — a Game Master records deaths, XP, coin and skill checks', () => {
-    test('a stated attribute check is held to the canon\'s dice and modifier limit (#70)', async ({ page }, testInfo) => {
+    test('a stated attribute check is held to the canon\'s dice and modifier limit (#70)', async ({ page }) => {
         // Read from the loaded canon, so this holds under either canon.
         const { attribute_check: check } = loadedSkillRules();
-        const name = `Wren${testInfo.workerIndex}x${Date.now() % 100000}`;
+        const name = `Wren${uniqueStamp()}`;
         const { sessionId } = seedSession(name);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
@@ -112,7 +113,7 @@ test.describe('GM chat — a Game Master records deaths, XP, coin and skill chec
     });
 
     test('each is a chip in the chat and a change on the record', async ({ page }, testInfo) => {
-        const name = `Gorn${testInfo.workerIndex}x${Date.now() % 100000}`;
+        const name = `Gorn${uniqueStamp()}`;
         const { sessionId, characterId } = seedSession(name);
         await loginAs(page, TEST_ADMIN);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);
@@ -152,8 +153,8 @@ print('RECORD', c.total_xp, format_purse(c), c.is_alive, c.death_cause)
             .toContainText('fell from the tower');
     });
 
-    test('a player asking for the same records is told only the Game Master can', async ({ page }, testInfo) => {
-        const name = `Wren${testInfo.workerIndex}x${Date.now() % 100000}`;
+    test('a player asking for the same records is told only the Game Master can', async ({ page }) => {
+        const name = `Wren${uniqueStamp()}`;
         const { sessionId, characterId } = seedSession(name, TEST_USER, 'play');
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);

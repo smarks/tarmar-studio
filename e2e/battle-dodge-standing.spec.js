@@ -11,6 +11,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -74,7 +75,7 @@ async function awaited(page, previous) {
 test.describe('The DODGE line', () => {
     test('says standing for a boxed-in archer and jogging for an open one', async ({ adminPage: page }) => {
         await createBattleViaSetup(page, {
-            name: `E2E Dodge standing ${Date.now()}`,
+            name: uniqueName('E2E Dodge standing'),
             fighters: Array(8).fill('unarmoured duelist'),
             seed: 42,
             controlMode: 'manual',

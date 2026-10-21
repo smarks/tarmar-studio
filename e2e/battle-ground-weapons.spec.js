@@ -10,6 +10,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 /**
@@ -42,7 +43,7 @@ print("LAID", len(state.ground_weapons))
 test.describe('Weapons lying on the field', () => {
     test('the arena draws and names them, and a pick-up moves them', async ({ adminPage: page }) => {
         await createBattleViaSetup(page, {
-            name: `E2E Ground ${Date.now()}`,
+            name: uniqueName('E2E Ground'),
             fighters: ['unarmoured duelist', 'unarmoured duelist'],
             seed: 42,
             controlMode: 'manual',

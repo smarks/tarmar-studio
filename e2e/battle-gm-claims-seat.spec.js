@@ -7,9 +7,10 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 test('a Game Master sees and uses Claim this seat in a lobby', async ({ adminPage: page }) => {
-    const battleName = `E2E GM Seat ${Date.now()}`;
+    const battleName = uniqueName('E2E GM Seat');
     await createBattleViaSetup(page, { name: battleName, fighters: 1, seed: 7, playerSeats: 1 });
     await expect(page.locator('#battle-status')).toHaveText('Lobby');
 

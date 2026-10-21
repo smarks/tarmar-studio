@@ -20,6 +20,7 @@
  */
 
 const { test, expect, createBattleViaSetup } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { menuWords, sentencePattern } = require('./turn-menu');
 
 /**
@@ -43,7 +44,7 @@ async function openWhoDecides(page) {
 
 test.describe('Battle control modes', () => {
     test('an automatic battle plays with nothing but Advance clicks', async ({ adminPage }) => {
-        const battleName = `E2E Automatic ${Date.now()}`;
+        const battleName = uniqueName('E2E Automatic');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 2,
@@ -75,7 +76,7 @@ test.describe('Battle control modes', () => {
     });
 
     test('a mixed battle stops at the manual figure and names it', async ({ adminPage }) => {
-        const battleName = `E2E Mixed ${Date.now()}`;
+        const battleName = uniqueName('E2E Mixed');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 3,
@@ -132,7 +133,7 @@ test.describe('Battle control modes', () => {
     });
 
     test('handing the awaited figure to the AI unsticks the battle', async ({ adminPage }) => {
-        const battleName = `E2E Handback ${Date.now()}`;
+        const battleName = uniqueName('E2E Handback');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 2,
@@ -167,7 +168,7 @@ test.describe('Battle control modes', () => {
     });
 
     test('set every combatant to follow the battle clears the overrides', async ({ adminPage }) => {
-        const battleName = `E2E SetAll ${Date.now()}`;
+        const battleName = uniqueName('E2E SetAll');
         await createBattleViaSetup(adminPage, {
             name: battleName,
             fighters: 3,

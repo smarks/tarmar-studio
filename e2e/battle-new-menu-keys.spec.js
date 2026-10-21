@@ -13,6 +13,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 /**
  * Start a two-duelist battle played by hand and stop at the first figure.
@@ -23,7 +24,7 @@ const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
  */
 async function firstManualTurn(page, label) {
     await createBattleViaSetup(page, {
-        name: `E2E ${label} ${Date.now()}`,
+        name: uniqueName(`E2E ${label}`),
         fighters: ['unarmoured duelist', 'unarmoured duelist'],
         seed: 42,
         controlMode: 'manual',

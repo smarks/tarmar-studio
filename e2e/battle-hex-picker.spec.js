@@ -8,6 +8,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { menuWords, menuLine } = require('./turn-menu');
 
 /**
@@ -19,7 +20,7 @@ const { menuWords, menuLine } = require('./turn-menu');
  */
 async function firstManualTurn(page, label) {
     await createBattleViaSetup(page, {
-        name: `E2E ${label} ${Date.now()}`,
+        name: uniqueName(`E2E ${label}`),
         fighters: ['unarmoured duelist', 'unarmoured duelist'],
         seed: 42,
         controlMode: 'manual',

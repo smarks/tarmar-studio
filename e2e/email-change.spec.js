@@ -16,6 +16,7 @@
  */
 
 const { test, expect, loginAs, TEST_ADMIN } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell, runDjangoShell } = require('./django');
 const { missingMailMessage, takeMessageTo } = require('./mail');
 
@@ -36,8 +37,8 @@ async function awaitMessageTo(address) {
     return message;
 }
 
-test('a new email address replaces the old one only through its link', async ({ page, browser }, testInfo) => {
-    const username = `e2e_mail_${testInfo.parallelIndex}_${Date.now()}`.slice(0, 25);
+test('a new email address replaces the old one only through its link', async ({ page, browser }) => {
+    const username = `e2e_mail_${uniqueStamp()}`;
     const oldEmail = `${username}-old@example.test`;
     const newEmail = `${username}-new@example.test`;
     runDjangoShell(`
@@ -106,8 +107,8 @@ get_user_model().objects.filter(username=${JSON.stringify(username)}).delete()
     }
 });
 
-test('an Admin sets another account\'s address, which lands unconfirmed', async ({ page, browser }, testInfo) => {
-    const username = `e2e_aset_${testInfo.parallelIndex}_${Date.now()}`.slice(0, 25);
+test('an Admin sets another account\'s address, which lands unconfirmed', async ({ page, browser }) => {
+    const username = `e2e_aset_${uniqueStamp()}`;
     const oldEmail = `${username}-old@example.test`;
     const newEmail = `${username}-new@example.test`;
     const output = readDjangoShell(`

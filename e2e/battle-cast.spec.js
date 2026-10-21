@@ -13,6 +13,7 @@
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { readDjangoShell } = require('./django');
 const { menuWords } = require('./turn-menu');
@@ -90,7 +91,7 @@ print("CHOSEN " + json.dumps({"spell_key": chosen["spell_key"], "target_id": cho
 test.describe('Wizard cast flow', () => {
     test('a seated wizard declares, inspects, stands down, then casts', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);
-        const battleName = `E2E Cast ${Date.now()}`;
+        const battleName = uniqueName('E2E Cast');
 
         // A battle with one AI opponent and one seat for the wizard.
         await createBattleViaSetup(adminPage, {
@@ -184,7 +185,7 @@ test.describe('Wizard cast flow', () => {
         let battleId = 0;
         let foes = [];
         const playerPage = await openTheWizardsStage(
-            adminPage, browser, `E2E Cast two foes ${Date.now()}`, {
+            adminPage, browser, uniqueName('E2E Cast two foes'), {
                 fighters: 2,
                 beforeTurn: (id) => {
                     battleId = id;

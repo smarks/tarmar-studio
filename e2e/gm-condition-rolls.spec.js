@@ -13,6 +13,7 @@
  */
 
 const { test, expect, loginAs, TEST_USER } = require('./fixtures');
+const { uniqueStamp } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 /**
@@ -49,8 +50,8 @@ async function send(page, message) {
 }
 
 test.describe('GM chat — rolls and the character\'s wounds', () => {
-    test('an injured check counts the penalty and a dying character rolls one save', async ({ page }, testInfo) => {
-        const stamp = `${testInfo.workerIndex}x${testInfo.repeatEachIndex}x${Date.now() % 100000}`;
+    test('an injured check counts the penalty and a dying character rolls one save', async ({ page }) => {
+        const stamp = uniqueStamp();
         const sessionId = seedSession(stamp);
         await loginAs(page, TEST_USER);
         await page.goto(`/tarmar/gm/?session=${sessionId}`);

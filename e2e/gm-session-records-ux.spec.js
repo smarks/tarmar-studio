@@ -16,6 +16,7 @@
  */
 
 const { test, expect, loginAs, TEST_USER, TEST_ADMIN, chooseToAttach } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { runDjangoShell, readDjangoShell } = require('./django');
 
 /** A character for ``owner`` whose first turn on the board is their last. */
@@ -119,7 +120,7 @@ test.describe('GM session — the chat reads back as it was played', () => {
 
 test.describe('GM session — a fight on the board', () => {
     test('is named from its sides and says how it ended, in the pane and the chat (#831, #785)', async ({ page }, testInfo) => {
-        const name = `Dain ${testInfo.workerIndex}-${Date.now() % 100000}`;
+        const name = uniqueName('Dain');
         seedDyingCharacter(TEST_ADMIN.username, name);
         await loginAs(page, TEST_ADMIN);
         await page.goto('/tarmar/gm/');
@@ -306,7 +307,7 @@ test.describe('GM session — a correction being typed survives a turn (#16)', (
     }
 
     function seedThreads(texts) {
-        return seedSession(TEST_ADMIN.username, `Correct mid-turn E2E ${Date.now()}`, texts
+        return seedSession(TEST_ADMIN.username, uniqueName('Correct mid-turn E2E'), texts
             .map((text) => `run_actions(session, {'action': 'open_thread', 'text': ${JSON.stringify(text)}})`)
             .join('\n'));
     }

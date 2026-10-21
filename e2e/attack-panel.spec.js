@@ -17,6 +17,7 @@
 const {
     test, expect, loginAs, seedCharacterFromExport, TEST_USER,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const {
     loadedEquipment, group, item, targetNumber: serverTargetNumber,
 } = require('./equipment-rules');
@@ -214,7 +215,7 @@ test.describe('Attack Resolution panel', () => {
             ...ATTACK_CHARACTER,
             data: {
                 ...ATTACK_CHARACTER.data,
-                name: `Archer ${Date.now()}`,
+                name: uniqueName('Archer'),
                 skills: { archery: 6 },
                 equipment: [
                     { item_id: missile.id, quantity: 1 },

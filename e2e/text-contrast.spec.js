@@ -23,6 +23,7 @@
 const {
     test, expect, loginAs, createNamedCharacter, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 
 //: WCAG 2.x AA for body text, the threshold common/css_contrast.py holds to.
@@ -133,7 +134,7 @@ async function expectReadableAtEveryWidth(page, url, selectors, prepare) {
     }
 }
 
-test('the gold the battle pages write in reads on the ground behind it', async ({ page }, testInfo) => {
+test('the gold the battle pages write in reads on the ground behind it', async ({ page }) => {
     test.setTimeout(120000);
     // .setup-stage-numeral, .muster-index and .control-default were
     // --colour-accent-gold-strong (#a8871f), 3.41:1 on white: a gold picked to
@@ -152,7 +153,7 @@ test('the gold the battle pages write in reads on the ground behind it', async (
 
     await expectReadableAtEveryWidth(page, setupUrl, ['.setup-stage-numeral', '.muster-index']);
 
-    await page.fill('input[name="name"]', `Contrast Gold ${testInfo.workerIndex}${Date.now()}`);
+    await page.fill('input[name="name"]', uniqueName('Contrast Gold'));
     await page.fill('input[name="seed"]', '7');
     await page.click('.setup-begin');
     await page.waitForURL(/\/tarmar\/battles\/\d+\/$/);
@@ -160,14 +161,14 @@ test('the gold the battle pages write in reads on the ground behind it', async (
     await expectReadableAtEveryWidth(page, page.url(), ['.control-default']);
 });
 
-test('the green an equipped item is marked with reads on the row behind it', async ({ page }, testInfo) => {
+test('the green an equipped item is marked with reads on the row behind it', async ({ page }) => {
     test.setTimeout(120000);
     // .equipment-row .item-equipped was --colour-sheet-positive (#16a34a),
     // 3.30:1 on the white row.
     // A Game Master, who can give the armour: gear is bought now (issue
     // #757), and a rolled purse can be too small for any armour.
     await loginAs(page, TEST_ADMIN);
-    await createNamedCharacter(page, `Contrast Green ${testInfo.workerIndex}${Date.now()}`);
+    await createNamedCharacter(page, uniqueName('Contrast Green'));
     const editorUrl = page.url();
     // Armour, because the equipped marker is what the green is printed on.
     await page.selectOption('#equipment-category', 'armor');
@@ -186,7 +187,7 @@ test('the green an equipped item is marked with reads on the row behind it', asy
  * chat box's placeholder grey at 2.85:1.
  */
 
-test('white on the teal fill reads, on an open help summary', async ({ page }, testInfo) => {
+test('white on the teal fill reads, on an open help summary', async ({ page }) => {
     test.setTimeout(120000);
     // --colour-accent-teal was #4a90a2: 3.62:1 under --colour-surface, which
     // is the 3:1 WCAG allows for large text, and neither place that carries
@@ -199,7 +200,7 @@ test('white on the teal fill reads, on an open help summary', async ({ page }, t
     // which needs fifty-one characters to show a second page -- past what a
     // spec can seed against the import limiter.
     await loginAs(page, TEST_USER);
-    await createNamedCharacter(page, `Contrast Teal ${testInfo.workerIndex}${Date.now()}`);
+    await createNamedCharacter(page, uniqueName('Contrast Teal'));
 
     await expectReadableAtEveryWidth(
         page,

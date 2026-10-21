@@ -15,6 +15,7 @@
  */
 
 const { test, expect } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 
 // Shipped catalog rows. The snapping turtle's source entry carries no
 // attacks at all; the dire wolf's carries a bite of 1d6+1.
@@ -52,7 +53,7 @@ test.describe('A beast with no modelled attack', () => {
         await expect(modelled.locator('.muster-note')).not.toContainText(NOTE);
 
         // March, and read the same two figures off the arena's roster.
-        await adminPage.fill('input[name="name"]', `E2E Beast attack ${Date.now()}`);
+        await adminPage.fill('input[name="name"]', uniqueName('E2E Beast attack'));
         await adminPage.locator('input[name="name"]').blur();
         await adminPage.click('.setup-begin');
         await adminPage.waitForURL(/\/tarmar\/battles\/\d+\/$/);

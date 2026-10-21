@@ -11,11 +11,12 @@
 const {
     test, expect, TEST_USER, submitPassphrase, createBattleViaSetup,
 } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage } = require('./coverage');
 
 test('a signed-out visitor is sent to sign in, then lands on the battle', async ({ adminPage, browser }) => {
     test.setTimeout(120000);
-    const battleName = `E2E Sign In ${Date.now()}`;
+    const battleName = uniqueName('E2E Sign In');
     await createBattleViaSetup(adminPage, { name: battleName, fighters: 2, seed: 71 });
     const battlePath = new URL(adminPage.url()).pathname;
     expect(battlePath).toMatch(/\/tarmar\/battles\/\d+\/$/);

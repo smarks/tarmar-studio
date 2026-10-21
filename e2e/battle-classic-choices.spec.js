@@ -9,6 +9,7 @@
  */
 
 const { test, expect, createBattleViaSetup, escaped } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
 const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 
@@ -41,7 +42,7 @@ print("NAMES", json.dumps([figure.name for figure in game.figures]))
 test.describe('Choosing a classic turn by hand', () => {
     test('each option reads as a choice, and the scoring is behind the switch', async ({ adminPage: page }) => {
         await createBattleViaSetup(page, {
-            name: `E2E Classic Choices ${Date.now()}`,
+            name: uniqueName('E2E Classic Choices'),
             fighters: 2,
             seed: 890,
             controlMode: 'manual',

@@ -15,6 +15,7 @@
 
 const { refusal } = require('./refusals');
 const { test, expect } = require('./fixtures');
+const { uniqueName } = require('./unique-name');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { E2E_GUEST_BATTLE_PREFIX, resetGuestBattleRate } = require('./cleanup');
 
@@ -38,7 +39,7 @@ test.describe('Guest arena', () => {
     test('a visitor with no account and no passphrase plays a battle', async ({ browser }, testInfo) => {
         test.setTimeout(120000);
         const { context, page } = await openAsGuest(browser);
-        const battleName = `${E2E_GUEST_BATTLE_PREFIX}Bout ${Date.now()}`;
+        const battleName = uniqueName(`${E2E_GUEST_BATTLE_PREFIX}Bout`);
 
         // The arena opens on arrival — no gate form anywhere on the way.
         await page.goto('/tarmar/battles/');
@@ -99,7 +100,7 @@ test.describe('Guest arena', () => {
     test('a guest lobby offers a generated fighter and explains what it will not offer', async ({ browser }, testInfo) => {
         test.setTimeout(120000);
         const { context, page } = await openAsGuest(browser);
-        const battleName = `${E2E_GUEST_BATTLE_PREFIX}Seat ${Date.now()}`;
+        const battleName = uniqueName(`${E2E_GUEST_BATTLE_PREFIX}Seat`);
 
         await page.goto('/tarmar/battles/');
         await page.click('.battle-list-masthead button[type="submit"]');
