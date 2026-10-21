@@ -36,7 +36,10 @@ test('a blip on the visibility toggle puts the checkbox back and says so', async
     await createNamedCharacter(page, name);
 
     await page.route('**/set-visibility/', (route) => route.abort('failed'));
-    await page.locator('#visibility-toggle').check();
+    // A click, not check(): the abort lands at once, and the page puts the
+    // box back before check() can see it changed (issue #137). What the box
+    // ends on is asserted below.
+    await page.locator('#visibility-toggle').click();
 
     await expect(page.locator('.notice')).toContainText('Network error');
     // The badge is what the server last confirmed; the box agrees with it again.
