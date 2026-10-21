@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
+from characters.rules import character_rules, game_master_origins_in_words
 from characters.skill_rules import skill_rules
 from reference.rules_file import derived_from_rules
 
@@ -128,10 +129,21 @@ SETTLED_REASONS: frozenset[str] = frozenset(
 def refusal_text(reason: str) -> str:
     """The configured words of the policy refusal ``reason``, or ``""``.
 
+    The literacy ruling's names the canon's origins left to the Game Master
+    when it has any (``literacy_ruling_origin``, issue #128).
+
     Args:
         reason: One of the ``REASON_*`` keys, or ``""`` for no refusal.
     """
-    return getattr(refusal_words().policy, reason) if reason else ""
+    if not reason:
+        return ""
+    words = refusal_words().policy
+    text = getattr(words, reason)
+    if reason == REASON_LITERACY_RULING:
+        origins = game_master_origins_in_words(character_rules())
+        if origins:
+            text += words.literacy_ruling_origin.format(origin=origins)
+    return text
 
 
 #: What to do instead, where the rules offer something. A player may not
@@ -139,12 +151,24 @@ def refusal_text(reason: str) -> str:
 #: dead end into the next step.
 INSTEAD_OF: dict[str, str] = {
     "record_attributes": "plan roll_attributes: a player's scores are rolled",
-    "rule_literacy": (
-        "plan roll_literacy where the Origin has a check, or say that at "
-        "Consult GM the Game Master decides"
-    ),
+    "rule_literacy": "plan roll_literacy where the Origin has a check",
     "roll_fatigue": 'plan roll_fatigue with no "value": a player\'s is rolled',
 }
+
+
+def _remedy(action: str) -> str | None:
+    """What :data:`INSTEAD_OF` offers for ``action``, with the canon's
+    origins left to the Game Master named after ``rule_literacy``'s (#128).
+
+    Args:
+        action: The refused action's name.
+    """
+    remedy = INSTEAD_OF.get(action)
+    if action == "rule_literacy" and remedy:
+        origins = game_master_origins_in_words(character_rules())
+        if origins:
+            remedy += f", or say that at {origins} the Game Master decides"
+    return remedy
 
 
 def already_refused_error(action: str, reason: str) -> str:
@@ -153,7 +177,7 @@ def already_refused_error(action: str, reason: str) -> str:
         f"{action} was already refused in this session, because {reason}. "
         "That will not change by asking again"
     )
-    remedy = INSTEAD_OF.get(action)
+    remedy = _remedy(action)
     return f"{said}; {remedy}" if remedy else f"{said}; do something else instead"
 
 

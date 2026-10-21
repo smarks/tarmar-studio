@@ -23,9 +23,9 @@ Left as code, for stages 6 and 7 or because no rules file holds them yet:
   default and Tarmar canons' tracks that no rules file carries;
 - the currency line, the Appearance roll, and the d20 track table's 20
   entries (``characters.skill_rules.TRACK_TABLE_DIE_FACES``);
-- the plan format's illustrative values (a provenance, Location and Wealth, a
-  difficulty, a skill, an item), and the quoted examples in the outcomes and
-  authority sections.
+- the plan format's illustrative values (a provenance, a difficulty, a skill,
+  an item; its Location and Wealth are the canon's rows since issue #128),
+  and the quoted examples in the outcomes and authority sections.
 """
 
 import functools
@@ -64,7 +64,13 @@ from characters.equipment_rules import (
     equipment_catalog,
     equipment_rules,
 )
-from characters.rules import CharacterRules, character_rules, social_class_display
+from characters.rules import (
+    PROMPT_OR_WORD,
+    CharacterRules,
+    character_rules,
+    game_master_origins_in_words,
+    social_class_display,
+)
 from characters.skill_rules import skill_rules
 from characters.skills import (
     calculate_attribute_modifier,
@@ -93,13 +99,6 @@ logger = logging.getLogger(__name__)
 # (default of settings.RULES_DIR) and the offline CLI (cli/gm.py). The path
 # itself is derived once, in reference.paths.
 DEFAULT_RULES_DIR = PUBLIC_RULES_DIR
-
-#: The word between the canon's natural totals in the prompt ("17 or 18",
-#: :func:`battle.magic_rules.totals_in_words`). The prompt's own, not the
-#: battle page's configured ``common.or_word``: this module is imported by the
-#: offline CLI with no Django, and so no settings to read that word from
-#: (``GMServiceTest.test_engine_imports_without_django``).
-PROMPT_OR_WORD = "or"
 
 
 def _render_matrix_fragment(
@@ -423,9 +422,53 @@ def _render_origin_choices(rules: CharacterRules) -> str:
     """The origins the model may state, "City/Village/Rural": the canon's
     location rows that have a literacy check, the row the rules leave to the
     Game Master left out, as the prompt has always left it out (issue #66)."""
-    return "/".join(
-        row.label for row in rules.location.rows if row.literacy_modifier is not None
+    return "/".join(rules.location.checked_origins)
+
+
+def _render_game_master_origin_sentence(rules: CharacterRules) -> str:
+    """ "An Origin of Consult GM has no check: the Game Master decides. ", from
+    the canon's location rows with no literacy check; "" when it has none
+    (#128).
+
+    Args:
+        rules: The canon's character rules.
+    """
+    origins = game_master_origins_in_words(rules)
+    if not origins:
+        return ""
+    return f"An Origin of {origins} has no check: the Game Master decides. "
+
+
+def _render_rule_literacy_example(rules: CharacterRules) -> str:
+    """The plan format's ``rule_literacy`` line, naming the canon's origins
+    left to the Game Master; "" when it has none, since no ruling could be
+    recorded (#128).
+
+    Args:
+        rules: The canon's character rules.
+    """
+    origins = game_master_origins_in_words(rules)
+    if not origins:
+        return ""
+    return (
+        '- {"action": "rule_literacy", "character_id": 41, "literate": true} '
+        "records the Game Master's ruling on whether a character whose Origin "
+        f"is {origins} can read (false for cannot). Only the Game Master "
+        "rules it, and only there: every other Origin has a check to roll.\n"
     )
+
+
+def _set_background_example(rules: CharacterRules) -> str:
+    """The plan format's ``set_background`` values, from the canon's rows
+    (#128): the first Origin a message may state (the first with a literacy
+    check, else the canon's default) and the canon's default Wealth.
+
+    Args:
+        rules: The canon's character rules.
+    """
+    stated_origins = rules.location.checked_origins
+    location = stated_origins[0] if stated_origins else rules.defaults.location
+    return f'"location": "{location}", "wealth": "{rules.defaults.wealth}"'
 
 
 def _render_provenance_fragment() -> str:
@@ -546,8 +589,8 @@ def section_character_creation() -> str:
         "be literate at all, "
         f"rolled once on {rules.literacy_roll.dice} for the player like any "
         "other creation roll; a "
-        "player's Origin is fixed once it is rolled or ruled. An Origin of "
-        "Consult GM has no check: the Game Master decides. That check decides "
+        "player's Origin is fixed once it is rolled or ruled. "
+        f"{_render_game_master_origin_sentence(rules)}That check decides "
         "whether a character can read; the Literacy skill is only how well.\n"
         "4. Optional Prior Experience, bought a year at a time from age "
         f"{rules.age.starting}: each "
@@ -2044,10 +2087,7 @@ def section_plan_schema() -> str:
         "Origin. The list gives a "
         "character's literacy once it is rolled or ruled; a character with no "
         "literacy in the list has not rolled it.\n"
-        '- {"action": "rule_literacy", "character_id": 41, "literate": true} '
-        "records the Game Master's ruling on whether a character whose Origin "
-        "is Consult GM can read (false for cannot). Only the Game Master "
-        "rules it, and only there: every other Origin has a check to roll.\n"
+        f"{_render_rule_literacy_example(rules)}"
         '- {"action": "roll_background", "character_id": 41} rolls a listed '
         "character's Location, Provenance and Wealth on their tables again. A "
         "new character's are rolled as it is made, so a plan that makes one "
@@ -2077,7 +2117,7 @@ def section_plan_schema() -> str:
         '- {"action": "rename_character", "character_id": 41, "name": '
         '"Thread"}\n'
         '- {"action": "set_background", "character_id": 41, "provenance": '
-        '"merchant", "location": "City", "wealth": "Moderate"}: any of the '
+        f'"merchant", {_set_background_example(rules)}}}: any of the '
         "three. For a character the same plan makes, name it with "
         '"new_character_ref": "Twain" instead of "character_id"; a Location '
         "the message states goes here then, before any literacy roll.\n"

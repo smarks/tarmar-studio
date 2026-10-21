@@ -34,7 +34,7 @@ from battle.tests.magic_fixtures import (
     seated_rules,
 )
 from characters.equipment_rules import EncumbranceLevel, EncumbranceRules
-from characters.rules import FatigueRollRules
+from characters.rules import FatigueRollRules, LocationRow, LocationTable
 from characters.skill_rules import SkillRules, SkillTrackRules
 from characters.skills import MAX_EXPERIENCE_YEARS_PER_RUN
 from characters.tests.rules_fixtures import (
@@ -542,6 +542,86 @@ class InventedRulesTest(SimpleTestCase):
             self.assertIn(
                 "Burdened: any load (Amble 3 hex max).\n", engine.section_combat()
             )
+
+    def test_the_origin_left_to_the_game_master_is_named_as_the_canon_names_it(
+        self,
+    ) -> None:
+        """#128: the row with no literacy check is "Ask the GM" here, and the
+        set_background example takes the canon's rows."""
+        creation = engine.section_character_creation()
+        plan_format = engine.section_plan_schema()
+        self.assertIn(
+            "An Origin of Ask the GM has no check: the Game Master decides. That "
+            "check decides whether a character can read",
+            creation,
+        )
+        self.assertIn(
+            "records the Game Master's ruling on whether a character whose Origin "
+            "is Ask the GM can read (false for cannot).",
+            plan_format,
+        )
+        self.assertIn(
+            '"provenance": "merchant", "location": "Port", "wealth": "Poor"}: any of '
+            "the three.",
+            plan_format,
+        )
+        for prompt in (engine.system_prompt(), engine.dm_system_prompt()):
+            with self.subTest(prompt=prompt[:40]):
+                self.assertNotIn("Consult GM", prompt)
+
+    def test_origins_left_to_the_game_master_are_named_together(self) -> None:
+        two = replace(
+            INVENTED_CHARACTER_RULES,
+            location=LocationTable(
+                rows=(
+                    LocationRow(40, "Wanderer", (), None),
+                    LocationRow(80, "Port", ("Sailing",), 1),
+                    LocationRow(100, "Ask the GM", (), None),
+                ),
+                skill_points=2,
+            ),
+        )
+        with seated_character_rules(two):
+            creation = engine.section_character_creation()
+            plan_format = engine.section_plan_schema()
+        self.assertIn("An Origin of Wanderer or Ask the GM has no check", creation)
+        self.assertIn("whose Origin is Wanderer or Ask the GM can read", plan_format)
+        self.assertIn('"location": "Port", "wealth": "Poor"', plan_format)
+
+    def test_a_canon_that_leaves_no_origin_to_the_game_master(self) -> None:
+        """No sentence about such an origin, and no rule_literacy line: a ruling
+        could never be recorded."""
+        none_left = replace(
+            INVENTED_CHARACTER_RULES,
+            location=LocationTable(
+                rows=(LocationRow(100, "Port", ("Sailing",), 1),), skill_points=2
+            ),
+        )
+        with seated_character_rules(none_left):
+            creation = engine.section_character_creation()
+            plan_format = engine.section_plan_schema()
+        self.assertIn(
+            "is fixed once it is rolled or ruled. That check decides", creation
+        )
+        self.assertNotIn("has no check", creation)
+        self.assertNotIn('"action": "rule_literacy"', plan_format)
+
+    def test_with_no_origin_a_message_may_state_the_example_is_the_default(
+        self,
+    ) -> None:
+        all_left = replace(
+            INVENTED_CHARACTER_RULES,
+            location=LocationTable(
+                rows=(
+                    LocationRow(50, "Ask the GM", (), None),
+                    LocationRow(100, "Port", (), None),
+                ),
+                skill_points=2,
+            ),
+        )
+        with seated_character_rules(all_left):
+            plan_format = engine.section_plan_schema()
+        self.assertIn('"location": "Port", "wealth": "Poor"', plan_format)
 
     def test_the_plan_format_names_the_dice_and_a_loaded_track(self) -> None:
         schema = engine.section_plan_schema()

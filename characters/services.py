@@ -80,7 +80,7 @@ from .purse import (
     hold_purchase_to_wealth,
 )
 from .refusal_words import ServicesWords, refusal_words
-from .rules import character_rules
+from .rules import character_rules, game_master_origins_in_words
 from .skills import (
     MAX_EXPERIENCE_YEARS_PER_RUN,
     MAX_SKILL_POINTS,
@@ -1010,10 +1010,11 @@ def apply_literacy_ruling(
             refusal_words().services.literacy_ruling_game_master_only
         )
     if character.location_literacy_modifier is not None:
-        raise CharacterChangeError(
-            f"The {character.location} origin has a literacy check to roll; a "
-            "Game Master's ruling is for an origin of Consult GM"
-        )
+        refusal = f"The {character.location} origin has a literacy check to roll"
+        origins = game_master_origins_in_words(character_rules())
+        if origins:
+            refusal += f"; a Game Master's ruling is for an origin of {origins}"
+        raise CharacterChangeError(refusal)
     character.literacy_ruling = literate
     if literate is None:
         return "the Game Master's literacy ruling withdrawn"

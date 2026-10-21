@@ -27,7 +27,7 @@ from .constants import CHARACTER_ATTRIBUTE_FIELDS
 from .dice import Roller, roll_dice_faces, roll_dice_logged
 from .models import Character
 from .refusal_words import game_master_call_note
-from .rules import DiceRollRules
+from .rules import DiceRollRules, character_rules, game_master_origins_in_words
 from .services import CharacterChangeError
 from .skill_rules import skill_rules
 from .skills import (
@@ -52,13 +52,18 @@ ILLITERATE_REASON = (
     "all, and cannot read; only a Game Master can call for a Literacy check"
 )
 
-#: Why a character whose literacy nobody has settled rolls none either (the
-#: #863 review): nothing yet says they can read.
-LITERACY_UNSETTLED_REASON = (
-    "This character's literacy check has not been rolled (or, at Consult GM, "
-    "ruled), so nothing says they can read; only a Game Master can call for a "
-    "Literacy check until it is"
-)
+
+def literacy_unsettled_reason() -> str:
+    """Why a character whose literacy nobody has settled rolls none either (the
+    #863 review): nothing yet says they can read. Names the canon's origins
+    left to the Game Master's ruling, when it has any (#128)."""
+    origins = game_master_origins_in_words(character_rules())
+    ruled = f" (or, at {origins}, ruled)" if origins else ""
+    return (
+        f"This character's literacy check has not been rolled{ruled}, so nothing "
+        "says they can read; only a Game Master can call for a Literacy check "
+        "until it is"
+    )
 
 
 def literacy_refusal(character: Character) -> str | None:
@@ -72,7 +77,7 @@ def literacy_refusal(character: Character) -> str | None:
     if literate is False:
         return ILLITERATE_REASON
     if literate is None:
-        return LITERACY_UNSETTLED_REASON
+        return literacy_unsettled_reason()
     return None
 
 

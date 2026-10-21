@@ -634,7 +634,7 @@ def totals_in_words(totals: Iterable[int], *, or_word: str) -> str:
     words, lowest first (issue #48). The word between them is the caller's:
     the turn menu's is configuration (``common.or_word`` in
     ``config/battle-rulings.toml``, #90), and the GM prompt's is the prompt's
-    own (``gm.engine.PROMPT_OR_WORD``), since ``gm.engine`` and this module
+    own (``characters.rules.PROMPT_OR_WORD``), since ``gm.engine`` and this module
     are imported by the offline CLI with no Django and so no settings to
     read the configured word from.
 

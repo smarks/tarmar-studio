@@ -17,8 +17,8 @@ from characters.refusal_words import game_master_call_note, refusal_words
 from characters.services import CharacterChangeError
 from characters.skill_checks import (
     ILLITERATE_REASON,
-    LITERACY_UNSETTLED_REASON,
     injury_penalty,
+    literacy_unsettled_reason,
     skill_check,
     unconscious_refusal,
 )
@@ -150,7 +150,9 @@ class IlliterateLiteracyCheckTest(BaseTestCase):
         self.character.literacy_roll = None
         self.character.literacy_rolled = False
         self.assertIsNone(self.character.is_literate)
-        with self.assertRaisesMessage(CharacterChangeError, LITERACY_UNSETTLED_REASON):
+        with self.assertRaisesMessage(
+            CharacterChangeError, literacy_unsettled_reason()
+        ):
             skill_check(self.character, "literacy", roller=FacesRoller(3, 3))
         skill_check(
             self.character, "literacy", is_game_master=True, roller=FacesRoller(3, 3)

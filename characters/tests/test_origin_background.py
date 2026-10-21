@@ -205,6 +205,26 @@ class OriginSkillFollowsTheOriginTest(BaseTestCase):
         self.assertIn("street smarts 1 taken back", skill_lines[0])
         self.assertIn("survival 1 granted by the Rural origin", skill_lines[1])
 
+    def test_a_player_may_choose_the_origin_left_to_the_game_master(self):
+        """location.md: "Roll percentile dice or choose", and Consult GM is a
+        row of the table under both shipping canons, so a player's
+        set_background may name it while nobody has rolled or chosen the
+        Origin (the #128 review). It grants no skill, and leaves literacy to
+        the Game Master's ruling."""
+        (origin,) = character_rules().location.game_master_origins
+        self.assertEqual(origin, "Consult GM")
+        character = create_character(self.player, location_recorded=False)
+
+        services.set_background(
+            character.pk, {"location": origin}, is_game_master=False
+        )
+
+        character.refresh_from_db()
+        self.assertEqual(character.location, origin)
+        self.assertTrue(character.location_recorded)
+        self.assertTrue(character.origin_defers_to_game_master)
+        self.assertEqual(character.skills, {})
+
     def test_a_game_master_moving_a_rolled_origin_moves_the_skill_and_rerolls(self):
         """set_background, the chat's path: the skill follows, and literacy is
         rolled again against the new Origin as #741 has it."""
