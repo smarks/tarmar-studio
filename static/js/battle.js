@@ -1970,6 +1970,26 @@ if (typeof module !== 'undefined' && module.exports) {
             }
         }
 
+        /**
+         * Render a refusal of stale pools (#842) from the 409 that carries
+         * the notice and the Game Master's control; they stay in the slot
+         * until a reload or an advance clears them. The Advance button and a
+         * player's choice reach the same refusal and are answered alike
+         * (#112). True when the refusal was rendered here; anything else is
+         * left to the caller's notice.
+         */
+        function showStale(data, status) {
+            if (status !== 409 || !staleSlot || !data || !data.stale_html) {
+                return false;
+            }
+            renderStale(data.stale_html);
+            if (button && data.advance) {
+                button.textContent = data.advance.label;
+                button.disabled = !data.advance.enabled;
+            }
+            return true;
+        }
+
         initDiceToggle(log, root);
 
         // What to draw, not the rules state: the server computes this per
@@ -2237,7 +2257,7 @@ if (typeof module !== 'undefined' && module.exports) {
             actionBusy = true;
             renderPanel();
             const data = await postAction(
-                panel.dataset.actUrl, 'Sending the action', body
+                panel.dataset.actUrl, 'Sending the action', body, showStale
             );
             actionBusy = false;
             if (!data) {
@@ -2323,19 +2343,6 @@ if (typeof module !== 'undefined' && module.exports) {
         }
 
         if (button) {
-            // A record-writing fight whose records moved is refused (#842):
-            // the server sends the notice and the Game Master's control, and
-            // they stay in the slot until a reload or an advance clears them.
-            const showStale = (data, status) => {
-                if (status !== 409 || !staleSlot || !data || !data.stale_html) {
-                    return false;
-                }
-                renderStale(data.stale_html);
-                if (data.advance) {
-                    button.textContent = data.advance.label;
-                }
-                return true;
-            };
             let refusedAsStale = false;
             button.addEventListener('click', async () => {
                 button.disabled = true;

@@ -1668,8 +1668,9 @@ RESNAPSHOT_GAME_MASTER_ONLY = (
 class StalePools(BattleRefusal):
     """A record-writing fight whose figures no longer match their records.
 
-    A refusal in the player's words (#842), which the advance view answers
-    with the readout beside it and every other battle view as text (#39).
+    A refusal in the player's words (#842). The advance and a player's
+    choice (which resumes the turn) both reach it, and both views answer it
+    with the readout beside it (#112).
     """
 
 

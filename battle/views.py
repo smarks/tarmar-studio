@@ -1377,7 +1377,6 @@ def battle_payload(
     full attributes it carries is decided here, from the actor, so a poll
     can never hand a spectator numbers the page would not have rendered.
     """
-    advance = advance_control(battle, actor)
     return {
         "status": battle.status,
         "turn": battle.turn_number,
@@ -1388,7 +1387,10 @@ def battle_payload(
         "seats": seat_summaries(battle, actor),
         "pending": pending_payload(battle, actor),
         "control_mode": battle.control_mode,
-        "advance": advance,
+        # The Advance readout and the stale-pools notice, rendered for every
+        # response (#842): a poll while a player's move is awaited shows the
+        # notice too, and "" clears it.
+        **advance_readout(battle, actor, request),
         # Whether the fight is still on (#868): a Games Master panel's Fight
         # form repaints from this when the board applies a response.
         "live": not battle.is_over,
@@ -1396,10 +1398,6 @@ def battle_payload(
         # the fight is on, the session's attached characters once it is over,
         # repainted with the board so the line follows either.
         BARE_HANDED_KEY: bare_handed_line(battle),
-        # Why a record-writing fight will not go on, and the Game Master's
-        # control, rendered once for every response (#842): a poll while a
-        # player's move is awaited shows it too, and "" clears it.
-        "stale_html": stale_pools_html(advance, request),
         # A Game Master's rulings on the battle (#867, #37): the records, so
         # a JSON caller reads back what it changed, and each panel rendered
         # once, keyed by its element id, which battle.js puts in its place.
@@ -1462,6 +1460,55 @@ def stale_pools_html(advance: dict | None, request: HttpRequest | None) -> str:
         return ""
     return render_to_string(
         "battle/_stale_pools.html", {"advance": advance}, request=request
+    )
+
+
+def advance_readout(battle: Battle, actor: Actor, request: HttpRequest | None) -> dict:
+    """The Advance button's readout and the stale-pools notice (#842).
+
+    Every battle response carries both, and so does the refusal of a
+    record-writing fight whose records moved (:func:`stale_pools_refused`),
+    so the keys and their rendering live here once.
+
+    Args:
+        battle: The battle the readout is for.
+        actor: Who is viewing; the readout is ``None`` for someone who
+            cannot run the battle, and the notice then ``""``.
+        request: The request, for the notice's form; ``None`` renders it
+            without one.
+
+    Returns:
+        ``advance`` (:func:`advance_control`) and ``stale_html`` (why the
+        fight will not go on, with the Game Master's control, or ``""``).
+    """
+    advance = advance_control(battle, actor)
+    return {"advance": advance, "stale_html": stale_pools_html(advance, request)}
+
+
+def stale_pools_refused(
+    refusal: StalePools, battle: Battle, actor: Actor, request: HttpRequest
+) -> JsonResponse:
+    """Answer a :class:`~battle.services.StalePools` refusal (#842, #112).
+
+    Not a failure: the rule refusing, in its own words, as a 409 with the
+    readout and the notice the page would render on a reload -- the Game
+    Master's control included -- so a page that was open when the records
+    moved gets them without reloading. The advance and a player's action
+    (which resumes the turn) both reach the refusal, and both answer it
+    through here.
+
+    Args:
+        refusal: The refusal the service raised.
+        battle: The battle refused.
+        actor: Who asked.
+        request: The refused request.
+
+    Returns:
+        The 409 response.
+    """
+    return JsonResponse(
+        {"error": str(refusal), **advance_readout(battle, actor, request)},
+        status=409,
     )
 
 
@@ -1870,19 +1917,7 @@ def battle_advance(request, pk):
     try:
         battle, events = advance_turn(battle.pk)
     except StalePools as stale:
-        # Not a failure: the rule refusing (issue #842), in its own words,
-        # with the readout and the notice the page would render on a reload
-        # -- the Game Master's control included -- so a page that was open
-        # when the records moved gets them without reloading.
-        advance = advance_control(battle, actor)
-        return JsonResponse(
-            {
-                "error": str(stale),
-                "advance": advance,
-                "stale_html": stale_pools_html(advance, request),
-            },
-            status=409,
-        )
+        return stale_pools_refused(stale, battle, actor, request)
     except BattleRefusal as refusal:
         # A rule refusing, like the other battle views' refusals: its words,
         # as a 400 (the lobby's, BattleInLobby). Only refusals are caught, not
@@ -2468,6 +2503,10 @@ def battle_act(request, pk):
             destination=destination,
             as_ai=as_ai,
         )
+    except StalePools as stale:
+        # The choice resumes the turn, which a record-writing fight whose
+        # records moved refuses as the advance does (#112).
+        return stale_pools_refused(stale, battle, actor, request)
     except BattleRefusal as act_error:
         return _json_error(str(act_error))
     return JsonResponse(battle_payload(battle, actor, events, request))
