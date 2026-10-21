@@ -36,6 +36,7 @@ from .engine import (
     assemble_magic_section,
     checked_magic_section,
     load_magic_section,
+    section_core,
     section_magic,
     system_prompt,
 )
@@ -63,8 +64,13 @@ from .turn_record import prompt_hash
 # the helper pays "the original casting cost"; Counterspell states the least
 # commitment (3), the opposed dice (3d6 + INT) and that the bonus is each
 # side's.
+#
+# 88512526e0974102379bef1acb65aa38494176cfd2f6ad701e2907defd4e386c until #150
+# stated the push's payoff from the same file, which the section had never
+# said: +1 to the spell's rolled damage or healing for each mana pushed, and
+# only a spell that rolls damage or healing can be pushed.
 TARMAR_MAGIC_SECTION_HASH = (
-    "88512526e0974102379bef1acb65aa38494176cfd2f6ad701e2907defd4e386c"
+    "e366288c7f1051d571e0c160f7d5cf2a08ad4d5d0ed405b1fe3baee0e7307cea"
 )
 
 # The subsections every magic section carries, in this order: checked here
@@ -94,6 +100,23 @@ class TarmarMagicSectionTest(SimpleTestCase):
 
     def test_the_magic_section_is_the_pinned_text(self) -> None:
         self.assertEqual(prompt_hash(section_magic()), TARMAR_MAGIC_SECTION_HASH)
+
+    def test_the_push_states_its_payoff(self) -> None:
+        """#150: the bonus a push adds, which no hand-written text stated."""
+        self.assertIn(
+            "Invest extra mana for greater effect. The push's bonus: +1 to the "
+            "spell's rolled damage or healing for each mana pushed. Only a spell "
+            "that rolls damage or healing can be pushed. Control Roll: ",
+            section_magic(),
+        )
+
+    def test_the_core_section_names_both_anchor_rolls(self) -> None:
+        """#150: the caster anchors on WIS, a third-party mage on INT."""
+        self.assertIn(
+            "During a Runaway the caster's Anchor roll is 3d6 ≤ WIS and a third-party "
+            "mage's is 3d6 ≤ INT.",
+            section_core(),
+        )
 
 
 class MagicSectionFromCanonTest(SimpleTestCase):
