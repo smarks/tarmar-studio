@@ -127,7 +127,7 @@ class TarmarMenuWords:
 
 @dataclass(frozen=True)
 class ClassicMenuWords:
-    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90)."""
+    """A classic Melee figure's turn menu's own words (#890, #56, #57, #90, #146)."""
 
     move_word: str = sentence()
     no_foe_in_reach: str = sentence("reason", "weapon", required=("reason",))
@@ -156,6 +156,12 @@ class ClassicMenuWords:
     crawl: str = sentence("hexes")
     disengage: str = sentence()
     hth_attack: str = sentence("aimed", "grapple")
+    shift_grapple: str = sentence("struck", "grapple")
+    then_grapple: str = sentence("line", "struck", "grapple", required=("line",))
+    no_attack: str = sentence("line", "reason", required=("line", "reason"))
+    no_foe_struck: str = sentence("weapon")
+    cannot_carry_out: str = sentence("line", required=("line",))
+    no_grapple: str = sentence()
     cast_cost: str = sentence("strength")
     go_prone: str = sentence()
     kneel: str = sentence()

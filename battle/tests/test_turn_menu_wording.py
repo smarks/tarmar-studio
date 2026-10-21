@@ -42,6 +42,7 @@ from tarmar_engine.classic.data import (
     DAGGER,
     HALBERD,
     LEATHER,
+    LIGHT_CROSSBOW,
     SMALL_BOW,
     SPEAR,
 )
@@ -419,19 +420,9 @@ def _magic_boards() -> dict[str, list[Line]]:
 
 
 #: The classic options whose line rehearses the engine's own plan for them,
-#: which the engine refuses for an option not legal on the board.
-_REHEARSED = frozenset(
-    {
-        ClassicOption.MOVE,
-        ClassicOption.HALF_MOVE,
-        ClassicOption.CHARGE_ATTACK,
-        ClassicOption.DODGE,
-        ClassicOption.READY_WEAPON,
-        ClassicOption.CHANGE_WEAPONS,
-        ClassicOption.PICK_UP,
-        ClassicOption.CAST,
-    }
-)
+#: which the engine refuses for an option not legal on the board: every one
+#: but a pass since #146, as the attack after any option is the engine's.
+_REHEARSED = frozenset(ClassicOption) - {ClassicOption.PASS}
 
 
 def _every_classic_option(game: GameState, chooser) -> list[Line]:
@@ -544,6 +535,35 @@ def _classic_boards() -> dict[str, list[Line]]:
     green.position = Hex(4, 9)
     rendered["classic bare-handed charge grapples another"] = charge_board(
         [bare, armoured, green], bare
+    )
+    # Bare hands grapple a slower foe under any option but a dodge, a defence,
+    # a disengage or a cast, and strike nobody a grapple may not begin on (#146).
+    for board, armour in (("slower", CHAINMAIL), ("as quick", None)):
+        bare = create_human("Red", 12, 12, "red")
+        bare.position = Hex(4, 4)
+        foe = armed("Blue", "blue", Hex(4, 5), BROADSWORD)
+        if armour is not None:
+            foe.armor = armour
+        rendered[f"classic bare-handed beside a foe {board}"] = charge_board(
+            [bare, foe], bare
+        )
+    # An option the engine offers and its verbs refuse: a bow readied while
+    # engaged; and a shot the engine will not loose into a pile with a friend
+    # (review of #146).
+    archer = armed("Red", "red", Hex(4, 4), SMALL_BOW)
+    rendered["classic bow engaged"] = charge_board(
+        [archer, armed("Blue", "blue", Hex(4, 5), BROADSWORD)], archer
+    )
+    friend, foe = armed("F0", "red", Hex(3, 2)), armed("F1", "blue", Hex(3, 2))
+    friend.hth_opponents, foe.hth_opponents = [foe.uid], [friend.uid]
+    shooter = armed("F2", "red", Hex(3, 7), LIGHT_CROSSBOW)
+    rendered["classic crossbow beside a pile"] = charge_board(
+        [friend, foe, shooter], shooter
+    )
+    # The one weapon that may fire prone (``option_availability``).
+    crossbow = armed("Red", "red", Hex(4, 4), LIGHT_CROSSBOW)
+    rendered["classic crossbow"] = charge_board(
+        [crossbow, armed("Blue", "blue", Hex(4, 10), BROADSWORD)], crossbow
     )
 
     wizard = create_wizard(

@@ -160,6 +160,20 @@ pick_up_any = "Pick up a weapon in reach"
 crawl = "Crawl up to {hexes} hexes, staying down"
 disengage = "Step away from the enemies engaging you"
 hth_attack = "Grapple {aimed}: {grapple}"
+# What bare hands do after any option but a dodge, a defence, a disengage or
+# a cast: grapple a foe one may be begun on (issue #146). {struck} is the foe
+# the engine grapples, {grapple} grapple_words.
+shift_grapple = "Shift a hex and grapple {struck}: {grapple}"
+then_grapple = "{line}, then grapple {struck}: {grapple}"
+# An attack that strikes nobody; {reason} is no_foe_struck or no_grapple.
+no_attack = "{line}: no attack, since {reason}"
+# True of each foe out of reach, and of one in a pile with a friend, which a
+# missile is not loosed into.
+no_foe_struck = "no foe here is one {weapon} will strike"
+# An option offered here that the rules then refuse to carry out: drawn, but
+# not to be chosen.
+cannot_carry_out = "{line}: it cannot be carried out here"
+no_grapple = "bare hands can only grapple, and no foe here may be grappled"
 cast_cost = "{strength} ST"
 go_prone = "Drop prone where you stand"
 kneel = "Drop to one knee"

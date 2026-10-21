@@ -39,6 +39,7 @@ marked, which both profiles' pages read.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, fields
 
 from hexarena.hex import Hex
@@ -53,6 +54,7 @@ from tarmar_engine.classic.figure import Figure
 from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.options import spec as classic_spec
 from tarmar_engine.classic.state import GameState
+from tarmar_engine.classic.state import IllegalAction as ClassicIllegalAction
 from tarmar_engine.engine import RUN_FATIGUE_COST, SPRINT_FATIGUE_COST
 from tarmar_engine.policy import (
     ANCHOR_OPTION,
@@ -70,6 +72,8 @@ from . import magic_bounds, profiles
 from .magic_rules import magic_rules, totals_in_words
 from .persistence import TARMAR_PROFILE
 from .wording import ClassicMenuWords, TarmarMenuWords, TurnMenuWords, words
+
+logger = logging.getLogger(__name__)
 
 
 def _shared() -> TurnMenuWords:
@@ -600,6 +604,11 @@ def _plain_line(
     return plain, cost
 
 
+#: The payload key marking an option the engine refuses to carry out here
+#: (review of #146), read by the choice path and the turn panel.
+REFUSED = "refused"
+
+
 @dataclass
 class DescribedCandidate(Candidate):
     """An engine candidate as a player weighs it (issue #788).
@@ -626,6 +635,10 @@ class DescribedCandidate(Candidate):
         borrowed: The mana a borrowing cast borrows (tarmar-engine #28,
             :func:`borrowed_mana`), for the battle screen's borrow control
             to name; 0 for every other option, and then not in the payload.
+        refused: An option the engine's menu offers and its own verbs refuse
+            to carry out here (review of #146): drawn but not selectable, and
+            refused when chosen; in the payload under :data:`REFUSED` only
+            when true.
     """
 
     ai_choice: bool = False
@@ -635,6 +648,7 @@ class DescribedCandidate(Candidate):
     described: bool = False
     destinations: tuple[tuple[int, int], ...] = ()
     borrowed: int = 0
+    refused: bool = False
 
     def to_payload(self) -> dict:
         payload = super().to_payload()
@@ -645,6 +659,8 @@ class DescribedCandidate(Candidate):
             payload["target_name"] = self.target_name
         if self.borrowed:
             payload["borrowed"] = self.borrowed
+        if self.refused:
+            payload[REFUSED] = True
         return payload
 
     def menu_payload(self) -> dict:
@@ -756,32 +772,47 @@ _CLASSIC_STANDING_MOVERS = frozenset(
 
 
 @dataclass(frozen=True)
-class _ClassicChargeBlow:
-    """A classic charge as the engine would make it (issue #56).
+class _ClassicBlow:
+    """A classic option as the engine would carry it out, and the attack the
+    combat phase would then declare (issues #56, #146).
 
     Attributes:
-        path: The hexes the charge walks.
-        struck: The foe it attacks, from the live game, or None when no foe
-            is in reach where it ends.
-        grapples: Whether that attack is a grapple (bare hands,
-            ``BlowKind.HAND_TO_HAND``, settled by the defender's roll) rather
-            than a weapon's blow.
-        forecast: The weapon blow's forecast from where the charge ends
-            (``GameState.attack_forecast`` on the rehearsal), its facing bonus
-            and a pole's charge die included; None for a grapple or no blow.
+        path: The hexes the option walks.
+        struck: The foe it attacks, from the live game, or None when it
+            attacks nobody.
+        grapples: Whether that attack is a grapple (bare hands, or a figure
+            already in one: ``BlowKind.HAND_TO_HAND``, settled by the
+            defender's roll) rather than a weapon's blow.
+        forecast: A striking option's weapon blow's forecast from where the
+            option leaves the figure (``GameState.attack_forecast`` on the
+            rehearsal), its facing bonus and a pole's charge die included;
+            None for a grapple, no blow, or an option that does not strike.
+        refused: Whether the engine refuses to carry the option out on the
+            copy though its menu offered it (the engine's own disagreement,
+            found in review of #146: CHANGE WEAPONS to a bow while engaged;
+            tarmar-engine #68, #69).
     """
 
     path: list[Hex]
     struck: Figure | None
     grapples: bool
     forecast: AttackForecast | None
+    refused: bool = False
 
 
-def _classic_charge_blow(
-    game: GameState, figure: Figure, candidate: Candidate
-) -> _ClassicChargeBlow:
-    """The classic engine's charge, rehearsed: where it moves, whom it strikes,
-    and what the blow faces from there.
+def _classic_rehearsed_blow(
+    game: GameState, figure: Figure, candidate: Candidate, plan: classic_ai.Plan
+) -> _ClassicBlow:
+    """A classic option, rehearsed: where it moves, whom the attack after it
+    strikes and how, and what a weapon's blow faces from there.
+
+    Asked of every option but a pass (issue #146), since the attack is the
+    combat phase's, not the option's: a charge may strike a foe other than
+    the one it closes on, or nobody (issue #56); a weapon strikes the foe its
+    front hexes reach; and bare hands grapple under any option but a dodge,
+    a defence, a disengage or a cast (``classic.ai.attack_blow``, melee
+    #275), so a bare-handed ATTACK, a move or a hold may grapple, and an
+    ATTACK on a foe no grapple may be begun on strikes nobody.
 
     The engine's own rules throughout, played on a copy of the game (its
     snapshot contract, ``to_dict``/``from_dict``) so the live one is
@@ -797,41 +828,58 @@ def _classic_charge_blow(
     ``planned_blow`` keeps to itself. A charge may strike a foe other than the
     one it closes on, or nobody (issue #56).
 
+    An option the engine's menu offers but its verbs refuse on the copy is
+    the engine disagreeing with itself; the row says so, in the engine's
+    words, rather than the menu failing (review of #146).
+
     Args:
         game: The live game the menu was built from.
         figure: The figure choosing.
-        candidate: Its CHARGE ATTACK option.
+        candidate: The option, any but a PASS (which defers rather than
+            moves, so has nothing to rehearse).
+        plan: The engine's plan for it (``classic.policy.plan_for``), which
+            the caller has already asked for.
 
     Returns:
-        The charge's path, the foe it attacks, whether it grapples, and the
-        blow's forecast.
+        The option's path, the foe it attacks, whether it grapples, the
+        blow's forecast, and whether the engine refuses the option.
 
     Raises:
         LookupError: if the copy of the game has lost the figure, or the live
             game the foe it strikes, which the snapshot contract rules out
             (as ``classic.ai.planned_blow`` raises).
     """
-    plan = classic_policy.plan_for(game, figure, candidate)
     rehearsal = GameState.from_dict(game.to_dict())
     charger = _classic_figure(rehearsal, figure.uid)
     if charger is None:
         raise LookupError(f"{figure.name} is missing from a copy of the game")
-    classic_ai.apply(rehearsal, charger, plan)
+    try:
+        classic_ai.apply(rehearsal, charger, plan)
+    except ClassicIllegalAction as refusal:
+        # The engine's words are for its developers, not a player's menu: they
+        # go to the log, and the row says it in the studio's (review of #146).
+        # Debug, since the menu is rebuilt on every replay of the turn.
+        logger.debug(
+            "The classic engine offered %s %s and refused it on a copy: %s",
+            figure.name,
+            candidate.letter,
+            refusal,
+        )
+        return _ClassicBlow(list(plan.path), None, False, None, refused=True)
     blow = classic_ai.attack_blow(rehearsal, charger)
     if blow is None:
-        return _ClassicChargeBlow(list(plan.path), None, False, None)
+        return _ClassicBlow(list(plan.path), None, False, None)
     grapples = blow.kind is BlowKind.HAND_TO_HAND
+    option = ClassicOption(candidate.letter)
     forecast = (
-        None
-        if grapples
-        else _classic_forecast(
-            rehearsal, charger, ClassicOption.CHARGE_ATTACK, blow.target
-        )
+        _classic_forecast(rehearsal, charger, option, blow.target)
+        if option in _CLASSIC_STRIKES and not grapples
+        else None
     )
     struck = _classic_figure(game, blow.target.uid)
     if struck is None:
         raise LookupError(f"{blow.target.name} is missing from the game")
-    return _ClassicChargeBlow(list(plan.path), struck, grapples, forecast)
+    return _ClassicBlow(list(plan.path), struck, grapples, forecast)
 
 
 def _classic_roll(dice_count: int) -> str:
@@ -912,8 +960,9 @@ def _classic_strike(forecast: AttackForecast | None) -> str:
 
 def _classic_plain_line(
     game: GameState, figure: Figure, candidate: Candidate, target: Figure | None
-) -> tuple[str, str]:
-    """The sentence a player reads for one classic option, and what it costs.
+) -> tuple[str, str, bool]:
+    """The sentence a player reads for one classic option, what it costs, and
+    whether the engine refuses to carry it out here (review of #146).
 
     The classic counterpart of :func:`_plain_line` (issue #890). Only a spell
     costs anything in a classic turn: the ST it invests, which is also the
@@ -928,76 +977,74 @@ def _classic_plain_line(
         figure.movement_allowance, classic_spec(option).movement_cap
     )
     cost = ""
+    # The engine's plan for the option, asked once (review of #146): a PASS
+    # defers rather than moves, so has none.
+    plan = (
+        classic_policy.plan_for(game, figure, candidate)
+        if option != ClassicOption.PASS
+        else None
+    )
     # A move the engine would not make is read as standing (issue #57): the
     # classic engine enacts exactly the plan ``plan_for`` derives, and an
     # empty path is no move ("boxed in", ``classic.ai._closing_move``).
-    plan = (
-        classic_policy.plan_for(game, figure, candidate)
-        if option in _CLASSIC_STANDING_MOVERS and target is not None
-        else None
+    stands = (
+        option in _CLASSIC_STANDING_MOVERS
+        and target is not None
+        and plan is not None
+        and not plan.path
     )
-    stands = plan is not None and not plan.path
     move = shared.reach.format(move=classic.move_word, hexes=budget)
     no_nearer = _no_nearer(move, aimed)
-    # A charge says whom the engine's own charge strikes, or that it strikes
-    # nobody (issue #56).
-    charge_path: list[Hex] = []
-    struck: Figure | None = target
-    grapples = False
-    forecast: AttackForecast | None = None
-    if option == ClassicOption.CHARGE_ATTACK and target is not None:
-        # Forecast from where the charge ends, on its rehearsal.
-        blow = _classic_charge_blow(game, figure, candidate)
-        charge_path, struck, grapples = blow.path, blow.struck, blow.grapples
-        forecast = blow.forecast
+    # The attack the combat phase declares after the option, whom it strikes
+    # and how, is the engine's (issues #56, #146).
+    # Every option but a pass, aimed or not: bare hands grapple after a hold
+    # with no foe named too (review of #146).
+    rehearsed = (
+        _classic_rehearsed_blow(game, figure, candidate, plan)
+        if plan is not None
+        else None
+    )
+    struck = rehearsed.struck if rehearsed is not None else None
+    # A grapple is settled by the defender's roll, not a to-hit roll, so it
+    # carries no odds (Melee p.17).
+    grapple = classic.grapple_words
+    refused = rehearsed is not None and rehearsed.refused
+    if (
+        option in _CLASSIC_STRIKES
+        and target is not None
+        and rehearsed is not None
+        and not refused
+    ):
+        plain = _classic_strike_line(
+            option, target, rehearsed, budget=budget, wielding=wielding
+        )
+        if struck is None and option == ClassicOption.CHARGE_ATTACK:
+            if target.position is not None:
+                reason = (
+                    _ends_from(
+                        move,
+                        game.arena.layout.distance(rehearsed.path[-1], target.position),
+                        aimed,
+                    )
+                    if rehearsed.path
+                    else no_nearer
+                )
+                plain = _no_attack_charge_line(
+                    aimed,
+                    classic.no_foe_in_reach.format(reason=reason, weapon=wielding),
+                )
+        elif struck is None:
+            reason = (
+                classic.no_grapple
+                if weapon is None
+                else classic.no_foe_struck.format(weapon=wielding)
+            )
+            plain = classic.no_attack.format(line=plain, reason=reason)
     elif option in _CLASSIC_STRIKES and target is not None:
-        forecast = _classic_forecast(game, figure, option, target)
-    if struck is None and target is not None and target.position is not None:
-        reason = (
-            _ends_from(
-                move,
-                game.arena.layout.distance(charge_path[-1], target.position),
-                aimed,
-            )
-            if charge_path
-            else no_nearer
-        )
-        plain = _no_attack_charge_line(
-            aimed, classic.no_foe_in_reach.format(reason=reason, weapon=wielding)
-        )
-    elif struck is not None and grapples:
-        # A grapple is settled by the defender's roll, not a to-hit roll, so
-        # it carries no odds (Melee p.17).
-        if struck is target:
-            plain = classic.charge_grapple.format(
-                aimed=aimed, hexes=budget, grapple=classic.grapple_words
-            )
-        else:
-            plain = classic.charge_grapple_another.format(
-                aimed=aimed,
-                hexes=budget,
-                struck=struck.name,
-                grapple=classic.grapple_words,
-            )
-    elif struck is not None and target is not None and struck is not target:
-        plain = _joined_odds(
-            classic.charge_another.format(
-                aimed=aimed, hexes=budget, struck=struck.name, weapon=wielding
-            ),
-            _classic_strike(forecast),
-        )
-    elif option in _CLASSIC_STRIKES and target is not None:
-        verbs = {
-            ClassicOption.ATTACK: shared.attack,
-            ClassicOption.SHIFT_ATTACK: classic.shift_attack,
-            ClassicOption.CHARGE_ATTACK: classic.charge,
-            ClassicOption.MISSILE_ATTACK: shared.shoot,
-            ClassicOption.ONE_LAST_SHOT: shared.last_shot,
-        }
-        plain = _joined_odds(
-            verbs[option].format(aimed=aimed, hexes=budget, weapon=wielding),
-            _classic_strike(forecast),
-        )
+        # Refused on the copy: the option's own sentence, without odds, and
+        # the refusal said below.
+        verbs = _classic_strike_verbs()
+        plain = verbs[option].format(aimed=aimed, hexes=budget, weapon=wielding)
     elif option in (ClassicOption.MOVE, ClassicOption.HALF_MOVE) and stands:
         plain = _stand_line(no_nearer)
     elif option == ClassicOption.MOVE:
@@ -1007,10 +1054,18 @@ def _classic_plain_line(
             else classic.move.format(hexes=budget)
         )
     elif option == ClassicOption.HALF_MOVE:
+        # A grapple after it is an attack, so the move is not read as one
+        # made without attacking (issue #146).
+        grappling = rehearsed is not None and rehearsed.grapples
+        toward, alone = (
+            (classic.move_toward, classic.move)
+            if grappling
+            else (classic.half_move_toward, classic.half_move)
+        )
         plain = (
-            classic.half_move_toward.format(hexes=budget, aimed=aimed)
+            toward.format(hexes=budget, aimed=aimed)
             if aimed
-            else classic.half_move.format(hexes=budget)
+            else alone.format(hexes=budget)
         )
     elif option == ClassicOption.DODGE:
         dice = game.rules.resolution.attack_dice_count(
@@ -1036,7 +1091,7 @@ def _classic_plain_line(
         )
     elif option in (ClassicOption.READY_WEAPON, ClassicOption.CHANGE_WEAPONS):
         # The weapon the engine takes up for this option, as it will enact it.
-        taken = classic_policy.plan_for(game, figure, candidate).ready
+        taken = plan.ready if plan is not None else ""
         if option == ClassicOption.READY_WEAPON:
             plain = _ready_line(taken)
         else:
@@ -1044,7 +1099,7 @@ def _classic_plain_line(
             if weapon is not None:
                 cost = shared.dropped.format(weapon=weapon.name)
     elif option == ClassicOption.PICK_UP:
-        taken = classic_policy.plan_for(game, figure, candidate).ready
+        taken = plan.ready if plan is not None else ""
         plain = shared.pick_up.format(weapon=taken) if taken else classic.pick_up_any
     elif option == ClassicOption.STAND_UP:
         plain = shared.stand_up
@@ -1053,7 +1108,11 @@ def _classic_plain_line(
     elif option == ClassicOption.DISENGAGE:
         plain = classic.disengage
     elif option == ClassicOption.HTH_ATTACK:
-        plain = classic.hth_attack.format(aimed=aimed, grapple=classic.grapple_words)
+        # The foe the engine grapples, the weakest one a grapple may be begun
+        # on (``classic.ai.attack_blow``).
+        plain = classic.hth_attack.format(
+            aimed=struck.name if struck is not None else aimed, grapple=grapple
+        )
     elif option == ClassicOption.CAST and candidate.spell_key:
         offers = {
             (spell.id, subject.uid): invested
@@ -1074,7 +1133,91 @@ def _classic_plain_line(
         plain = classic.pass_turn
     else:
         plain = candidate.name.capitalize()
-    return plain, cost
+    if refused:
+        # The engine's menu offers an option its own verbs refuse here (review
+        # of #146); the row says it cannot be carried out, and is not offered,
+        # so it costs nothing.
+        plain = classic.cannot_carry_out.format(line=plain)
+        cost = ""
+    elif (
+        rehearsed is not None
+        and rehearsed.grapples
+        and struck is not None
+        and option not in _CLASSIC_STRIKES
+        and option != ClassicOption.HTH_ATTACK
+    ):
+        # Bare hands grapple after a move, a hold or a change of weapons too,
+        # and the line says so (issue #146).
+        plain = classic.then_grapple.format(
+            line=plain, struck=struck.name, grapple=grapple
+        )
+    return plain, cost, refused
+
+
+def _classic_strike_verbs() -> dict[ClassicOption, str]:
+    """Each striking option's own sentence, in the menu's words."""
+    shared, classic = _shared(), _classic()
+    return {
+        ClassicOption.ATTACK: shared.attack,
+        ClassicOption.SHIFT_ATTACK: classic.shift_attack,
+        ClassicOption.CHARGE_ATTACK: classic.charge,
+        ClassicOption.MISSILE_ATTACK: shared.shoot,
+        ClassicOption.ONE_LAST_SHOT: shared.last_shot,
+    }
+
+
+def _classic_strike_line(
+    option: ClassicOption,
+    target: Figure,
+    rehearsed: _ClassicBlow,
+    *,
+    budget: int,
+    wielding: str,
+) -> str:
+    """The line of a classic option that strikes, read off the attack the
+    engine would declare after it (issues #56, #146).
+
+    A weapon's blow names the foe it strikes and its odds; a grapple says it
+    grapples, with no odds; an option that strikes nobody is the option's
+    own sentence, which the caller says the reason for.
+
+    Args:
+        option: One of :data:`_CLASSIC_STRIKES`.
+        target: The foe the option is aimed at.
+        rehearsed: The option as the engine would carry it out.
+        budget: The hexes the option may move.
+        wielding: The weapon's words, or bare hands.
+    """
+    classic = _classic()
+    aimed, struck, grapple = target.name, rehearsed.struck, classic.grapple_words
+    charging = option == ClassicOption.CHARGE_ATTACK
+    if struck is not None and rehearsed.grapples:
+        if charging and struck is target:
+            return classic.charge_grapple.format(
+                aimed=aimed, hexes=budget, grapple=grapple
+            )
+        if charging:
+            return classic.charge_grapple_another.format(
+                aimed=aimed, hexes=budget, struck=struck.name, grapple=grapple
+            )
+        if option == ClassicOption.SHIFT_ATTACK:
+            return classic.shift_grapple.format(struck=struck.name, grapple=grapple)
+        return classic.hth_attack.format(aimed=struck.name, grapple=grapple)
+    odds = _classic_strike(rehearsed.forecast)
+    if charging and struck is not None and struck is not target:
+        return _joined_odds(
+            classic.charge_another.format(
+                aimed=aimed, hexes=budget, struck=struck.name, weapon=wielding
+            ),
+            odds,
+        )
+    verbs = _classic_strike_verbs()
+    # A blow other than a charge names the foe it strikes, which may not be
+    # the one it is aimed at; a charge's aim is where it goes, so it keeps it.
+    named = struck.name if struck is not None and not charging else aimed
+    return _joined_odds(
+        verbs[option].format(aimed=named, hexes=budget, weapon=wielding), odds
+    )
 
 
 def describe_classic(
@@ -1082,7 +1225,7 @@ def describe_classic(
 ) -> DescribedCandidate:
     """One classic option as the turn panel draws it (issue #890)."""
     target = _classic_figure(game, candidate.target_id)
-    plain, cost = _classic_plain_line(game, figure, candidate, target)
+    plain, cost, refused = _classic_plain_line(game, figure, candidate, target)
     return DescribedCandidate(
         **_base_fields(candidate),
         ai_choice=ai_choice,
@@ -1090,6 +1233,7 @@ def describe_classic(
         cost=cost,
         target_name=target.name if target is not None else "",
         described=True,
+        refused=refused,
     )
 
 

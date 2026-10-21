@@ -1674,9 +1674,17 @@ if (typeof module !== 'undefined' && module.exports) {
             if (candidate.anchor_target != null) {
                 option.classList.add('turn-option-anchor');
             }
-            option.addEventListener('click', () => {
-                if (opts.onSelect) { opts.onSelect(index); }
-            });
+            // An option the rules refuse to carry out here (review of #146):
+            // drawn with the server's line saying so, and not selectable; the
+            // server refuses it too if it is sent anyway.
+            if (candidate.refused) {
+                option.disabled = true;
+                option.classList.add('is-refused');
+            } else {
+                option.addEventListener('click', () => {
+                    if (opts.onSelect) { opts.onSelect(index); }
+                });
+            }
             menu.appendChild(option);
         });
 

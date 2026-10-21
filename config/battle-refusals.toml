@@ -81,6 +81,9 @@ hand_choice_to_ai_denied = "Only this battle's DM, its owner, or the combatant's
 no_pending_menu = "No pending menu to choose from"
 not_your_combatant = "That is not your combatant"
 option_not_on_menu = "That option is not on the pending menu"
+# An option the menu shows but the rules refuse to carry out here (review of
+# #146); {option} is its name.
+option_cannot_be_carried_out = "{option} cannot be carried out here; choose another option"
 # {hex}: the hex asked for, as (q, r).
 destination_not_marked = "{option} cannot move {name} to hex {hex}: pick one of the marked hexes, or none"
 # {option} above, for an option with no name.

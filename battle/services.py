@@ -3504,6 +3504,27 @@ def _stale_choice_message(
     )
 
 
+def _refuse_an_option_not_carried_out(option: dict) -> None:
+    """Refuse a menu option the engine offered and refuses to carry out here.
+
+    The classic engine's menu can offer an option its own verbs then refuse
+    (review of #146; tarmar-engine #68, #69); the turn menu marks it
+    (:data:`battle.turn_menu.REFUSED`) and draws it unselectable, and a choice
+    of it, the player's or the AI's hand-off, is refused here rather than
+    stored to fail the turn. A guard against nonsense, the same for everyone.
+
+    Raises:
+        BattleRefusal: ``option`` is so marked.
+    """
+    if option.get(turn_menu.REFUSED):
+        services = refusal_words().services
+        raise BattleRefusal(
+            services.option_cannot_be_carried_out.format(
+                option=option.get("name", services.unnamed_option)
+            )
+        )
+
+
 def record_player_action(
     battle_id: int,
     user,
@@ -3606,6 +3627,7 @@ def record_player_action(
                 if marked
                 else max(candidates, key=lambda candidate: candidate.get("score", 0))
             )
+            _refuse_an_option_not_carried_out(top)
             letter = top["letter"]
             target_id = top.get("target_id")
             spell_key = top.get("spell_key") or ""
@@ -3644,6 +3666,7 @@ def record_player_action(
             )
             if matched is None:
                 raise BattleRefusal(refusal_words().services.option_not_on_menu)
+            _refuse_an_option_not_carried_out(matched)
             if destination is not None and list(destination) not in matched.get(
                 "destinations", []
             ):

@@ -3471,42 +3471,6 @@
  ],
  "classic every legal option engaged": [
   {
-   "letter": "missile_attack",
-   "target_id": "f1",
-   "plain": "Shoot Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "missile_attack",
-   "target_id": null,
-   "plain": "Missile_attack",
-   "cost": ""
-  },
-  {
-   "letter": "stand_up",
-   "target_id": "f1",
-   "plain": "Stand up; it takes the whole turn",
-   "cost": ""
-  },
-  {
-   "letter": "stand_up",
-   "target_id": null,
-   "plain": "Stand up; it takes the whole turn",
-   "cost": ""
-  },
-  {
-   "letter": "crawl",
-   "target_id": "f1",
-   "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
-   "letter": "crawl",
-   "target_id": null,
-   "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
    "letter": "attack",
    "target_id": "f1",
    "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
@@ -3543,18 +3507,6 @@
    "cost": ""
   },
   {
-   "letter": "one_last_shot",
-   "target_id": "f1",
-   "plain": "One last shot at Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "one_last_shot",
-   "target_id": null,
-   "plain": "One_last_shot",
-   "cost": ""
-  },
-  {
    "letter": "change_weapons",
    "target_id": "f1",
    "plain": "Change to the Broadsword",
@@ -3576,42 +3528,6 @@
    "letter": "disengage",
    "target_id": null,
    "plain": "Step away from the enemies engaging you",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": "f1",
-   "plain": "Grapple Blue: move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": null,
-   "plain": "Grapple : move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": "f1",
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": null,
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": "f1",
-   "plain": "Drop to one knee",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": null,
-   "plain": "Drop to one knee",
    "cost": ""
   },
   {
@@ -3701,138 +3617,6 @@
    "cost": ""
   },
   {
-   "letter": "missile_attack",
-   "target_id": "f1",
-   "plain": "Shoot Blue with bare hands",
-   "cost": ""
-  },
-  {
-   "letter": "missile_attack",
-   "target_id": null,
-   "plain": "Missile_attack",
-   "cost": ""
-  },
-  {
-   "letter": "stand_up",
-   "target_id": "f1",
-   "plain": "Stand up; it takes the whole turn",
-   "cost": ""
-  },
-  {
-   "letter": "stand_up",
-   "target_id": null,
-   "plain": "Stand up; it takes the whole turn",
-   "cost": ""
-  },
-  {
-   "letter": "crawl",
-   "target_id": "f1",
-   "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
-   "letter": "crawl",
-   "target_id": null,
-   "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
-   "letter": "attack",
-   "target_id": "f1",
-   "plain": "Attack Blue with bare hands",
-   "cost": ""
-  },
-  {
-   "letter": "attack",
-   "target_id": null,
-   "plain": "Attack",
-   "cost": ""
-  },
-  {
-   "letter": "shift_attack",
-   "target_id": "f1",
-   "plain": "Shift a hex and attack Blue with bare hands",
-   "cost": ""
-  },
-  {
-   "letter": "shift_attack",
-   "target_id": null,
-   "plain": "Shift_attack",
-   "cost": ""
-  },
-  {
-   "letter": "shift_defend",
-   "target_id": "f1",
-   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
-   "cost": ""
-  },
-  {
-   "letter": "shift_defend",
-   "target_id": null,
-   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
-   "cost": ""
-  },
-  {
-   "letter": "one_last_shot",
-   "target_id": "f1",
-   "plain": "One last shot at Blue with bare hands",
-   "cost": ""
-  },
-  {
-   "letter": "one_last_shot",
-   "target_id": null,
-   "plain": "One_last_shot",
-   "cost": ""
-  },
-  {
-   "letter": "disengage",
-   "target_id": "f1",
-   "plain": "Step away from the enemies engaging you",
-   "cost": ""
-  },
-  {
-   "letter": "disengage",
-   "target_id": null,
-   "plain": "Step away from the enemies engaging you",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": "f1",
-   "plain": "Grapple Blue: move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": null,
-   "plain": "Grapple : move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": "f1",
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": null,
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": "f1",
-   "plain": "Drop to one knee",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": null,
-   "plain": "Drop to one knee",
-   "cost": ""
-  },
-  {
    "letter": "do_nothing",
    "target_id": "f1",
    "plain": "Hold where you are and do nothing this turn",
@@ -3859,18 +3643,6 @@
  ],
  "classic every legal option prone": [
   {
-   "letter": "missile_attack",
-   "target_id": "f1",
-   "plain": "Shoot Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "missile_attack",
-   "target_id": null,
-   "plain": "Missile_attack",
-   "cost": ""
-  },
-  {
    "letter": "stand_up",
    "target_id": "f1",
    "plain": "Stand up; it takes the whole turn",
@@ -3892,102 +3664,6 @@
    "letter": "crawl",
    "target_id": null,
    "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
-   "letter": "attack",
-   "target_id": "f1",
-   "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "attack",
-   "target_id": null,
-   "plain": "Attack",
-   "cost": ""
-  },
-  {
-   "letter": "shift_attack",
-   "target_id": "f1",
-   "plain": "Shift a hex and attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "shift_attack",
-   "target_id": null,
-   "plain": "Shift_attack",
-   "cost": ""
-  },
-  {
-   "letter": "shift_defend",
-   "target_id": "f1",
-   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
-   "cost": ""
-  },
-  {
-   "letter": "shift_defend",
-   "target_id": null,
-   "plain": "Shift a hex and defend: blows in melee roll 4d6 to hit you, not 3d6",
-   "cost": ""
-  },
-  {
-   "letter": "one_last_shot",
-   "target_id": "f1",
-   "plain": "One last shot at Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "one_last_shot",
-   "target_id": null,
-   "plain": "One_last_shot",
-   "cost": ""
-  },
-  {
-   "letter": "disengage",
-   "target_id": "f1",
-   "plain": "Step away from the enemies engaging you",
-   "cost": ""
-  },
-  {
-   "letter": "disengage",
-   "target_id": null,
-   "plain": "Step away from the enemies engaging you",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": "f1",
-   "plain": "Grapple Blue: move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": null,
-   "plain": "Grapple : move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": "f1",
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": null,
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": "f1",
-   "plain": "Drop to one knee",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": null,
-   "plain": "Drop to one knee",
    "cost": ""
   },
   {
@@ -4017,42 +3693,6 @@
  ],
  "classic every legal option with a spare": [
   {
-   "letter": "missile_attack",
-   "target_id": "f1",
-   "plain": "Shoot Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "missile_attack",
-   "target_id": null,
-   "plain": "Missile_attack",
-   "cost": ""
-  },
-  {
-   "letter": "stand_up",
-   "target_id": "f1",
-   "plain": "Stand up; it takes the whole turn",
-   "cost": ""
-  },
-  {
-   "letter": "stand_up",
-   "target_id": null,
-   "plain": "Stand up; it takes the whole turn",
-   "cost": ""
-  },
-  {
-   "letter": "crawl",
-   "target_id": "f1",
-   "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
-   "letter": "crawl",
-   "target_id": null,
-   "plain": "Crawl up to 2 hexes, staying down",
-   "cost": ""
-  },
-  {
    "letter": "attack",
    "target_id": "f1",
    "plain": "Attack Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
@@ -4089,18 +3729,6 @@
    "cost": ""
   },
   {
-   "letter": "one_last_shot",
-   "target_id": "f1",
-   "plain": "One last shot at Blue with the Broadsword: 10 or less on 3d6 to hit (about 50%), 2d6 less 2 armour (about 5 a hit)",
-   "cost": ""
-  },
-  {
-   "letter": "one_last_shot",
-   "target_id": null,
-   "plain": "One_last_shot",
-   "cost": ""
-  },
-  {
    "letter": "change_weapons",
    "target_id": "f1",
    "plain": "Change to the Dagger",
@@ -4125,18 +3753,6 @@
    "cost": ""
   },
   {
-   "letter": "hth_attack",
-   "target_id": "f1",
-   "plain": "Grapple Blue: move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
-   "letter": "hth_attack",
-   "target_id": null,
-   "plain": "Grapple : move into their hex and fight hand to hand",
-   "cost": ""
-  },
-  {
    "letter": "pick_up",
    "target_id": "f1",
    "plain": "Pick up the Dagger",
@@ -4146,30 +3762,6 @@
    "letter": "pick_up",
    "target_id": null,
    "plain": "Pick up the Dagger",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": "f1",
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "go_prone",
-   "target_id": null,
-   "plain": "Drop prone where you stand",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": "f1",
-   "plain": "Drop to one knee",
-   "cost": ""
-  },
-  {
-   "letter": "kneel",
-   "target_id": null,
-   "plain": "Drop to one knee",
    "cost": ""
   },
   {
@@ -4735,13 +4327,13 @@
   {
    "letter": "move",
    "target_id": "f1",
-   "plain": "Move up to 10 hexes toward Blue",
+   "plain": "Move up to 10 hexes toward Blue, then grapple Blue: move into their hex and fight hand to hand",
    "cost": ""
   },
   {
    "letter": "half_move",
    "target_id": "f1",
-   "plain": "Move up to 5 hexes toward Blue without attacking",
+   "plain": "Move up to 5 hexes toward Blue, then grapple Blue: move into their hex and fight hand to hand",
    "cost": ""
   },
   {
@@ -4779,13 +4371,13 @@
   {
    "letter": "move",
    "target_id": "f2",
-   "plain": "Move up to 10 hexes toward Green",
+   "plain": "Move up to 10 hexes toward Green, then grapple Blue: move into their hex and fight hand to hand",
    "cost": ""
   },
   {
    "letter": "half_move",
    "target_id": "f2",
-   "plain": "Move up to 5 hexes toward Green without attacking",
+   "plain": "Move up to 5 hexes toward Green, then grapple Blue: move into their hex and fight hand to hand",
    "cost": ""
   },
   {
@@ -4819,7 +4411,177 @@
    "cost": ""
   }
  ],
- "classic wizard": [
+ "classic bare-handed beside a foe slower": [
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change weapons, then grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "hth_attack",
+   "target_id": "f1",
+   "plain": "Grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn, then grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic bare-handed beside a foe as quick": [
+  {
+   "letter": "attack",
+   "target_id": "f1",
+   "plain": "Attack Blue with bare hands: no attack, since bare hands can only grapple, and no foe here may be grappled",
+   "cost": ""
+  },
+  {
+   "letter": "shift_attack",
+   "target_id": "f1",
+   "plain": "Shift a hex and attack Blue with bare hands: no attack, since bare hands can only grapple, and no foe here may be grappled",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change weapons",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic bow engaged": [
+  {
+   "letter": "one_last_shot",
+   "target_id": "f1",
+   "plain": "One last shot at Blue with the Small bow: 11 or less on 3d6 to hit (about 62%), 1d6-1 (about 3 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "change_weapons",
+   "target_id": "f1",
+   "plain": "Change to the Small bow: it cannot be carried out here",
+   "cost": ""
+  },
+  {
+   "letter": "disengage",
+   "target_id": "f1",
+   "plain": "Step away from the enemies engaging you",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic crossbow beside a pile": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward F1",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward F1 without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward F1: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Light crossbow",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot F1 with the Light crossbow: no attack, since no foe here is one the Light crossbow will strike",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": "f1",
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic crossbow": [
   {
    "letter": "move",
    "target_id": "f1",
@@ -4830,6 +4592,62 @@
    "letter": "half_move",
    "target_id": "f1",
    "plain": "Move up to 5 hexes toward Blue without attacking",
+   "cost": ""
+  },
+  {
+   "letter": "dodge",
+   "target_id": "f1",
+   "plain": "Dodge while moving up to 5 hexes toward Blue: missiles and thrown weapons roll 4d6 to hit you, not 3d6",
+   "cost": ""
+  },
+  {
+   "letter": "ready_weapon",
+   "target_id": "f1",
+   "plain": "Ready the Light crossbow",
+   "cost": ""
+  },
+  {
+   "letter": "missile_attack",
+   "target_id": "f1",
+   "plain": "Shoot Blue with the Light crossbow: 11 or less on 3d6 to hit (about 62%), 2d6 (about 7 a hit)",
+   "cost": ""
+  },
+  {
+   "letter": "go_prone",
+   "target_id": "f1",
+   "plain": "Drop prone where you stand",
+   "cost": ""
+  },
+  {
+   "letter": "kneel",
+   "target_id": "f1",
+   "plain": "Drop to one knee",
+   "cost": ""
+  },
+  {
+   "letter": "do_nothing",
+   "target_id": "f1",
+   "plain": "Hold where you are and do nothing this turn",
+   "cost": ""
+  },
+  {
+   "letter": "pass",
+   "target_id": "f1",
+   "plain": "Wait: choose after the others have moved",
+   "cost": ""
+  }
+ ],
+ "classic wizard": [
+  {
+   "letter": "move",
+   "target_id": "f1",
+   "plain": "Move up to 10 hexes toward Blue, then grapple Blue: move into their hex and fight hand to hand",
+   "cost": ""
+  },
+  {
+   "letter": "half_move",
+   "target_id": "f1",
+   "plain": "Move up to 5 hexes toward Blue, then grapple Blue: move into their hex and fight hand to hand",
    "cost": ""
   },
   {

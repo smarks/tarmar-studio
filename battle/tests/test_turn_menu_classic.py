@@ -11,6 +11,9 @@ sentence is its own key followed by what filled it, so the tests prove which
 sentence was chosen and what filled it, never the shipped wording.
 """
 
+import json
+
+from django.urls import reverse
 from hexarena.hex import Hex
 from tarmar_engine.classic import policy as classic_policy
 from tarmar_engine.classic.arena import Arena
@@ -20,6 +23,7 @@ from tarmar_engine.classic.data import (
     DAGGER,
     HALBERD,
     LEATHER,
+    LIGHT_CROSSBOW,
     MAIN_GAUCHE,
     SABER,
     SMALL_BOW,
@@ -30,10 +34,14 @@ from tarmar_engine.classic.monsters import create_monster
 from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.state import GameState
 
-from battle import turn_menu
+from battle import control, turn_menu
+from battle.models import Battle
 from battle.persistence import CLASSIC_PROFILE
+from battle.policy import Candidate
+from battle.services import advance_turn, create_battle
+from battle.tests.fixed_refusals import with_fixed_refusals
 from battle.tests.test_persistence import classic_game
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, create_character
 
 from .rulings_words import with_fixed_words
 
@@ -370,6 +378,153 @@ class ClassicMenuIsDescribedTest(BaseTestCase):
         )
         self.assertNotIn("3d6", line)
 
+    def bare_handed_beside(self, foe_armour=None) -> tuple[GameState, Figure]:
+        """Bare-handed Red beside Blue's Broadsword, Blue slowed by
+        ``foe_armour`` if given, so a grapple may be begun on it (Melee p.17:
+        a foe with a lower MA)."""
+        red = create_human("Red", 12, 12, "red")
+        red.position = Hex(4, 4)
+        blue = armed("Blue", "blue", Hex(4, 5), BROADSWORD)
+        if foe_armour is not None:
+            blue.armor = foe_armour
+        return GameState(Arena(cols=9, rows=15), [red, blue]), red
+
+    def test_a_bare_handed_attack_says_it_grapples_with_no_odds(self):
+        """#146: the ATTACK and SHIFT ATTACK rows read "attack Blue with bare
+        hands", though the engine's blow is a grapple (``attack_blow``)."""
+        game, red = self.bare_handed_beside(CHAINMAIL)
+        entries = self.menu_for(game, red)
+        grapple = "classic_menu.grapple_words"
+        self.assertEqual(
+            self.entry(entries, "attack")["plain"],
+            f"classic_menu.hth_attack Blue {grapple}",
+        )
+        self.assertEqual(
+            self.entry(entries, "shift_attack")["plain"],
+            f"classic_menu.shift_grapple {grapple} Blue",
+        )
+
+    def test_a_bare_handed_attack_no_grapple_may_begin_strikes_nobody(self):
+        """Beside a foe as quick as it, from the front, bare hands may begin no
+        grapple, so the engine's ATTACK strikes nobody, and the row says so."""
+        game, red = self.bare_handed_beside()
+        entries = self.menu_for(game, red)
+        for letter, sentence in (
+            ("attack", "turn_menu.attack Blue"),
+            ("shift_attack", "classic_menu.shift_attack Blue"),
+        ):
+            with self.subTest(letter=letter):
+                self.assertEqual(
+                    self.entry(entries, letter)["plain"],
+                    f"classic_menu.no_attack {sentence} turn_menu.bare_hands "
+                    "classic_menu.no_grapple",
+                )
+
+    def test_bare_hands_grapple_after_a_hold_or_a_move_and_the_row_says_so(self):
+        """Bare hands grapple under any option but a dodge, a defence, a
+        disengage or a cast (``attack_blow``, melee #275): a hold beside a
+        slower foe, and a move that ends beside one, grapple it too."""
+        game, red = self.bare_handed_beside(CHAINMAIL)
+        hold = self.entry(self.menu_for(game, red), "do_nothing")["plain"]
+        red.position = Hex(4, 2)
+        entries = self.menu_for(game, red)
+        grapple = "classic_menu.then_grapple classic_menu.grapple_words"
+        self.assertEqual(hold, f"{grapple} classic_menu.do_nothing Blue")
+        self.assertEqual(
+            self.entry(entries, "move")["plain"],
+            f"{grapple} classic_menu.move_toward Blue 10 Blue",
+        )
+        # A move it then attacks from is not one "without attacking".
+        self.assertEqual(
+            self.entry(entries, "half_move")["plain"],
+            f"{grapple} classic_menu.move_toward Blue 5 Blue",
+        )
+        # A dodge does not attack, bare-handed or not.
+        self.assertNotIn("grapple", self.entry(entries, "dodge")["plain"])
+
+    def test_a_blow_names_the_foe_the_engine_strikes(self):
+        """A weapon strikes the weakest foe its front hexes reach
+        (``attack_blow``), which may not be the one its row is aimed at."""
+        red = armed("Red", "red", Hex(4, 4), BROADSWORD)
+        blue = armed("Blue", "blue", Hex(4, 5), BROADSWORD)
+        green = create_human("Green", 9, 15, "blue")
+        green.position = Hex(5, 4)
+        game = GameState(Arena(cols=9, rows=15), [red, blue, green])
+        aimed_at_blue = turn_menu.describe_classic(
+            game,
+            red,
+            Candidate("attack", "ATTACK", 0.0, "", target_id=blue.uid),
+            ai_choice=False,
+        )
+        self.assertRegex(
+            aimed_at_blue.plain,
+            r"^turn_menu\.with_odds turn_menu\.attack Green turn_menu\.the_weapon "
+            r"Broadsword classic_menu\.",
+        )
+        self.assertEqual(aimed_at_blue.target_name, "Blue")
+
+    def test_a_shot_into_a_pile_with_a_friend_strikes_nobody_and_says_so(self):
+        """The engine looses no missile into a hand-to-hand pile holding a
+        friend (``attack_blow``), so a crossbow's MISSILE ATTACK at the foe in
+        it strikes nobody, though the foe is in range (review of #146, the
+        reviewer's seed 341)."""
+        friend = armed("F0", "red", Hex(3, 2))
+        foe = armed("F1", "blue", Hex(3, 2))
+        friend.hth_opponents, foe.hth_opponents = [foe.uid], [friend.uid]
+        crossbow = armed("F2", "red", Hex(3, 7), LIGHT_CROSSBOW)
+        game = GameState(Arena(cols=9, rows=15), [friend, foe, crossbow])
+        entry = self.entry(self.menu_for(game, crossbow), "missile_attack")
+        self.assertEqual(entry["target_name"], "F1")
+        self.assertEqual(
+            entry["plain"],
+            "classic_menu.no_attack turn_menu.shoot F1 turn_menu.the_weapon "
+            "Light crossbow classic_menu.no_foe_struck turn_menu.the_weapon "
+            "Light crossbow",
+        )
+
+    def test_an_option_the_engine_offers_and_then_refuses_says_so(self):
+        """The engine's menu offers CHANGE WEAPONS to a bow while engaged, and
+        its own verbs then refuse to ready a missile weapon there (review of
+        #146; tarmar-engine #68, #69). The menu is built, the row says in the
+        studio's words that it cannot be carried out, and it is marked so the
+        panel draws it unselectable and the choice path refuses it."""
+        archer = armed("Red", "red", Hex(4, 4), SMALL_BOW)
+        game = GameState(
+            Arena(cols=9, rows=15),
+            [archer, armed("Blue", "blue", Hex(4, 5), BROADSWORD)],
+        )
+        before = game.to_dict()
+        entries = self.menu_for(game, archer)
+        entry = self.entry(entries, "change_weapons")
+        self.assertEqual(
+            entry["plain"],
+            "classic_menu.cannot_carry_out turn_menu.change_to Small bow",
+        )
+        self.assertIs(entry[turn_menu.REFUSED], True)
+        # Not to be taken, so it costs nothing (the weapon is not dropped).
+        self.assertEqual(entry["cost"], "")
+        # Only the refused option carries the mark.
+        self.assertEqual(
+            [one["letter"] for one in entries if turn_menu.REFUSED in one],
+            ["change_weapons"],
+        )
+        self.assertEqual(game.to_dict(), before)
+
+    def test_bare_hands_grapple_after_a_hold_named_at_nobody(self):
+        """A hold with no foe named is rehearsed too (review of #146)."""
+        game, red = self.bare_handed_beside(CHAINMAIL)
+        hold = turn_menu.describe_classic(
+            game,
+            red,
+            Candidate("do_nothing", "DO NOTHING", 0.0, "", target_id=None),
+            ai_choice=False,
+        )
+        self.assertEqual(
+            hold.plain,
+            "classic_menu.then_grapple classic_menu.grapple_words "
+            "classic_menu.do_nothing Blue",
+        )
+
     def test_the_chance_counts_the_automatic_hits_and_misses(self):
         # Melee p.10: a 3, 4 or 5 always hits and a 16, 17 or 18 always
         # misses, so no to-hit number makes a classic blow certain either way:
@@ -407,3 +562,87 @@ class ClassicMenuIsDescribedTest(BaseTestCase):
         cast = casts[0]
         self.assertEqual(cast["plain"], "turn_menu.cast_at Blue Magic Fist")
         self.assertRegex(cast["cost"], r"^classic_menu\.cast_cost \d+$")
+
+
+@with_fixed_refusals
+class AnOptionTheRulesRefuseIsRefusedWhenChosenTest(BaseTestCase):
+    """A choice of an option the menu marks refused is refused, not stored to
+    fail the turn (review of #146): the same for a player, a Game Master and
+    the AI hand-off. The choice path reads the stored menu, the same in either
+    profile, so a Tarmar battle's pause stands in, one option marked."""
+
+    def setUp(self):
+        super().setUp()
+        self.game_master = self.create_dm()
+        battle = create_battle(
+            self.game_master,
+            name="Refused option",
+            count=1,
+            seed=3,
+            character_ids=(
+                create_character(self.create_user("player"), name="Aldwin").pk,
+            ),
+            control_mode=control.MANUAL,
+        )
+        battle, _events = advance_turn(battle.pk)
+        self.assertEqual(battle.status, Battle.STATUS_AWAITING)
+        pending = battle.pending_input_json
+        self.refused = pending["candidates"][0]
+        self.refused[turn_menu.REFUSED] = True
+        Battle.objects.filter(pk=battle.pk).update(pending_input_json=pending)
+        self.battle = Battle.objects.get(pk=battle.pk)
+        self.login_as(self.game_master)
+
+    def act(self, choice: dict):
+        pending = self.battle.pending_input_json
+        return self.client.post(
+            reverse("battle:act", args=[self.battle.pk]),
+            json.dumps(
+                {"combatant_id": pending["combatant_id"], "turn": pending["turn"]}
+                | choice
+            ),
+            content_type="application/json",
+        )
+
+    def assert_refused(self, response) -> None:
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(
+            response.json()["error"],
+            "services.option_cannot_be_carried_out " + self.refused["name"],
+        )
+        after = Battle.objects.get(pk=self.battle.pk)
+        self.assertEqual(after.turn_inputs_json, {})
+        self.assertEqual(after.status, Battle.STATUS_AWAITING)
+        self.assertEqual(after.turn_number, self.battle.turn_number)
+
+    def test_choosing_it_is_refused(self):
+        self.assert_refused(
+            self.act(
+                {
+                    "letter": self.refused["letter"],
+                    "target_id": self.refused.get("target_id"),
+                    "spell_key": self.refused.get("spell_key") or "",
+                }
+            )
+        )
+
+    def test_handing_it_to_the_ai_is_refused(self):
+        pending = self.battle.pending_input_json
+        for candidate in pending["candidates"]:
+            candidate.pop("ai_choice", None)
+        self.refused["ai_choice"] = True
+        pending["candidates"][0] = self.refused
+        Battle.objects.filter(pk=self.battle.pk).update(pending_input_json=pending)
+        self.battle = Battle.objects.get(pk=self.battle.pk)
+        self.assert_refused(self.act({"ai": True}))
+
+    def test_another_option_is_still_taken(self):
+        other = self.battle.pending_input_json["candidates"][1]
+        response = self.act(
+            {
+                "letter": other["letter"],
+                "target_id": other.get("target_id"),
+                "spell_key": other.get("spell_key") or "",
+            }
+        )
+        self.assertEqual(response.status_code, 200, response.content)
