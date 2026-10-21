@@ -38,6 +38,7 @@ __all__ = [
     "MAX_DATABASE_INTEGER",
     "_can_edit_object",
     "is_owner_or_manager",
+    "wants_json",
     "client_ip",
     "request_theme",
     "safe_next_url",
@@ -147,6 +148,20 @@ def database_integer(value: Any) -> int:
     if not -MAX_DATABASE_INTEGER - 1 <= number <= MAX_DATABASE_INTEGER:
         raise ValueError("Out of range")
     return number
+
+
+def wants_json(request: HttpRequest) -> bool:
+    """True for a script caller, false for a plain form post.
+
+    Endpoints that serve both answer a form post with a page or a redirect,
+    the page rendered from stored state being the whole update, and a caller
+    driving them from script (``X-Requested-With: XMLHttpRequest``, or a JSON
+    body) in JSON: the battle controls, and the GM page's mode switch, which
+    changes the mode without reloading the page (issue #89).
+    """
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
+        request.content_type or ""
+    ).startswith("application/json")
 
 
 def request_theme(request: HttpRequest) -> Theme:

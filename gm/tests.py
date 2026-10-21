@@ -516,6 +516,9 @@ class GMViewTest(BaseTestCase):
                 # running when the page loaded (issue #515).
                 "turnUrlTemplate",
                 "runningTurn",
+                # Where the conversation is asked for as stored, from a turn
+                # on, to show it without a reload (issue #89).
+                "historyUrlTemplate",
             },
         )
         # Only a Game Master is given somewhere to send a review (issue #402).

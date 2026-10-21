@@ -134,8 +134,19 @@ class TurnSurvivesDisconnectTest(BaseTestCase):
         self.assertContains(page, REPLY)
         record = GMTurnRecord.objects.get()
         state = self.client.get(f"/tarmar/gm/turns/{record.pk}/").json()
+        # What the done frame would have said, too (issue #89): the page
+        # shows the finished turn in place rather than reloading.
+        session = GMSession.objects.get(pk=session_id)
         self.assertEqual(
-            state, {"state": "finished", "session_id": session_id, "error": ""}
+            state,
+            {
+                "state": "finished",
+                "session_id": session_id,
+                "error": "",
+                "session_name": session.name,
+                "message_count": session.message_count,
+                "message_count_label": session.message_count_label,
+            },
         )
 
         # A stale page's Retry of the same message is refused, not replayed.

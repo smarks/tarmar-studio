@@ -169,6 +169,55 @@ if (typeof module !== 'undefined' && module.exports) {
     return true;
   }
 
+  /** A character's Luck control (gm/_luck_control.html). */
+  const LUCK_FORM = '.gm-luck-form';
+
+  /**
+   * The Luck spends on their way, by session and character. Held here, on
+   * the panel, rather than on the form: a turn's refetch replaces the form
+   * while a spend is out, and a press on the fresh one used to send a second
+   * spend (issue #105). The server holds a player to once per level either
+   * way; a Game Master may spend past it, so for him the page is the guard.
+   */
+  const spendingLuck = new Set();
+
+  /**
+   * The key ``form``'s spend is held under while it is on its way.
+   * @param {HTMLFormElement} form - A `.gm-luck-form`.
+   * @returns {string} The session and the character, as one key.
+   */
+  function luckKey(form) {
+    return `${currentSessionId()}:${form.getAttribute('data-character-id')}`;
+  }
+
+  /**
+   * Where a held button keeps the state the server rendered it in, so
+   * freeing it puts that back rather than switching it on (as
+   * battle-setup.js's guard keeps its renderedDisabled).
+   */
+  const RENDERED_DISABLED = 'renderedDisabled';
+
+  /**
+   * Hold the button of every Luck control in ``scope`` whose spend is on its
+   * way, and free the rest to the state they were rendered in: what the tab
+   * shows of a spend, however often it has been fetched again since.
+   * @param {ParentNode} scope
+   */
+  function paintLuckControls(scope) {
+    scope.querySelectorAll(LUCK_FORM).forEach((control) => {
+      const button = control.querySelector('button[type="submit"]');
+      if (!button) return;
+      const kept = RENDERED_DISABLED in button.dataset;
+      if (spendingLuck.has(luckKey(control))) {
+        if (!kept) button.dataset[RENDERED_DISABLED] = String(button.disabled);
+        button.disabled = true;
+      } else if (kept) {
+        button.disabled = button.dataset[RENDERED_DISABLED] === 'true';
+        delete button.dataset[RENDERED_DISABLED];
+      }
+    });
+  }
+
   /**
    * Spend one of a character's Luck uses in this session (issue #861), then
    * refetch the tab so the count is the recorded one. A refusal (a player
@@ -177,12 +226,13 @@ if (typeof module !== 'undefined' && module.exports) {
    * @returns {Promise<boolean>} Whether the spend was recorded.
    */
   async function spendLuck(form) {
-    // One spend at a time per control: a double-click must not spend twice
-    // (the #861 review). The button stays disabled until the answer lands.
-    if (form.dataset.spending === 'true') return false;
-    form.dataset.spending = 'true';
-    const button = form.querySelector('button[type="submit"]');
-    if (button) button.disabled = true;
+    // One spend at a time per character: a double-click must not spend twice
+    // (the #861 review), on this form or on the one a refetch put in its
+    // place (issue #105). The button stays disabled until the answer lands.
+    const key = luckKey(form);
+    if (spendingLuck.has(key)) return false;
+    spendingLuck.add(key);
+    paintLuckControls(root.document);
     const roll = form.querySelector('.gm-luck-roll');
     try {
       const data = await post(form.getAttribute('data-luck-url'), {
@@ -195,8 +245,8 @@ if (typeof module !== 'undefined' && module.exports) {
       await refreshPanel();
       return true;
     } finally {
-      delete form.dataset.spending;
-      if (button) button.disabled = false;
+      spendingLuck.delete(key);
+      paintLuckControls(root.document);
     }
   }
 
@@ -324,6 +374,8 @@ if (typeof module !== 'undefined' && module.exports) {
             container.innerHTML = body;
             if (tab.keepView) tab.keepView.restore(container, liveView);
             root.gmPanelDrafts.restore(container, drafts);
+            // A spend still on its way keeps the fresh control held (#105).
+            paintLuckControls(container);
             if (root.picker) {
               root.picker.initPickers(container);
               // A search typed into the attach picker is one of those drafts
@@ -336,6 +388,12 @@ if (typeof module !== 'undefined' && module.exports) {
                 root.picker.loadPage(fresh, pickerView.page, pickerView.direction);
               }
             }
+            // The pane's pop-out control opens the sheet on the page now,
+            // and says there is none to open once the last is detached: it
+            // is painted from the tab's contents, which a reload repainted
+            // and an in-place change must too (issue #89's sweep).
+            const panes = root.gmPanelLayout;
+            if (panes && panes.isActive()) panes.paintPopouts();
             replaced = true;
           }
         }
@@ -372,7 +430,7 @@ if (typeof module !== 'undefined' && module.exports) {
     const container = root.document.getElementById(CHARACTERS_TAB.containerId);
     if (container) {
       container.addEventListener('submit', (event) => {
-        const luckForm = event.target.closest('.gm-luck-form');
+        const luckForm = event.target.closest(LUCK_FORM);
         if (luckForm) {
           event.preventDefault();
           spendLuck(luckForm);

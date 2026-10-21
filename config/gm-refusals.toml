@@ -84,6 +84,7 @@ change_one_of = "change must be one of: {changes}"
 
 [views_history]
 before_not_turn = "before must be the number of a turn"
+since_not_turn = "since must be the number of a turn"
 before_not_thread = "before must be the id of a thread"
 
 [fight]

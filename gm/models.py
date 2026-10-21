@@ -21,6 +21,22 @@ MODE_DESCRIPTIONS: dict[str, str] = {
     MODE_PLAY: "Runs the game for you: sets the scene, plays the world, and asks what you do.",
     MODE_AIDE: "Answers what you ask and stops. You are running the game; it is not.",
 }
+#: What the message box invites in each mode, and the chat's opening line
+#: while a session has no history yet. The page addresses the reader the way
+#: the mode they are in does (issues #353, #372): the play-mode line invites
+#: them into a scene, which is the one thing the aide must not do. The mode
+#: control carries both for each option, so switching the mode in place
+#: (issue #89) paints the page from these same words.
+MODE_PLACEHOLDERS: dict[str, str] = {
+    MODE_PLAY: "What do you do?",
+    MODE_AIDE: "Ask the aide",
+}
+MODE_OPENINGS: dict[str, str] = {
+    MODE_PLAY: "Describe your character concept or say what you'd like to do.",
+    MODE_AIDE: (
+        "Ask a rules question, or ask for NPCs, an encounter, loot, or read-aloud text."
+    ),
+}
 MODE_CHOICES: tuple[tuple[str, str], ...] = tuple(
     (mode, MODE_LABELS[mode]) for mode in GM_MODES
 )

@@ -48,9 +48,13 @@ session picker takes (issues #431, #864).{% endcomment %}
         the badge that only reported the mode was, for a Game Master, a label
         on a decision he had never been allowed to make. Everyone sees it now,
         because everyone may switch. Part of the page and always present,
-        never a banner that dismisses itself; the select posts an ordinary
-        form and the page comes back rendered from the stored mode, so what is
-        on screen is what the model was told.{% endcomment %}
+        never a banner that dismisses itself. chat.js posts the form when the
+        select changes and paints the page from the mode the server stored,
+        from the words each option carries (gm.models' MODE_* wording), so
+        what is on screen is what the model was told without a reload, which
+        threw away the earlier turns the reader had loaded (issue #89).
+        Without JavaScript the button posts it and the page comes back
+        rendered from the stored mode.{% endcomment %}
         <div class="gm-mode-indicator" id="gm-mode-indicator">
             <span class="gm-mode-name">{{ session_mode_label }}</span>
             <span class="gm-mode-note">{{ session_mode_description }}</span>
@@ -58,9 +62,9 @@ session picker takes (issues #431, #864).{% endcomment %}
                 {% csrf_token %}
                 {% if active_session %}<input type="hidden" name="session_id" value="{{ active_session.pk }}">{% endif %}
                 <label class="sr-only" for="gm-mode-select">Game Master mode</label>
-                <select id="gm-mode-select" name="mode" onchange="this.form.submit()">
+                <select id="gm-mode-select" name="mode">
                     {% for option in session_mode_options %}
-                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                    <option value="{{ option.value }}" data-description="{{ option.description }}" data-placeholder="{{ option.placeholder }}" data-opening="{{ option.opening }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
                     {% endfor %}
                 </select>
                 {# Reachable without JavaScript, and dead weight with it, so it #}
@@ -106,11 +110,7 @@ session picker takes (issues #431, #864).{% endcomment %}
                 invites them into a scene, which is the one thing the aide must
                 not do. It follows the mode, not the account's role — a Game
                 Master who has chosen to play is asked what he does.{% endcomment %}
-                {% if session_mode == 'aide' %}
-                <p>Ask a rules question, or ask for NPCs, an encounter, loot, or read-aloud text.</p>
-                {% else %}
-                <p>Describe your character concept or say what you'd like to do.</p>
-                {% endif %}
+                <p id="gm-mode-opening">{{ session_mode_opening }}</p>
                 <p class="hint">Type /help in the input for available commands.</p>
                 {% if campaign_offer %}
                 {% comment %}Continuing a campaign (issue #761): offered from the records the last played session holds, and done only when asked. Nothing carries over on its own.{% endcomment %}
@@ -161,7 +161,7 @@ session picker takes (issues #431, #864).{% endcomment %}
                a multi-paragraph action could not be typed at all. Enter still
                sends -- chat.js keeps that -- and Shift+Enter makes a new line,
                which is the convention every chat box uses.{% endcomment %}
-            <textarea id="user-input" rows="1" placeholder="{% if session_mode == 'aide' %}Ask the aide{% else %}What do you do?{% endif %}" autocomplete="off" autofocus></textarea>
+            <textarea id="user-input" rows="1" placeholder="{{ session_mode_placeholder }}" autocomplete="off" autofocus></textarea>
             <button type="submit" id="send-btn">Send</button>
         </form>
     </div>

@@ -102,6 +102,7 @@ class ViewsHistoryWords:
     """``gm.views_history``'s refusals: paging back through a session."""
 
     before_not_turn: str = sentence()
+    since_not_turn: str = sentence()
     before_not_thread: str = sentence()
 
 

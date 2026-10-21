@@ -11,8 +11,10 @@ from typing import NamedTuple
 
 import httpx
 from django.conf import settings
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import (
@@ -42,6 +44,7 @@ from common.helpers import (
     _parse_json_body,
     column_length,
     database_integer,
+    wants_json,
 )
 from common.mixins import ActivePageMixin
 from common.pagination import query_without
@@ -73,6 +76,8 @@ from .messages import (
 from .models import (
     MODE_DESCRIPTIONS,
     MODE_LABELS,
+    MODE_OPENINGS,
+    MODE_PLACEHOLDERS,
     PLACEHOLDER_SESSION_NAME,
     CampaignState,
     GMRecordEdit,
@@ -488,6 +493,28 @@ def _characters_panel_context(user, session: GMSession | None) -> dict:
     }
 
 
+def _finished_turn_map(session_id: int | None, narration: str) -> dict | None:
+    """Where the party is after a turn, for the Map tab to follow (#343, #579).
+
+    The party's own record, which the turn may just have changed; only a
+    session that has recorded no place at all falls back to reading the
+    narration for one. The done frame carries it, and so does the answer a
+    page that lost the stream reads the finished turn from (issue #89).
+
+    Args:
+        session_id: The session the turn saved into.
+        narration: The turn's reply.
+
+    Returns:
+        The map payload, or None when neither names a place.
+    """
+    party_map = _party_map_payload(session_id)
+    if party_map is not None:
+        return party_map
+    detected_place = detect_place(narration)
+    return detected_place.frame_payload() if detected_place is not None else None
+
+
 def _story_map_payload(history: list[ChatMessage]) -> dict[str, str] | None:
     """The ``map`` payload the latest GM reply naming a place would carry."""
     for message in reversed(history):
@@ -590,6 +617,41 @@ def _panel_verdict(session: GMSession | None) -> str | None:
         return None
     notice = filed_verdict(session)
     return str(notice["content"]) if notice else fight_verdict(session.battle)
+
+
+def _battle_panel_context(
+    user: AbstractBaseUser | AnonymousUser, session: GMSession | None
+) -> dict[str, object]:
+    """Everything ``gm/_panel_battle.html`` needs, wherever it is rendered.
+
+    The chat page's Battle tab (issue #345) and the tab's live fragment
+    (``gm:battle_panel``, issue #89) render the partial from this one
+    context: the session's battle drawn with the battle app's own arena
+    partial, from the same context the battle page builds, so the board
+    beside the chat is the board.
+
+    Args:
+        user: The viewer, who decides what the arena offers.
+        session: The session whose fight the tab shows, or None for a page
+            opened without one.
+
+    Returns:
+        The battle, how it ended, whether it is still on, and the arena's
+        own context when there is a battle.
+    """
+    battle = session.battle if session is not None else None
+    return {
+        "panel_battle": battle,
+        # How it ended, once it has (issue #785): the notice filed for this
+        # ending, so the pane says what the chat says.
+        "panel_verdict": _panel_verdict(session),
+        "battle_live": session is not None and fight_in_progress(session),
+        **(
+            arena_context(battle, Actor.for_user_or_guest(user, ""))
+            if battle is not None
+            else {}
+        ),
+    }
 
 
 def _fold_marker(session: GMSession, set_by: GMRecordEdit | None) -> ChatMessage:
@@ -758,16 +820,6 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
             )
             history = _visible_history(active_session)
 
-        # The Battle tab (issue #345): the session's battle rendered with the
-        # battle app's own arena partial, from the same context the battle
-        # page builds, so the board beside the chat is the board.
-        battle = active_session.battle if active_session else None
-        battle_context = (
-            arena_context(battle, Actor.for_user_or_guest(self.request.user, ""))
-            if battle is not None
-            else {}
-        )
-
         # The mode indicator (issue #353), which is now also the control
         # that changes the mode (issue #372). It is read from the same value
         # the stream endpoint sends the model -- the session's own column, or
@@ -811,11 +863,15 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                 "session_mode": mode,
                 "session_mode_label": MODE_LABELS[mode],
                 "session_mode_description": MODE_DESCRIPTIONS[mode],
+                "session_mode_placeholder": MODE_PLACEHOLDERS[mode],
+                "session_mode_opening": MODE_OPENINGS[mode],
                 "session_mode_options": [
                     {
                         "value": value,
                         "label": label,
                         "description": MODE_DESCRIPTIONS[value],
+                        "placeholder": MODE_PLACEHOLDERS[value],
+                        "opening": MODE_OPENINGS[value],
                         "selected": value == mode,
                     }
                     for value, label in MODE_LABELS.items()
@@ -848,13 +904,9 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                 # page (issue #351) renders the same partial from the same
                 # helper.
                 **_map_panel_context(active_session, history),
-                "panel_battle": battle,
-                # How it ended, once it has (issue #785): the notice filed for
-                # this ending, so the pane says what the chat says.
-                "panel_verdict": _panel_verdict(active_session),
-                "battle_live": bool(active_session)
-                and fight_in_progress(active_session),
-                **battle_context,
+                # The Battle tab (issue #345), from the one builder its live
+                # fragment uses too (issue #89).
+                **_battle_panel_context(self.request.user, active_session),
                 # What gm-panel-characters.js needs, in its own json_script
                 # block so chat.js's #chat-config keeps only its own keys.
                 # gm-panel-battle.js reads the token and session id from the
@@ -872,6 +924,11 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                     # so a thing the GM just moved shows without a reload.
                     "campaignPanelUrlTemplate": reverse(
                         "gm:campaign_panel", args=[0]
+                    ).replace("/0/", "/{session_id}/"),
+                    # The Battle tab is asked for again when the board
+                    # changes under it (issue #89), rather than the page.
+                    "battlePanelUrlTemplate": reverse(
+                        "gm:battle_panel", args=[0]
                     ).replace("/0/", "/{session_id}/"),
                     "sessionId": active_session.pk if active_session else None,
                     # What the Battle tab says when a fight is answered with
@@ -892,6 +949,11 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                     # turn still running when it loaded (issue #515).
                     "turnUrlTemplate": reverse("gm:turn", args=[0]).replace(
                         "/0/", "/{turn_id}/"
+                    ),
+                    # Where the page asks for the conversation as stored, from
+                    # a turn on, to show it without a reload (issue #89).
+                    "historyUrlTemplate": reverse("gm:history_page", args=[0]).replace(
+                        "/0/", "/{session_id}/"
                     ),
                     "runningTurn": (
                         {"id": running.pk, "message": running.user_message}
@@ -1750,13 +1812,9 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
         # Where the party is, from the record this turn may just have
         # changed (issue #579). Only a session that has recorded no place at
         # all falls back to reading the narration for one.
-        party_map = _party_map_payload(outcome.session_id)
-        if party_map is not None:
-            done_data["map"] = party_map
-        else:
-            detected_place = detect_place(outcome.narration)
-            if detected_place is not None:
-                done_data["map"] = detected_place.frame_payload()
+        finished_map = _finished_turn_map(outcome.session_id, outcome.narration)
+        if finished_map is not None:
+            done_data["map"] = finished_map
         recorder.finish(
             GMTurnRecord.OUTCOME_OK,
             session_id=outcome.session_id,
@@ -1867,6 +1925,11 @@ def gm_turn(request: HttpRequest, turn_id: int) -> JsonResponse:
     Returns ``state`` -- ``running``, ``finished`` or ``failed`` -- with the
     session the turn saved into and, for a failed turn, why. Only the turn's
     own player may ask.
+
+    A finished turn's answer also carries what its done frame would have
+    (issue #89): the session's name and message count, and where the party
+    is, so the page shows the turn in place, as a streamed one is, rather
+    than reloading.
     """
     expire_stale_running_turns()
     record = GMTurnRecord.objects.filter(pk=turn_id, user=request.user).first()
@@ -1878,9 +1941,24 @@ def gm_turn(request: HttpRequest, turn_id: int) -> JsonResponse:
         state = "finished"
     else:
         state = "failed"
-    return JsonResponse(
-        {"state": state, "session_id": record.session_id, "error": record.error}
+    answer: dict[str, object] = {
+        "state": state,
+        "session_id": record.session_id,
+        "error": record.error,
+    }
+    saved_into = (
+        GMSession.objects.filter(pk=record.session_id, user=request.user).first()
+        if state == "finished" and record.session_id is not None
+        else None
     )
+    if saved_into is not None:
+        answer["session_name"] = saved_into.name
+        answer["message_count"] = saved_into.message_count
+        answer["message_count_label"] = saved_into.message_count_label
+        finished_map = _finished_turn_map(saved_into.pk, record.reply)
+        if finished_map is not None:
+            answer["map"] = finished_map
+    return JsonResponse(answer)
 
 
 @login_required
@@ -1922,14 +2000,18 @@ def gm_save(request: HttpRequest) -> JsonResponse:
 
 @login_required
 @require_POST
-def gm_mode(request: HttpRequest) -> HttpResponseRedirect:
+def gm_mode(request: HttpRequest) -> HttpResponse:
     """Change how the Game Master behaves in this session (issue #372).
 
     The control on the chat page posts an ordinary form here: ``mode``, and
-    ``session_id`` when there is a session yet. It answers with a redirect
-    back to the chat page rather than JSON, so what the reader ends up
-    looking at is the page rendered from the stored mode -- there is no
-    banner to dismiss and nothing on screen that a reload could contradict.
+    ``session_id`` when there is a session yet. A plain form post (the page
+    without JavaScript) is answered with a redirect back to the chat page,
+    rendered from the stored mode. The page's script posts the same form
+    (``common.helpers.wants_json``) and is answered with the mode as stored,
+    ``{"ok": true, "mode": ...}``, which it paints the page from in place
+    (issue #89): a reload threw away the earlier turns the reader had loaded.
+    Either way there is no banner to dismiss and nothing on screen that a
+    reload could contradict.
 
     Anyone may change their own session's mode. It confers nothing: the
     Game Master's authority is read off the account on every turn and is
@@ -1942,19 +2024,24 @@ def gm_mode(request: HttpRequest) -> HttpResponseRedirect:
     mode = mode_for_user(request.POST.get("mode"), request.user)
     session_id = request.POST.get("session_id")
     chat_url = reverse("gm:chat")
+    scripted = wants_json(request)
     if not session_id:
         # No session exists yet, so there is no row to write the choice on.
         # It rides in the query string until the first message creates one,
         # which is state the page renders from and a reload preserves.
+        if scripted:
+            return JsonResponse({"ok": True, "mode": mode})
         return redirect(f"{chat_url}?mode={mode}")
 
     session, error = _get_gm_session(session_id, request.user)
     if error:
-        return redirect(chat_url)
+        return error if scripted else redirect(chat_url)
     assert session is not None
     # Keeps the conversation and files a hidden note at the seam; see
     # GMSession.switch_mode for why the history is not thrown away.
     session.switch_mode(mode)
+    if scripted:
+        return JsonResponse({"ok": True, "mode": session.mode})
     return redirect(f"{chat_url}?session={session.pk}")
 
 
@@ -2172,6 +2259,26 @@ def gm_characters_panel(request: HttpRequest, session_id: int) -> HttpResponse:
         request,
         "gm/_panel_characters_body.html",
         _characters_panel_context(request.user, session),
+    )
+
+
+@login_required
+@require_GET
+def gm_battle_panel(request: HttpRequest, session_id: int) -> HttpResponse:
+    """The Battle tab for one of the user's sessions (issue #89).
+
+    The page asks for it when the board changes under it -- a fight started
+    from the page, a restart made elsewhere, a ruling posted from the tab --
+    and puts it in place of the tab it shows, so the rest of the page, the
+    earlier turns the reader loaded among it, stays as it is. The same
+    template and context as the page render, so the fragment cannot drift
+    from a reload.
+    """
+    session = get_object_or_404(GMSession, pk=session_id, user=request.user)
+    return render(
+        request,
+        "gm/_panel_battle.html",
+        {"active_session": session, **_battle_panel_context(request.user, session)},
     )
 
 

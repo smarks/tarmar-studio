@@ -429,6 +429,8 @@ class GMChatPagePanelTest(BaseTestCase):
                 # The Battle tab's error-page messages (#94).
                 "fightTimeoutMessage",
                 "fightErrorPageMessage",
+                # The Battle tab is drawn again in place (issue #89).
+                "battlePanelUrlTemplate",
             },
         )
         self.assertEqual(

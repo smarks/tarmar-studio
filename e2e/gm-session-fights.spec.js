@@ -28,6 +28,7 @@
 const { refusal } = require('./refusals');
 const { test, expect, loginAs, submitPassphrase, chooseToAttach } = require('./fixtures');
 const { readDjangoShell, runDjangoShell } = require('./django');
+const { rulingWords } = require('./rulings');
 
 const WORKER = Number(process.env.TEST_PARALLEL_INDEX || 0);
 // This worker's accounts only: another worker may still be using its own.
@@ -220,6 +221,34 @@ users.delete()
         await page.click('#gm-fight-start');
         await expect(page.locator('#gm-panel-battle-error'))
             .toHaveText(refusal('gm', 'fight', 'attach_living_character'));
+    });
+
+    test('#89: a ruling posted from the Battle tab shows there without a reload', async ({ page }, testInfo) => {
+        const run = runFor(testInfo);
+        const miraName = run.named('Ruling Mira');
+        run.seed(`mira = create_character(master, name=name('Ruling Mira'), equipment=${DAGGER})`);
+        await loginAs(page, run.master);
+        await page.goto('/tarmar/gm/');
+        await attachAndFight(page, [miraName], 'a gray wolf');
+        const sessionUrl = page.url();
+        await page.evaluate(() => { window.issue89NotReloaded = true; });
+
+        // The form posted as an ordinary form, and the server answered with
+        // the whole GM page again; it posts as a script caller now, and the
+        // tab is drawn from the record.
+        const words = rulingWords().hth_agreement;
+        const ruling = page.locator('#battle-hth-agreement');
+        await expect(ruling.locator('.agreement-line')).toHaveText(words.none_marked);
+        await ruling.getByRole('button', { name: words.mark_whole_battle }).click();
+
+        await expect(ruling.locator('.agreement-line')).toHaveText(words.whole_battle_line);
+        await expect(ruling.getByRole('button', { name: words.lift_whole_battle })).toBeVisible();
+        await expect(page.locator('#gm-panel-battle-error')).toBeHidden();
+        expect(page.url()).toBe(sessionUrl);
+        expect(await page.evaluate(() => window.issue89NotReloaded === true)).toBe(true);
+        // The board drawn again is wired: Advance still plays.
+        await page.click('#advance-turn');
+        await expect(page.locator('#turn-panel')).toContainText(miraName);
     });
 
     test('#854: a restart leaves the dead dead on the board, and the log says why', async ({ page }, testInfo) => {

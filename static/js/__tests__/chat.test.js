@@ -2405,3 +2405,257 @@ describe('showNewSessionInRail (issue #62)', () => {
         );
     });
 });
+
+/**
+ * The mode control changes the mode in place (issue #89). It posted an
+ * ordinary form the server answered with a redirect, a reload that threw
+ * away the earlier turns the reader had loaded. It posts the same form as a
+ * script caller now and paints the page from the mode the server stored,
+ * from the words each option carries.
+ */
+describe('switching the mode (issues #372, #89)', () => {
+    let chatModule;
+
+    function setUpModeControl(sessionIdValue) {
+        const chatConfig = JSON.stringify({
+            streamUrl: '/tarmar/gm/stream/',
+            saveUrl: '/tarmar/gm/save/',
+            deleteUrl: '/tarmar/gm/delete/',
+            sessionId: sessionIdValue,
+            mode: 'aide',
+        });
+        document.body.innerHTML = `
+            <script id="chat-config" type="application/json">${chatConfig}<\/script>
+            <div class="gm-mode-indicator" id="gm-mode-indicator">
+                <span class="gm-mode-name">GM aide</span>
+                <span class="gm-mode-note">Answers what you ask and stops.</span>
+                <form class="gm-mode-switch" method="post" action="/tarmar/gm/mode/">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="form-token">
+                    <select id="gm-mode-select" name="mode">
+                        <option value="play" data-description="Runs the game for you." data-placeholder="What do you do?" data-opening="Say what you'd like to do.">Game Master</option>
+                        <option value="aide" data-description="Answers what you ask and stops." data-placeholder="Ask the aide" data-opening="Ask a rules question." selected>GM aide</option>
+                    </select>
+                </form>
+            </div>
+            <div id="messages">
+                <div class="empty-state"><p id="gm-mode-opening">Ask a rules question.</p></div>
+                <div class="message user" data-history-turn="0" id="loaded-earlier"></div>
+            </div>
+            <textarea id="user-input" placeholder="Ask the aide"></textarea>
+            <button id="send-btn"></button>
+        `;
+        jest.resetModules();
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        chatModule = require('../chat.js');
+    }
+
+    function choose(mode) {
+        const select = document.getElementById('gm-mode-select');
+        select.value = mode;
+        select.dispatchEvent(new Event('change'));
+    }
+
+    async function settle() {
+        for (let tick = 0; tick < 6; tick += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+    }
+
+    beforeEach(() => {
+        fetch.mockReset();
+        window.history.replaceState(null, '', '/tarmar/gm/?session=7');
+    });
+
+    test('posts the form for the session and paints the stored mode without a reload', async () => {
+        // The form carries no session id, as one rendered before this page's
+        // first message made the session: the id is the one the page knows.
+        setUpModeControl(7);
+        const earlier = document.getElementById('loaded-earlier');
+        fetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, mode: 'play' }) });
+
+        choose('play');
+        await settle();
+
+        const [url, options] = fetch.mock.calls[0];
+        expect(url).toBe('http://localhost/tarmar/gm/mode/');
+        expect(options.method).toBe('POST');
+        expect(options.headers['X-Requested-With']).toBe('XMLHttpRequest');
+        expect(options.body.get('mode')).toBe('play');
+        expect(options.body.get('session_id')).toBe('7');
+        expect(document.querySelector('.gm-mode-name').textContent).toBe('Game Master');
+        expect(document.querySelector('.gm-mode-note').textContent).toBe('Runs the game for you.');
+        expect(document.getElementById('user-input').placeholder).toBe('What do you do?');
+        expect(document.getElementById('gm-mode-opening').textContent).toBe('Say what you\'d like to do.');
+        expect(document.getElementById('gm-mode-select').disabled).toBe(false);
+        expect(earlier.isConnected).toBe(true);
+        expect(pageNavigation.go).not.toHaveBeenCalled();
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+        expect(window.location.search).toBe('?session=7');
+    });
+
+    test('with no session yet the choice rides in the address', async () => {
+        setUpModeControl(null);
+        window.history.replaceState(null, '', '/tarmar/gm/');
+        fetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, mode: 'play' }) });
+
+        choose('play');
+        await settle();
+
+        expect(fetch.mock.calls[0][1].body.has('session_id')).toBe(false);
+        // No session yet: the choice rides in the address, as the redirect put it.
+        expect(window.location.search).toBe('?mode=play');
+    });
+
+    test('the mode a turn creating the session sends is the one now shown', async () => {
+        setUpModeControl(null);
+        window.history.replaceState(null, '', '/tarmar/gm/');
+        fetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, mode: 'play' }) });
+        choose('play');
+        await settle();
+        fetch.mockRejectedValueOnce(new TypeError('offline'));
+
+        await chatModule.streamMessage({ message: 'Hello' });
+
+        expect(JSON.parse(fetch.mock.calls[1][1].body).mode).toBe('play');
+    });
+
+    test('a refusal says so and puts back the mode in force', async () => {
+        setUpModeControl(7);
+        fetch.mockResolvedValueOnce({
+            ok: false, status: 404, statusText: 'Not Found',
+            json: async () => ({ error: 'GM session not found' }),
+        });
+
+        choose('play');
+        await settle();
+
+        expect(alert).toHaveBeenCalledWith('The mode could not be changed: GM session not found');
+        expect(document.getElementById('gm-mode-select').value).toBe('aide');
+        expect(document.querySelector('.gm-mode-name').textContent).toBe('GM aide');
+        expect(document.getElementById('user-input').placeholder).toBe('Ask the aide');
+        expect(pageNavigation.reload).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * The conversation as stored, put in place (issue #89): the turns from the
+ * last one the page holds, in place of that turn and of what the page wrote
+ * live after it; what it wrote after asking stays below.
+ */
+describe('showConversationAsStored (#89)', () => {
+    let chatModule;
+
+    function turn(number, said) {
+        return `<div class="message user" data-history-turn="${number}"><div class="message-content">${said}</div></div>`;
+    }
+
+    beforeEach(() => {
+        fetch.mockReset();
+        const chatConfig = JSON.stringify({
+            streamUrl: '/tarmar/gm/stream/',
+            saveUrl: '/tarmar/gm/save/',
+            deleteUrl: '/tarmar/gm/delete/',
+            historyUrlTemplate: '/tarmar/gm/sessions/{session_id}/history/',
+            sessionId: 7,
+            mode: 'play',
+        });
+        document.body.innerHTML = `
+            <script id="chat-config" type="application/json">${chatConfig}<\/script>
+            <div id="messages">
+                <div data-earlier id="control"><button data-earlier-url="/x?before=0">Show earlier</button></div>
+                ${turn(1, 'one')}${turn(2, 'two')}
+                <div class="message user" id="live">typed live</div>
+            </div>
+            <input id="user-input">
+            <button id="send-btn"></button>
+        `;
+        jest.resetModules();
+        global.marked = require('../marked.min.js').marked;
+        global.DOMPurify = require('../dompurify.min.js');
+        chatModule = require('../chat.js');
+    });
+
+    test('replaces the last turn and what followed it, keeping the control and the turns above', async () => {
+        const control = document.getElementById('control');
+        const first = document.querySelector('[data-history-turn="1"]');
+        fetch.mockResolvedValueOnce({
+            ok: true, status: 200,
+            text: async () => `${turn(2, 'two')}<div class="message assistant" data-history-turn="2">`
+                + '<div class="message-content" data-markdown>**Bold** reply</div></div>',
+        });
+
+        await expect(chatModule.showConversationAsStored()).resolves.toBe(true);
+
+        expect(fetch.mock.calls[0][0]).toBe('/tarmar/gm/sessions/7/history/?since=2');
+        const messages = document.getElementById('messages');
+        expect(messages.firstElementChild).toBe(control);
+        expect(first.isConnected).toBe(true);
+        expect(document.getElementById('live')).toBeNull();
+        expect(messages.querySelectorAll('[data-history-turn="2"]')).toHaveLength(2);
+        // Replies render as on a load, through the sanitizing renderer.
+        expect(messages.querySelector('strong').textContent).toBe('Bold');
+    });
+
+    test('what the page writes while it asks stays below what comes back', async () => {
+        let answer;
+        fetch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+        const shown = chatModule.showConversationAsStored();
+        const later = document.createElement('div');
+        later.id = 'later';
+        document.getElementById('messages').append(later);
+        answer({ ok: true, status: 200, text: async () => turn(2, 'two') + turn(3, 'three') });
+        await shown;
+
+        const messages = document.getElementById('messages');
+        expect(messages.lastElementChild).toBe(later);
+        expect(document.getElementById('live')).toBeNull();
+        expect(messages.querySelector('[data-history-turn="3"]')).not.toBeNull();
+    });
+
+    test('a turn sent meanwhile stays when what was last has gone', async () => {
+        // The element last when the page asked (here the live message) is
+        // taken away before the answer comes, and a turn is sent meanwhile.
+        let answer;
+        fetch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+        const shown = chatModule.showConversationAsStored();
+        document.getElementById('live').remove();
+        const sent = document.createElement('div');
+        sent.id = 'sent-meanwhile';
+        document.getElementById('messages').append(sent);
+        answer({ ok: true, status: 200, text: async () => turn(2, 'two') + turn(3, 'three') });
+        await shown;
+
+        const messages = document.getElementById('messages');
+        expect(messages.lastElementChild).toBe(sent);
+        expect(messages.querySelector('[data-history-turn="3"]').nextElementSibling).toBe(sent);
+        expect(messages.querySelectorAll('[data-history-turn="2"]')).toHaveLength(1);
+    });
+
+    test('an earlier page loaded meanwhile stays above what comes back', async () => {
+        let answer;
+        fetch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+        const shown = chatModule.showConversationAsStored();
+        const control = document.getElementById('control');
+        control.insertAdjacentHTML('afterend', turn(0, 'zero'));
+        control.remove();
+        answer({ ok: true, status: 200, text: async () => turn(2, 'two') });
+        await shown;
+
+        const turns = Array.from(document.getElementById('messages').children)
+            .map((child) => child.dataset.historyTurn);
+        expect(turns).toEqual(['0', '1', '2']);
+    });
+
+    test('a failure leaves the page as it was', async () => {
+        fetch.mockResolvedValueOnce({ ok: false, status: 502, statusText: 'Bad Gateway' });
+
+        await expect(chatModule.showConversationAsStored()).rejects.toThrow('Bad Gateway');
+
+        expect(document.getElementById('live')).not.toBeNull();
+        expect(document.querySelectorAll('[data-history-turn]')).toHaveLength(2);
+    });
+});
