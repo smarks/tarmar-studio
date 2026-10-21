@@ -45,7 +45,7 @@ from ..retrieval import (
     is_played_entry,
 )
 from . import events
-from .policy import SETTLED_REFUSALS, TurnPolicy
+from .policy import REFUSAL_REASON, SETTLED_REASONS, TurnPolicy
 
 #: The heading above the character list.
 ROSTER_HEADING = "Session characters:"
@@ -915,8 +915,9 @@ def settled_refusals(
 ) -> dict[str, str]:
     """Actions this session was refused for a reason that cannot change.
 
-    Maps the action to the reason. Only refusals in
-    :data:`gm.turn_engine.policy.SETTLED_REFUSALS`: a refusal that turned on
+    Maps the action to the reason. Only refusals whose frame records a reason
+    key in :data:`gm.turn_engine.policy.SETTLED_REASONS`, never matched by
+    their words (issue #97): a refusal that turned on
     what the message said may not hold next turn, and must not be held
     against a plan (issue #614). Those reasons turn on the account's role, so
     only turns taken with the role it has now count (issue #835).
@@ -934,7 +935,11 @@ def settled_refusals(
         frame = (payload or {}).get("frame") or {}
         error = str(frame.get("error") or "")
         kind = str(frame.get("kind") or "")
-        if frame.get("ran") or error not in SETTLED_REFUSALS or not kind:
+        if (
+            frame.get("ran")
+            or frame.get(REFUSAL_REASON) not in SETTLED_REASONS
+            or not kind
+        ):
             continue
         settled.setdefault(kind, error)
     return settled

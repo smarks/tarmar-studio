@@ -45,13 +45,20 @@ from ..models import (
     SupplyItem,
     TableRuling,
 )
+from ..refusal_words import refusal_words
 from ..roll_service import RollRequest, resolve_roll_series, roll_frame_payload
 from . import events
 from .engine import ActionResult
 from .events import TurnEvent
 from .outcomes import outcomes_from_run
-from .plan import PlannedAction, policy_refusal
-from .policy import CAMPAIGN_ACTIONS, GAME_MASTER_RECORDS_REFUSAL, TurnPolicy
+from .plan import PlannedAction, policy_refusal_reason
+from .policy import (
+    CAMPAIGN_ACTIONS,
+    REASON_GAME_MASTER_RECORDS,
+    REFUSAL_REASON,
+    TurnPolicy,
+    refusal_text,
+)
 from .state import (
     CampaignBlock,
     RosterLine,
@@ -108,17 +115,17 @@ ACTION_STATUS: dict[str, str] = {
 }
 
 
-#: Why a session may no longer change a character another player owns
-#: (issue #837). A Game Master may attach anybody's character; an account
-#: that has since lost the role is held to its own.
-NOT_YOURS_REFUSAL = (
-    "that character belongs to another player, and only a Game Master may "
-    "change another player's character"
-)
-
-
 class _Refused(Exception):
-    """An action this turn will not run; ``str()`` says why."""
+    """An action this turn will not run; ``str()`` says why.
+
+    Attributes:
+        reason: The policy's reason key when the policy refused it (a
+            ``REASON_*`` of :mod:`gm.turn_engine.policy`), else ``""``.
+    """
+
+    def __init__(self, message: str, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 def _choice(field_name: str, value: str) -> str:
@@ -240,7 +247,7 @@ class RecordsExecutor:
             return result
         try:
             if action.refused:
-                raise _Refused(action.refusal)
+                raise _Refused(action.refusal, action.refusal_reason)
             self._check_role_still_held(action)
             if action.action == "roll":
                 return self._roll(action, record)
@@ -270,13 +277,13 @@ class RecordsExecutor:
                 )
             return result
         except _Refused as refusal:
-            result = self._refused(action, str(refusal))
+            result = self._refused(action, str(refusal), refusal_reason=refusal.reason)
         except services.CharacterChangeError as error:
             result = self._refused(action, str(error))
         except ValidationError as error:
             result = self._refused(action, "; ".join(error.messages))
         except Character.DoesNotExist:
-            result = self._refused(action, "that character no longer exists")
+            result = self._refused(action, refusal_words().executor.character_gone)
         logger.info("GM plan action %s refused: %s", action.action, result.error)
         record(TurnEvent(events.ACTION, self._payload(action, result), visible=True))
         return result
@@ -287,7 +294,9 @@ class RecordsExecutor:
         for entry in roster.roster(self.session):
             if entry.character.pk == character_id:
                 return entry
-        raise _Refused(f"there is no character with id {character_id} in this session")
+        raise _Refused(
+            refusal_words().executor.no_such_character.format(id=character_id)
+        )
 
     def _target(self, action: PlannedAction) -> tuple[roster.RosterEntry, bool]:
         """The roster entry ``action`` acts on, and whether it was just started."""
@@ -299,9 +308,9 @@ class RecordsExecutor:
             for entry in roster.roster(self.session):
                 if entry.character.name.casefold() == new.called.casefold():
                     raise _Refused(
-                        f"this session already has a character called "
-                        f"{entry.character.name} (id {entry.character.pk}), and "
-                        "a second one needs a name of its own"
+                        refusal_words().executor.duplicate_character_name.format(
+                            name=entry.character.name, id=entry.character.pk
+                        )
                     )
             session = self._session()
             stated = [
@@ -317,11 +326,13 @@ class RecordsExecutor:
             character_id = self._started.get(action.new_character_ref.casefold())
             if character_id is None:
                 raise _Refused(
-                    f"{action.new_character_ref} was not created, so this was not done"
+                    refusal_words().executor.not_created.format(
+                        ref=action.new_character_ref
+                    )
                 )
             return self._entry(character_id), False
         if action.character_id is None:  # pragma: no cover - the plan requires one
-            raise _Refused("no character was named")
+            raise _Refused(refusal_words().executor.no_character_named)
         return self._entry(action.character_id), False
 
     def _session(self) -> GMSession:
@@ -365,9 +376,9 @@ class RecordsExecutor:
         self._is_game_master = self.policy.is_game_master and is_dm(self._owner_now())
         if self.policy.is_game_master and not self._is_game_master:
             as_player = replace(self.policy, is_game_master=False)
-            refusal = policy_refusal(action, as_player)
-            if refusal:
-                raise _Refused(refusal)
+            reason = policy_refusal_reason(action, as_player)
+            if reason:
+                raise _Refused(refusal_text(reason), reason)
 
     def _authorize(self, character: Character) -> None:
         """Whether this session may still write ``character`` (issue #837).
@@ -383,7 +394,7 @@ class RecordsExecutor:
                 no longer a Game Master.
         """
         if not is_owner_or_manager(self._owner_now(), character.user):
-            raise _Refused(NOT_YOURS_REFUSAL)
+            raise _Refused(refusal_words().executor.not_yours)
 
     def _who_for_status(self, action: PlannedAction) -> str:
         if action.new_character is not None:
@@ -610,7 +621,9 @@ class RecordsExecutor:
                 that cannot cover a take.
         """
         if not self._is_game_master:  # pragma: no cover - refused before it runs
-            raise _Refused(GAME_MASTER_RECORDS_REFUSAL)
+            raise _Refused(
+                refusal_text(REASON_GAME_MASTER_RECORDS), REASON_GAME_MASTER_RECORDS
+            )
         with services.changing(
             character_id, actor=self.actor, authorize=self._authorize
         ) as change:
@@ -769,7 +782,9 @@ class RecordsExecutor:
         )
         if action.spent:
             if existing is None:
-                raise _Refused(f"the party is not carrying {action.item}")
+                raise _Refused(
+                    refusal_words().executor.not_carrying.format(item=action.item)
+                )
             existing.delete()
             return self._noted(action, f"{action.item} is gone")
         given = {
@@ -814,7 +829,9 @@ class RecordsExecutor:
             return self._noted(action, entity.line.removeprefix("- "))
         if existing.kind != kind:
             raise _Refused(
-                f"{existing.name} is already recorded as a {existing.get_kind_display().lower()}"
+                refusal_words().executor.already_recorded_as.format(
+                    name=existing.name, kind=existing.get_kind_display().lower()
+                )
             )
         for field, value in given.items():
             setattr(existing, field, value)
@@ -832,7 +849,7 @@ class RecordsExecutor:
         )
         if thread is None:
             raise _Refused(
-                f"there is no open thread with id {action.thread_id} in this session"
+                refusal_words().executor.no_open_thread.format(id=action.thread_id)
             )
         thread.resolved = True
         thread.resolution = action.resolution
@@ -873,8 +890,9 @@ class RecordsExecutor:
             )
             if ruling is None:
                 raise _Refused(
-                    f"there is no active ruling with id {action.ruling_id} at this "
-                    "table"
+                    refusal_words().executor.no_active_ruling.format(
+                        id=action.ruling_id
+                    )
                 )
             self._retire(ruling, record)
             note = f"retired the ruling on {ruling.topic}: {ruling.text}"
@@ -1015,7 +1033,9 @@ class RecordsExecutor:
             procedure=procedure,
         )
 
-    def _refused(self, action: PlannedAction, reason: str) -> ActionResult:
+    def _refused(
+        self, action: PlannedAction, reason: str, *, refusal_reason: str = ""
+    ) -> ActionResult:
         who = self._who_for_status(action)
         what = ACTION_STATUS[action.action] + (f" for {who}" if who else "")
         procedure = {
@@ -1026,6 +1046,8 @@ class RecordsExecutor:
             "lines": [f"{CHIP_PREFIX} Not done: {what}, because {reason}"],
             "error": reason,
         }
+        if refusal_reason:
+            procedure[REFUSAL_REASON] = refusal_reason
         return ActionResult(
             result=f"Not done: {what}, because {reason}.",
             ran=False,

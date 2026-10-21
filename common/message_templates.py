@@ -76,7 +76,7 @@ def require_bare_fields(name: str, template: str) -> str:
     so a format spec, a conversion, an attribute or an index would reach the
     player as written. And a trial fill with empty or zero values passes
     shapes the real values break on (``{by:>{name}}`` pads to a width read
-    from a name), which the battle's words refuse (battle/wording.py).
+    from a name), which the battle's words refuse (common/wording.py).
 
     Args:
         name: What the error names the template by: a variable, or a file,

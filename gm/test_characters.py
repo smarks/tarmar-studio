@@ -16,6 +16,7 @@ from common.test_helpers import BaseTestCase, create_character
 
 from .character_sheet import CharacterSheet
 from .models import GMSession
+from .refusal_words import refusal_words
 from .retrieval import CANON_KIND, SHEET_KIND, is_hidden_message
 from .testing import gm_replies
 
@@ -200,7 +201,9 @@ class GMCharacterEndpointsTest(BaseTestCase):
             ATTACH_URL, {"session_id": self.session.pk, "character_id": foreign.pk}
         )
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json(), {"error": "Character not found"})
+        self.assertEqual(
+            response.json(), {"error": refusal_words().views.character_not_found}
+        )
 
     def test_dm_may_attach_a_character_they_can_edit(self):
         dm = self.create_dm()
@@ -232,7 +235,7 @@ class GMCharacterEndpointsTest(BaseTestCase):
             {"session_id": self.session.pk, "character_id": self.character.pk},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json(), {"error": "Character is dead"})
+        self.assertEqual(response.json(), {"error": refusal_words().attach.dead})
 
     def test_attach_rejects_a_missing_or_malformed_character_id(self):
         missing = self._post(
@@ -243,7 +246,9 @@ class GMCharacterEndpointsTest(BaseTestCase):
             ATTACH_URL, {"session_id": self.session.pk, "character_id": "abc"}
         )
         self.assertEqual(malformed.status_code, 400)
-        self.assertEqual(malformed.json(), {"error": "Invalid character_id"})
+        self.assertEqual(
+            malformed.json(), {"error": refusal_words().views.invalid_character_id}
+        )
         listed = self._post(
             ATTACH_URL, {"session_id": self.session.pk, "character_id": [1]}
         )
@@ -256,7 +261,9 @@ class GMCharacterEndpointsTest(BaseTestCase):
             {"session_id": foreign_session.pk, "character_id": self.character.pk},
         )
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json(), {"error": "GM session not found"})
+        self.assertEqual(
+            response.json(), {"error": refusal_words().views.session_not_found}
+        )
         self.assertEqual(foreign_session.characters.count(), 0)
 
     def test_attach_rejects_a_malformed_session_id(self):
@@ -264,7 +271,9 @@ class GMCharacterEndpointsTest(BaseTestCase):
             ATTACH_URL, {"session_id": "abc", "character_id": self.character.pk}
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json(), {"error": "Invalid session_id"})
+        self.assertEqual(
+            response.json(), {"error": refusal_words().views.invalid_session_id}
+        )
 
     def test_attach_rejects_malformed_json(self):
         response = self.client.post(ATTACH_URL, "{", content_type="application/json")
@@ -323,7 +332,9 @@ class GMCharacterEndpointsTest(BaseTestCase):
     def test_detach_needs_a_session(self):
         response = self._post(DETACH_URL, {"character_id": self.character.pk})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json(), {"error": "No session_id"})
+        self.assertEqual(
+            response.json(), {"error": refusal_words().views.no_session_id}
+        )
 
     def test_detach_rejects_foreign_or_malformed_session(self):
         foreign_session = GMSession.objects.create(name="Theirs", user=self.other)
@@ -345,7 +356,9 @@ class GMCharacterEndpointsTest(BaseTestCase):
                 DETACH_URL, {"session_id": self.session.pk, "character_id": bad_id}
             )
             self.assertEqual(response.status_code, 400, bad_id)
-            self.assertEqual(response.json(), {"error": "Invalid character_id"})
+            self.assertEqual(
+                response.json(), {"error": refusal_words().views.invalid_character_id}
+            )
 
     def test_detach_rejects_malformed_json(self):
         response = self.client.post(DETACH_URL, "{", content_type="application/json")

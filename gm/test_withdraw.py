@@ -9,6 +9,7 @@ from django.urls import reverse
 
 from battle.models import Battle, BattleEvent
 from battle.profiles import for_battle
+from battle.refusal_words import refusal_words
 from battle.services import restart_battle, take_seat, withdraw_from_fight
 from common.test_helpers import BaseTestCase, create_character
 
@@ -197,12 +198,20 @@ class WithdrawMidFightTest(BaseTestCase):
             record_before,
         )
         if not battle.is_over:
-            with self.assertRaisesMessage(ValueError, "withdrawn from this session"):
+            with self.assertRaisesMessage(
+                ValueError,
+                refusal_words().services.withdrawn_seat.format(
+                    name=self.seat.display_name
+                ),
+            ):
                 take_seat(self.battle.pk, self.seat.pk, game_master=self.game_master)
 
     def test_the_game_master_cannot_take_the_withdrawn_seat(self) -> None:
         withdraw(self.aldwin, self.session.pk, self.player)
-        with self.assertRaisesMessage(ValueError, "withdrawn from this session"):
+        with self.assertRaisesMessage(
+            ValueError,
+            refusal_words().services.withdrawn_seat.format(name=self.seat.display_name),
+        ):
             take_seat(self.battle.pk, self.seat.pk, game_master=self.game_master)
         self.login_as(self.game_master)
         state = self.client.get(f"/tarmar/battles/{self.battle.pk}/state/").json()

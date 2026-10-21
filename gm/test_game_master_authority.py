@@ -16,6 +16,7 @@ from django.test import SimpleTestCase
 
 from characters import services
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
+from characters.refusal_words import refusal_words
 from characters.services import CharacterChangeError
 from common.test_helpers import BaseTestCase
 
@@ -77,7 +78,8 @@ class AttributeRangeTest(SimpleTestCase):
         self.assertEqual(character.strength, 22)
         self.assertEqual(
             note,
-            "strength recorded as 22 (outside the 3-18 a player may set: the Game Master's call)",
+            "strength recorded as 22 (outside the 3-18 a player may set: "
+            f"{refusal_words().common.the_game_masters_call})",
         )
 
     def test_nobody_can_set_more_than_a_character_can_hold(self):
@@ -194,7 +196,9 @@ class AuthorityFromTheAccountTest(BaseTestCase):
 
         self.assertTrue(outcome.results[0].ran, outcome.results[0].error)
         self.assertEqual(character_values(session)["strength"], 22)
-        self.assertIn("the Game Master's call", outcome.results[0].note)
+        self.assertIn(
+            refusal_words().common.the_game_masters_call, outcome.results[0].note
+        )
 
     def test_a_players_stated_score_is_refused(self):
         session, outcome = self._play(

@@ -22,6 +22,7 @@ from characters import services
 from characters.dice import DICE_IN_TEXT
 from characters.import_service import CharacterImportError, validate_import_payload
 from characters.models import Character
+from characters.refusal_words import refusal_words
 from characters.services import CharacterChangeError
 from characters.views.characters import LITERACY_RESPONSE_KEYS
 from common.test_helpers import BaseTestCase, create_character
@@ -761,7 +762,8 @@ class LiteracyRulingTest(BaseTestCase):
             services.can_rule_literacy(self.character, is_game_master=False)
         )
         with self.assertRaisesMessage(
-            CharacterChangeError, services.LITERACY_RULING_GAME_MASTER_ONLY
+            CharacterChangeError,
+            refusal_words().services.literacy_ruling_game_master_only,
         ):
             self.rule(True, is_game_master=False)
 
@@ -906,7 +908,8 @@ class LiteracyRulingEndpointTest(BaseTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            response.json()["error"], services.LITERACY_RULING_GAME_MASTER_ONLY
+            response.json()["error"],
+            refusal_words().services.literacy_ruling_game_master_only,
         )
         self.character.refresh_from_db()
         self.assertIsNone(self.character.literacy_ruling)

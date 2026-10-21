@@ -882,6 +882,25 @@ startup by `battle/wording.py::load_rulings_wording` into
 `settings.BATTLE_RULINGS_WORDING` (`BATTLE_RULINGS_WORDING_FILE` names another
 file).
 
+The rest of the battle app's refusals -- the setup, muster, lobby, seat and
+choice services, the views' answers to who may act and to malformed requests,
+the control modes, and the notes a guest reads beside a control -- are
+configuration the same way: `config/battle-refusals.toml`, one table per
+module, read by `battle/refusal_words.py` into `settings.BATTLE_REFUSAL_WORDS`
+(issues #97, #86). The Games Master app's refusals (its views, hand edits,
+fights, Luck, withdrawals, the plan policy and the executor) are
+`config/gm-refusals.toml`, read by `gm/refusal_words.py` into
+`settings.GM_REFUSAL_WORDS`. The characters app's field-table reasons for the
+values only a Game Master sets, and the phrase that marks a Game Master's call
+on a history line, a check's line and the skill check's options, are
+`config/characters-refusals.toml`, read by `characters/refusal_words.py` into
+`settings.CHARACTERS_REFUSAL_WORDS` (issue #85); the sheet's script gets the
+check's call note in the skill check's answer. All these files go through one
+loader,
+`common/wording.py::load_wording`, which refuses a missing or unknown key, a
+blank value or a `{name}` a sentence may not use at startup. Tests run under
+`common.wording.fixed_wording`, never the shipped sentences.
+
 ### A battle's life
 
 ```mermaid
@@ -1093,13 +1112,19 @@ straight when debugging:
 1. **Schema errors** — not a refusal. `read_plan` returns errors, the engine
    emits `PLAN_REJECTED`, sends `replan_message(errors)` and re-reads once;
    a second failure sets `plan_unreadable`.
-2. **Policy refusals** — `TurnPolicy.refusal_for` marks the action refused but
-   leaves it in order; the executor raises `_Refused` and produces
-   `"Not done: X, because Y."`. Reasons include `GAME_MASTER_ONLY_REFUSAL`,
-   `HOUSE_RULE_REFUSAL`, `PLAYER_STATED_SCORES_REFUSAL`,
-   `AIDE_UNASKED_ROLL_REFUSAL`, and a `character_id` outside the roster.
-3. **Settled refusals** (issue #614) — `state.settled_refusals` scans the last
-   `REFUSAL_LOOKBACK = 80` action events; asking again becomes a *schema error*
+2. **Policy refusals** — `TurnPolicy.refusal_reason` names the reason, a
+   `REASON_*` key of the `[policy]` table in `config/gm-refusals.toml`
+   (`game_master_only`, `house_rule`, `player_stated_scores`,
+   `aide_unasked_roll` and the rest), and `refusal_for` gives its configured
+   words. The action is marked refused but left in order; the executor raises
+   `_Refused` and produces `"Not done: X, because Y."`, recording the key in
+   the action's frame as `refusal_reason`. A `character_id` outside the roster
+   is refused too, with no policy reason.
+3. **Settled refusals** (issues #614, #97) — `state.settled_refusals` scans the
+   last `REFUSAL_LOOKBACK = 80` action events and holds those whose frame's
+   `refusal_reason` is in `policy.SETTLED_REASONS`, by key, never by the
+   sentence, so two reasons given one sentence stay apart and an edited
+   sentence keeps its stored refusals settled; asking again becomes a *schema error*
    via `policy.already_refused_error`, which forces a replan instead of a second
    identical refusal.
 

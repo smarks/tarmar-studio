@@ -8,10 +8,12 @@ actually decides.
 """
 
 from django.urls import reverse
+from django.utils.html import escape
 
 from battle.access import Actor
 from battle.models import Battle
 from battle.persistence import CLASSIC_PROFILE
+from battle.refusal_words import refusal_words
 from battle.services import claim_seat, create_battle, set_seat_ready, start_battle
 from battle.views import seat_summaries
 
@@ -51,7 +53,9 @@ class LobbyRefusalTest(LobbyViewTestMixin):
         )
         self.assertEqual(response.status_code, 400)
         self.assertTemplateUsed(response, "battle/battle_detail.html")
-        self.assertContains(response, "not your seat", status_code=400)
+        self.assertContains(
+            response, escape(refusal_words().services.not_your_seat), status_code=400
+        )
         # The muster is still there: the reason joined the page rather than
         # replacing it.
         self.assertContains(response, "Muster", status_code=400)
@@ -63,7 +67,11 @@ class LobbyRefusalTest(LobbyViewTestMixin):
         response = self.client.post(
             reverse("battle:seat-release", args=[battle.pk, seat.pk])
         )
-        self.assertContains(response, "not an occupied seat", status_code=400)
+        self.assertContains(
+            response,
+            escape(refusal_words().services.not_an_occupied_seat),
+            status_code=400,
+        )
         self.assertContains(response, "Muster", status_code=400)
 
     def test_an_xhr_caller_still_gets_json(self):
@@ -75,7 +83,7 @@ class LobbyRefusalTest(LobbyViewTestMixin):
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         )
         self.assertEqual(response.status_code, 403)
-        self.assertIn("can do that", response.json()["error"])
+        self.assertIn(refusal_words().views.control_denied, response.json()["error"])
 
 
 class SeatedPlayerControlTest(LobbyViewTestMixin):

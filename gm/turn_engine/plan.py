@@ -52,8 +52,9 @@ from ..models import (
     SupplyItem,
     TableRuling,
 )
+from ..refusal_words import refusal_words
 from ..rules_lookup import MAX_SUBJECT_CHARS, MAX_TRACK_CHARS
-from .policy import ACTION_NAMES, TurnPolicy, already_refused_error
+from .policy import ACTION_NAMES, TurnPolicy, already_refused_error, refusal_text
 
 #: The most actions one plan may hold. A turn asking for more is a plan gone
 #: wrong, not a table's real request.
@@ -258,6 +259,9 @@ class PlannedAction:
     #: 0 for none.
     modifier: int = 0
     refusal: str = ""
+    #: The policy's reason key for ``refusal`` (a ``REASON_*`` of
+    #: :mod:`gm.turn_engine.policy`), or ``""`` when the policy is not why.
+    refusal_reason: str = ""
 
     @property
     def refused(self) -> bool:
@@ -893,22 +897,33 @@ def _combat_numbers(reader: _ActionReader) -> tuple[tuple[str, str | int], ...]:
     return tuple(numbers)
 
 
-def policy_refusal(action: PlannedAction, policy: TurnPolicy) -> str:
-    """Why the turn's policy refuses ``action``, or ``""``."""
-    return policy.refusal_for(
+def policy_refusal_reason(action: PlannedAction, policy: TurnPolicy) -> str:
+    """Which refusal the turn's policy gives ``action`` (a ``REASON_*`` key of
+    :mod:`gm.turn_engine.policy`), or ``""``."""
+    return policy.refusal_reason(
         action.action,
         states_scores=action.action == "record_attributes"
         or (action.action == "roll_fatigue" and action.fatigue_value is not None),
     )
 
 
+def policy_refusal(action: PlannedAction, policy: TurnPolicy) -> str:
+    """Why the turn's policy refuses ``action``, in its words, or ``""``."""
+    return refusal_text(policy_refusal_reason(action, policy))
+
+
 def _refusal(
     action: PlannedAction, roster_ids: Collection[int], policy: TurnPolicy
-) -> str:
-    """Why this turn may not run ``action``, or ``""``."""
+) -> tuple[str, str]:
+    """Why this turn may not run ``action``, and the policy's reason key when
+    the policy is why; ``("", "")`` when it may."""
     if action.character_id is not None and action.character_id not in roster_ids:
-        return f"there is no character with id {action.character_id} in this session"
-    return policy_refusal(action, policy)
+        return (
+            refusal_words().executor.no_such_character.format(id=action.character_id),
+            "",
+        )
+    reason = policy_refusal_reason(action, policy)
+    return refusal_text(reason), reason
 
 
 #: Why a player's skill check may not carry the Game Master's overrides.
@@ -1041,8 +1056,12 @@ def read_plan(
             if settled_reason and policy_refusal(action, policy):
                 errors.append(already_refused_error(action.action, settled_reason))
                 continue
-            refusal = _refusal(action, roster_ids, policy)
-            actions.append(replace(action, refusal=refusal) if refusal else action)
+            refusal, reason = _refusal(action, roster_ids, policy)
+            actions.append(
+                replace(action, refusal=refusal, refusal_reason=reason)
+                if refusal
+                else action
+            )
     if errors:
         return PlanReading(errors=tuple(errors))
     return PlanReading(actions=tuple(actions))

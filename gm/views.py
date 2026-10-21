@@ -91,6 +91,7 @@ from .pickers import (
     session_picker,
     sessions_holding_character,
 )
+from .refusal_words import refusal_words
 from .retrieval import (
     PROCEDURE_KIND,
     RECAP_KIND,
@@ -239,46 +240,8 @@ def _waiting_frame(payload: dict) -> dict:
     return frame
 
 
-# What the player reads when a turn or a fight fails on an exception nobody
-# wrote for them (issue #13). The exception's own text can carry file paths,
-# SQL, the model host's address or internal state, so it goes to the log with
-# its traceback and the turn's record and the page get this sentence instead.
-# The sentence is never empty, so the page's ``if (data.error)`` check always
-# shows it (issue #663).
-GM_SERVER_ERROR_MESSAGE = (
-    "The Game Master ran into an error on the server and could not finish. "
-    "It has been logged; send your message again in a moment."
-)
-
-
-# "Send to Claude" from an account that is not a Game Master's (issue #402):
-# the endpoint's refusal, and the page's own when it has no endpoint to post
-# to, from this one sentence (#94).
-SEND_TO_CLAUDE_GAME_MASTER_ONLY = "Only a Game Master can send a session to Claude."
-
-# A second message to a session whose turn is still running (issue #515).
-TURN_ALREADY_RUNNING_ERROR = (
-    "The Game Master is still answering your last message in this session. "
-    "Its reply will appear here when it is ready; send this one after that."
-)
-# /fight while a message is still being answered (issue #836).
-FIGHT_WHILE_TURN_RUNNING = (
-    "The Game Master is still answering your last message in this session. "
-    "Start the fight once the reply has appeared."
-)
 #: How a fight's turn record is marked (issue #836).
 FIGHT_COMMAND = "fight"
-#: /fight when the model cannot be asked who the party faces (review of #841).
-FIGHT_MODEL_UNREACHABLE = (
-    "The Game Master could not be reached to choose who you face. Nothing was "
-    "started; try the fight again in a moment."
-)
-# A Retry of a turn that in fact finished after its page lost the stream
-# (issue #515). Running it again would play its procedures twice.
-TURN_ALREADY_ANSWERED_ERROR = (
-    "That message was already answered while the page was away. Reload the "
-    "page to see the reply."
-)
 
 
 def _get_gm_session(session_id, user) -> tuple[GMSession | None, JsonResponse | None]:
@@ -297,9 +260,9 @@ def _get_gm_session(session_id, user) -> tuple[GMSession | None, JsonResponse | 
     try:
         return get_object_or_404(GMSession, pk=session_id, user=user), None
     except (ValueError, TypeError, OverflowError):
-        return None, _json_error("Invalid session_id")
+        return None, _json_error(refusal_words().views.invalid_session_id)
     except Http404:
-        return None, _json_error("GM session not found", status=404)
+        return None, _json_error(refusal_words().views.session_not_found, status=404)
 
 
 #: What a Game Master's own characters are grouped under in the picker.
@@ -353,9 +316,9 @@ def _get_attachable_character(
     try:
         character = get_object_or_404(Character, pk=character_id, is_deleted=False)
     except (ValueError, TypeError, OverflowError):
-        return None, _json_error("Invalid character_id")
+        return None, _json_error(refusal_words().views.invalid_character_id)
     except Http404:
-        return None, _json_error("Character not found", status=404)
+        return None, _json_error(refusal_words().views.character_not_found, status=404)
     # The rule itself lives in gm.attach, so the controls that offer an
     # attach (the sheet's and the home page's, #827/#828) ask the same one.
     refusal = attach_refusal(request.user, character)
@@ -951,7 +914,9 @@ class GMChatView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, TemplateV
                         reverse("gm:reviews") if is_dm(self.request.user) else None
                     ),
                     # What the page says when it has no reviewUrl (#94).
-                    "reviewGameMasterOnly": SEND_TO_CLAUDE_GAME_MASTER_ONLY,
+                    "reviewGameMasterOnly": (
+                        refusal_words().views.send_to_claude_game_master_only
+                    ),
                 },
             }
         )
@@ -1124,7 +1089,7 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     session_id = data.get("session_id")
     user_message = data.get("message", "")
     if not isinstance(user_message, str):
-        return _json_error("message must be a string")
+        return _json_error(refusal_words().views.message_not_text)
     user_message = user_message.strip()
     command = data.get("command")
 
@@ -1214,9 +1179,15 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     # reloaded page, another tab, or a Retry -- would interleave with it.
     already_running = claim_turn(recorder)
     if already_running is not None:
-        recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=TURN_ALREADY_RUNNING_ERROR)
+        recorder.finish(
+            GMTurnRecord.OUTCOME_REJECTED,
+            error=refusal_words().views.turn_already_running,
+        )
         return JsonResponse(
-            {"error": TURN_ALREADY_RUNNING_ERROR, "running_turn": already_running.pk},
+            {
+                "error": refusal_words().views.turn_already_running,
+                "running_turn": already_running.pk,
+            },
             status=409,
         )
 
@@ -1236,7 +1207,7 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
                 "content"
             ]
         else:
-            return _rejected_turn(recorder, "Rules directory not found")
+            return _rejected_turn(recorder, refusal_words().views.rules_not_found)
     elif command == "roll":
         try:
             rolls, total = roll_dice(user_message)
@@ -1264,12 +1235,12 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     ):
         # The turn this Retry is for ran to the end after its page lost the
         # stream (issue #515). Sending it again would play it twice.
-        return _rejected_turn(recorder, TURN_ALREADY_ANSWERED_ERROR)
+        return _rejected_turn(recorder, refusal_words().views.turn_already_answered)
     elif user_message:
         history.append({"role": "user", "content": user_message})
         ordinary_turn = True
     else:
-        return _rejected_turn(recorder, "No message provided")
+        return _rejected_turn(recorder, refusal_words().views.no_message)
 
     # The plan → run → narrate loop (issue #590).
     return _plan_turn(
@@ -1289,14 +1260,6 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
             stored_entries=stored_entries,
         ),
     )
-
-
-# What the player is told when the model's plan could not be read twice over
-# (issue #590): nothing was recorded, and the narration says so too.
-PLAN_UNREADABLE_NOTICE = (
-    "The Game Master could not work out what to record or roll for that "
-    "message, so nothing was changed. Try asking again in other words."
-)
 
 
 @dataclass
@@ -1741,16 +1704,20 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             # failed event and the log keep the real reason.
             record_failed_turn(
                 GMTurnRecord.OUTCOME_ERROR,
-                GM_SERVER_ERROR_MESSAGE,
+                refusal_words().views.server_error,
                 INTERRUPTED_BY_CONNECTION,
                 [],
             )
-            yield _sse({"error": GM_SERVER_ERROR_MESSAGE})
+            yield _sse({"error": refusal_words().views.server_error})
             return
 
         turn_notices = [
             *grounding_notices,
-            *([PLAN_UNREADABLE_NOTICE] if outcome.plan_unreadable else []),
+            *(
+                [refusal_words().views.plan_unreadable]
+                if outcome.plan_unreadable
+                else []
+            ),
         ]
         done_data: dict = {
             "done": True,
@@ -1904,7 +1871,7 @@ def gm_turn(request: HttpRequest, turn_id: int) -> JsonResponse:
     expire_stale_running_turns()
     record = GMTurnRecord.objects.filter(pk=turn_id, user=request.user).first()
     if record is None:
-        return _json_error("GM turn not found", status=404)
+        return _json_error(refusal_words().views.turn_not_found, status=404)
     if record.outcome == GMTurnRecord.OUTCOME_RUNNING:
         state = "running"
     elif record.outcome == GMTurnRecord.OUTCOME_OK:
@@ -1932,13 +1899,13 @@ def gm_save(request: HttpRequest) -> JsonResponse:
     session_id = data.get("session_id")
     name = data.get("name", "")
     if not isinstance(name, str):
-        return _json_error("name must be a string")
+        return _json_error(refusal_words().views.name_not_text)
     name = name.strip()
 
     if not session_id:
-        return _json_error("No session_id")
+        return _json_error(refusal_words().views.no_session_id)
     if not name:
-        return _json_error("A session needs a name")
+        return _json_error(refusal_words().views.session_needs_name)
     refusal = too_long("Name", name, SESSION_NAME_MAX_STORED)
     if refusal:
         return _json_error(refusal)
@@ -2056,7 +2023,7 @@ def gm_delete(request: HttpRequest) -> JsonResponse:
     session_id = data.get("session_id")
 
     if not session_id:
-        return _json_error("No session_id")
+        return _json_error(refusal_words().views.no_session_id)
 
     session, err = _get_gm_session(session_id, request.user)
     if err:
@@ -2230,7 +2197,9 @@ def gm_campaign_panel(request: HttpRequest, session_id: int) -> HttpResponse:
         try:
             resolved_from = database_integer(request.GET["resolved_from"])
         except ValueError:
-            return HttpResponseBadRequest("resolved_from must be the id of a thread")
+            return HttpResponseBadRequest(
+                refusal_words().views.resolved_from_not_thread
+            )
         resolved_since = StoryThread.objects.filter(
             session=session, pk=resolved_from
         ).first()
@@ -2256,7 +2225,7 @@ def gm_characters_detach(request: HttpRequest) -> JsonResponse:
         return error_response
     session_id = data.get("session_id")
     if not session_id:
-        return _json_error("No session_id")
+        return _json_error(refusal_words().views.no_session_id)
     session, error = _get_gm_session(session_id, request.user)
     if error:
         return error
@@ -2264,7 +2233,7 @@ def gm_characters_detach(request: HttpRequest) -> JsonResponse:
     try:
         character = session.characters.filter(pk=data.get("character_id")).first()
     except (ValueError, TypeError, OverflowError):
-        return _json_error("Invalid character_id")
+        return _json_error(refusal_words().views.invalid_character_id)
     if character is not None:
         session.characters.remove(character)
     return JsonResponse(_session_characters_payload(session))
@@ -2288,14 +2257,14 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
         return error_response
     session_id = data.get("session_id")
     if not session_id:
-        return _json_error("Attach a character or send a message first")
+        return _json_error(refusal_words().views.attach_or_send)
     session, error = _get_gm_session(session_id, request.user)
     if error:
         return error
     assert session is not None
     foes_text = data.get("foes", "")
     if not isinstance(foes_text, str):
-        return _json_error("foes must be a string")
+        return _json_error(refusal_words().views.foes_not_text)
     refusal = too_long("Foes", foes_text, MAX_GM_MESSAGE_CHARS)
     if refusal:
         return _json_error(refusal)
@@ -2319,9 +2288,15 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
     )
     already_running = claim_turn(recorder)
     if already_running is not None:
-        recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=FIGHT_WHILE_TURN_RUNNING)
+        recorder.finish(
+            GMTurnRecord.OUTCOME_REJECTED,
+            error=refusal_words().views.fight_while_turn_running,
+        )
         return JsonResponse(
-            {"error": FIGHT_WHILE_TURN_RUNNING, "running_turn": already_running.pk},
+            {
+                "error": refusal_words().views.fight_while_turn_running,
+                "running_turn": already_running.pk,
+            },
             status=409,
         )
     try:
@@ -2344,8 +2319,11 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
         logger.warning("GM fight: the foe call failed: %s", model_error)
         # The record says what the player was told: ``gm:turn`` reads it back
         # to the player, and the model error names the model host (#13).
-        recorder.finish(GMTurnRecord.OUTCOME_ERROR, error=FIGHT_MODEL_UNREACHABLE)
-        return _json_error(FIGHT_MODEL_UNREACHABLE, status=503)
+        recorder.finish(
+            GMTurnRecord.OUTCOME_ERROR,
+            error=refusal_words().views.fight_model_unreachable,
+        )
+        return _json_error(refusal_words().views.fight_model_unreachable, status=503)
     except StreamDeadlinePassed as out_of_time:
         logger.warning("GM fight: the foe call passed its deadline: %s", out_of_time)
         recorder.finish(GMTurnRecord.OUTCOME_TOO_SLOW, error=str(out_of_time))
@@ -2355,7 +2333,9 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
     except Exception:
         # Django logs the traceback of what is raised; the record, which
         # ``gm:turn`` reads back to the player, gets the fixed sentence (#13).
-        recorder.finish(GMTurnRecord.OUTCOME_ERROR, error=GM_SERVER_ERROR_MESSAGE)
+        recorder.finish(
+            GMTurnRecord.OUTCOME_ERROR, error=refusal_words().views.server_error
+        )
         raise
     stored = session.history
     recorder.finish(
@@ -2418,7 +2398,10 @@ def gm_review_create(request: HttpRequest) -> JsonResponse:
     a review runs a model on the LLM host, and reads every hidden entry.
     """
     if not is_dm(request.user):
-        return _json_error(SEND_TO_CLAUDE_GAME_MASTER_ONLY, status=403)
+        return _json_error(
+            refusal_words().views.send_to_claude_game_master_only.format(),
+            status=403,
+        )
     data, error_response = _parse_json_body(request)
     if error_response:
         return error_response
@@ -2428,7 +2411,7 @@ def gm_review_create(request: HttpRequest) -> JsonResponse:
     assert session is not None
     note = data.get("note", "")
     if not isinstance(note, str):
-        return _json_error("note must be a string")
+        return _json_error(refusal_words().views.note_not_text)
     review = GMReviewRequest.objects.create(
         session=session,
         requested_by=request.user,
@@ -2503,7 +2486,7 @@ class GMReviewListView(BreadcrumbMixin, ActivePageMixin, LoginRequiredMixin, Lis
 
     def get(self, request, *args, **kwargs):
         if not is_dm(request.user):
-            raise PermissionDenied("Only a Game Master can see Claude's reviews.")
+            raise PermissionDenied(refusal_words().views.reviews_game_master_only)
         return super().get(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -2550,7 +2533,7 @@ def gm_review_statuses(request: HttpRequest) -> JsonResponse:
     from what it rendered.
     """
     if not is_dm(request.user):
-        return _json_error("Only a Game Master can see Claude's reviews.", status=403)
+        return _json_error(refusal_words().views.reviews_game_master_only, status=403)
     review_ids = []
     for part in request.GET.get("ids", "").split(","):
         # isdigit() let "²" through to int(), and a number past SQLite's

@@ -23,12 +23,13 @@ from .character_schema import (
 )
 from .engine import MODE_PLAY, section_plan_schema
 from .ledger import DraftLedger, draft_defaults
+from .refusal_words import refusal_words
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .testing import add_character, recorded, session_with_character
 from .turn_engine.plan import read_plan
 from .turn_engine.policy import (
-    LITERACY_RULING_REFUSAL,
-    SETTLED_REFUSALS,
+    REASON_LITERACY_RULING,
+    SETTLED_REASONS,
     TurnPolicy,
 )
 from .turn_engine.state import key_figures
@@ -263,8 +264,10 @@ class LiteracyRulingPlanTest(SimpleTestCase):
             is_game_master=False,
         )
         self.assertTrue(reading.ok, reading.errors)
-        self.assertEqual(reading.actions[0].refusal, LITERACY_RULING_REFUSAL)
-        self.assertIn(LITERACY_RULING_REFUSAL, SETTLED_REFUSALS)
+        self.assertEqual(
+            reading.actions[0].refusal, refusal_words().policy.literacy_ruling
+        )
+        self.assertIn(REASON_LITERACY_RULING, SETTLED_REASONS)
 
     def test_the_plan_schema_teaches_the_ruling(self):
         self.assertIn(
@@ -338,6 +341,8 @@ class PlayerLiteracyRulingTest(ExecutorTestCase):
         )
 
         self.assertFalse(outcome.results[0].ran)
-        self.assertEqual(outcome.results[0].error, LITERACY_RULING_REFUSAL)
+        self.assertEqual(
+            outcome.results[0].error, refusal_words().policy.literacy_ruling
+        )
         character.refresh_from_db()
         self.assertIsNone(character.literacy_ruling)

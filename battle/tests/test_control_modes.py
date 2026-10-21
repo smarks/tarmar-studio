@@ -32,6 +32,7 @@ from battle.access import Actor, decides_for
 from battle.engine.state import BattleState
 from battle.models import Battle, BattleEvent
 from battle.persistence import dump_state
+from battle.refusal_words import refusal_words
 from battle.services import (
     advance_turn,
     claim_seat,
@@ -43,6 +44,7 @@ from battle.services import (
     set_seat_ready,
     start_battle,
 )
+from battle.tests.fixed_refusals import with_fixed_refusals
 from battle.views import advance_control
 from common.guest import GUEST_KEY_SESSION_FIELD
 from common.test_helpers import BaseTestCase
@@ -665,7 +667,9 @@ class AiStandsInForAnAbsentPlayerTest(BaseTestCase):
     def test_a_bystander_may_not(self):
         battle, _events = advance_turn(self.battle.pk)
         bystander = self.create_user(username="bystander308")
-        with self.assertRaisesMessage(ValueError, "hand the choice to the AI"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.hand_choice_to_ai_denied
+        ):
             record_player_action(
                 self.battle.pk,
                 bystander,
@@ -923,11 +927,12 @@ class ChoiceNamesItsPauseTest(BaseTestCase):
             candidates[0],
         )
 
+    @with_fixed_refusals
     def test_a_choice_composed_for_another_combatant_is_refused(self):
         battle, awaited_id, turn = self.awaiting()
         other = battle.combatants.exclude(pk=awaited_id).first()
         option = self.generic_option(battle)
-        with self.assertRaisesMessage(ValueError, "the battle is waiting on"):
+        with self.assertRaisesMessage(ValueError, "services.stale_choice"):
             record_player_action(
                 battle.pk,
                 self.dm,
@@ -942,10 +947,14 @@ class ChoiceNamesItsPauseTest(BaseTestCase):
         self.assertEqual(battle.status, Battle.STATUS_AWAITING)
         self.assertEqual(battle.pending_input_json["combatant_id"], awaited_id)
 
+    @with_fixed_refusals
     def test_a_choice_composed_for_another_turn_is_refused(self):
         battle, awaited_id, turn = self.awaiting()
         option = self.generic_option(battle)
-        with self.assertRaisesMessage(ValueError, f"turn {turn}"):
+        with self.assertRaisesMessage(
+            ValueError,
+            f"services.stale_choice {battle.combatants.get(pk=awaited_id).display_name} {turn}",
+        ):
             record_player_action(
                 battle.pk,
                 self.dm,
@@ -977,12 +986,13 @@ class ChoiceNamesItsPauseTest(BaseTestCase):
         self.assertIn(other.display_name, message)
         self.assertIn(awaited.display_name, message)
 
+    @with_fixed_refusals
     def test_the_ai_hand_off_is_bound_to_its_pause_too(self):
         """Handing a decision to the AI names a figure as much as picking
         an option does, so a stale hand-off is refused on the same terms."""
         battle, awaited_id, turn = self.awaiting()
         other = battle.combatants.exclude(pk=awaited_id).first()
-        with self.assertRaisesMessage(ValueError, "the battle is waiting on"):
+        with self.assertRaisesMessage(ValueError, "services.stale_choice"):
             record_player_action(
                 battle.pk,
                 self.dm,

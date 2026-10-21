@@ -38,21 +38,9 @@ from battle.access import is_dm
 from characters.constants import too_long
 
 from .models import GMRecordEdit, GMSession, SceneEntity, StoryThread, TableRuling
+from .refusal_words import refusal_words
 from .summary import MAX_SUMMARY_CHARS
 from .turn_record import running_turn_for
-
-#: What anyone without a Game Master's account is told.
-GAME_MASTER_ONLY = (
-    "Only a Game Master sets the records at this table by hand; a player's "
-    "records follow the story."
-)
-
-
-#: Why a recap correction is refused while a turn runs (review of #791).
-RECAP_WHILE_TURN_RUNNING = (
-    "The Game Master is still answering a message in this session, and that "
-    "turn may rewrite the recap. Correct it once the reply has appeared."
-)
 
 
 class HandEditError(Exception):
@@ -79,7 +67,7 @@ def may_edit_by_hand(user: Any) -> bool:
 
 def _require_game_master(user: Any) -> None:
     if not may_edit_by_hand(user):
-        raise HandEditError(GAME_MASTER_ONLY)
+        raise HandEditError(refusal_words().hand_records.game_master_only)
 
 
 def _log(
@@ -123,14 +111,14 @@ def _clean_text(
     if value is None:
         value = ""
     if not isinstance(value, str):
-        raise HandEditError(f"{label} must be text")
+        raise HandEditError(refusal_words().hand_records.not_text.format(label=label))
     if lines:
         kept = [line.rstrip() for line in value.replace("\r\n", "\n").split("\n")]
         cleaned = "\n".join(kept).strip()
     else:
         cleaned = " ".join(value.split())
     if required and not cleaned:
-        raise HandEditError(f"{label} is needed")
+        raise HandEditError(refusal_words().hand_records.needed.format(label=label))
     # The one wording every path gives past a limit (#928, #938).
     refusal = too_long(label, cleaned, limit)
     if refusal:
@@ -159,7 +147,9 @@ def _run_ruling_action(session: GMSession, user: Any, action: dict[str, Any]) ->
     executor = RecordsExecutor(policy, session, lambda: session, user)
     result = executor.run(reading.actions[0], lambda event: None)
     if not result.ran:
-        raise HandEditError(result.error or "the ruling was not recorded")
+        raise HandEditError(
+            result.error or refusal_words().hand_records.ruling_not_recorded
+        )
     return result.note
 
 
@@ -167,7 +157,7 @@ def _ruling(session: GMSession, ruling_id: Any) -> TableRuling:
     try:
         return TableRuling.objects.get(session=session, pk=int(ruling_id), active=True)
     except (TypeError, ValueError, OverflowError, TableRuling.DoesNotExist):
-        raise HandEditError("There is no such ruling in force at this table") from None
+        raise HandEditError(refusal_words().hand_records.no_such_ruling) from None
 
 
 def add_ruling(session: GMSession, user: Any, topic: Any, text: Any) -> HandEdit:
@@ -302,9 +292,7 @@ def _entity(session: GMSession, entity_id: Any) -> SceneEntity:
             session=session, pk=int(entity_id)
         )
     except (TypeError, ValueError, OverflowError, SceneEntity.DoesNotExist):
-        raise HandEditError(
-            "There is no such person or thing in this session"
-        ) from None
+        raise HandEditError(refusal_words().hand_records.no_such_entity) from None
 
 
 def save_entity(
@@ -324,13 +312,15 @@ def save_entity(
     """
     _require_game_master(user)
     if kind not in (SceneEntity.PERSON, SceneEntity.THING):
-        raise HandEditError("A record is a person or a thing")
+        raise HandEditError(refusal_words().hand_records.entity_kind)
     cleaned = _entity_values(values)
     with transaction.atomic():
         if entity_id in (None, ""):
             if _same_name_taken(session, cleaned["name"], besides=None):
                 raise HandEditError(
-                    f"{cleaned['name']} is already recorded; correct that one instead"
+                    refusal_words().hand_records.entity_already_recorded.format(
+                        name=cleaned["name"]
+                    )
                 )
             entity = SceneEntity(session=session, kind=kind, **cleaned)
             change, before = GMRecordEdit.ADDED, {}
@@ -338,7 +328,9 @@ def save_entity(
             entity = _entity(session, entity_id)
             if _same_name_taken(session, cleaned["name"], besides=entity.pk):
                 raise HandEditError(
-                    f"{cleaned['name']} is already recorded as another row"
+                    refusal_words().hand_records.entity_recorded_as_another_row.format(
+                        name=cleaned["name"]
+                    )
                 )
             before = _entity_snapshot(entity)
             for field, value in cleaned.items():
@@ -397,7 +389,7 @@ def _thread(session: GMSession, thread_id: Any) -> StoryThread:
             session=session, pk=int(thread_id)
         )
     except (TypeError, ValueError, OverflowError, StoryThread.DoesNotExist):
-        raise HandEditError("There is no such thread in this session") from None
+        raise HandEditError(refusal_words().hand_records.no_such_thread) from None
 
 
 def _thread_text(value: Any, label: str = "The thread", required: bool = True) -> str:
@@ -469,7 +461,11 @@ def resolve_thread(
 
     def apply(thread: StoryThread) -> None:
         if thread.resolved:
-            raise HandEditError(f"Thread {thread.pk} is already resolved")
+            raise HandEditError(
+                refusal_words().hand_records.thread_already_resolved.format(
+                    thread=thread.pk
+                )
+            )
         thread.resolved = True
         thread.resolution = cleaned
         thread.resolved_at = timezone.now()
@@ -486,7 +482,9 @@ def reopen_thread(session: GMSession, user: Any, thread_id: Any) -> HandEdit:
 
     def apply(thread: StoryThread) -> None:
         if not thread.resolved:
-            raise HandEditError(f"Thread {thread.pk} is still open")
+            raise HandEditError(
+                refusal_words().hand_records.thread_still_open.format(thread=thread.pk)
+            )
         thread.resolved = False
         thread.resolution = ""
         thread.resolved_at = None
@@ -523,10 +521,10 @@ def correct_recap(session: GMSession, user: Any, text: Any) -> HandEdit:
         # A turn may fold the session and write its own recap over this one,
         # without trace (review of #791); so not while one runs.
         if running_turn_for(session.user, session.pk) is not None:
-            raise HandEditError(RECAP_WHILE_TURN_RUNNING)
+            raise HandEditError(refusal_words().hand_records.recap_while_turn_running)
         locked = GMSession.objects.select_for_update().get(pk=session.pk)
         if not locked.summary_covers:
-            raise HandEditError("This session has not been folded into a recap yet")
+            raise HandEditError(refusal_words().hand_records.not_folded_yet)
         before = {"summary": locked.summary, "summary_covers": locked.summary_covers}
         locked.summary = cleaned
         locked.save(update_fields=["summary"])

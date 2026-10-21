@@ -409,7 +409,7 @@ class BackgroundRollTest(BaseTestCase):
             services.roll_background(character.pk)
 
         with self.assertRaisesMessage(
-            CharacterChangeError, services.ROLL_FIXED_REASONS["location"]
+            CharacterChangeError, services.roll_fixed_reason("location")
         ):
             services.update_field(character.pk, "location", "City")
 

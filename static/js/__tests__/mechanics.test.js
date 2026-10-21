@@ -113,15 +113,22 @@ test('names a focus bonus before the injury penalty, so the line adds up', async
     );
 });
 
-test("says when the check was a Game Master's call past the rules", async () => {
+test('ends the line with what the server says a Game Master called it past (#85)', async () => {
+    // The words are the server's configuration, sent with the check; the
+    // script adds none of its own, so these are not the shipped ones.
     await load(jsonResponse({
         success: true,
-        check: checkPayload({ game_master_call: 'unconscious', outcome: 'failure', total: 8 }),
+        check: checkPayload({
+            game_master_call: 'unconscious',
+            game_master_call_note: ' [called past: unconscious]',
+            outcome: 'failure',
+            total: 8,
+        }),
     }));
     document.getElementById('roll').click();
     await flush();
     expect(document.getElementById('check-result').textContent).toBe(
-        "stealth: 2d6 [5, 4] = 9 +2 DEX (15) +2 level = 8 vs 10: failure (a Game Master's call: unconscious)"
+        'stealth: 2d6 [5, 4] = 9 +2 DEX (15) +2 level = 8 vs 10: failure [called past: unconscious]'
     );
 });
 

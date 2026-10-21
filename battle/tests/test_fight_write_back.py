@@ -17,8 +17,8 @@ from battle import profiles
 from battle.engine.state import BattleState
 from battle.models import Battle
 from battle.persistence import CLASSIC_PROFILE, TARMAR_PROFILE, load_state
+from battle.refusal_words import refusal_words
 from battle.services import (
-    RESULTS_RECORDED_REFUSAL,
     WITHHELD_NOT_GAME_MASTER,
     WITHHELD_OTHER_PLAYERS,
     StalePools,
@@ -34,6 +34,7 @@ from battle.services import (
     start_battle,
     withheld_characters,
 )
+from battle.tests.fixed_refusals import with_fixed_refusals
 from characters import services as character_services
 from characters.models import Character
 from characters.services import FightReport
@@ -290,7 +291,9 @@ class FightWriteBackTest(BaseTestCase):
         damage = self.character.fatigue_damage
         with self.assertRaises(ValueError) as caught:
             restart_battle(battle.pk)
-        self.assertEqual(str(caught.exception), RESULTS_RECORDED_REFUSAL)
+        self.assertEqual(
+            str(caught.exception), refusal_words().services.results_recorded
+        )
         self.character.refresh_from_db()
         self.assertEqual(self.character.fatigue_damage, damage)
 
@@ -404,7 +407,9 @@ class PlayersOwnBattleTest(BaseTestCase):
         self.assertNotContains(response, 'id="restart-battle"')
         response = self.client.post(f"/tarmar/battles/{battle.pk}/restart/")
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], RESULTS_RECORDED_REFUSAL)
+        self.assertEqual(
+            response.json()["error"], refusal_words().services.results_recorded
+        )
         self.login_as(game_master)
         response = self.client.get(f"/tarmar/battles/{battle.pk}/")
         self.assertContains(response, 'id="restart-battle"')
@@ -451,13 +456,14 @@ class LobbyStartTest(BaseTestCase):
         battle = start_battle(self.battle.pk)
         self.assertEqual(tarmar_state(battle).by_id(self.seat.pk).debt, 0)
 
+    @with_fixed_refusals
     def test_a_character_who_died_after_the_claim_cannot_start(self):
         Character.objects.filter(pk=self.character.pk).update(
             is_alive=False, death_cause="a fall"
         )
         with self.assertRaises(ValueError) as caught:
             start_battle(self.battle.pk)
-        self.assertIn("has died since claiming a seat", str(caught.exception))
+        self.assertIn("services.died_since_claiming", str(caught.exception))
 
 
 class ClassicFightWriteBackTest(BaseTestCase):
@@ -530,6 +536,7 @@ class StalePoolsTest(BaseTestCase):
             fatigue_damage=0, body_damage=0
         )
 
+    @with_fixed_refusals
     def test_a_fight_healed_while_it_sat_unfinished_is_refused(self):
         battle = self.hurt(self.make_battle())
         if battle.status in OVER:
@@ -537,7 +544,7 @@ class StalePoolsTest(BaseTestCase):
         self.heal()
         turn = Battle.objects.get(pk=battle.pk).turn_number
 
-        with self.assertRaisesMessage(StalePools, "Aldwin: the record's pools"):
+        with self.assertRaisesMessage(StalePools, "services.stale_pools Aldwin"):
             advance_turn(battle.pk)
 
         self.assertEqual(Battle.objects.get(pk=battle.pk).turn_number, turn)
@@ -585,6 +592,7 @@ class StalePoolsTest(BaseTestCase):
         self.assertNotIn("owed", note.message)
         advance_turn(battle.pk)
 
+    @with_fixed_refusals
     def test_a_debt_the_game_master_settles_mid_fight_is_what_the_board_owes(self):
         # Borrowing (tarmar-engine #28): the board must not go on rolling
         # against, capping by or paying back a debt the record forgave.
@@ -598,7 +606,7 @@ class StalePoolsTest(BaseTestCase):
             self.character.pk, owed=0, is_game_master=True
         )
 
-        with self.assertRaisesMessage(StalePools, "Aldwin: the record's pools"):
+        with self.assertRaisesMessage(StalePools, "services.stale_pools Aldwin"):
             advance_turn(battle.pk)
 
         battle = resnapshot_pools(battle.pk, is_game_master=True)
@@ -613,13 +621,17 @@ class StalePoolsTest(BaseTestCase):
         battle = self.hurt(self.make_battle())
         self.heal()
 
-        with self.assertRaisesMessage(ValueError, "Only a Game Master"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.resnapshot_game_master_only
+        ):
             resnapshot_pools(battle.pk, is_game_master=False)
 
     def test_nothing_to_take_is_said(self):
         battle = self.make_battle()
 
-        with self.assertRaisesMessage(ValueError, "already holds its record's pools"):
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.pools_already_held
+        ):
             resnapshot_pools(battle.pk, is_game_master=True)
 
     def test_a_fight_nobody_touched_goes_on(self):
@@ -645,6 +657,7 @@ class StalePoolsTest(BaseTestCase):
 
         advance_turn(battle.pk)
 
+    @with_fixed_refusals
     def test_the_page_says_so_and_offers_the_game_master_the_control(self):
         battle = self.hurt(self.make_battle())
         if battle.status in OVER:
@@ -666,7 +679,7 @@ class StalePoolsTest(BaseTestCase):
         self.assertContains(page, 'id="resnapshot-pools"')
         self.assertContains(page, "Pools changed on the records")
         self.assertEqual(refused.status_code, 409)
-        self.assertIn("Aldwin: the record's pools", refused.json()["error"])
+        self.assertIn("services.stale_pools Aldwin", refused.json()["error"])
         # The notice and the control come with the refusal, for a page that
         # was open when the records moved (review of #842).
         self.assertIn('id="resnapshot-pools"', refused.json()["stale_html"])

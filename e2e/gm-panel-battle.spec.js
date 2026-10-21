@@ -10,6 +10,7 @@
  * turn panel offers his options.
  */
 
+const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_USER, chooseToAttach } = require('./fixtures');
 const { runDjangoShell } = require('./django');
 
@@ -169,7 +170,7 @@ test.describe('GM panel — Battle tab', () => {
 
         const error = page.locator('#gm-panel-battle-error');
         await expect(error).toBeVisible();
-        await expect(error).toContainText('still answering your last message');
+        await expect(error).toContainText(refusal('gm', 'views', 'fight_while_turn_running'));
         await expect(page.locator('#gm-battle')).toHaveCount(0);
         // The turn ends as it would have, with no fight in its history.
         await expect(page.locator('.message.assistant').last()).toContainText('nothing stirs', { timeout: 30000 });

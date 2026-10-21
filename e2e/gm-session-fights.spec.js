@@ -25,6 +25,7 @@
  * its own rows in every list it reads (the review's finding 4).
  */
 
+const { refusal } = require('./refusals');
 const { test, expect, loginAs, submitPassphrase, chooseToAttach } = require('./fixtures');
 const { readDjangoShell, runDjangoShell } = require('./django');
 
@@ -218,7 +219,7 @@ users.delete()
         await page.fill('#gm-fight-foes', 'a gray wolf');
         await page.click('#gm-fight-start');
         await expect(page.locator('#gm-panel-battle-error'))
-            .toHaveText('Attach a living character before starting a fight');
+            .toHaveText(refusal('gm', 'fight', 'attach_living_character'));
     });
 
     test('#854: a restart leaves the dead dead on the board, and the log says why', async ({ page }, testInfo) => {
@@ -290,7 +291,9 @@ dain.save()`);
         await luck.getByRole('button', { name: 'Spend Luck' }).click();
         await expect(page.locator('.gm-luck-count')).toHaveText('Luck +1: 1 of 1 used this session');
         await page.locator('.gm-luck-form').getByRole('button', { name: 'Spend Luck' }).click();
-        await expect(page.locator('#gm-panel-characters-error')).toContainText('spent all 1');
+        await expect(page.locator('#gm-panel-characters-error')).toContainText(
+            refusal('gm', 'luck', 'luck_spent', { name: wrenName, level: 1 })
+        );
         await page.reload();
         await page.click('#gm-panel-tab-characters');
         await expect(page.locator('.gm-luck-count')).toHaveText('Luck +1: 1 of 1 used this session');

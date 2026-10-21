@@ -9,36 +9,12 @@ the gate hints' (#77): tests pin the code to its configuration, not to the
 file; ``test_wording`` checks the shipped file itself.
 """
 
-from dataclasses import fields
-from typing import get_type_hints
-
 from django.test import override_settings
 
-from battle.wording import PLACEHOLDERS, RulingsWording
+from battle.wording import RulingsWording
+from common.wording import fixed_wording
 
-
-def fixed_rulings_wording() -> RulingsWording:
-    """Every sentence as ``"<table>.<key> {name} ..."``."""
-    tables = {}
-    for table, words_type in get_type_hints(RulingsWording).items():
-        tables[table] = words_type(
-            **{
-                word_field.name: " ".join(
-                    [
-                        f"{table}.{word_field.name}",
-                        *(
-                            f"{{{placeholder}}}"
-                            for placeholder in sorted(word_field.metadata[PLACEHOLDERS])
-                        ),
-                    ]
-                )
-                for word_field in fields(words_type)
-            }
-        )
-    return RulingsWording(**tables)
-
-
-FIXED_WORDS = fixed_rulings_wording()
+FIXED_WORDS = fixed_wording(RulingsWording)
 
 #: A class or method decorator: run under :data:`FIXED_WORDS`.
 with_fixed_words = override_settings(BATTLE_RULINGS_WORDING=FIXED_WORDS)

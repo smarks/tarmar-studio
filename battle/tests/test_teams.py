@@ -11,6 +11,7 @@ battle ends exactly where it always did.
 from battle.models import Battle, BattleDraft
 from battle.persistence import CLASSIC_PROFILE
 from battle.profiles import for_battle
+from battle.refusal_words import refusal_words
 from battle.services import (
     MAX_COMBATANTS,
     add_draft_entry,
@@ -491,7 +492,9 @@ class TeamSetupViewsTest(BaseTestCase):
             {"party_id": "999999"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "No such party", status_code=400)
+        self.assertContains(
+            response, refusal_words().services.no_such_party, status_code=400
+        )
 
     def test_team_add_remove_and_entry_move_round_trip(self):
         add_url = self.reverse("battle:setup-team-add", args=[self.draft.pk])

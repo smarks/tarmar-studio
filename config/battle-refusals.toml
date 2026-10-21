@@ -1,0 +1,134 @@
+# The words the battle app refuses a request in: one table per module that
+# refuses, and the notes a guest reads beside a control (issues #97, #86).
+#
+# Read once at startup (battle.refusal_words.load_refusal_words); a missing key, an
+# unknown key or a {name} a sentence may not use stops the server there rather
+# than in front of a player. BATTLE_REFUSAL_WORDS_FILE names another file. Change the
+# wording freely; keep each {name} a sentence uses, or drop it. Changing a
+# sentence never changes who is refused.
+#
+# The words of a Game Master's rulings on a battle (hand-to-hand by agreement,
+# lifted magic bounds) are in battle-rulings.toml.
+
+[services]
+# Setting up a battle and its muster.
+guest_saved_characters = "Sign in to bring saved characters — a guest's battle is fought with generated fighters and catalog beasts"
+character_twice = "A character cannot fight twice in the same battle"
+# {ids}: the record numbers of the characters refused.
+not_seatable_characters = "Not characters you can seat (they may have died or been deleted): {ids}"
+combatant_count = "A battle needs between {fewest} and {most} combatants (characters, beasts, and player seats together); got {total}"
+team_needs_name = "A team needs a name"
+no_such_team = "No such team on this draft"
+no_such_muster_entry = "No such muster entry"
+no_such_party = "No such party"
+party_has_no_members = "{party} has no members to import"
+nobody_in_party_can_join = "Nobody in {party} can join: {hidden} hidden from you, {fallen} dead or gone, {already} already on the muster"
+no_room_for_party = "No room for {party}: {joining} would join a muster of {mustered}, and a battle holds at most {most}"
+muster_full = "The muster is full — a battle holds at most {most}"
+unknown_archetype = "Unknown archetype"
+no_such_beast = "No catalog beast matches that request"
+unknown_beast_category = "Unknown beast category"
+unknown_difficulty_band = "Unknown difficulty band"
+not_a_seatable_character = "Not a character you can seat"
+already_on_muster = "{name} is already on the muster"
+unknown_roster_entry_kind = "Unknown roster entry kind"
+battle_needs_name = "A battle needs a name"
+
+# The lobby: claiming, releasing and readying seats, and starting.
+choose_character_or_archetype = "Choose a character or an archetype to generate"
+no_guest_session = "This browser has no guest session — reload and try again"
+guest_own_character = "Sign in to bring one of your own characters to a seat"
+not_open_for_joining = "This battle is no longer open for joining"
+already_hold_a_seat = "You already hold a seat in this battle"
+seat_already_taken = "That seat is already taken"
+not_your_living_character = "That is not one of your living characters"
+not_an_occupied_seat = "That is not an occupied seat"
+release_seat_player_or_dm = "Only the seat's player or a DM can release it"
+not_your_seat = "That is not your seat"
+died_since_claiming = "{name} has died since claiming a seat; the seat must be released before the battle can start"
+already_started = "This battle has already started"
+every_player_ready = "Every seated player must be ready first"
+too_few_combatants = "A battle needs at least {fewest} combatants; wait for more seats to fill"
+
+# A fight that writes to the character records, and restarting one.
+results_recorded = "This fight has already hurt or killed a character on their record; only a Game Master can restart it"
+# {names}: the figures whose records' pools moved.
+stale_pools = "{names}: the record's pools have changed since this fight last wrote them -- healed, hurt in another fight, or handed back by a restart -- so the board no longer holds what the character has. A Game Master takes the pools from the records before the fight goes on"
+resnapshot_game_master_only = "Only a Game Master can take a fight's pools from the character records"
+not_started = "This battle has not started"
+pools_already_held = "Every figure already holds its record's pools"
+# Also the disabled Restart button's tooltip.
+no_starting_snapshot = "This battle has no starting snapshot to restart from"
+no_such_combatant = "No such combatant in this battle"
+
+# A Game Master standing in for an absent player's seat, and handing it back.
+take_seat_game_master_only = "Only the Game Master running this fight takes a seat, and only for a player who is absent"
+withdrawn_seat = "{name} was withdrawn from this session by the player who owns the character; the seat is theirs alone"
+return_seat_owner_or_game_master = "Only the character's owner or the Game Master running this fight hands a seat back"
+no_seat_to_return = "Nobody has taken {name}'s seat, so there is none to give back"
+no_seat_to_take = "Nobody sits in {name}'s seat, so there is no absent player to stand in for"
+already_play_seat = "You already play {name}"
+owner_already_plays = "{owner} already plays {name}"
+battle_over = "This battle is over"
+no_owner_to_stand_in_for = "Only a saved character's seat has an owner to stand in for"
+
+# A player's choice at a paused turn.
+no_input_pending = "No player input is pending"
+stale_choice = "That choice was made for {chosen_name} on turn {chosen_turn}, but the battle is waiting on {awaited_name}'s turn {awaited_turn}. The menu has moved on — choose again."
+# {chosen_name} above, when the figure the choice named is not in the battle.
+stale_choice_unknown_figure = "another combatant"
+hand_choice_to_ai_denied = "Only this battle's DM, its owner, or the combatant's own player can hand the choice to the AI"
+no_pending_menu = "No pending menu to choose from"
+not_your_combatant = "That is not your combatant"
+option_not_on_menu = "That option is not on the pending menu"
+# {hex}: the hex asked for, as (q, r).
+destination_not_marked = "{option} cannot move {name} to hex {hex}: pick one of the marked hexes, or none"
+# {option} above, for an option with no name.
+unnamed_option = "That option"
+name_taken = "Another combatant already has that name"
+
+[views]
+# Who may run a battle.
+control_denied = "Only this battle's DM or the person who made it can do that"
+foes_belong_to_game_master = "This fight came from a Games Master session: its foes belong to the Game Master, so only a Game Master can restart it or change who decides"
+combatant_control_denied = "Only this battle's DM, the person who made it, or the combatant's own player can do that"
+start_denied = "Only this battle's DM or the person who made it can start it"
+# What a request hears when it fails for a reason that is not a rule refusing it.
+request_failed = "That could not be done because of an error on the server. It has been logged; reload the page and try again."
+
+# The setup page's terms and muster.
+seed_not_whole_number = "Seed must be a whole number"
+seed_out_of_range = "Seed must be between 0 and {highest}"
+unknown_rules_profile = "Unknown rules profile"
+draft_gone = "This battle has already started, or its setup was discarded"
+unknown_setup_field = "Unknown setup field"
+numeric_character_id = "A numeric character_id is required"
+numeric_entry_index = "A numeric entry index is required"
+numeric_party_id = "A numeric party_id is required"
+
+# Renaming a combatant.
+numeric_combatant_id = "A numeric combatant_id is required"
+combatant_needs_name = "A combatant needs a name"
+name_characters = "Names may only use letters, numbers, spaces, hyphens, periods, apostrophes, and parentheses"
+
+# A player's choice at a paused turn, and the page's poll.
+choice_combatant_id = "A numeric combatant_id is required: name the combatant this choice was made for"
+choice_turn = "A numeric turn is required: name the turn this choice was made on"
+numeric_target_id = "A numeric target_id is required"
+numeric_push_mana = "A numeric push_mana is required"
+borrow_true_or_false = "borrow is true or false"
+numeric_anchor_target = "A numeric anchor_target is required"
+numeric_counter_mana = "A numeric counter_mana is required"
+destination_is_hex = "A destination is a hex: [q, r]"
+numeric_after_marker = "A numeric after marker is required"
+
+[guest_notes]
+# Beside a disabled control, and as the refusal when a guest posts to it anyway.
+saved_characters = "Signed-in players can seat their saved characters here. As a guest you fight with generated fighters and catalog beasts."
+claim_character = "Signed-in players can bring one of their own characters to a seat. As a guest, generate a fighter below — it fights exactly the same, it just is not kept afterwards."
+parties = "Parties are saved teams, and saving needs an account. Teams you name on this muster still work — they last as long as the battle."
+keep = "Nothing here is saved to an account: the fighters this battle rolls exist only inside it. Sign in before you start and the battle is kept under your name."
+
+[control]
+battle_mode = "Control mode must be automatic or manual"
+combatant_mode = "Control mode must be automatic, manual, or inherited"

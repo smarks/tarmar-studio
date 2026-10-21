@@ -9,6 +9,7 @@
  * Spencer may overrule.
  */
 
+const { refusal } = require('./refusals');
 const { test, expect, loginAs, TEST_ADMIN } = require('./fixtures');
 const { readDjangoShell } = require('./django');
 
@@ -60,7 +61,9 @@ test.describe('Battle page — a fight whose records moved under it', () => {
 
         const notice = page.locator('#battle-stale-pools');
         await expect(notice).toBeVisible();
-        await expect(notice).toContainText(`${name}: the record's pools have changed`);
+        await expect(notice).toContainText(
+            refusal('battle', 'services', 'stale_pools', { names: name })
+        );
         await expect(page.locator('#advance-turn')).toBeDisabled();
         await expect(page.locator('#advance-turn')).toHaveText(/Pools changed on the records/);
         await page.screenshot({ path: testInfo.outputPath('stale-pools.png'), fullPage: true });
@@ -86,7 +89,9 @@ test.describe('Battle page — a fight whose records moved under it', () => {
         heal(characterId);
         await page.click('#advance-turn');
 
-        await expect(page.locator('#battle-stale-pools')).toContainText(`${name}: the record's pools have changed`);
+        await expect(page.locator('#battle-stale-pools')).toContainText(
+            refusal('battle', 'services', 'stale_pools', { names: name })
+        );
         await expect(page.locator('#advance-turn')).toBeDisabled();
         await page.click('#resnapshot-pools');
         await page.waitForURL(new RegExp(`/tarmar/battles/${battleId}/$`));

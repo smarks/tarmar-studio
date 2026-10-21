@@ -16,14 +16,16 @@ makes, and no direction the model writes changes any total.
 
 from unittest.mock import patch
 
+from characters.refusal_words import game_master_call_note
 from common.test_helpers import create_character
 
 from .engine import MODE_AIDE, MODE_PLAY
+from .refusal_words import refusal_words
 from .test_aide_roll_condition import hurt_to
 from .test_turn_engine_executor import ExecutorTestCase, plan
 from .turn_engine import events
 from .turn_engine.plan import PLAYER_ATTRIBUTE_CHECK_ERROR
-from .turn_engine.policy import AIDE_UNASKED_ROLL_REFUSAL, TurnPolicy
+from .turn_engine.policy import TurnPolicy
 
 #: Where the attribute check's dice come from (the canon's, 3d6 on the
 #: pages), for a fixed total.
@@ -206,7 +208,7 @@ class AGameMasterOverridesTest(ExecutorTestCase):
             )
         result = outcome.results[0]
         self.assertTrue(result.ran, result.error)
-        self.assertIn("(a Game Master's call: unconscious)", result.result)
+        self.assertIn(game_master_call_note("unconscious"), result.result)
 
 
 class TheAideRollsTheCheckOnlyWhenAskedTest(ExecutorTestCase):
@@ -230,7 +232,9 @@ class TheAideRollsTheCheckOnlyWhenAskedTest(ExecutorTestCase):
             MODE_AIDE, is_game_master=True, latest="How is Gorn after the fall?"
         )
         outcome, *_rest = self.play(plan(self.check()))
-        self.assertEqual(outcome.results[0].error, AIDE_UNASKED_ROLL_REFUSAL)
+        self.assertEqual(
+            outcome.results[0].error, refusal_words().policy.aide_unasked_roll
+        )
 
     def test_a_check_asked_for_by_name_runs(self):
         for asked in ("Give Gorn a strength check", "an attribute check for Gorn"):

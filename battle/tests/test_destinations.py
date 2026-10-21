@@ -18,6 +18,7 @@ from battle.services import (
     record_player_action,
     set_combatant_control_mode,
 )
+from battle.tests.fixed_refusals import with_fixed_refusals
 from common.test_helpers import BaseTestCase
 
 from .test_lobby import started_battle_with_player
@@ -114,16 +115,17 @@ class PickedDestinationTest(BaseTestCase):
         self.assertEqual(moved.payload["destination"], list(hex_picked))
         self.assertEqual(moved.payload["to"], list(hex_picked))
 
+    @with_fixed_refusals
     def test_a_hex_the_option_cannot_take_is_refused(self):
         battle, _seat, move = self.pending_move()
-        with self.assertRaisesMessage(ValueError, "pick one of the marked hexes"):
+        with self.assertRaisesMessage(ValueError, "services.destination_not_marked"):
             self.act(battle, move, (99, 99))
         defend = next(
             entry
             for entry in battle.pending_input_json["candidates"]
             if not entry.get("destinations")
         )
-        with self.assertRaisesMessage(ValueError, "pick one of the marked hexes"):
+        with self.assertRaisesMessage(ValueError, "services.destination_not_marked"):
             self.act(battle, defend, tuple(move["destinations"][0]))
 
     def test_the_endpoint_reads_the_hex(self):

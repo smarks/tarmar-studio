@@ -13,6 +13,7 @@
  * under examination. Each one opens its own clean browser context.
  */
 
+const { refusal } = require('./refusals');
 const { test, expect } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { E2E_GUEST_BATTLE_PREFIX, resetGuestBattleRate } = require('./cleanup');
@@ -47,7 +48,7 @@ test.describe('Guest arena', () => {
             'You are playing as a guest'
         );
         await expect(page.locator('.guest-standing')).toContainText(
-            'Nothing here is saved to an account'
+            refusal('battle', 'guest_notes', 'keep')
         );
 
         // New battle is offered, not hidden.
@@ -59,14 +60,16 @@ test.describe('Guest arena', () => {
         // disabled control, the reason, and a way to sign in.
         const characterLimit = page.locator('#guest-limit-characters');
         await expect(characterLimit).toBeVisible();
-        await expect(characterLimit).toContainText('generated fighters');
+        await expect(characterLimit).toContainText(
+            refusal('battle', 'guest_notes', 'saved_characters')
+        );
         await expect(characterLimit.locator('a')).toHaveText('Sign in');
         await expect(
             page.locator('button:has-text("Seat a saved character")')
         ).toBeDisabled();
         const partyLimit = page.locator('#guest-limit-parties');
         await expect(partyLimit).toBeVisible();
-        await expect(partyLimit).toContainText('Parties are saved teams');
+        await expect(partyLimit).toContainText(refusal('battle', 'guest_notes', 'parties'));
         await expect(
             page.locator('button:has-text("Import as a team")')
         ).toBeDisabled();
@@ -116,7 +119,9 @@ test.describe('Guest arena', () => {
         await page.click('.seat-claim summary');
         const claimLimit = page.locator('#guest-limit-claim');
         await expect(claimLimit).toBeVisible();
-        await expect(claimLimit).toContainText('generate a fighter below');
+        await expect(claimLimit).toContainText(
+            refusal('battle', 'guest_notes', 'claim_character')
+        );
         await expect(page.locator('select[name="character_id"]')).toHaveCount(0);
         await page.locator('.seat-claim select[name="archetype"]').selectOption('archer');
         await page.click('.seat-claim button:has-text("Join with a generated fighter")');

@@ -21,6 +21,7 @@ const {
     test, expect, loginAs, createCharacter, submitPassphrase, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
 const { startCoverage } = require('./coverage');
+const { refusal } = require('./refusals');
 const { runDjangoShell, readDjangoJson } = require('./django');
 const { pinDice } = require('./dice');
 const { loadedCharacterRules, originForPercentile } = require('./character-rules');
@@ -66,7 +67,8 @@ function anotherOrigin(origin, among = CHECKED_ORIGINS) {
 }
 
 /** The reason a player's sheet prints beside a rolled Origin (#970). */
-const ROLLED_ORIGIN_FIXED = 'The Origin was rolled, and a roll is final; only a Game Master can change it.';
+/** The configured reason a rolled Origin is final (#970, #85). */
+const rolledOriginFixed = () => refusal('characters', 'services', 'roll_fixed_origin');
 
 /**
  * Create a character whose player chose the Origin rather than rolled it.
@@ -320,7 +322,7 @@ test.describe('Literacy row (#740, #741)', () => {
         // which Origin that face is, and the scenario needs one with a check.
         await expect(page.locator('#dice-log')).toContainText(`Location: d100=${SEEDED_LOCATION_FACE} `);
         await expect(page.locator('[data-field="location"]')).toHaveCount(0);
-        await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
+        await expect(page.locator('[data-locked-field="location"]')).toHaveText(rolledOriginFixed());
         await expect(page.locator('#origin-fixed-note')).toHaveCount(0);
         const rolled = originForPercentile(SEEDED_LOCATION_FACE);
         expect(CHECKED_ORIGINS, `face ${SEEDED_LOCATION_FACE} is ${rolled}, which has no check to roll`).toContain(rolled);
@@ -328,7 +330,7 @@ test.describe('Literacy row (#740, #741)', () => {
         await page.locator('#roll-literacy-btn').click();
         await expect(page.locator('#literacy-result')).toHaveText(/^(Literate|Illiterate) \(rolled/);
         await expect(page.locator('#origin-fixed-note')).toHaveCount(0);
-        await expect(page.locator('[data-locked-field="location"]')).toHaveText(ROLLED_ORIGIN_FIXED);
+        await expect(page.locator('[data-locked-field="location"]')).toHaveText(rolledOriginFixed());
 
         // The lock is the server's: a hand-built POST is refused with it.
         const refused = await page.evaluate(async ({ id, value }) => {
@@ -341,7 +343,7 @@ test.describe('Literacy row (#740, #741)', () => {
             return { status: response.status, body: await response.json() };
         }, { id: characterId, value: anotherOrigin(rolled, ORIGINS) });
         expect(refused.status).toBe(400);
-        expect(refused.body.error).toBe(ROLLED_ORIGIN_FIXED);
+        expect(refused.body.error).toBe(rolledOriginFixed());
 
         // A Game Master may change it.
         const context = await browser.newContext();

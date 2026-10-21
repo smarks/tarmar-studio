@@ -20,6 +20,7 @@ from common.test_helpers import BaseTestCase
 
 from . import views
 from .models import PLACEHOLDER_SESSION_NAME, GMSession, GMTurnRecord
+from .refusal_words import refusal_words
 from .retrieval import INTERRUPTED_KIND, PROCEDURE_KIND
 from .testing import gm_replies
 from .tests import FakeMonotonicClock, SlowFakeStream
@@ -36,6 +37,7 @@ STREAM_URL = "/tarmar/gm/stream/"
 PLAN = json.dumps(
     {"actions": [{"action": "roll_attributes", "new_character": {"name": "Wren"}}]}
 )
+
 REPLY = "You came through the year."
 
 
@@ -145,7 +147,9 @@ class TurnSurvivesDisconnectTest(BaseTestCase):
             content_type="application/json",
         )
         self.assertEqual(retry.status_code, 400)
-        self.assertEqual(retry.json()["error"], views.TURN_ALREADY_ANSWERED_ERROR)
+        self.assertEqual(
+            retry.json()["error"], refusal_words().views.turn_already_answered
+        )
         self.assertEqual(stream.call_count, 2)
         session = GMSession.objects.get(pk=session_id)
         self.assertEqual(self._kinds(session).count(PROCEDURE_KIND), 1)
@@ -168,7 +172,10 @@ class TurnSurvivesDisconnectTest(BaseTestCase):
         self.assertEqual(second.status_code, 409)
         self.assertEqual(
             second.json(),
-            {"error": views.TURN_ALREADY_RUNNING_ERROR, "running_turn": running.pk},
+            {
+                "error": refusal_words().views.turn_already_running,
+                "running_turn": running.pk,
+            },
         )
         refused = GMTurnRecord.objects.get(user_message="Pull")
         self.assertEqual(refused.outcome, GMTurnRecord.OUTCOME_REJECTED)

@@ -18,7 +18,7 @@ from django.utils import timezone
 from common.test_helpers import BaseTestCase
 
 from .models import GMReviewRequest, GMSession
-from .views import SEND_TO_CLAUDE_GAME_MASTER_ONLY
+from .refusal_words import refusal_words
 
 CREATE_URL = "/tarmar/gm/reviews/"
 
@@ -208,7 +208,10 @@ class SendForReviewViewTest(BaseTestCase):
         response = self.post_json(CREATE_URL, {"session_id": session.pk, "note": "x"})
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["error"], SEND_TO_CLAUDE_GAME_MASTER_ONLY)
+        self.assertEqual(
+            response.json()["error"],
+            refusal_words().views.send_to_claude_game_master_only.format(),
+        )
         self.assertFalse(GMReviewRequest.objects.exists())
 
     def test_someone_elses_session_cannot_be_sent(self):
@@ -244,7 +247,7 @@ class SendForReviewViewTest(BaseTestCase):
         # What the page says instead is the endpoint's own refusal (#94).
         self.assertEqual(
             player_page.context["chat_config"]["reviewGameMasterOnly"],
-            SEND_TO_CLAUDE_GAME_MASTER_ONLY,
+            refusal_words().views.send_to_claude_game_master_only,
         )
         self.assertNotContains(player_page, 'id="gm-review-button"')
 

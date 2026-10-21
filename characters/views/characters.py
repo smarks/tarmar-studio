@@ -85,6 +85,7 @@ from ..models import (
 )
 from ..pickers import owner_filter_picker
 from ..purse import format_coin, format_purse
+from ..refusal_words import refusal_words
 from ..rules import character_rules
 from ..services import CharacterChangeError
 from ..skill_checks import (
@@ -853,6 +854,16 @@ def skill_check_skills(character: Character) -> list[dict]:
     return check_skills
 
 
+def skill_check_options_context(character: Character) -> dict:
+    """What ``characters/_skill_check_options.html`` renders from: the options,
+    and the configured words an option only a Game Master calls for says
+    (``config/characters-refusals.toml``, issue #85)."""
+    return {
+        "skill_check_skills": skill_check_skills(character),
+        "game_masters_call": refusal_words().common.a_game_masters_call,
+    }
+
+
 def mechanics_context(character: Character, is_game_master: bool) -> dict:
     """What the sheet's skill check, Weapon skill, purse and magic need.
 
@@ -863,7 +874,7 @@ def mechanics_context(character: Character, is_game_master: bool) -> dict:
         "is_game_master": is_game_master,
         "unrecorded_weapon_skill": UNRECORDED_WEAPON_SKILL,
         "weapon_choices": weapon_choices(),
-        "skill_check_skills": skill_check_skills(character),
+        **skill_check_options_context(character),
         "skill_check_attributes": CHARACTER_ATTRIBUTE_FIELDS,
         "skill_check_dice": skill_rules().skill_check.dice,
         "purse": format_purse(character),
@@ -1931,7 +1942,7 @@ def sheet_repaint(character: Character, viewer: User | AnonymousUser) -> dict:
         "current_mana": current_mana(character),
         "skill_check_options_html": render_to_string(
             "characters/_skill_check_options.html",
-            {"skill_check_skills": skill_check_skills(character)},
+            skill_check_options_context(character),
         ),
         "recent_changes_html": render_to_string(
             "characters/_recent_changes.html",

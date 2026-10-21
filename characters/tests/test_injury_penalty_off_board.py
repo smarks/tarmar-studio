@@ -7,11 +7,13 @@ character were unhurt.
 """
 
 from django.urls import reverse
+from django.utils.html import escape
 from tarmar_engine.reactions import TarmarReactions
 
 from battle.services import snapshot_character
 from characters import attack
 from characters.models import Character
+from characters.refusal_words import game_master_call_note, refusal_words
 from characters.services import CharacterChangeError
 from characters.skill_checks import (
     ILLITERATE_REASON,
@@ -136,9 +138,7 @@ class IlliterateLiteracyCheckTest(BaseTestCase):
         )
         self.assertEqual(check.skill, "literacy")
         self.assertEqual(check.game_master_call, "not known to read")
-        self.assertTrue(
-            check.line.endswith("(a Game Master's call: not known to read)")
-        )
+        self.assertTrue(check.line.endswith(game_master_call_note("not known to read")))
 
     def test_a_literate_character_rolls_and_one_not_yet_rolled_does_not(
         self,
@@ -180,7 +180,11 @@ class IlliterateLiteracyCheckTest(BaseTestCase):
         html = self.client.get(
             reverse("characters:edit", args=[self.character.pk])
         ).content.decode()
-        self.assertIn("Literacy (INT) — not known to read; a Game Master's call", html)
+        self.assertIn(
+            "Literacy (INT) — not known to read; "
+            + escape(refusal_words().common.a_game_masters_call),
+            html,
+        )
 
 
 class UnconsciousRollsNothingTest(BaseTestCase):
@@ -256,7 +260,7 @@ class UnconsciousRollsNothingTest(BaseTestCase):
             self.character, "stealth", is_game_master=True, stated_total=7
         )
         self.assertEqual(called.game_master_call, "unconscious")
-        self.assertTrue(called.line.endswith("(a Game Master's call: unconscious)"))
+        self.assertTrue(called.line.endswith(game_master_call_note("unconscious")))
         self.login_as(self.create_dm(username="warden"))
         response = self.post_json(
             reverse("characters:skill_check", args=[self.character.pk]),

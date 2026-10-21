@@ -17,6 +17,7 @@ from common.helpers import database_integer
 from .hand_records import latest_hand_edits, may_edit_by_hand
 from .history_pages import history_page, resolved_threads_page
 from .models import GMRecordEdit, GMSession, StoryThread
+from .refusal_words import refusal_words
 from .text_limits import GM_TEXT_LIMITS
 from .views import _hand_marked, _visible_history
 
@@ -42,7 +43,7 @@ def gm_history_page(request: HttpRequest, session_id: int) -> HttpResponse:
     try:
         before = _before(request)
     except ValueError:
-        return HttpResponseBadRequest("before must be the number of a turn")
+        return HttpResponseBadRequest(refusal_words().views_history.before_not_turn)
     return render(
         request,
         "gm/_history_entries.html",
@@ -69,7 +70,7 @@ def gm_resolved_threads(request: HttpRequest, session_id: int) -> HttpResponse:
     try:
         before_id = _before(request)
     except ValueError:
-        return HttpResponseBadRequest("before must be the id of a thread")
+        return HttpResponseBadRequest(refusal_words().views_history.before_not_thread)
     before = StoryThread.objects.filter(session=session, pk=before_id).first()
     if before is None:
         raise Http404("No thread of this session has that id.")

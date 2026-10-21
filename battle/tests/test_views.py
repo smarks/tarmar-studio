@@ -3,14 +3,13 @@
 from unittest import mock
 
 from django.urls import reverse
+from django.utils.html import escape
 
-from battle import control, profiles, views
+from battle import control, profiles
 from battle.access import Actor, detail_visible_ids
 from battle.models import Battle, BattleEvent
+from battle.refusal_words import refusal_words
 from battle.services import (
-    NO_SEAT_TO_RETURN,
-    NO_SEAT_TO_TAKE,
-    RETURN_SEAT_OWNER_OR_GAME_MASTER,
     create_battle,
     take_seat,
 )
@@ -191,7 +190,7 @@ class BattleAdvanceTest(BaseTestCase):
         response, records = self._advance_failing_with(self.battle, secret)
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], views.BATTLE_REQUEST_FAILED_MESSAGE)
+        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
         self.assertNotIn("hunter2", response.content.decode())
         self.assertNotIn("RuntimeError", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
@@ -206,7 +205,7 @@ class BattleAdvanceTest(BaseTestCase):
         response, records = self._advance_failing_with(own_battle, secret)
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], views.BATTLE_REQUEST_FAILED_MESSAGE)
+        self.assertEqual(response.json()["error"], refusal_words().views.request_failed)
         self.assertNotIn("secret_token", response.content.decode())
         self.assertIn(secret, str(logged_exception(records[0])))
 
@@ -463,7 +462,9 @@ class BattleRestartViewTest(BaseTestCase):
         Battle.objects.filter(pk=self.battle.pk).update(initial_state_json={})
         response = self.client.post(reverse("battle:restart", args=[self.battle.pk]))
         self.assertEqual(response.status_code, 400)
-        self.assertIn("no starting snapshot", response.json()["error"])
+        self.assertIn(
+            refusal_words().services.no_starting_snapshot, response.json()["error"]
+        )
 
     def test_restart_of_a_missing_battle_is_a_404(self):
         response = self.client.post(reverse("battle:restart", args=[999999]))
@@ -503,7 +504,9 @@ class BattleDetailChromeTest(BaseTestCase):
     def test_restart_is_disabled_without_a_starting_snapshot(self):
         Battle.objects.filter(pk=self.battle.pk).update(initial_state_json={})
         response = self.client.get(reverse("battle:detail", args=[self.battle.pk]))
-        self.assertContains(response, "no starting snapshot")
+        self.assertContains(
+            response, escape(refusal_words().services.no_starting_snapshot)
+        )
 
 
 class SeatReturnOfferTest(BaseTestCase):
@@ -548,7 +551,7 @@ class SeatReturnOfferTest(BaseTestCase):
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(
             refused.json()["error"],
-            NO_SEAT_TO_RETURN.format(name=seat.display_name),
+            refusal_words().services.no_seat_to_return.format(name=seat.display_name),
         )
         seat.refresh_from_db()
         self.assertIsNone(seat.player_id)
@@ -578,7 +581,8 @@ class SeatReturnOfferTest(BaseTestCase):
         )
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(
-            refused.json()["error"], NO_SEAT_TO_TAKE.format(name=seat.display_name)
+            refused.json()["error"],
+            refusal_words().services.no_seat_to_take.format(name=seat.display_name),
         )
         seat.refresh_from_db()
         self.assertIsNone(seat.player_id)
@@ -627,4 +631,7 @@ class SeatReturnOfferTest(BaseTestCase):
             reverse("battle:seat-return", args=[battle.pk, seat.pk])
         )
         self.assertEqual(refused.status_code, 403)
-        self.assertEqual(refused.json()["error"], RETURN_SEAT_OWNER_OR_GAME_MASTER)
+        self.assertEqual(
+            refused.json()["error"],
+            refusal_words().services.return_seat_owner_or_game_master,
+        )

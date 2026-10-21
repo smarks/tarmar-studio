@@ -15,6 +15,8 @@ from django.db.models import QuerySet
 from characters.models import Character
 from common.helpers import is_owner_or_manager
 
+from .refusal_words import refusal_words
+
 
 @dataclass(frozen=True)
 class AttachRefusal:
@@ -44,12 +46,15 @@ def attach_refusal(user, character: Character) -> AttachRefusal | None:
         Master) are both "not found"; a dead or incomplete one says so.
     """
     if character.is_deleted or not is_owner_or_manager(user, character.user):
-        return AttachRefusal("Character not found", 404)
+        return AttachRefusal(refusal_words().views.character_not_found, 404)
     if not character.is_alive:
-        return AttachRefusal("Character is dead", 400)
+        return AttachRefusal(refusal_words().attach.dead, 400)
     if not character.is_complete:
         return AttachRefusal(
-            f"Character is not complete: {', '.join(character.missing_parts)}", 400
+            refusal_words().attach.incomplete.format(
+                missing=", ".join(character.missing_parts)
+            ),
+            400,
         )
     return None
 

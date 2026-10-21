@@ -59,11 +59,9 @@ if (typeof module !== 'undefined' && module.exports) {
         if (check.difficulty !== null) text += ' vs ' + check.difficulty;
         if (check.outcome) text += ': ' + check.outcome;
         if (check.natural) text += ' (' + check.natural + ')';
-        // What a Game Master called the check past (#863, #840 review).
-        if (check.game_master_call) {
-            text += " (a Game Master's call: " + check.game_master_call + ')';
-        }
-        return text;
+        // What a Game Master called the check past (#863, #840 review), in
+        // the server's configured words (#85): empty when nothing was.
+        return text + (check.game_master_call_note || '');
     }
 
     async function submit(block, button) {
