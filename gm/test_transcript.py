@@ -7,6 +7,7 @@ turn leaves a record, and that the download reproduces what the server stored,
 hidden entries marked as hidden.
 """
 
+import datetime
 import json
 from io import StringIO
 from unittest.mock import patch
@@ -19,7 +20,14 @@ from gm.engine import dm_system_prompt, system_prompt
 from gm.models import GMPromptSnapshot, GMSession, GMTurnRecord
 from gm.retrieval import CANON_KIND, PROCEDURE_KIND
 from gm.testing import add_character, gm_replies
-from gm.transcript import CHIP, HIDDEN, VISIBLE, Block, transcript_blocks
+from gm.transcript import (
+    CHIP,
+    HIDDEN,
+    VISIBLE,
+    Block,
+    render_transcript_text,
+    transcript_blocks,
+)
 from gm.turn_record import TurnRecorder, prompt_hash
 from gm.views import GM_SERVER_ERROR_MESSAGE
 
@@ -440,6 +448,36 @@ class TranscriptDownloadTest(BaseTestCase):
                 template.replace("{session_id}", str(self.session.pk)), self.url
             )
         self.assertContains(with_session, 'id="gm-transcript-button"')
+
+    def test_each_stamp_names_its_zone(self):
+        """The transcript's instants go through the one formatter a
+        downloaded file writes instants with (#123), each with its zone."""
+        created = datetime.datetime(2026, 10, 15, 2, 50, 11, tzinfo=datetime.UTC)
+        updated = datetime.datetime(2026, 10, 16, 8, 5, 0, tzinfo=datetime.UTC)
+        started = datetime.datetime(2026, 10, 16, 8, 4, 30, tzinfo=datetime.UTC)
+        exported = datetime.datetime(2026, 10, 20, 23, 40, tzinfo=datetime.UTC)
+        GMSession.objects.filter(pk=self.session.pk).update(
+            created_at=created, updated_at=updated
+        )
+        GMTurnRecord.objects.filter(session=self.session).update(started_at=started)
+        self.session.refresh_from_db()
+
+        with patch("django.utils.timezone.now", return_value=exported):
+            lines = render_transcript_text(self.session).splitlines()
+
+        self.assertIn("Created: 2026-10-15 02:50:11 UTC", lines)
+        self.assertIn("Updated: 2026-10-16 08:05:00 UTC", lines)
+        self.assertTrue(
+            any(
+                line.startswith("Exported: 2026-10-20 23:40:00 UTC by app")
+                for line in lines
+            )
+        )
+        self.assertTrue(
+            any(
+                line.startswith("TURN 1 · 2026-10-16 08:04:30 UTC · ") for line in lines
+            )
+        )
 
 
 class TranscriptCommandTest(BaseTestCase):
