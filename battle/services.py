@@ -3317,10 +3317,10 @@ def _channel_reading(
         within = rules.cast_within_channel(actor, spell)
         limit = rules.channel_bound(actor, spell)
     except ChannelUnclassifiedSpell:
-        return None, "the rules give it no kind of magic, so no Channel for it"
+        return None, words().cast_stage.no_kind_of_magic
     if within:
         return limit, ""
-    return limit, f"costs {spell.level} mana, past a Channel of {limit} for it"
+    return limit, words().cast_stage.past_channel.format(level=spell.level, limit=limit)
 
 
 def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
@@ -3375,6 +3375,7 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     # to say so rather than claim castable.
     enemies = policy.enemies_by_distance(state, actor)
     rules = magic_rules()
+    stage = words().cast_stage
     rows = []
     for key in actor.spells:
         spell = get_spell(key)
@@ -3382,9 +3383,9 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         spell_channel, channel_refusal = _channel_reading(rules, actor, spell)
         other_reason = ""
         if spell.continuing and key in actor.active_spells:
-            other_reason = "already up — renews itself"
+            other_reason = stage.renews
         elif aimed and not enemies:
-            other_reason = "nothing in reach to aim at"
+            other_reason = stage.nothing_to_aim_at
         elif channel_refusal:
             other_reason = channel_refusal
         shortfall = turn_menu.mana_short(actor, spell.level)
@@ -3404,12 +3405,11 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
             )
         )
         if borrowable:
-            reason = (
-                f"needs {spell.level} mana, {actor.mana} left: "
-                f"borrow the {shortfall} it lacks"
+            reason = stage.mana_borrowable.format(
+                level=spell.level, mana=actor.mana, shortfall=shortfall
             )
         elif shortfall:
-            reason = f"needs {spell.level} mana, {actor.mana} left"
+            reason = stage.mana_short.format(level=spell.level, mana=actor.mana)
         else:
             reason = other_reason
         castable = not reason
@@ -3422,15 +3422,16 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         # until tarmar-engine #56 lands.
         chance = policy.cast_success_chance(attribute, rules.casting_failure)
         # The floor named where it lowers the highest total that succeeds,
-        # in the words of the engine's own cast working
-        # (``tarmar_engine.policy._cast_candidates``).
+        # as the engine's own cast working names it
+        # (``tarmar_engine.policy._cast_candidates``), which keeps its phrase
+        # inside the candidate's rationale rather than as data (#145).
         floor = (
-            f", under the fumble floor {rules.casting_failure.fumble_floor}"
+            stage.under_fumble_floor.format(floor=rules.casting_failure.fumble_floor)
             if rules.casting_failure is not None
             and casting_success_ceiling(attribute, rules.casting_failure) < attribute
             else ""
         )
-        aim = ", then a DEX roll to land it" if spell.targeted else ""
+        aim = stage.dex_to_land if spell.targeted else ""
         targets: list[CombatantState | None] = (
             list(enemies) if aimed and enemies else [None]
         )
@@ -3443,8 +3444,13 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
                     if target is not None and len(targets) > 1
                     else spell.name
                 ),
-                "cost": f"{spell.school} — {spell.level} mana",
-                "note": f"{chance:.0%} on 3d6 \u2264 {spell.attribute}{floor}{aim}",
+                "cost": stage.mana_cost.format(school=spell.school, level=spell.level),
+                "note": stage.mana_chance.format(
+                    chance=f"{chance:.0%}",
+                    attribute=spell.attribute,
+                    floor=floor,
+                    aim=aim,
+                ),
                 "castable": castable,
                 "reason": reason,
                 # Cast only by borrowing the shortfall (tarmar-engine #28).
@@ -3458,7 +3464,7 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
             for target in targets
         )
     return {
-        "pool_label": "Mana",
+        "pool_label": stage.mana_pool,
         "pool": actor.mana,
         "max_pool": actor.max_mana,
         # Mana borrowed and not yet paid back (tarmar-engine #28).

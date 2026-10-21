@@ -1257,6 +1257,7 @@ def pending_payload(battle, actor: Actor) -> dict | None:
     # being asked. ``holds_seat`` alone would show them a prompt addressed
     # to nobody.
     is_you = decides_for(actor, battle, seat)
+    profile = profiles.for_battle(battle)
     payload = {
         "combatant_id": seat.pk,
         "turn": pending.get("turn"),
@@ -1265,10 +1266,11 @@ def pending_payload(battle, actor: Actor) -> dict | None:
         "is_you": is_you,
         "candidates": [],
         "magic": None,
+        # The pool's name for a stage with no caster's payload (#145 review).
+        "pool_label": profile.pool_label(),
     }
     if is_you or commands_foes(actor, battle):
         payload["candidates"] = pending.get("candidates", [])
-        profile = profiles.for_battle(battle)
         payload["magic"] = profile.caster_magic(
             profile.load(battle.state_json), seat.pk
         )

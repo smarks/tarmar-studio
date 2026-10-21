@@ -268,6 +268,37 @@ class MagicBoundsWords:
 
 
 @dataclass(frozen=True)
+class CastStageWords:
+    """The cast stage's rows, both profiles (#145): each spell's name, its
+    cost, its chance, and why it cannot be cast when it cannot."""
+
+    row_at: str = sentence("spell", "target", required=("spell", "target"))
+    mana_pool: str = sentence()
+    mana_cost: str = sentence("school", "level")
+    renews: str = sentence()
+    nothing_to_aim_at: str = sentence()
+    no_kind_of_magic: str = sentence()
+    past_channel: str = sentence("level", "limit")
+    mana_short: str = sentence("level", "mana")
+    mana_borrowable: str = sentence("level", "mana", "shortfall")
+    mana_chance: str = sentence(
+        "chance", "attribute", "floor", "aim", required=("floor", "aim")
+    )
+    under_fumble_floor: str = sentence("floor")
+    dex_to_land: str = sentence()
+    strength_pool: str = sentence()
+    strength_cost: str = sentence("kind", "strength")
+    nothing_to_cast_at: str = sentence()
+    strength_short: str = sentence("needed", "strength")
+    strength_chance: str = sentence("chance", "needed", "range", required=("range",))
+    before_range: str = sentence()
+    missile_spell: str = sentence()
+    thrown_spell: str = sentence()
+    creation_spell: str = sentence()
+    special_spell: str = sentence()
+
+
+@dataclass(frozen=True)
 class RulingsWording:
     """The whole file: one table per ruling, and the words they share."""
 
@@ -278,6 +309,7 @@ class RulingsWording:
     turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
+    cast_stage: CastStageWords
 
 
 def load_rulings_wording(path: Path) -> RulingsWording:

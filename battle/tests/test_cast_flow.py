@@ -11,9 +11,15 @@ The castable set is derived in two places for two purposes — the engine's
 ``policy._cast_candidates`` (what may be chosen) and ``caster_magic`` (what
 is shown, with reasons) — so :class:`CastableSetAgreesWithPolicyTest` pins
 them together the way ``test_rules_drift`` pins the rules docs.
+
+The rows' words are configuration (``config/battle-rulings.toml``'s
+``[cast_stage]``, #145), so the tests that read them run under
+:data:`~.rulings_words.FIXED_WORDS`: each sentence is its key followed by what
+filled it, in the order of the names it may use.
 """
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import patch
@@ -47,6 +53,7 @@ from .magic_fixtures import (
     INVENTED_RULES,
     seated_rules,
 )
+from .rulings_words import with_fixed_words
 from .test_classic_adaptation import snapshot as classic_snapshot
 from .test_state import make_combatant
 
@@ -56,6 +63,19 @@ WIZARD_SPELLS = ["fire_missile", "lightning_bolt", "shield", "heal"]
 #: Each spell's recorded level: under the invented Channel (twice the level)
 #: every spell is within it.
 WIZARD_SPELL_LEVELS = {"fire_missile": 1, "lightning_bolt": 2, "shield": 1, "heal": 1}
+
+
+#: The fixed words' aim and floor clauses (#145), which fill the chance note.
+DEX_TO_LAND = "cast_stage.dex_to_land"
+FLOOR_12 = "cast_stage.under_fumble_floor 12"
+
+
+def chance_note(
+    chance: float, attribute: str, *, floor: str = "", aim: str = ""
+) -> str:
+    """A Tarmar row's chance under the fixed words: the sentence's key, then
+    what fills it, in the order of its names (aim, attribute, chance, floor)."""
+    return f"cast_stage.mana_chance {aim} {attribute} {chance:.0%} {floor}"
 
 
 def wizard_state(**overrides):
@@ -76,6 +96,7 @@ def wizard_state(**overrides):
     )
 
 
+@with_fixed_words
 class CasterMagicTest(SimpleTestCase):
     def setUp(self):
         super().setUp()
@@ -91,13 +112,13 @@ class CasterMagicTest(SimpleTestCase):
         assert magic is not None
         # The pool names itself: the page prints the label rather than
         # assuming Tarmar's vocabulary (#263).
-        self.assertEqual(magic["pool_label"], "Mana")
+        self.assertEqual(magic["pool_label"], "cast_stage.mana_pool")
         self.assertEqual(magic["pool"], 6)
         self.assertEqual(magic["max_pool"], 10)
         self.assertEqual([spell["key"] for spell in magic["spells"]], WIZARD_SPELLS)
         missile = magic["spells"][0]
         self.assertEqual(missile["name"], "Fire Missile")
-        self.assertEqual(missile["cost"], "Elemental — 1 mana")
+        self.assertEqual(missile["cost"], "cast_stage.mana_cost 1 Elemental")
         self.assertEqual(missile["target_id"], 2)
         self.assertTrue(missile["castable"])
         self.assertEqual(missile["reason"], "")
@@ -122,7 +143,7 @@ class CasterMagicTest(SimpleTestCase):
         missile = magic["spells"][0]
         self.assertIsNone(missile["target_id"])
         self.assertFalse(missile["castable"])
-        self.assertEqual(missile["reason"], "nothing in reach to aim at")
+        self.assertEqual(missile["reason"], "cast_stage.nothing_to_aim_at")
 
     def test_an_unaffordable_spell_is_shown_with_what_it_costs(self):
         magic = caster_magic(wizard_state(mana=2), 1)
@@ -131,14 +152,14 @@ class CasterMagicTest(SimpleTestCase):
             spell for spell in magic["spells"] if spell["key"] == "lightning_bolt"
         )
         self.assertFalse(bolt["castable"])
-        self.assertEqual(bolt["reason"], "needs 3 mana, 2 left")
+        self.assertEqual(bolt["reason"], "cast_stage.mana_short 3 2")
 
     def test_a_continuing_spell_already_up_is_shown_as_up(self):
         magic = caster_magic(wizard_state(active_spells=["shield"]), 1)
         assert magic is not None
         shield = next(spell for spell in magic["spells"] if spell["key"] == "shield")
         self.assertFalse(shield["castable"])
-        self.assertEqual(shield["reason"], "already up — renews itself")
+        self.assertEqual(shield["reason"], "cast_stage.renews")
 
     def test_the_casting_chance_is_worded_per_spell(self):
         magic = caster_magic(wizard_state(), 1)
@@ -149,12 +170,10 @@ class CasterMagicTest(SimpleTestCase):
         # (#263) and the page must not phrase one profile's odds for both.
         self.assertEqual(
             by_key["fire_missile"]["note"],
-            f"{policy.three_d6_at_most(14):.0%} on 3d6 \u2264 INT,"
-            " then a DEX roll to land it",
+            chance_note(policy.three_d6_at_most(14), "INT", aim=DEX_TO_LAND),
         )
         self.assertEqual(
-            by_key["heal"]["note"],
-            f"{policy.three_d6_at_most(12):.0%} on 3d6 \u2264 WIS",
+            by_key["heal"]["note"], chance_note(policy.three_d6_at_most(12), "WIS")
         )
 
     def test_the_casting_chance_includes_the_fumble_floor(self):
@@ -168,8 +187,9 @@ class CasterMagicTest(SimpleTestCase):
         # INT 14 past the floor: 3d6 at most 11, not at most 14.
         self.assertEqual(
             by_key["fire_missile"]["note"],
-            f"{policy.three_d6_at_most(11):.0%} on 3d6 \u2264 INT, under the "
-            "fumble floor 12, then a DEX roll to land it",
+            chance_note(
+                policy.three_d6_at_most(11), "INT", floor=FLOOR_12, aim=DEX_TO_LAND
+            ),
         )
         self.assertNotEqual(
             f"{policy.three_d6_at_most(11):.0%}", f"{policy.three_d6_at_most(14):.0%}"
@@ -177,8 +197,7 @@ class CasterMagicTest(SimpleTestCase):
         # WIS 12 too: a 12 would pass the attribute but meets the floor.
         self.assertEqual(
             by_key["heal"]["note"],
-            f"{policy.three_d6_at_most(11):.0%} on 3d6 \u2264 WIS, under the "
-            "fumble floor 12",
+            chance_note(policy.three_d6_at_most(11), "WIS", floor=FLOOR_12),
         )
 
     def test_a_floor_above_the_attribute_is_not_named(self):
@@ -193,9 +212,7 @@ class CasterMagicTest(SimpleTestCase):
             magic = caster_magic(wizard_state(), 1)
         assert magic is not None
         heal = next(spell for spell in magic["spells"] if spell["key"] == "heal")
-        self.assertEqual(
-            heal["note"], f"{policy.three_d6_at_most(12):.0%} on 3d6 \u2264 WIS"
-        )
+        self.assertEqual(heal["note"], chance_note(policy.three_d6_at_most(12), "WIS"))
 
     def test_a_spell_at_two_foes_gets_a_row_each_nearest_first(self):
         state = wizard_state()
@@ -208,7 +225,10 @@ class CasterMagicTest(SimpleTestCase):
         self.assertEqual([row["target_id"] for row in missiles], [2, 3])
         self.assertEqual(
             [row["name"] for row in missiles],
-            [f"Fire Missile → {near.name}", f"Fire Missile → {far.name}"],
+            [
+                f"cast_stage.row_at Fire Missile {near.name}",
+                f"cast_stage.row_at Fire Missile {far.name}",
+            ],
         )
         # A spell aimed at nobody keeps its one row and its own name.
         shield = [row for row in magic["spells"] if row["key"] == "shield"]
@@ -247,9 +267,10 @@ class CasterMagicTest(SimpleTestCase):
             spell for spell in magic["spells"] if spell["key"] == "lightning_bolt"
         )
         self.assertFalse(bolt["castable"])
-        self.assertEqual(bolt["reason"], "costs 3 mana, past a Channel of 2 for it")
+        self.assertEqual(bolt["reason"], "cast_stage.past_channel 3 2")
 
 
+@with_fixed_words
 class BorrowableSpellTest(SimpleTestCase):
     """A spell the caster cannot afford, under Borrowing (tarmar-engine #28).
 
@@ -272,7 +293,7 @@ class BorrowableSpellTest(SimpleTestCase):
         self.assertFalse(bolt["castable"])
         self.assertTrue(bolt["borrowable"])
         self.assertEqual(bolt["shortfall"], 2)
-        self.assertEqual(bolt["reason"], "needs 3 mana, 1 left: borrow the 2 it lacks")
+        self.assertEqual(bolt["reason"], "cast_stage.mana_borrowable 3 1 2")
 
     def test_an_affordable_spell_borrows_nothing(self):
         missile = self.row(wizard_state(mana=1), "fire_missile")
@@ -287,7 +308,7 @@ class BorrowableSpellTest(SimpleTestCase):
         self.assertTrue(self.row(state, "fire_missile")["borrowable"])
         bolt = self.row(state, "lightning_bolt")
         self.assertFalse(bolt["borrowable"])
-        self.assertEqual(bolt["reason"], "needs 3 mana, 0 left")
+        self.assertEqual(bolt["reason"], "cast_stage.mana_short 3 0")
 
     def test_a_spell_past_the_channel_is_not_borrowable(self):
         bolt = self.row(
@@ -302,7 +323,7 @@ class BorrowableSpellTest(SimpleTestCase):
         with seated_rules(INVENTED_RULES):
             bolt = self.row(wizard_state(mana=1), "lightning_bolt")
         self.assertFalse(bolt["borrowable"])
-        self.assertEqual(bolt["reason"], "needs 3 mana, 1 left")
+        self.assertEqual(bolt["reason"], "cast_stage.mana_short 3 1")
 
     def test_the_pool_says_what_is_owed(self):
         magic = caster_magic(wizard_state(mana=0, debt=2), 1)
@@ -563,6 +584,7 @@ class CastAtTheFarFoeTest(BaseTestCase):
         self.assertTrue(damage.message.startswith(f"{self.far_name} takes "))
 
 
+@with_fixed_words
 class PendingPayloadCarriesMagicTest(BaseTestCase):
     """The cast stage's data reaches exactly the viewers the menu does."""
 
@@ -589,8 +611,10 @@ class PendingPayloadCarriesMagicTest(BaseTestCase):
         magic = pending["magic"]
         self.assertIsNotNone(magic)
         self.assertTrue(magic["spells"])
-        self.assertEqual(magic["pool_label"], "Mana")
+        self.assertEqual(magic["pool_label"], "cast_stage.mana_pool")
         self.assertEqual(magic["max_pool"], magic["pool"])
+        # Beside the payload too, for a stage with none to read (#145 review).
+        self.assertEqual(pending["pool_label"], "cast_stage.mana_pool")
 
     def test_the_dm_sees_it_too(self):
         battle, _seat = self.awaiting_wizard_battle()
@@ -632,6 +656,7 @@ def raise_shield(state):
     return state
 
 
+@with_fixed_words
 class ClassicCasterMagicTest(SimpleTestCase):
     """The classic wizard's own stage (#263), in its own vocabulary."""
 
@@ -647,7 +672,7 @@ class ClassicCasterMagicTest(SimpleTestCase):
         # its own pool instead of letting the page assume.
         magic = classic_caster_magic(classic_wizard_state(), 1)
         assert magic is not None
-        self.assertEqual(magic["pool_label"], "ST")
+        self.assertEqual(magic["pool_label"], "cast_stage.strength_pool")
         figure = next(one for one in classic_wizard_state().figures if one.uid == "1")
         self.assertEqual(magic["pool"], figure.current_st)
         self.assertEqual(magic["max_pool"], figure.strength)
@@ -659,7 +684,7 @@ class ClassicCasterMagicTest(SimpleTestCase):
         self.assertEqual([row["target_id"] for row in fists], ["2", "3"])
         self.assertEqual(
             [row["name"] for row in fists],
-            ["Magic Fist → Bram", "Magic Fist → Cyn"],
+            ["cast_stage.row_at Magic Fist Bram", "cast_stage.row_at Magic Fist Cyn"],
         )
 
     def test_a_self_cast_names_no_target_in_its_row(self):
@@ -670,16 +695,21 @@ class ClassicCasterMagicTest(SimpleTestCase):
         self.assertEqual(blur["name"], "Blur")
         # No range to aim: a self-cast takes no distance penalty, so its
         # printed chance is the whole of it.
-        self.assertNotIn("range", blur["note"])
+        self.assertNotIn("cast_stage.before_range", blur["note"])
 
     def test_a_cast_costs_st_and_says_what_it_rolls(self):
         magic = classic_caster_magic(classic_wizard_state(), 1)
         assert magic is not None
         fist = next(spell for spell in magic["spells"] if spell["key"] == "magic_fist")
-        self.assertEqual(fist["cost"], "Missile — 3 ST")
-        self.assertIn("adjDX", fist["note"])
-        self.assertIn("before the range to aim", fist["note"])
-        self.assertNotIn("mana", fist["cost"])
+        # The kind in the stage's words, and ST, never mana.
+        self.assertEqual(
+            fist["cost"], "cast_stage.strength_cost cast_stage.missile_spell 3"
+        )
+        # Filled by chance, needed and range, in that order.
+        self.assertRegex(
+            fist["note"],
+            r"^cast_stage\.strength_chance \d+% \d+ cast_stage\.before_range$",
+        )
 
     def test_a_spell_nothing_can_be_cast_at_is_shown_with_the_reason(self):
         # Staff is in a crossed wizard's hand but the cast layer aims it at
@@ -688,7 +718,7 @@ class ClassicCasterMagicTest(SimpleTestCase):
         assert magic is not None
         staff = next(spell for spell in magic["spells"] if spell["key"] == "staff")
         self.assertFalse(staff["castable"])
-        self.assertEqual(staff["reason"], "nothing this spell can be cast at")
+        self.assertEqual(staff["reason"], "cast_stage.nothing_to_cast_at")
         self.assertIsNone(staff["target_id"])
 
     def test_a_spell_the_catalog_never_heard_of_is_left_out(self):
@@ -719,6 +749,66 @@ class ClassicCasterMagicTest(SimpleTestCase):
             {spell["reason"] for spell in magic["spells"]},
             {"cannot cast with a shield ready"},
         )
+
+
+@with_fixed_words
+class CastStageWordsAreReadFromTheConfigurationTest(SimpleTestCase):
+    """Every word a row carries is ``[cast_stage]``'s, in both profiles (#145):
+    under the fixed words, no pool, cost, note or reason is written in code.
+    A reason the engine words (a classic wizard's shield) is the engine's."""
+
+    #: Each field as a whole, under the fixed words: a sentence's key, then
+    #: only what fills it (numbers, a percent, a school, an attribute, and the
+    #: configured clauses), so a word written in code anywhere in it fails.
+    WHOLE = {
+        "pool_label": (r"cast_stage\.(?:mana_pool|strength_pool)",),
+        "cost": (
+            r"cast_stage\.mana_cost \d+ [A-Z][a-z]+",
+            r"cast_stage\.strength_cost cast_stage\.[a-z]+_spell \d+",
+        ),
+        "note": (
+            r"cast_stage\.mana_chance (?:cast_stage\.dex_to_land)? (?:INT|WIS) "
+            r"\d+% (?:cast_stage\.under_fumble_floor \d+)?",
+            r"cast_stage\.strength_chance \d+% \d+ (?:cast_stage\.before_range)?",
+        ),
+        "reason": (
+            r"cast_stage\.(?:renews|nothing_to_aim_at|no_kind_of_magic"
+            r"|nothing_to_cast_at)",
+            r"cast_stage\.(?:past_channel|mana_short|strength_short) \d+ \d+",
+            r"cast_stage\.mana_borrowable \d+ \d+ \d+",
+        ),
+    }
+
+    def assert_whole(self, field: str, words: str) -> None:
+        self.assertTrue(
+            any(re.fullmatch(pattern, words) for pattern in self.WHOLE[field]),
+            f"{field}: {words!r}",
+        )
+
+    def assert_configured(self, magic: dict | None) -> None:
+        assert magic is not None
+        self.assert_whole("pool_label", magic["pool_label"])
+        for row in magic["spells"]:
+            for field in ("cost", "note", "reason"):
+                with self.subTest(spell=row["key"], field=field):
+                    if row[field]:
+                        self.assert_whole(field, row[field])
+
+    def test_a_tarmar_caster_s_rows(self):
+        with seated_rules(BORROWING_RULES):
+            for state in (
+                wizard_state(),
+                wizard_state(mana=1),
+                wizard_state(mana=0, debt=3),
+                wizard_state(active_spells=["shield"]),
+                wizard_state(
+                    spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+                ),
+            ):
+                self.assert_configured(caster_magic(state, 1))
+
+    def test_a_classic_wizard_s_rows(self):
+        self.assert_configured(classic_caster_magic(classic_wizard_state(), 1))
 
 
 class ClassicCastableSetAgreesWithPolicyTest(SimpleTestCase):

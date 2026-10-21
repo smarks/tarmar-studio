@@ -325,7 +325,7 @@ test.describe('Pushing mana into a cast', () => {
         );
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
         // The configured words, the pool named as the server names it.
-        const pool = { pool_label: 'Mana', pool: '0' };
+        const pool = { pool_label: escaped(menuWords().stage.mana_pool), pool: '0' };
         await expect(stage.locator('.turn-cast-pool')).toHaveText(menuLine(
             menuWords().panel.stage_pool,
             {
@@ -341,8 +341,11 @@ test.describe('Pushing mana into a cast', () => {
             has: playerPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
         });
         await expect(missileGroup.locator('.turn-spell')).toBeDisabled();
+        // Fire Missile's level 1 against an empty pool: one short, borrowed.
         await expect(missileGroup.locator('.turn-spell-note'))
-            .toContainText('borrow the 1 it lacks');
+            .toHaveText(menuLine(menuWords().stage.mana_borrowable, {
+                level: '1', mana: '0', shortfall: '1',
+            }));
         const copies = missileGroup.locator('.turn-borrow-amount');
         const { panel } = menuWords();
         const borrowOne = menuLine(panel.borrow_amount, { borrowed: '1' });

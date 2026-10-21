@@ -12,10 +12,11 @@
 
 const {
     test, expect, TEST_USER, loginAs, submitPassphrase, createBattleViaSetup, battleRowOnList,
+    escaped,
 } = require('./fixtures');
 const { startCoverage, stopCoverage } = require('./coverage');
 const { readDjangoShell } = require('./django');
-const { menuWords } = require('./turn-menu');
+const { menuWords, menuLine, sentencePattern } = require('./turn-menu');
 const { openTheWizardsStage } = require('./wizard-stage');
 
 /**
@@ -130,7 +131,7 @@ test.describe('Wizard cast flow', () => {
         await expect(castOption).toBeVisible({ timeout: 15000 });
         await expect(castOption).toHaveCount(1);
         await expect(castOption).toContainText(menuWords().panel.cast_option);
-        await expect(castOption).toContainText('Mana');
+        await expect(castOption).toContainText(menuWords().stage.mana_pool);
         await expect(playerPage.locator('#turn-panel .turn-cast-stage'))
             .toHaveCount(0);
 
@@ -196,13 +197,21 @@ test.describe('Wizard cast flow', () => {
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
         await expect(stage).toBeVisible();
 
-        // One Fire Missile row per foe, each naming its own, nearest first.
+        // One Fire Missile row per foe, each naming its own, nearest first,
+        // in the configured words (#145).
+        const rowAt = (spell, target) => menuLine(menuWords().stage.row_at, {
+            spell: escaped(spell), target: escaped(target),
+        });
         const missileRows = stage.locator('.turn-spell', {
-            has: playerPage.locator('.turn-spell-name', { hasText: /^Fire Missile → / }),
+            has: playerPage.locator('.turn-spell-name', {
+                hasText: new RegExp(`^${sentencePattern(menuWords().stage.row_at, {
+                    spell: escaped('Fire Missile'),
+                })}$`),
+            }),
         });
         await expect(missileRows.locator('.turn-spell-name')).toHaveText([
-            `Fire Missile → ${near.name}`,
-            `Fire Missile → ${far.name}`,
+            rowAt('Fire Missile', near.name),
+            rowAt('Fire Missile', far.name),
         ]);
 
         // The AI's own pick, as the server marked it, is a cast at the near
@@ -216,7 +225,7 @@ test.describe('Wizard cast flow', () => {
         });
         await expect(tagged).toHaveCount(1);
         await expect(tagged.locator('.turn-spell-name'))
-            .toHaveText(`${aiPick.spell_name} → ${near.name}`);
+            .toHaveText(rowAt(aiPick.spell_name, near.name));
         await expect(missileRows.locator('.turn-option-ai-pick')).toHaveCount(0);
 
         // Cast at the far foe.

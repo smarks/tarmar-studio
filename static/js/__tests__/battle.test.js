@@ -2414,6 +2414,22 @@ describe('the wizard cast flow (#250)', () => {
         expect(panel.querySelectorAll('.turn-option')).toHaveLength(1);
     });
 
+    test('a cast with no caster payload names the pool as the server does', () => {
+        // Review of #145: the fallback named its pool 'Mana' in code, wrong
+        // for a classic wizard; it reads the pending payload's configured
+        // ``pool_label`` now.
+        const panel = panelNode();
+        const pending = castingPending({ magic: null, pool_label: 'cast_stage.strength_pool' });
+        battle.renderTurnPanel(panel, pending, { words: PANEL_WORDS,
+            selectedIndex: null, castOpen: true,
+        });
+        expect(panel.querySelector('.turn-option-cast').textContent)
+            .toContain('turn_panel.pool 0 0 cast_stage.strength_pool');
+        expect(panel.querySelector('.turn-cast-pool').textContent)
+            .toContain('cast_stage.strength_pool');
+        expect(panel.textContent).not.toContain('Mana');
+    });
+
     test('a caster with no castable spell this turn gets no cast group', () => {
         // Engaged in hand-to-hand, say: the letter is not on the menu even
         // though the wizard still knows spells.
