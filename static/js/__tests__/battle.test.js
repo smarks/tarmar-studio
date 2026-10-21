@@ -1685,6 +1685,88 @@ describe('turn panel wiring on the battle page (#250)', () => {
         expect(document.getElementById('battle-status').textContent).toBe('Paused');
         expect(document.querySelector('.turn-group[data-turn="1"]')).not.toBeNull();
     });
+
+    // A choice resumes the turn, which a record-writing fight whose records
+    // moved refuses as the advance does (#842): the 409 carries the notice,
+    // the Game Master's control and the readout, rendered as the advance's
+    // refusal is (#112).
+    const stalePending = {
+        combatant_id: 1, turn: 1, display_name: 'Aldwin',
+        player: 'warden', is_you: true,
+        candidates: [{ letter: 'j', name: 'ATTACK', score: 1.9,
+                       rationale: 'advice', target_id: 2, spell_key: '' }],
+    };
+
+    function refuseStale(staleHtml, advance) {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 409,
+            json: async () => ({
+                error: "Aldwin: the record's pools have changed",
+                advance,
+                stale_html: staleHtml,
+            }),
+        });
+        require('../api.js');
+        global.uiNotify = jest.fn();
+    }
+
+    async function confirmChoice() {
+        const panel = document.getElementById('turn-panel');
+        panel.querySelector('.turn-option').click();
+        panel.querySelector('.turn-confirm').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        return panel;
+    }
+
+    test('a stale-pools refusal of a choice shows the notice and the control (#112)', async () => {
+        mountAwaitingPage(stalePending);
+        document.body.insertAdjacentHTML(
+            'beforeend',
+            '<button id="advance-turn" data-url="/tarmar/battles/1/advance/">'
+            + "Waiting on Aldwin's move</button>"
+            + '<div id="battle-stale-slot"></div>'
+        );
+        battle.initBattlePage();
+        refuseStale(
+            '<p id="battle-stale-pools">Aldwin: the record changed.</p>'
+            + '<form><input type="hidden" name="next" value="/tarmar/battles/1/act/">'
+            + '<button id="resnapshot-pools">Take the pools from the records</button></form>',
+            { label: 'Pools changed on the records', enabled: false }
+        );
+
+        const panel = await confirmChoice();
+
+        expect(document.getElementById('battle-stale-pools').textContent).toContain('Aldwin');
+        expect(document.getElementById('resnapshot-pools')).not.toBeNull();
+        // Back to the page the choice was made on, never the act endpoint.
+        expect(document.querySelector('#battle-stale-slot input[name="next"]').value)
+            .toBe(`${window.location.pathname}${window.location.search}`);
+        expect(document.getElementById('advance-turn').textContent)
+            .toBe('Pools changed on the records');
+        expect(document.getElementById('advance-turn').disabled).toBe(true);
+        expect(global.uiNotify).not.toHaveBeenCalled();
+        // The menu stays, so the choice can be made again once the pools
+        // are taken from the records.
+        expect(panel.querySelector('.turn-option')).not.toBeNull();
+    });
+
+    test('a stale-pools refusal with no notice for this viewer says why (#112)', async () => {
+        // A player who does not run the battle gets no readout and no
+        // control (views.advance_control), so the refusal's words are all
+        // there is to show.
+        mountAwaitingPage(stalePending);
+        document.body.insertAdjacentHTML('beforeend', '<div id="battle-stale-slot"></div>');
+        battle.initBattlePage();
+        refuseStale('', null);
+
+        await confirmChoice();
+
+        expect(document.getElementById('battle-stale-pools')).toBeNull();
+        expect(global.uiNotify).toHaveBeenCalledWith(
+            "Sending the action failed (HTTP 409: Aldwin: the record's pools have changed)."
+        );
+    });
 });
 
 describe('the turn panel keeps keyboard focus (#646)', () => {

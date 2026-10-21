@@ -2,7 +2,6 @@
 
 import html as html_lib
 import json
-from datetime import datetime
 
 import bleach
 
@@ -13,6 +12,7 @@ from characters.purse import format_purse
 from characters.rules import social_class_display
 from characters.skills import track_label
 from characters.templatetags.dice_display import survival_roll
+from common.instants import labelled_instant
 
 # Formatting tags allowed in the exported HTML/PDF. No <img> or <a>, so a
 # malicious skill/equipment name can't inject an external/file resource that
@@ -205,7 +205,7 @@ def generate_character_markdown(character) -> str:
     lines.append(f"# {character.name}")
     lines.append("")
     lines.append(f"**Player:** {character.user.username}")
-    lines.append(f"**Created:** {character.created_at.strftime('%B %d, %Y')}")
+    lines.append(f"**Created:** {labelled_instant(character.created_at)}")
     lines.append(f"**Status:** {character.status}")
     lines.append("")
 
@@ -490,10 +490,7 @@ def generate_character_markdown(character) -> str:
 
     # Footer
     lines.append("---")
-    lines.append(
-        f"*Exported on {datetime.now().strftime('%B %d, %Y at %H:%M')} "
-        f"from Tarmar Studio*"
-    )
+    lines.append(f"*Exported on {labelled_instant()} from Tarmar Studio*")
 
     return "\n".join(lines)
 

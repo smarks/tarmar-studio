@@ -1,9 +1,12 @@
 """Tests for the character_export app."""
 
+import datetime
 import json
 import unittest
+from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 
 from accounts.models import User
 from characters.models import Character
@@ -432,6 +435,41 @@ class GenerateCharacterMarkdownTest(TestCase):
         self.assertIn("---", md)
         self.assertIn("Exported on", md)
         self.assertIn("Tarmar Studio", md)
+
+    def created_and_exported_lines(self) -> tuple[str, str]:
+        """The export's Created and Exported lines, for a character created
+        just after UTC midnight and an export taken a few days later."""
+        created = datetime.datetime(2026, 10, 15, 2, 50, 11, tzinfo=datetime.UTC)
+        exported = datetime.datetime(2026, 10, 20, 23, 40, tzinfo=datetime.UTC)
+        Character.objects.filter(pk=self.character.pk).update(created_at=created)
+        self.character.refresh_from_db()
+        with mock.patch("django.utils.timezone.now", return_value=exported):
+            md = generate_character_markdown(self.character)
+        lines = md.splitlines()
+        created_line = next(line for line in lines if line.startswith("**Created:**"))
+        exported_line = next(line for line in lines if "Exported on" in line)
+        return created_line, exported_line
+
+    def test_the_created_and_exported_instants_name_their_zone(self):
+        """A downloaded file is read where the page's local-time pass cannot
+        reach (#123): each instant says which zone its clock is in, and the
+        export's is the server's aware now, not its naive clock."""
+        created_line, exported_line = self.created_and_exported_lines()
+
+        self.assertEqual(created_line, "**Created:** 2026-10-15 02:50:11 UTC")
+        self.assertEqual(
+            exported_line, "*Exported on 2026-10-20 23:40:00 UTC from Tarmar Studio*"
+        )
+
+    def test_an_active_zone_other_than_utc_is_the_one_named(self):
+        """The file names the zone its clock is in, whichever is active."""
+        with timezone.override("America/New_York"):
+            created_line, exported_line = self.created_and_exported_lines()
+
+        self.assertEqual(created_line, "**Created:** 2026-10-14 22:50:11 EDT")
+        self.assertEqual(
+            exported_line, "*Exported on 2026-10-20 19:40:00 EDT from Tarmar Studio*"
+        )
 
     def test_no_skills_message(self):
         """Verify message shown when character has no skills."""
