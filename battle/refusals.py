@@ -12,7 +12,8 @@ Both used to be a bare ``ValueError``, so a view that caught one to show the
 player the refusal showed the internal text word for word as well. A
 refusal is now a :class:`BattleRefusal`; the views catch that type alone and
 answer every other ``ValueError`` with a fixed, logged message (issue #13
-set the pattern for the advance view).
+set the pattern for the advance view), and since #113 every other exception
+too, a ``RuntimeError`` or ``KeyError`` from the engine included.
 
 This module holds only the type, so every battle module that refuses --
 ``services``, ``control``, ``views`` -- imports it without importing the

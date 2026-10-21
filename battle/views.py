@@ -41,9 +41,11 @@ from datetime import datetime
 from itertools import groupby
 
 from django.contrib.auth.views import redirect_to_login
+from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.db import transaction
 from django.db.models import BooleanField, Count, Exists, Max, OuterRef, Q, Value
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http.multipartparser import MultiPartParserError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -157,12 +159,13 @@ FOES_BELONG_TO_GAME_MASTER = (
 )
 
 #: What a battle endpoint's script caller is told when the request fails for
-#: a reason that is not a rule refusing it: the advance's every exception
-#: (issue #13), and any other endpoint's ``ValueError`` that is not a
-#: :class:`~battle.refusals.BattleRefusal` (issue #39). The exception's own
-#: text can carry file paths, SQL, rules profiles or combatant ids, and players
-#: run battles too, so it goes to the log with its traceback and the page gets
-#: this sentence.
+#: a reason that is not a rule refusing it: any exception under an endpoint
+#: that wears :func:`_internal_errors_logged`, other than a
+#: :class:`~battle.refusals.BattleRefusal` the view answers and what Django
+#: answers itself (issues #13, #39, #113). The exception's own text can carry
+#: file paths, SQL, rules profiles or combatant ids, and players run battles
+#: too, so it goes to the log with its traceback and the page gets this
+#: sentence.
 BATTLE_REQUEST_FAILED_MESSAGE = (
     "That could not be done because of an error on the server. It has been "
     "logged; reload the page and try again."
@@ -234,18 +237,35 @@ def _wants_json(request) -> bool:
 logger = logging.getLogger(__name__)
 
 
+#: The exceptions Django answers itself, each with a 4xx of its own
+#: (``django.core.handlers.exception.response_for_exception``): a page that
+#: is not there, a permission refused, a request it cannot read. None is the
+#: server failing, so :func:`_internal_errors_logged` lets them through.
+DJANGO_ANSWERED_EXCEPTIONS = (
+    Http404,
+    PermissionDenied,
+    MultiPartParserError,
+    BadRequest,
+    SuspiciousOperation,
+)
+
+
 def _internal_errors_logged(
     *, json_only: bool = False
 ) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
-    """Keep a service's internal ``ValueError`` text off the page (issue #39).
+    """Keep an internal failure's text off the page (issues #13, #39, #113).
 
     A battle view catches :class:`~battle.refusals.BattleRefusal` around its
-    service call and shows the player those words. Any other ``ValueError``
-    is an internal check failing, and its text is not the player's to read.
-    A script caller gets :data:`BATTLE_REQUEST_FAILED_MESSAGE` as JSON, with
-    the error logged here with its traceback, as the advance answers (#13).
+    service call and shows the player those words. Anything else the view
+    raises -- a ``ValueError`` from an internal check, a ``RuntimeError`` or
+    ``KeyError`` from the engine -- is the server failing, and its text is
+    not the player's to read. A script caller gets
+    :data:`BATTLE_REQUEST_FAILED_MESSAGE` as JSON, with the error logged here
+    with its traceback, so ``battle.js`` always has an answer it can parse.
     A form post gets the error raised on, so Django logs it once with its
-    traceback and renders the site's own error page.
+    traceback and renders the site's own error page. What Django answers
+    itself (:data:`DJANGO_ANSWERED_EXCEPTIONS`, a 404 above all) goes on to
+    Django either way.
 
     Args:
         json_only: The endpoint answers only JSON, so its error is JSON even
@@ -260,7 +280,9 @@ def _internal_errors_logged(
         def guarded(request: HttpRequest, *args, **kwargs) -> HttpResponse:
             try:
                 return view(request, *args, **kwargs)
-            except ValueError:
+            except DJANGO_ANSWERED_EXCEPTIONS:
+                raise
+            except Exception:  # noqa: BLE001 — logged with its traceback, never shown
                 if not (json_only or _wants_json(request)):
                     raise
                 logger.exception("Battle endpoint %s failed", request.path)
@@ -873,8 +895,8 @@ def battle_setup_update(request, pk):
 
 
 @require_POST
-@_draft_gone_is_404
 @_internal_errors_logged()
+@_draft_gone_is_404
 def battle_setup_add(request, pk):
     """Add one muster entry (fighter, beast, random beast, character, seat)."""
     draft = _own_draft_or_404(request, pk)
@@ -921,8 +943,8 @@ def battle_setup_add(request, pk):
 
 
 @require_POST
-@_draft_gone_is_404
 @_internal_errors_logged()
+@_draft_gone_is_404
 def battle_setup_remove(request, pk):
     """Strike one muster entry, by roster position."""
     draft = _own_draft_or_404(request, pk)
@@ -948,8 +970,8 @@ def battle_setup_remove(request, pk):
 
 
 @require_POST
-@_draft_gone_is_404
 @_internal_errors_logged()
+@_draft_gone_is_404
 def battle_setup_import_party(request, pk):
     """Import a party as a new team seeded with its visible members (#275).
 
@@ -1006,8 +1028,8 @@ def battle_setup_import_party(request, pk):
 
 
 @require_POST
-@_draft_gone_is_404
 @_internal_errors_logged()
+@_draft_gone_is_404
 def battle_setup_team_add(request, pk):
     """Name a new, empty team on the draft's ledger."""
     draft = _own_draft_or_404(request, pk)
@@ -1026,8 +1048,8 @@ def battle_setup_team_add(request, pk):
 
 
 @require_POST
-@_draft_gone_is_404
 @_internal_errors_logged()
+@_draft_gone_is_404
 def battle_setup_team_remove(request, pk):
     """Disband one team; its entries return to the free-for-all pool."""
     draft = _own_draft_or_404(request, pk)
@@ -1044,8 +1066,8 @@ def battle_setup_team_remove(request, pk):
 
 
 @require_POST
-@_draft_gone_is_404
 @_internal_errors_logged()
+@_draft_gone_is_404
 def battle_setup_entry_team(request, pk):
     """Move one muster entry onto a team (or back to the free pool)."""
     draft = _own_draft_or_404(request, pk)
@@ -1909,6 +1931,7 @@ def _back_or_detail(request, battle: Battle):
 
 
 @require_POST
+@_internal_errors_logged(json_only=True)
 def battle_advance(request, pk):
     actor, battle = _actor_and_readable_battle(request, pk)
     denied = _control_denied(actor, battle)
@@ -1920,13 +1943,10 @@ def battle_advance(request, pk):
         return stale_pools_refused(stale, battle, actor, request)
     except BattleRefusal as refusal:
         # A rule refusing, like the other battle views' refusals: its words,
-        # as a 400 (the lobby's, BattleInLobby). Only refusals are caught, not
-        # ValueError at large, since the engine's own ValueErrors are
-        # internal text (issues #13, #39).
+        # as a 400 (the lobby's, BattleInLobby). Only refusals are caught
+        # here; anything else the engine raises is internal text, which the
+        # decorator logs and answers with the fixed sentence (#13, #39, #113).
         return _json_error(str(refusal))
-    except Exception:  # noqa: BLE001 — logged with its traceback, never shown
-        logger.exception("Advancing battle %s failed", pk)
-        return _json_error(BATTLE_REQUEST_FAILED_MESSAGE, status=500)
     return JsonResponse(battle_payload(battle, actor, events, request))
 
 
@@ -2513,6 +2533,7 @@ def battle_act(request, pk):
 
 
 @require_GET
+@_internal_errors_logged(json_only=True)
 def battle_state(request, pk):
     """Poll endpoint: the battle's current shape, plus events after a marker.
 
