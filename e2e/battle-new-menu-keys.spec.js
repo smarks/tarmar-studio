@@ -36,21 +36,32 @@ async function firstManualTurn(page, label) {
 }
 
 /**
+ * The awaited figure's option with this exact name, on the menu shown now.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} name - the engine's printed option name
+ */
+function optionNamed(page, name) {
+    return page.locator('#turn-panel .turn-option').filter({
+        has: page.locator('.turn-option-name', { hasText: new RegExp(`^${escaped(name)}$`) }),
+    });
+}
+
+/**
  * Take the option with this exact name for the awaited figure.
+ *
+ * Once confirmed, the panel shows the next figure's menu, so nothing about
+ * this option can be read after this returns (issue #140).
  *
  * @param {import('@playwright/test').Page} page
  * @param {string} name - the engine's printed option name
  */
 async function choose(page, name) {
-    const panel = page.locator('#turn-panel');
-    const option = panel.locator('.turn-option').filter({
-        has: page.locator('.turn-option-name', { hasText: new RegExp(`^${escaped(name)}$`) }),
-    });
+    const option = optionNamed(page, name);
     await expect(option).toHaveCount(1);
     await option.click();
     await expect(option).toHaveAttribute('aria-pressed', 'true');
-    await panel.locator('.turn-confirm').click();
-    return option;
+    await page.locator('#turn-panel .turn-confirm').click();
 }
 
 /**
@@ -96,17 +107,16 @@ async function turnOneLines(page) {
 test.describe('The 0.9.5 menu keys', () => {
     test('a player sprints from the turn menu', async ({ adminPage }) => {
         const sprinter = await firstManualTurn(adminPage, 'Sprint');
-        const panel = adminPage.locator('#turn-panel');
         // The yielded variant is offered beside it, and both carry the rules'
-        // letter a in the badge rather than the engine's token.
-        const yielded = panel.locator('.turn-option').filter({
-            has: adminPage.locator('.turn-option-name', {
-                hasText: 'MOVE (SPRINT) (YIELD: MOVE IN FINAL MOVEMENT)',
-            }),
-        });
-        await expect(yielded.locator('.turn-option-letter')).toHaveText('a');
-        const sprint = await choose(adminPage, 'MOVE (SPRINT)');
-        await expect(sprint.locator('.turn-option-letter')).toHaveText('a');
+        // letter a in the badge rather than the engine's token. Read from the
+        // sprinter's menu, before the choice is confirmed: the next figure's
+        // menu holds no Sprint (issue #140).
+        await expect(optionNamed(
+            adminPage, 'MOVE (SPRINT) (YIELD: MOVE IN FINAL MOVEMENT)'
+        ).locator('.turn-option-letter')).toHaveText('a');
+        await expect(optionNamed(adminPage, 'MOVE (SPRINT)').locator('.turn-option-letter'))
+            .toHaveText('a');
+        await choose(adminPage, 'MOVE (SPRINT)');
         await secondFigureHolds(adminPage, sprinter);
 
         const lines = await turnOneLines(adminPage);
