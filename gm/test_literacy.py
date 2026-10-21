@@ -8,17 +8,24 @@ the same service the sheet's control does (``services.roll_literacy``), held
 to the same rules: a player rolls once, a Game Master may roll again.
 """
 
+from dataclasses import replace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
-from characters.rules import character_rules
+from characters.models import Character
+from characters.rules import LocationRow, LocationTable, character_rules
+from characters.services import CharacterChangeError, apply_literacy_ruling
+from characters.skill_checks import literacy_unsettled_reason
+from characters.tests.rules_fixtures import seated_character_rules
+from characters.tests.test_rules import INVENTED_CHARACTER_RULES
 from common.test_helpers import BaseTestCase
 
 from .character_schema import (
     character_fields,
     character_json_schema,
+    extraction_prompt,
     extraction_to_import_payload,
 )
 from .engine import MODE_PLAY, section_plan_schema
@@ -31,8 +38,19 @@ from .turn_engine.policy import (
     REASON_LITERACY_RULING,
     SETTLED_REASONS,
     TurnPolicy,
+    already_refused_error,
+    refusal_text,
 )
 from .turn_engine.state import key_figures
+
+
+def literacy_refusal() -> str:
+    """A player's refusal to rule on literacy under the loaded canon (#128):
+    the configured sentence naming the one origin its rules leave to the Game
+    Master, which both canons have."""
+    words = refusal_words().policy
+    (origin,) = character_rules().location.game_master_origins
+    return words.literacy_ruling + words.literacy_ruling_origin.format(origin=origin)
 
 
 def rolled(total: int):
@@ -264,9 +282,7 @@ class LiteracyRulingPlanTest(SimpleTestCase):
             is_game_master=False,
         )
         self.assertTrue(reading.ok, reading.errors)
-        self.assertEqual(
-            reading.actions[0].refusal, refusal_words().policy.literacy_ruling
-        )
+        self.assertEqual(reading.actions[0].refusal, literacy_refusal())
         self.assertIn(REASON_LITERACY_RULING, SETTLED_REASONS)
 
     def test_the_plan_schema_teaches_the_ruling(self):
@@ -341,8 +357,134 @@ class PlayerLiteracyRulingTest(ExecutorTestCase):
         )
 
         self.assertFalse(outcome.results[0].ran)
-        self.assertEqual(
-            outcome.results[0].error, refusal_words().policy.literacy_ruling
-        )
+        self.assertEqual(outcome.results[0].error, literacy_refusal())
         character.refresh_from_db()
         self.assertIsNone(character.literacy_ruling)
+
+
+#: :data:`INVENTED_CHARACTER_RULES` with every origin given a literacy check.
+NO_ORIGIN_LEFT_TO_THE_GAME_MASTER = replace(
+    INVENTED_CHARACTER_RULES,
+    location=LocationTable(
+        rows=(LocationRow(100, "Port", ("Sailing",), 1),), skill_points=2
+    ),
+)
+
+
+class OriginLeftToTheGameMasterWordsTest(SimpleTestCase):
+    """What the model is told about the origin the rules leave to the Game
+    Master names it as the canon does, "Ask the GM" in the invented rules,
+    and says nothing of one a canon does not have (issue #128)."""
+
+    def ruling_description(self) -> str:
+        return character_json_schema()["properties"]["literacy_ruling"]["description"]
+
+    def test_the_refusals_and_the_extraction_name_the_canons_origin(self) -> None:
+        words = refusal_words().policy
+        with seated_character_rules(INVENTED_CHARACTER_RULES):
+            refusal = refusal_text(REASON_LITERACY_RULING)
+            again = already_refused_error("rule_literacy", refusal)
+            extraction = extraction_prompt()
+            description = self.ruling_description()
+        self.assertEqual(
+            refusal,
+            words.literacy_ruling
+            + words.literacy_ruling_origin.format(origin="Ask the GM"),
+        )
+        self.assertTrue(
+            again.endswith(
+                "; plan roll_literacy where the Origin has a check, or say that at "
+                "Ask the GM the Game Master decides"
+            )
+        )
+        self.assertIn(
+            "literacy_ruling is the Game Master's ruling at an Origin of Ask the "
+            "GM, or null;",
+            extraction,
+        )
+        self.assertTrue(description.startswith("Only for an Origin of Ask the GM: "))
+        for text in (refusal, again, extraction, description):
+            with self.subTest(text=text[:40]):
+                self.assertNotIn("Consult GM", text)
+
+    def test_a_canon_that_leaves_no_origin_to_the_game_master(self) -> None:
+        with seated_character_rules(NO_ORIGIN_LEFT_TO_THE_GAME_MASTER):
+            refusal = refusal_text(REASON_LITERACY_RULING)
+            again = already_refused_error("rule_literacy", refusal)
+            extraction = extraction_prompt()
+            description = self.ruling_description()
+        self.assertEqual(refusal, refusal_words().policy.literacy_ruling)
+        self.assertTrue(
+            again.endswith("; plan roll_literacy where the Origin has a check")
+        )
+        self.assertIn(
+            "literacy_ruling is always null: every Origin has a check to roll;",
+            extraction,
+        )
+        self.assertEqual(
+            description, "Always null: every Origin has a literacy check to roll"
+        )
+
+
+class OriginLeftToTheGameMasterOnTheRecordTest(SimpleTestCase):
+    """The sheet's words the model reads name that origin as the canon does
+    too: the literacy line in the state block, a player's unsettled-literacy
+    refusal from skill_check, and the ruling's refusal at an origin with a
+    check (the #128 review)."""
+
+    def test_under_the_loaded_canon_the_words_are_unchanged(self) -> None:
+        """Both shipping canons call the row Consult GM: byte for byte what
+        the typed strings said."""
+        (origin,) = character_rules().location.game_master_origins
+        self.assertEqual(origin, "Consult GM")
+        self.assertEqual(Character(location=origin).location_literacy_check, origin)
+        self.assertEqual(
+            literacy_unsettled_reason(),
+            "This character's literacy check has not been rolled (or, at Consult "
+            "GM, ruled), so nothing says they can read; only a Game Master can "
+            "call for a Literacy check until it is",
+        )
+        (checked, *_rest) = character_rules().location.checked_origins
+        with self.assertRaisesMessage(
+            CharacterChangeError,
+            f"The {checked} origin has a literacy check to roll; a Game Master's "
+            "ruling is for an origin of Consult GM",
+        ):
+            apply_literacy_ruling(
+                Character(location=checked), True, is_game_master=True
+            )
+
+    def test_the_canons_own_label(self) -> None:
+        with seated_character_rules(INVENTED_CHARACTER_RULES):
+            check = Character(location="Ask the GM").location_literacy_check
+            reason = literacy_unsettled_reason()
+            with self.assertRaises(CharacterChangeError) as refused:
+                apply_literacy_ruling(
+                    Character(location="Port"), True, is_game_master=True
+                )
+        self.assertEqual(check, "Ask the GM")
+        self.assertIn("(or, at Ask the GM, ruled)", reason)
+        self.assertEqual(
+            str(refused.exception),
+            "The Port origin has a literacy check to roll; a Game Master's ruling "
+            "is for an origin of Ask the GM",
+        )
+        for text in (check, reason, str(refused.exception)):
+            with self.subTest(text=text):
+                self.assertNotIn("Consult GM", text)
+
+    def test_a_canon_that_leaves_no_origin_to_the_game_master(self) -> None:
+        with seated_character_rules(NO_ORIGIN_LEFT_TO_THE_GAME_MASTER):
+            reason = literacy_unsettled_reason()
+            with self.assertRaises(CharacterChangeError) as refused:
+                apply_literacy_ruling(
+                    Character(location="Port"), True, is_game_master=True
+                )
+        self.assertTrue(
+            reason.startswith(
+                "This character's literacy check has not been rolled, so nothing"
+            )
+        )
+        self.assertEqual(
+            str(refused.exception), "The Port origin has a literacy check to roll"
+        )

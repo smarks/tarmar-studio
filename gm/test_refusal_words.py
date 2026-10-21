@@ -122,7 +122,11 @@ class NoRefusalWrittenInCodeTest(SimpleTestCase):
             for name, value in vars(policy_module).items()
             if name.startswith("REASON_")
         }
-        self.assertEqual(reasons, keys)
+        # One key is a clause, not a reason: what the literacy ruling's
+        # refusal adds when the canon leaves an origin to the Game Master
+        # (issue #128).
+        self.assertEqual(keys - reasons, {"literacy_ruling_origin"})
+        self.assertLessEqual(reasons, keys)
         self.assertLess(SETTLED_REASONS, keys)
         self.assertNotIn(REASON_AIDE_UNASKED_ROLL, SETTLED_REASONS)
 

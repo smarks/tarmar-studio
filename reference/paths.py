@@ -105,9 +105,9 @@ them):
 - ``gm-prompt/magic.md`` (optional): the magic section of the same prompt,
   read the same way (issue #922). Without it ``gm.engine`` uses the default
   canon's, which states only the public rules, and logs a warning. Its
-  Special Casting Results and Borrowing headings carry no body: ``gm.engine``
-  builds both from ``magic-rules.json`` and refuses a file that writes one
-  (issue #48).
+  Special Casting Results, Push (Boosting), Channel, Borrowing, Runaway and
+  Counterspell headings carry no body: ``gm.engine`` builds each from
+  ``magic-rules.json`` and refuses a file that writes one (issues #48, #127).
 
 Four more entries a canon may carry are not pages either, so
 :func:`iter_content_markdown` skips them like ``gm-prompt/`` (issue #921;

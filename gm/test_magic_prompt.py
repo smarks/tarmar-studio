@@ -1,11 +1,11 @@
-"""The magic section of the GM prompt is read from the canon (issues #922, #48).
+"""The magic section of the GM prompt is read from the canon (#922, #48, #127).
 
 ``SECTION_MAGIC`` used to be a string in ``gm.engine``. The Tarmar version
 carries the GM-side numbers the public magic pages leave out, so it moved into
 the canon directory as ``gm-prompt/magic.md`` (#922). Its Special Casting
-Results and Borrowing are now built from the canon's ``magic-rules.json``
-around the file (#48), so the file leaves them empty and
-``gm.engine.section_magic`` assembles the two. These tests pin the assembled
+Results and Borrowing (#48), and its Push, Channel, Runaway and Counterspell
+(#127), are now built from the canon's ``magic-rules.json`` around the file,
+so the file leaves them empty and ``gm.engine.section_magic`` assembles them. These tests pin the assembled
 Tarmar section, that a canon without the file gets the default canon's
 section, that the assembler refuses a body under a heading the engine builds
 or a missing one, and that the default canon's section keeps to the public
@@ -51,9 +51,20 @@ from .turn_record import prompt_hash
 # Casting Results and Borrowing from the canon's ``magic-rules.json``: the
 # table now states the critical success's +2 and 1 mana back and that a 16
 # keeps its mana, and Borrowing states the natural 18 that always fails, that
-# a failure is a Runaway, and that refunds pay the Debt first.
+# a failure is a Runaway, and that refunds pay the Debt first. That was
+# d13c58b26bbfe092f3d704371fbd3ae991d4f3d97c06d27219a1772d40662741 until #127
+# built Push, Channel, Runaway and Counterspell from the same file: Push's
+# penalty now counts the "mana pushed" (the canon's base cost does not count)
+# and each failure band says whether the spell takes effect; Channel says the
+# cap covers the cost and the pushed mana and that Arcane costs 2× to advance;
+# Runaway's growth states the +1 a turn it ran that the board banks and adds
+# once to the anchorer's next cast of that spell (a continuing spell's growth
+# stays the GM's, ruling runaway_effect_growth), and
+# the helper pays "the original casting cost"; Counterspell states the least
+# commitment (3), the opposed dice (3d6 + INT) and that the bonus is each
+# side's.
 TARMAR_MAGIC_SECTION_HASH = (
-    "d13c58b26bbfe092f3d704371fbd3ae991d4f3d97c06d27219a1772d40662741"
+    "88512526e0974102379bef1acb65aa38494176cfd2f6ad701e2907defd4e386c"
 )
 
 # The subsections every magic section carries, in this order: checked here
@@ -144,20 +155,28 @@ class MagicSectionFromCanonTest(SimpleTestCase):
             load_magic_section(directory)
 
 
-_SPECIAL_CASTING_RESULTS, _BORROWING = GENERATED_MAGIC_HEADINGS
+(
+    _SPECIAL_CASTING_RESULTS,
+    _PUSH,
+    _CHANNEL,
+    _BORROWING,
+    _RUNAWAY,
+    _COUNTERSPELL,
+) = GENERATED_MAGIC_HEADINGS
 
 #: A magic section with every generated heading empty, a subsection of prose
-#: between them, and the last generated heading at the end of the file.
+#: between two of them, generated headings one after another, and the last
+#: generated heading at the end of the file.
 INVENTED_MAGIC_FILE = (
     "## Magic System\nOpening.\n\n"
     f"{_SPECIAL_CASTING_RESULTS}\n\n"
     "### Schools of Magic\nSchools.\n  Indented, kept as written.\n\n"
-    f"{_BORROWING}"
+    f"{_PUSH}\n\n{_CHANNEL}\n\n{_BORROWING}\n\n{_RUNAWAY}\n\n{_COUNTERSPELL}"
 )
 
 
 class AssembleMagicSectionTest(SimpleTestCase):
-    """The engine's subsections go in under their empty headings (#48)."""
+    """The engine's subsections go in under their empty headings (#48, #127)."""
 
     def test_each_generated_heading_takes_its_body_and_the_rest_is_kept(self) -> None:
         assembled = assemble_magic_section(INVENTED_MAGIC_FILE, DEFAULT_MAGIC_RULES)
@@ -168,10 +187,33 @@ class AssembleMagicSectionTest(SimpleTestCase):
         )
         self.assertIn(
             ".\n\n### Schools of Magic\nSchools.\n  Indented, kept as written.\n\n"
-            f"{_BORROWING}\nSpend all remaining mana",
+            f"{_PUSH}\nInvest extra mana",
             assembled,
         )
-        self.assertTrue(assembled.endswith("before it refills the pool."))
+        for heading, next_heading in (
+            (_PUSH, _CHANNEL),
+            (_CHANNEL, _BORROWING),
+            (_BORROWING, _RUNAWAY),
+            (_RUNAWAY, _COUNTERSPELL),
+        ):
+            with self.subTest(heading=heading):
+                body_start = assembled.index(f"{heading}\n") + len(heading) + 1
+                self.assertEqual(
+                    assembled.index("\n\n", body_start),
+                    assembled.index(f"\n\n{next_heading}\n"),
+                )
+        self.assertTrue(
+            assembled.endswith(
+                f"{_COUNTERSPELL}\nThe defender commits 1 to 5 mana and declares a "
+                "counter (on their action); opposed 2d10 + INT rolls, each side +1 per "
+                "2 mana invested (the caster's whole casting, the defender's "
+                "commitment); ties go to the defender. Defender wins: spell "
+                "countered. Caster wins: spell goes off. Only the caster can escalate "
+                "on later turns by paying again; the defender gets one shot per "
+                "casting and may oppose again (paying again) or let it through. A "
+                "failed Control Roll during escalation can trigger Runaway."
+            )
+        )
 
     def test_a_body_under_a_generated_heading_is_refused(self) -> None:
         for heading in GENERATED_MAGIC_HEADINGS:

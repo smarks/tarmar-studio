@@ -1716,7 +1716,9 @@ class Character(models.Model):
         """
         modifier = self.location_literacy_modifier
         if modifier is None:
-            return "Consult GM"
+            # The origin the rules leave to the Game Master, by its own label
+            # ("Consult GM" on the public pages), never a typed one (#128).
+            return self.location
         return character_rules().literacy_roll.check_text(modifier)
 
     @property

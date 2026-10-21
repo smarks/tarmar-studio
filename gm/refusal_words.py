@@ -54,6 +54,7 @@ class PolicyWords:
     game_master_only: str = sentence()
     house_rule: str = sentence()
     literacy_ruling: str = sentence()
+    literacy_ruling_origin: str = sentence("origin", required=("origin",))
     player_stated_scores: str = sentence()
     player_stated_fatigue: str = sentence()
     game_master_records: str = sentence()
