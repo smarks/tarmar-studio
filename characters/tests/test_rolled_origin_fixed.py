@@ -24,7 +24,12 @@ from characters.models import Character
 from common.test_helpers import BaseTestCase, create_character
 
 ROLLED_RURAL_LINE = "Location: d100=80 -> Rural"
-FIXED = services.ROLL_FIXED_REASONS["location"]
+
+
+def fixed() -> str:
+    """The configured reason a rolled Origin is final (issue #85), read when
+    asked so a test's own words apply."""
+    return services.roll_fixed_reason("location")
 
 
 def _origin_select(page: str) -> bool:
@@ -75,12 +80,12 @@ class RolledOriginFixedTest(BaseTestCase):
         response = self.update("City")
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.json()["error"], FIXED)
+        self.assertEqual(response.json()["error"], fixed())
         self.assert_unchanged()
 
     def test_the_chats_set_background_refuses_a_player(self):
         """The Games Master's set_background goes through change_field too."""
-        with self.assertRaisesMessage(services.CharacterChangeError, FIXED):
+        with self.assertRaisesMessage(services.CharacterChangeError, fixed()):
             services.set_background(self.character.pk, {"location": "City"})
         self.assert_unchanged()
 
@@ -104,7 +109,7 @@ class RolledOriginFixedTest(BaseTestCase):
         self.login_as(self.player)
         page = self.edit_page()
         self.assertFalse(_origin_select(page))
-        self.assertEqual(_locked_reason(page), FIXED)
+        self.assertEqual(_locked_reason(page), fixed())
 
     def test_the_literacy_note_is_not_printed_beside_a_rolled_origin(self):
         """Rolled and then fixed by literacy as well: one reason, the roll's,
@@ -116,7 +121,7 @@ class RolledOriginFixedTest(BaseTestCase):
 
         page = self.edit_page()
 
-        self.assertEqual(_locked_reason(page), FIXED)
+        self.assertEqual(_locked_reason(page), fixed())
         self.assertNotIn('id="origin-fixed-note"', page)
 
     def test_a_game_master_changes_it_and_literacy_is_rolled_again(self):
@@ -249,7 +254,7 @@ class RolledWhereverItIsRolledTest(BaseTestCase):
             {"field": "location", "value": "Consult GM"},
         )
         self.assertEqual(refused.status_code, 400)
-        self.assertEqual(refused.json()["error"], FIXED)
+        self.assertEqual(refused.json()["error"], fixed())
 
     def test_a_sheet_roll_fixes_an_origin_nobody_recorded(self):
         character = create_character(
@@ -270,7 +275,7 @@ class RolledWhereverItIsRolledTest(BaseTestCase):
             reverse("characters:edit", args=[character.pk])
         ).content.decode()
         self.assertFalse(_origin_select(page))
-        self.assertEqual(_locked_reason(page), FIXED)
+        self.assertEqual(_locked_reason(page), fixed())
 
     def test_a_chat_started_characters_origin_is_fixed_for_its_player(self):
         """The roster rolls the background as creation does (#754), so the
@@ -332,7 +337,7 @@ class RolledOriginOnReImportTest(BaseTestCase):
             {"field": "location", "value": "City"},
         )
         self.assertEqual(refused.status_code, 400)
-        self.assertEqual(refused.json()["error"], FIXED)
+        self.assertEqual(refused.json()["error"], fixed())
 
     def test_an_origin_edited_in_the_file_comes_in_as_a_choice(self):
         """The file names an Origin the character does not hold: no roll made

@@ -79,6 +79,7 @@ from .purse import (
     charge_for_more_of_custom_item,
     hold_purchase_to_wealth,
 )
+from .refusal_words import ServicesWords, refusal_words
 from .rules import character_rules
 from .skills import (
     MAX_EXPERIENCE_YEARS_PER_RUN,
@@ -169,31 +170,11 @@ def _nobody() -> FieldRule:
     return FieldRule(FieldAuthor.NOBODY)
 
 
-#: Why a player's literacy ruling is refused (issue #743), wherever it is
-#: asked for: the field table's reason and the service's refusal.
-LITERACY_RULING_GAME_MASTER_ONLY = (
-    "Only a Game Master rules on whether a character can read; a player's "
-    "literacy is rolled"
-)
-
-#: Why a player's origin ruling is refused (issue #801).
-ORIGIN_RULING_GAME_MASTER_ONLY = "Only a Game Master rules what a Consult GM origin is"
-
-#: Why a player cannot set the Dragonborn secret (issue #810).
-DRAGONBORN_GAME_MASTER_ONLY = "Only a Game Master can set this."
-
 #: Fields whose value a player must never read, in the history either (#810).
 SECRET_FIELDS: frozenset[str] = frozenset({"is_dragonborn"})
 #: What the history records for a change to one of them.
 SECRET_HISTORY_FIELD = "game_master_note"
 SECRET_HISTORY_NOTE = "a Game Master's note"
-
-#: Why a player cannot set current Fatigue and Body (issue #751), nor the
-#: mana owed (tarmar-engine #28).
-POOLS_GAME_MASTER_ONLY = (
-    "Only a Game Master can set current Fatigue, Body and Mana and the mana "
-    "owed; a fight on the board records them on its own"
-)
 
 
 def _attribute_reason() -> str:
@@ -202,27 +183,35 @@ def _attribute_reason() -> str:
     The canon's attribute dice and point-buy total (issue #68).
     """
     rules = character_rules()
-    return (
-        f"Rolled ({rules.attribute_roll.dice}) or bought "
-        f"({rules.attributes.point_buy.total} points); only a Game Master can "
-        "change a recorded score."
+    return refusal_words().services.field_attribute.format(
+        dice=rules.attribute_roll.dice, points=rules.attributes.point_buy.total
     )
 
 
 def _fatigue_roll_reason() -> str:
     """Why a player may not change the Fatigue roll, with the canon's dice."""
-    return (
-        f"Rolled ({character_rules().fatigue_roll.dice}) once; only a Game "
-        "Master can change it."
+    return refusal_words().services.field_fatigue_roll.format(
+        dice=character_rules().fatigue_roll.dice
     )
 
 
 def _literacy_roll_reason() -> str:
     """Why a player may not change the literacy roll, with the canon's dice."""
-    return (
-        f"Rolled ({character_rules().literacy_roll.dice}) once; only a Game "
-        "Master can have it rolled again."
+    return refusal_words().services.field_literacy_roll.format(
+        dice=character_rules().literacy_roll.dice
     )
+
+
+def _said(pick: Callable[[ServicesWords], str]) -> Callable[[], str]:
+    """A field reason read from the configured words each time it is asked
+    (``config/characters-refusals.toml``, issue #85), never once at import."""
+    return lambda: pick(refusal_words().services)
+
+
+#: Reasons more than one field gives.
+_PROVENANCE_REASON = _game_master(_said(lambda said: said.field_provenance))
+_DEATH_REASON = _game_master(_said(lambda said: said.field_death))
+_POOLS_REASON = _game_master(_said(lambda said: said.pools_game_master_only))
 
 
 #: Every stored field of ``Character`` and who may set it (issue #748). A test
@@ -265,56 +254,48 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "pack_dropped": _player(),
         # Rolled or awarded.
         **dict.fromkeys(CHARACTER_ATTRIBUTE_FIELDS, _game_master(_attribute_reason)),
-        "appearance_roll": _game_master(
-            "Rolled (1d6); only a Game Master can change it or qualify a 1 or a 6."
-        ),
+        "appearance_roll": _game_master(_said(lambda said: said.field_appearance_roll)),
         "fatigue_roll": _game_master(_fatigue_roll_reason),
         "literacy_roll": _game_master(_literacy_roll_reason),
         # The Game Master's word at "Consult GM", which has no check (#743).
-        "literacy_ruling": _game_master(LITERACY_RULING_GAME_MASTER_ONLY),
+        "literacy_ruling": _game_master(
+            _said(lambda said: said.literacy_ruling_game_master_only)
+        ),
         # What a "Consult GM" origin is (#801): the Game Master's word again.
-        "origin_ruling": _game_master(ORIGIN_RULING_GAME_MASTER_ONLY),
+        "origin_ruling": _game_master(
+            _said(lambda said: said.origin_ruling_game_master_only)
+        ),
         # A people is the player's choice; nobody rolls one (#810).
         "people": _player(),
         # The Game Master's secret (#810), never the player's to set or see.
-        "is_dragonborn": _game_master(DRAGONBORN_GAME_MASTER_ONLY),
+        "is_dragonborn": _game_master(
+            _said(lambda said: said.dragonborn_game_master_only)
+        ),
         # Written by the first battle seat or played turn, never by hand (#803).
         "entered_play_at": _nobody(),
         # What a lowered XP could not take back; the next XP pays it (#769).
         "skill_points_owed": _nobody(),
-        "provenance_class": _game_master(
-            "Rolled on the provenance table; only a Game Master can change it."
-        ),
-        "provenance_detail": _game_master(
-            "Rolled on the provenance table; only a Game Master can change it."
-        ),
-        "wealth_level": _game_master(
-            "Rolled on the wealth table; only a Game Master can change it."
-        ),
-        "starting_coin": _game_master(
-            "Set once by the wealth roll; only a Game Master can change it."
-        ),
-        "total_xp": _game_master(
-            "Earned in play or prior experience; only a Game Master can award it."
-        ),
-        "age": _game_master(
-            "Moves with years of prior experience; only a Game Master can change it."
-        ),
+        "provenance_class": _PROVENANCE_REASON,
+        "provenance_detail": _PROVENANCE_REASON,
+        "wealth_level": _game_master(_said(lambda said: said.field_wealth_level)),
+        "starting_coin": _game_master(_said(lambda said: said.field_starting_coin)),
+        "total_xp": _game_master(_said(lambda said: said.field_total_xp)),
+        "age": _game_master(_said(lambda said: said.field_age)),
         "free_skill_points": _game_master(
-            "Earned with XP; only a Game Master can grant more."
+            _said(lambda said: said.field_free_skill_points)
         ),
-        "is_alive": _game_master("Only a Game Master can mark a death or revive."),
-        "death_cause": _game_master("Only a Game Master can mark a death or revive."),
+        "is_alive": _DEATH_REASON,
+        "death_cause": _DEATH_REASON,
         # What fights left the character (issue #751, and spent mana by the
         # coordinator's ruling): written by a fight that writes to records
         # (record_fight) and set by a Game Master (set_current_pools); not a
         # sheet field edit for anyone, so they are not in CHARACTER_FIELDS.
-        "fatigue_damage": _game_master(POOLS_GAME_MASTER_ONLY),
-        "body_damage": _game_master(POOLS_GAME_MASTER_ONLY),
-        "mana_spent": _game_master(POOLS_GAME_MASTER_ONLY),
+        "fatigue_damage": _POOLS_REASON,
+        "body_damage": _POOLS_REASON,
+        "mana_spent": _POOLS_REASON,
         # Mana borrowed and not paid back (tarmar-engine #28): only a fight's
         # result writes it, and a Game Master settles it, as for mana spent.
-        "mana_owed": _game_master(POOLS_GAME_MASTER_ONLY),
+        "mana_owed": _POOLS_REASON,
         # Written by the rules as a consequence of something else.
         "provenance_recorded": _nobody(),
         "location_recorded": _nobody(),
@@ -324,7 +305,7 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         # The Mana Pool's maximum: the Magic track's Spell Points, and what a
         # Game Master grants through characters.magic.grant_mana (#774).
         "free_spell_points": _game_master(
-            "Spell Points from the Magic track; only a Game Master grants mana."
+            _said(lambda said: said.field_free_spell_points)
         ),
         # The spells known: a player puts free skill points into one through
         # characters.magic.learn_spell, as into a skill; never a field update
@@ -332,9 +313,7 @@ FIELD_RULES: Mapping[str, FieldRule] = MappingProxyType(
         "spells": _player(),
         # Moves only through characters.purse.move_coin: purchases, and a
         # Game Master giving or taking coin (#757).
-        "coin_adjustment": _game_master(
-            "Moves with purchases; only a Game Master gives or takes coin."
-        ),
+        "coin_adjustment": _game_master(_said(lambda said: said.field_coin_adjustment)),
         "experience_terms": _nobody(),
         "experience_log": _nobody(),
         "money_earned": _nobody(),
@@ -384,8 +363,8 @@ def field_refusal(field_name: str) -> str:
     if field_name in ROLL_FIXED_REASONS:
         # A player's own field, refused only once a roll is recorded (#948,
         # #970).
-        return ROLL_FIXED_REASONS[field_name]
-    return f"{field_name} is not something anyone sets by hand."
+        return roll_fixed_reason(field_name)
+    return refusal_words().services.nobody_sets.format(field=field_name)
 
 
 def can_set_field(
@@ -559,16 +538,25 @@ def player_chosen_face_reasons() -> Mapping[str, str]:
 #: rule as #948". Provenance and wealth are not here: a player never chooses
 #: them (Spencer's rulings on #749), so ``FIELD_RULES`` gives them to the Game
 #: Master outright and the player's one roll is ``check_first_roll``'s.
-ROLL_FIXED_REASONS: Mapping[str, str] = MappingProxyType(
+#: Each field's reason is read from the configured words when it is asked
+#: (``config/characters-refusals.toml``, issue #85): :func:`roll_fixed_reason`.
+ROLL_FIXED_REASONS: Mapping[str, Callable[[], str]] = MappingProxyType(
     {
-        "height_roll": "Height was rolled, and a roll is final; only a Game "
-        "Master can change it.",
-        "weight_roll": "Weight was rolled, and a roll is final; only a Game "
-        "Master can change it.",
-        "location": "The Origin was rolled, and a roll is final; only a Game "
-        "Master can change it.",
+        "height_roll": _said(lambda said: said.roll_fixed_height),
+        "weight_roll": _said(lambda said: said.roll_fixed_weight),
+        "location": _said(lambda said: said.roll_fixed_origin),
     }
 )
+
+
+def roll_fixed_reason(field_name: str) -> str:
+    """Why a player may not change this field once it was rolled.
+
+    Args:
+        field_name: A field of :data:`ROLL_FIXED_REASONS`.
+    """
+    return ROLL_FIXED_REASONS[field_name]()
+
 
 #: The label each of those fields' rolls is recorded under in the dice log:
 #: the sheet's label for a height or weight (``models.DIE_ROLL_FIELDS``) and
@@ -611,9 +599,7 @@ def check_player_choice(
 #: sources (DEX, weapon skill, under-strength, situational) and the catalog
 #: publishes each item's own numbers. A modifier is a Game Master's grant, a
 #: magic item placed as loot (dm-rules/gm-tools/dungeons-ruins.md).
-ITEM_MODIFIER_RULE = _game_master(
-    "Item modifiers are a Game Master's grant; the rules give equipment none."
-)
+ITEM_MODIFIER_RULE = _game_master(_said(lambda said: said.field_item_modifiers))
 
 
 def can_set_item_modifiers(*, is_game_master: bool) -> bool:
@@ -833,7 +819,7 @@ def check_attribute(name: str, value: int, is_game_master: bool) -> str:
         )
     return (
         f" (outside the {point_buy.minimum}-{point_buy.maximum} a player "
-        "may set: the Game Master's call)"
+        f"may set: {refusal_words().common.the_game_masters_call})"
     )
 
 
@@ -1020,7 +1006,9 @@ def apply_literacy_ruling(
             to roll.
     """
     if not is_game_master:
-        raise CharacterChangeError(LITERACY_RULING_GAME_MASTER_ONLY)
+        raise CharacterChangeError(
+            refusal_words().services.literacy_ruling_game_master_only
+        )
     if character.location_literacy_modifier is not None:
         raise CharacterChangeError(
             f"The {character.location} origin has a literacy check to roll; a "
@@ -1412,7 +1400,7 @@ def apply_current_pools(
             pool or a debt further than the record can hold.
     """
     if not is_game_master:
-        raise CharacterChangeError(POOLS_GAME_MASTER_ONLY)
+        raise CharacterChangeError(refusal_words().services.pools_game_master_only)
     if fatigue is None and body is None and mana is None and owed is None:
         raise CharacterChangeError(
             "Give a current Fatigue, Body or Mana, or the mana owed, to set"
@@ -1813,7 +1801,10 @@ def apply_experience_years(
         f"+{run_result['free_points_awarded']} free skill point(s)){outcome}"
     )
     if in_play:
-        note += "; after the character entered play: the Game Master's call"
+        note += (
+            "; after the character entered play: "
+            f"{refusal_words().common.the_game_masters_call}"
+        )
     return note, run_result
 
 
@@ -2003,7 +1994,10 @@ def apply_skill_rename(
         character.origin_skill = new_skill
     recorded = new_skill
     if not origin_choice and glossary_skill(old_skill) != glossary_skill(new_skill):
-        recorded += " (points moved from another skill: the Game Master's call)"
+        recorded += (
+            " (points moved from another skill: "
+            f"{refusal_words().common.the_game_masters_call})"
+        )
     return recorded, points
 
 

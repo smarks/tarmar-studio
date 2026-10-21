@@ -21,6 +21,7 @@ from characters.import_service import (
     save_imported_character,
     validate_import_payload,
 )
+from characters.refusal_words import refusal_words
 from characters.services import CharacterChangeError, FightReport
 from common.test_helpers import BaseTestCase, create_character, mark_gate_passed
 
@@ -244,7 +245,9 @@ class SetCurrentPoolsTest(BaseTestCase):
     def test_the_service_refuses_a_player_and_takes_a_game_master(self):
         with self.assertRaises(CharacterChangeError) as caught:
             services.set_current_pools(self.character.pk, fatigue=10)
-        self.assertEqual(str(caught.exception), services.POOLS_GAME_MASTER_ONLY)
+        self.assertEqual(
+            str(caught.exception), refusal_words().services.pools_game_master_only
+        )
         result = services.set_current_pools(
             self.character.pk, fatigue=10, is_game_master=True, actor=self.dm
         )
@@ -311,7 +314,9 @@ class SetCurrentPoolsTest(BaseTestCase):
         self.login_as(self.owner)
         response = self.post_json(self.url, {"fatigue": 59, "body": 40})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], services.POOLS_GAME_MASTER_ONLY)
+        self.assertEqual(
+            response.json()["error"], refusal_words().services.pools_game_master_only
+        )
         self.character.refresh_from_db()
         self.assertEqual(self.character.history, [])
 
@@ -464,7 +469,9 @@ class PoolFieldRulesTest(BaseTestCase):
             with self.subTest(name=name):
                 rule = services.FIELD_RULES[name]
                 self.assertIs(rule.author, services.FieldAuthor.GAME_MASTER)
-                self.assertEqual(rule.reason, services.POOLS_GAME_MASTER_ONLY)
+                self.assertEqual(
+                    rule.reason, refusal_words().services.pools_game_master_only
+                )
                 self.assertNotIn(name, CHARACTER_FIELDS)
                 self.assertNotIn(name, services.update_fields_for(is_game_master=True))
 
@@ -537,7 +544,9 @@ class ManaOwedTest(BaseTestCase):
         self.character.save()
         with self.assertRaises(CharacterChangeError) as caught:
             services.set_current_pools(self.character.pk, owed=0)
-        self.assertEqual(str(caught.exception), services.POOLS_GAME_MASTER_ONLY)
+        self.assertEqual(
+            str(caught.exception), refusal_words().services.pools_game_master_only
+        )
         result = services.set_current_pools(
             self.character.pk, owed=1, is_game_master=True
         )
@@ -552,7 +561,9 @@ class ManaOwedTest(BaseTestCase):
         self.login_as(self.owner)
         response = self.post_json(self.url, {"owed": 0})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], services.POOLS_GAME_MASTER_ONLY)
+        self.assertEqual(
+            response.json()["error"], refusal_words().services.pools_game_master_only
+        )
         self.login_as(self.create_dm())
         mark_gate_passed(self.client)
         response = self.post_json(self.url, {"owed": "2"})

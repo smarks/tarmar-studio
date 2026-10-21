@@ -26,6 +26,7 @@ from character_export.export_utils import (
 from characters import services
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.models import CHARACTER_FIELDS, Character
+from characters.refusal_words import refusal_words
 from characters.services import (
     FIELD_RULES,
     GAME_MASTER_UPDATE_FIELDS,
@@ -226,7 +227,7 @@ class PlayerFieldUpdateTest(BaseTestCase):
         result = services.update_field(
             self.character.pk, "strength", 25, is_game_master=True
         )
-        self.assertIn("the Game Master's call", result.note)
+        self.assertIn(refusal_words().common.the_game_masters_call, result.note)
 
     def test_the_fatigue_service_holds_a_player_by_default(self):
         with self.assertRaisesMessage(

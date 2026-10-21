@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied
 from characters import services
 from characters.dice import DICE_IN_TEXT
 from characters.models import Character
+from characters.refusal_words import refusal_words
 from characters.services import CharacterChangeError
 from characters.skills import normalize_skill_name
 from common.test_helpers import BaseTestCase, create_character
@@ -126,7 +127,7 @@ class LockedCallsTest(BaseTestCase):
         )
 
         self.assertEqual(result.character.strength, 25)
-        self.assertIn("the Game Master's call", result.note)
+        self.assertIn(refusal_words().common.the_game_masters_call, result.note)
 
     def test_set_attribute_all_records_six(self):
         result = services.set_attribute(self.character.pk, "all", 12)

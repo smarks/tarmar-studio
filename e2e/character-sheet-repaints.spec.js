@@ -15,6 +15,7 @@ const {
     test, expect, loginAs, TEST_USER, TEST_ADMIN, escaped,
 } = require('./fixtures');
 const { readDjangoShell } = require('./django');
+const { refusal } = require('./refusals');
 const { pinDice } = require('./dice');
 const {
     loadedEquipment, group, item, movementCostingLoad, sheetValues,
@@ -516,6 +517,8 @@ print('CHARACTER', character.pk)
         const latest = page.locator('#recent-changes-rows tr').first();
         await expect(latest).toContainText('street smarts');
         await expect(latest).toContainText('survival');
-        await expect(latest).not.toContainText("Game Master's call");
+        await expect(latest).not.toContainText(
+            refusal('characters', 'common', 'the_game_masters_call')
+        );
     });
 });

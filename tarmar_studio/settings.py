@@ -36,6 +36,9 @@ from battle.refusal_words import (  # noqa: E402
     load_refusal_words as load_battle_refusal_words,
 )
 from battle.wording import load_rulings_wording  # noqa: E402
+from characters.refusal_words import (  # noqa: E402
+    load_refusal_words as load_characters_refusal_words,
+)
 from common.base_url import (  # noqa: E402
     BASE_URL_RULE,
     BASE_URL_WITH_PATH_RULE,
@@ -178,7 +181,8 @@ BATTLE_RULINGS_WORDING = load_rulings_wording(BATTLE_RULINGS_WORDING_FILE)
 
 # The words each app refuses a request in (issues #97, #86): one TOML file per
 # app under config/, one table per module, read and checked here as the rulings'
-# words are. BATTLE_REFUSAL_WORDS_FILE and GM_REFUSAL_WORDS_FILE name other files,
+# words are. BATTLE_REFUSAL_WORDS_FILE, GM_REFUSAL_WORDS_FILE and
+# CHARACTERS_REFUSAL_WORDS_FILE name other files,
 # resolved as GATE_HINTS_FILE is; empty means the default.
 BATTLE_REFUSAL_WORDS_FILE = BASE_DIR / (
     os.environ.get("BATTLE_REFUSAL_WORDS_FILE") or "config/battle-refusals.toml"
@@ -188,6 +192,10 @@ GM_REFUSAL_WORDS_FILE = BASE_DIR / (
     os.environ.get("GM_REFUSAL_WORDS_FILE") or "config/gm-refusals.toml"
 )
 GM_REFUSAL_WORDS = load_gm_refusal_words(GM_REFUSAL_WORDS_FILE)
+CHARACTERS_REFUSAL_WORDS_FILE = BASE_DIR / (
+    os.environ.get("CHARACTERS_REFUSAL_WORDS_FILE") or "config/characters-refusals.toml"
+)
+CHARACTERS_REFUSAL_WORDS = load_characters_refusal_words(CHARACTERS_REFUSAL_WORDS_FILE)
 
 # How many wrong guesses in a window before a hint is shown. Three because of
 # the #55 evidence, stated once beside the hints comment in common/gate.py. It

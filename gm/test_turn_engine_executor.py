@@ -591,7 +591,7 @@ class PlayerActionsTest(ExecutorTestCase):
             )
         )
 
-        reason = services.ROLL_FIXED_REASONS["location"]
+        reason = services.roll_fixed_reason("location")
         self.assertFalse(outcome.results[0].ran)
         self.assertEqual(outcome.results[0].error, reason)
         self.assertIn(reason, model.requests[1][-1]["content"])
@@ -715,7 +715,7 @@ class PlayerActionsTest(ExecutorTestCase):
         self.assertIn("Location: d100=80 -> Rural", character.dice_log)
         self.assertIn("a rolled background", outcome.results[0].result)
         with self.assertRaisesMessage(
-            services.CharacterChangeError, services.ROLL_FIXED_REASONS["location"]
+            services.CharacterChangeError, services.roll_fixed_reason("location")
         ):
             services.update_field(character.pk, "location", "City")
 
@@ -739,7 +739,7 @@ class PlayerActionsTest(ExecutorTestCase):
         )
 
         self.assertEqual(
-            outcome.results[0].error, services.ROLL_FIXED_REASONS["location"]
+            outcome.results[0].error, services.roll_fixed_reason("location")
         )
         character.refresh_from_db()
         self.assertEqual(character.location, "Rural")

@@ -887,7 +887,13 @@ module, read by `battle/refusal_words.py` into `settings.BATTLE_REFUSAL_WORDS`
 (issues #97, #86). The Games Master app's refusals (its views, hand edits,
 fights, Luck, withdrawals, the plan policy and the executor) are
 `config/gm-refusals.toml`, read by `gm/refusal_words.py` into
-`settings.GM_REFUSAL_WORDS`. All three files go through one loader,
+`settings.GM_REFUSAL_WORDS`. The characters app's field-table reasons for the
+values only a Game Master sets, and the phrase that marks a Game Master's call
+on a history line, a check's line and the skill check's options, are
+`config/characters-refusals.toml`, read by `characters/refusal_words.py` into
+`settings.CHARACTERS_REFUSAL_WORDS` (issue #85); the sheet's script gets the
+check's call note in the skill check's answer. All these files go through one
+loader,
 `common/wording.py::load_wording`, which refuses a missing or unknown key, a
 blank value or a `{name}` a sentence may not use at startup. Tests run under
 `common.wording.fixed_wording`, never the shipped sentences.

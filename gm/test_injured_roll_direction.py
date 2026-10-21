@@ -16,6 +16,7 @@ makes, and no direction the model writes changes any total.
 
 from unittest.mock import patch
 
+from characters.refusal_words import game_master_call_note
 from common.test_helpers import create_character
 
 from .engine import MODE_AIDE, MODE_PLAY
@@ -207,7 +208,7 @@ class AGameMasterOverridesTest(ExecutorTestCase):
             )
         result = outcome.results[0]
         self.assertTrue(result.ran, result.error)
-        self.assertIn("(a Game Master's call: unconscious)", result.result)
+        self.assertIn(game_master_call_note("unconscious"), result.result)
 
 
 class TheAideRollsTheCheckOnlyWhenAskedTest(ExecutorTestCase):

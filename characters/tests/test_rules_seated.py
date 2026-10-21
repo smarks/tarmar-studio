@@ -43,6 +43,7 @@ from characters.models import (
     validate_literacy_roll,
     validate_starting_age,
 )
+from characters.refusal_words import refusal_words
 from characters.rules import LocationRow, LocationTable
 from characters.services import (
     CharacterChangeError,
@@ -381,8 +382,8 @@ class OriginSkillTest(SimpleTestCase):
                 )
                 self.assertEqual(
                     recorded,
-                    f"{new_skill} (points moved from another skill: the Game "
-                    "Master's call)",
+                    f"{new_skill} (points moved from another skill: "
+                    f"{refusal_words().common.the_game_masters_call})",
                 )
                 self.assertEqual((points, character.skills), (2, {new_skill: 2}))
 

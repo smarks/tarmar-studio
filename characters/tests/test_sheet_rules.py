@@ -15,6 +15,7 @@ from django.urls import reverse
 from battle.models import Battle, BattleCombatant
 from characters import services
 from characters.models import Character
+from characters.refusal_words import refusal_words
 from characters.services import (
     FIELD_RULES,
     CharacterChangeError,
@@ -144,14 +145,20 @@ class RenameTest(BaseTestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.character.refresh_from_db()
         self.assertEqual(self.character.skills, {"survival": 4})
-        self.assertIn("the Game Master's call", self.character.history[-1]["new"])
+        self.assertIn(
+            refusal_words().common.the_game_masters_call,
+            self.character.history[-1]["new"],
+        )
 
     def test_a_skill_village_does_not_list_stays_the_game_masters(self):
         self.login_as(self.create_dm("village-gm-stealth"))
         response = self.rename("street smarts", "stealth")
         self.assertEqual(response.status_code, 200, response.content)
         self.character.refresh_from_db()
-        self.assertIn("the Game Master's call", self.character.history[-1]["new"])
+        self.assertIn(
+            refusal_words().common.the_game_masters_call,
+            self.character.history[-1]["new"],
+        )
 
     def test_the_village_choice_moves_the_origin_point_and_nothing_else(self):
         Character.objects.filter(pk=self.character.pk).update(
@@ -173,7 +180,10 @@ class RenameTest(BaseTestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.character.refresh_from_db()
         self.assertEqual(self.character.skills["broadsword"], 15)
-        self.assertIn("the Game Master's call", self.character.history[-1]["new"])
+        self.assertIn(
+            refusal_words().common.the_game_masters_call,
+            self.character.history[-1]["new"],
+        )
 
     def test_the_service_holds_the_same_rule(self):
         character = Character(skills={"coins": 3}, location="City")
@@ -183,7 +193,7 @@ class RenameTest(BaseTestCase):
             character, "coins", "arcane", is_game_master=True
         )
         self.assertEqual((points, character.skills), (3, {"arcane": 3}))
-        self.assertIn("Game Master", recorded)
+        self.assertIn(refusal_words().common.the_game_masters_call, recorded)
 
 
 class XpGrantTest(BaseTestCase):
@@ -614,7 +624,10 @@ class PriorExperienceInPlayTest(BaseTestCase):
         allowed = self.post_json(url, {"track": "merchant", "years": 1})
         self.assertEqual(allowed.status_code, 200, allowed.content)
         self.character.refresh_from_db()
-        self.assertIn("the Game Master's call", self.character.history[-1]["new"])
+        self.assertIn(
+            refusal_words().common.the_game_masters_call,
+            self.character.history[-1]["new"],
+        )
 
     def test_the_chat_path_holds_the_player_too(self):
         self.attached_and_played()
@@ -624,7 +637,7 @@ class PriorExperienceInPlayTest(BaseTestCase):
         note, _run = apply_experience_years(
             character, "merchant", 1, is_game_master=True
         )
-        self.assertIn("the Game Master's call", note)
+        self.assertIn(refusal_words().common.the_game_masters_call, note)
 
 
 class ChosenPartTest(BaseTestCase):
