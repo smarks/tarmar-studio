@@ -16,10 +16,14 @@ from tarmar_engine.classic.data import (
     DAGGER,
     HALBERD,
     LEATHER,
+    MAIN_GAUCHE,
+    SABER,
     SMALL_BOW,
+    SPEAR,
 )
 from tarmar_engine.classic.figure import Figure, create_human, create_wizard
 from tarmar_engine.classic.monsters import create_monster
+from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.state import GameState
 
 from battle import turn_menu
@@ -89,17 +93,33 @@ class ClassicMenuIsDescribedTest(BaseTestCase):
 
     def test_an_attack_reads_its_odds_and_damage_off_the_classic_figures(self):
         game = classic_game()
-        red, _blue = game.figures
+        red, blue = game.figures
         attack = self.entry(self.menu_for(game, red), "attack")
         # adjDX 10 (DX 12, leather -2) on 3d6 is 50%; the Broadsword's 2d6
-        # less the leather's 2. No average: that is the engine's to say
-        # (smarks/tarmar-engine#23), so the line does not claim one.
+        # less the leather's 2; and what a hit does on average, the engine's
+        # own figure (tarmar-engine #23).
+        forecast = game.attack_forecast(red, blue, ClassicOption.ATTACK)
         self.assertEqual(
             attack["plain"],
             "Attack Blue with the Broadsword: 10 or less on 3d6 to hit "
-            "(about 50%), 2d6 less 2 armour",
+            f"(about 50%), 2d6 less 2 armour (about {round(forecast.expected_damage)} "
+            "a hit)",
         )
         self.assertEqual(attack["cost"], "")
+
+    def test_a_ready_main_gauche_s_parry_counts_among_the_stops(self):
+        """#131: a target with a main-gauche ready in its off hand turns aside
+        one hit more, as the engine's damage roll does."""
+        red = self.armed("Red", "red", Hex(4, 4), BROADSWORD)
+        blue = create_human(
+            "Blue", 13, 11, "blue", weapons=[SABER, MAIN_GAUCHE], ready_weapon=SABER
+        )
+        blue.position = Hex(4, 5)
+        game = GameState(Arena(cols=9, rows=15), [red, blue])
+        forecast = game.attack_forecast(red, blue, ClassicOption.ATTACK)
+        self.assertEqual(forecast.armour_stops, 1)
+        attack = self.entry(self.menu_for(game, red), "attack")
+        self.assertIn(", 2d6 less 1 armour (", attack["plain"])
 
     def test_a_defending_target_is_read_as_four_dice(self):
         game = classic_game()
@@ -232,6 +252,47 @@ class ClassicMenuIsDescribedTest(BaseTestCase):
             r"^Charge Blue: move up to 5 hexes and attack with the Broadsword: ",
         )
 
+    def test_a_charge_that_ends_on_the_flank_takes_the_flank_bonus(self):
+        """The charge line reads the blow from where the charge ends
+        (tarmar-engine #23), not from where the charger stands: Red starts in
+        Blue's front arc, where a blow would take no facing bonus, and its
+        charge ends on Blue's flank, which gives the +2 the blow will be
+        declared with."""
+        red = self.armed("Red", "red", Hex(6, 8), BROADSWORD)
+        blue = self.armed("Blue", "blue", Hex(4, 8))
+        blue.facing = 0
+        game = GameState(Arena(cols=9, rows=15), [red, blue])
+        from_the_start = game.attack_forecast(red, blue, ClassicOption.ATTACK)
+        self.assertEqual((from_the_start.zone, from_the_start.needed), ("front", 11))
+        line = self.entry(self.menu_for(game, red), "charge_attack")["plain"]
+        self.assertRegex(
+            line,
+            r"^Charge Blue: move up to 5 hexes and attack with the Broadsword: "
+            r"13 or less on 3d6 to hit ",
+        )
+        self.assertNotIn("before any", line)
+
+    def test_a_pole_charge_in_a_straight_line_adds_its_die(self):
+        """A pole used in a charge of three or more straight hexes does an
+        extra die (p.12), the engine's ``extra_dice``."""
+        spear = self.armed("Red", "red", Hex(4, 3), SPEAR)
+        self.assertRegex(
+            self.charge_line([spear, self.armed("Blue", "blue", Hex(4, 7))], spear),
+            r"^Charge Blue: move up to 5 hexes and attack with the Spear: \d+ or "
+            r"less on 3d6 to hit \(about \d+%\), 1d6\+1, and 1d6 more for the "
+            r"charge \(about \d+ a hit\)$",
+        )
+
+    def test_armour_after_a_pole_s_charge_die_comes_off_the_whole(self):
+        spear = self.armed("Red", "red", Hex(4, 3), SPEAR)
+        blue = self.armed("Blue", "blue", Hex(4, 7))
+        blue.armor = LEATHER
+        self.assertRegex(
+            self.charge_line([spear, blue], spear),
+            r", 1d6\+1, and 1d6 more for the charge, less 2 armour \(about \d+ a "
+            r"hit\)$",
+        )
+
     def test_a_pole_weapon_s_charge_jabs_two_hexes_off(self):
         """A charge ending two hexes off still strikes with a pole (p.12, #56)."""
         halberd = self.armed("Red", "red", Hex(4, 2), HALBERD)
@@ -285,12 +346,16 @@ class ClassicMenuIsDescribedTest(BaseTestCase):
         self.assertNotIn("3d6", line)
 
     def test_the_chance_counts_the_automatic_hits_and_misses(self):
-        game = classic_game()
         # Melee p.10: a 3, 4 or 5 always hits and a 16, 17 or 18 always
-        # misses, so no to-hit number makes a classic blow certain either way.
-        self.assertGreater(turn_menu._classic_hit_chance(game, 0, 3), 0)
-        self.assertLess(turn_menu._classic_hit_chance(game, 18, 3), 100)
-        self.assertEqual(turn_menu._classic_hit_chance(game, 10, 3), 50)
+        # misses, so no to-hit number makes a classic blow certain either way:
+        # 10 of 216 rolls hit whatever the adjDX, and 10 of 216 miss.
+        for dexterity, chance in ((1, "about 5%"), (24, "about 95%")):
+            with self.subTest(dexterity=dexterity):
+                game = classic_game()
+                red, _blue = game.figures
+                red.dexterity = dexterity
+                attack = self.entry(self.menu_for(game, red), "attack")
+                self.assertIn(f"on 3d6 to hit ({chance})", attack["plain"])
 
     def test_a_wizard_s_cast_says_what_it_invests(self):
         wizard = create_wizard(

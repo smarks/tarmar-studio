@@ -363,13 +363,17 @@ class ClassicProfile(BattleProfile):
             sequence += 1
             return decision.chosen
 
+        from .classic_adaptation import label_sides
+
+        # Every side named as a reader knows it (#909), from the figures as
+        # they stand: a battle saved before its figures carried labels, and a
+        # figure renamed since the last turn, both read right.
+        label_sides(state.figures)
         lines: list[str] = []
         get_profile(self.name).run_turn(state, roller, lines.append, choose)
 
-        from .classic_adaptation import name_sides_in_lines
-
         events = list(decisions)
-        for line in name_sides_in_lines(lines, state.figures):
+        for line in lines:
             events.append(
                 {
                     "turn": turn,

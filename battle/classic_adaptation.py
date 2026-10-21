@@ -53,12 +53,16 @@ Tarmar-only battle never pulls it in.
 
 from __future__ import annotations
 
-import copy
-import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from . import policy
 from .engine.state import CombatantState, WeaponState
+
+if TYPE_CHECKING:
+    # Types only: the classic subpackage stays out of every import chain
+    # until a function that needs it runs.
+    from tarmar_engine.classic.figure import Figure, SideLabel
 
 #: The studio armour tier a classic armour stands in for. The studio grades
 #: armour in four tiers; classic lists six pieces. Cloth and half-plate have
@@ -158,83 +162,54 @@ def classic_team(figure) -> str:
     )
 
 
-def side_label(figure, roster_position: int) -> str:
-    """What a reader calls the side ``figure`` fights on (#909).
+def side_label(figure: Figure, roster_position: int) -> SideLabel:
+    """What a reader calls the side ``figure`` fights on (#909), as the
+    engine's :class:`~tarmar_engine.classic.figure.SideLabel` (tarmar-engine
+    #25).
 
-    The team's name when the side has one; else the figure's own name, since
-    a teamless figure is a side of one; else :data:`NAMELESS_SIDE_LABEL` by
-    its 1-based ``roster_position``.
-    """
-    team = classic_team(figure)
-    if team:
-        return team
-    return figure.name.strip() or NAMELESS_SIDE_LABEL.format(position=roster_position)
-
-
-def name_sides_in_lines(lines: list[str], figures: list) -> list[str]:
-    """The classic runner's log lines, with every side named for a reader.
-
-    The classic narrative names a figure ``"Name (side)"`` and a win
-    ``"🏆 The <side> hold the field — victory!"``, printing the side key as
-    it stands. Neither key is a reader's word. A teamless figure's side is
-    its uid, a ``BattleCombatant`` row pk (``CLASSIC_UID_IS_ROW_PK``), so
-    unchanged the log would read "Yaria Hawkridge (743)" and "The 743 hold
-    the field" (#909): it is named by :func:`side_label` instead, and its
-    win reads "🏆 Yaria Hawkridge holds the field — victory!". A teamed
-    figure's side carries :data:`TEAM_SIDE_PREFIX` (#930), so its token is
-    rewritten to the team's name: "Ada (team:Red)" reads "Ada (Red)" and
-    "The team:Red hold the field" reads "The Red hold the field". Because
-    the two kinds of key never collide, neither do their lines: team "7"'s
-    win and the teamless row-7 figure's win are different engine lines and
-    stay different here.
-
-    The tokens to replace come from the engine's own formatters, so a change
-    to how the engine prints a figure or a win is followed here rather than
-    silently missed. They are replaced in one pass, longest first: a
-    disambiguated name such as "Thorn (2)" holds the token of a figure named
-    "Thorn" whose row happens to be 2, and must not be read as it. Every
-    figure's token is in that pass, so "Thorn (2) (team:Red)" is matched
-    whole before the teamless "Thorn (2)" can match inside it.
+    A teamed figure's side is its team, named in the parens: "Ada (Red)",
+    "The Red hold the field". A teamless figure is a side of one, named by
+    its own name, or :data:`NAMELESS_SIDE_LABEL` by its 1-based
+    ``roster_position`` when it has none: "Yaria Hawkridge swings", "Yaria
+    Hawkridge holds the field". Either way the side key, a row pk for a
+    teamless figure (``CLASSIC_UID_IS_ROW_PK``) or :data:`TEAM_SIDE_PREFIX`
+    and the team's name for a teamed one, never reaches a reader.
 
     Args:
-        lines: Log lines as the classic runner wrote them.
-        figures: The battle's classic figures, in roster order.
+        figure: The classic figure.
+        roster_position: Its 1-based place in the battle's roster.
 
     Returns:
-        The lines, relabelled, in the same order.
+        The label to give the figure.
     """
-    # The engine's private figure formatter, used on purpose: it is the one
-    # definition of the "Name (side)" token, so matching its output cannot
-    # drift from what the engine printed (smarks/tarmar-engine#25 would let
-    # the caller hand the engine these labels instead).
-    from tarmar_engine.classic.narrative import _name, narrate_victory
+    from tarmar_engine.classic.figure import SideLabel
 
-    labels: dict[str, str] = {}
-    victories: dict[str, str] = {}
-    for roster_position, figure in enumerate(figures, start=1):
-        team = classic_team(figure)
-        if team:
-            # The same formatter, handed the team's name where the side key
-            # stood, so a teamed figure reads exactly as it did before #930.
-            as_named = copy.copy(figure)
-            as_named.side = team
-            labels[_name(figure)] = _name(as_named)
-            victories[narrate_victory(figure.side)] = narrate_victory(team)
-            continue
-        label = side_label(figure, roster_position)
-        labels[_name(figure)] = label
-        victories[narrate_victory(figure.side)] = (
-            f"🏆 {label} holds the field — victory!"
-        )
-    if not labels:
-        return list(lines)
-    token = re.compile(
-        "|".join(re.escape(found) for found in sorted(labels, key=len, reverse=True))
+    team = classic_team(figure)
+    if team:
+        return SideLabel(team, team=True)
+    return SideLabel(
+        figure.name.strip() or NAMELESS_SIDE_LABEL.format(position=roster_position),
+        team=False,
     )
-    return [
-        victories.get(line) or token.sub(lambda match: labels[match.group(0)], line)
-        for line in lines
-    ]
+
+
+def label_sides(figures: list[Figure]) -> None:
+    """Give each classic figure its :func:`side_label`, by its place in
+    ``figures``, the battle's roster order.
+
+    Labelled when the figures are built (:func:`classic_figures`) and again
+    before every turn (``ClassicProfile.run_turn``), from the figures as they
+    stand: a battle snapshotted before tarmar-engine 0.9.19 loads unlabelled,
+    and a figure renamed mid-battle (``ClassicProfile.rename``) is a side of
+    one whose label is its name, so a label kept from an earlier turn would
+    print a name the figure no longer has. The label is derived, never
+    edited on its own.
+
+    Args:
+        figures: The battle's classic figures, in roster order.
+    """
+    for roster_position, figure in enumerate(figures, start=1):
+        figure.side_label = side_label(figure, roster_position)
 
 
 @dataclass(frozen=True)
@@ -460,6 +435,8 @@ def classic_figures(snapshots: list[CombatantState], arena) -> ClassicRoster:
         )
         if not matched:
             disarmed.append(snapshot.name)
+    # Each side named as a reader knows it, by the engine (tarmar-engine #25).
+    label_sides(figures)
     return ClassicRoster(
         figures=figures,
         disarmed=tuple(disarmed),
