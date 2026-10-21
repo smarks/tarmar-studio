@@ -26,8 +26,10 @@ from tarmar_engine.magic import (
     SpellEffectKind,
 )
 
-from battle.magic_rules import load_magic_rules, magic_rules
+from battle.magic_rules import CASTING_DICE, load_magic_rules, magic_rules
+from common.rolling import parse_dice_specification
 from reference.paths import CANON_MAGIC_RULES_FILE_NAME, DEFAULT_CANON_DIR
+from reference.rules_file import forget_values_derived_from_rules
 
 #: The default canon's magic rules: the numbers its magic-mechanics pages
 #: state, whichever canon is loaded.
@@ -172,7 +174,7 @@ def rules_with_channel(
 
 
 def casting_faces(natural_total: int) -> list[int]:
-    """Faces of the casting roll's 3d6 summing to ``natural_total``.
+    """Faces of the casting roll's dice summing to ``natural_total``.
 
     Lets a test throw a total it read from the loaded canon's rules without
     writing that total down.
@@ -181,12 +183,12 @@ def casting_faces(natural_total: int) -> list[int]:
         natural_total: The sum wanted.
 
     Returns:
-        Three faces, highest first, summing to ``natural_total``.
+        One face per die, highest first, summing to ``natural_total``.
 
     Raises:
         ValueError: No faces of the casting dice sum to it.
     """
-    dice, sides = 3, 6
+    dice, sides, _ = parse_dice_specification(CASTING_DICE)
     if not dice <= natural_total <= dice * sides:
         raise ValueError(f"no {dice}d{sides} faces sum to {natural_total}")
     faces: list[int] = []
@@ -202,12 +204,19 @@ def casting_faces(natural_total: int) -> list[int]:
 def seated_rules(rules: MagicRules = INVENTED_RULES) -> Iterator[None]:
     """Seat ``rules`` as the loaded canon's for every caller, then forget them.
 
+    Every value built from the loaded rules is forgotten too, before and
+    after: the Games Master's magic section is built from them once and held
+    for the process (``gm.engine.section_magic``, issue #48), so a seated test
+    reads it built from the seated rules, and no later test does.
+
     Args:
         rules: The rules :func:`battle.magic_rules.magic_rules` answers with.
     """
     magic_rules.cache_clear()
+    forget_values_derived_from_rules()
     try:
         with patch("battle.magic_rules.load_magic_rules", return_value=rules):
             yield
     finally:
         magic_rules.cache_clear()
+        forget_values_derived_from_rules()

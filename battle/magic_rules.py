@@ -72,12 +72,18 @@ is required: a canon states each number rather than inheriting an engine
 default. An unknown key at any level is an error, since it is most likely a
 misspelling of a known one; so is a key repeated in one object, two tiers or
 two failure bands sharing a ``key``, and an attribute named twice in
-``borrowing.debt_attributes``. ``rulings`` is optional and is the canon's own
+``borrowing.debt_attributes``. So is a natural total its dice cannot roll
+(a tier's, the casting roll's failing ones against :data:`CASTING_DICE`, and
+Push's and the Debt Roll's automatic ones against their own dice), a success
+tier at or above ``casting_failure.fumble_floor``, which the board would never
+play, and a ``borrowing.max_debt`` of 0, which leaves nothing to borrow
+(issue #48). ``rulings`` is optional and is the canon's own
 record of the readings its pages left open; like every canon rules file's, it
 is checked for shape and not otherwise read (``reference.rules_file``).
 """
 
 import functools
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -100,8 +106,16 @@ from tarmar_engine.magic import (
 )
 from tarmar_engine.spells import SPELLS
 
+from common.rolling import dice_total_range
 from reference.paths import MAGIC_RULES_FILE
 from reference.rules_file import RulesFileError, RulesFileReader
+
+#: The dice the engine makes a casting roll on. ``tarmar_engine`` rolls them
+#: inline and exports no constant, so this is the studio's one statement of
+#: them: the loader holds the canon's casting totals to their range, and
+#: ``gm.engine`` states them in the prompt, where the survival save, rolled on
+#: the same dice, is said beside them (issue #48).
+CASTING_DICE = "3d6"
 
 TIER_FIELDS = ("key", "label", "natural_totals", "effect_bonus", "mana_refund")
 BAND_FIELDS = (
@@ -187,6 +201,25 @@ class _MagicRulesFileReader(RulesFileReader):
 
     error_class = MagicRulesError
 
+    def totals_rolled_on(
+        self, totals: Iterable[int], dice: str, field_path: str
+    ) -> None:
+        """Natural totals ``dice`` can roll, every one of them (issue #48).
+
+        Args:
+            totals: The canon's natural totals.
+            dice: The dice they are totals of.
+            field_path: Where the totals are in the file.
+        """
+        lowest, highest = dice_total_range(dice)
+        outside = sorted(total for total in totals if not lowest <= total <= highest)
+        if outside:
+            self.fail(
+                field_path,
+                f"has {outside}, which {dice} cannot roll (it rolls {lowest} to "
+                f"{highest})",
+            )
+
     def engine_spell_key(self, key: str, field_path: str) -> None:
         """A key the pinned engine's spell catalog has."""
         if key not in SPELLS:
@@ -196,7 +229,7 @@ class _MagicRulesFileReader(RulesFileReader):
         """One entry of ``casting_success_tiers``."""
         fields = self.json_object(value, field_path, TIER_FIELDS)
         with self.wrapped_value_errors(field_path):
-            return CastingSuccessTier(
+            tier = CastingSuccessTier(
                 key=self.text(fields["key"], f"{field_path}.key"),
                 label=self.text(fields["label"], f"{field_path}.label"),
                 natural_totals=self.integer_set(
@@ -209,6 +242,10 @@ class _MagicRulesFileReader(RulesFileReader):
                     fields["mana_refund"], f"{field_path}.mana_refund"
                 ),
             )
+        self.totals_rolled_on(
+            tier.natural_totals, CASTING_DICE, f"{field_path}.natural_totals"
+        )
+        return tier
 
     def control_band(self, value: Any, field_path: str) -> ControlBand:
         """One entry of ``push.failure_bands``."""
@@ -266,7 +303,7 @@ class _MagicRulesFileReader(RulesFileReader):
         bands = self.entries(fields["failure_bands"], bands_path, self.control_band)
         self.unique_keys(bands, bands_path)
         with self.wrapped_value_errors(field_path):
-            return PushRules(
+            push = PushRules(
                 control_dice=self.text(
                     fields["control_dice"], f"{field_path}.control_dice"
                 ),
@@ -297,6 +334,12 @@ class _MagicRulesFileReader(RulesFileReader):
                     f"{field_path}.spell_effect_bonus_per_mana",
                 ),
             )
+        self.totals_rolled_on(
+            push.automatic_runaway_totals,
+            push.control_dice,
+            f"{field_path}.automatic_runaway_totals",
+        )
+        return push
 
     def channel_derivation(self, value: Any, field_path: str) -> ChannelDerivation:
         """One entry of ``channel.derivations``."""
@@ -354,7 +397,7 @@ class _MagicRulesFileReader(RulesFileReader):
             return None
         fields = self.json_object(value, field_path, BORROWING_FIELDS)
         with self.wrapped_value_errors(field_path):
-            return BorrowingRules(
+            borrowing = BorrowingRules(
                 debt_dice=self.text(fields["debt_dice"], f"{field_path}.debt_dice"),
                 debt_attributes=self.text_list(
                     fields["debt_attributes"], f"{field_path}.debt_attributes"
@@ -377,6 +420,17 @@ class _MagicRulesFileReader(RulesFileReader):
                     f"{field_path}.refunds_pay_debt_first",
                 ),
             )
+        self.totals_rolled_on(
+            borrowing.automatic_failure_totals,
+            borrowing.debt_dice,
+            f"{field_path}.automatic_failure_totals",
+        )
+        if borrowing.max_debt == 0:
+            self.fail(
+                f"{field_path}.max_debt",
+                "must be at least 1 or null; 0 leaves nothing to borrow",
+            )
+        return borrowing
 
     def roll_under_rule(self, value: Any, field_path: str) -> RollUnderRule:
         """``runaway.self_anchor`` or ``runaway.helper_anchor``: dice against
@@ -462,7 +516,7 @@ class _MagicRulesFileReader(RulesFileReader):
             return None
         fields = self.json_object(value, field_path, CASTING_FAILURE_FIELDS)
         with self.wrapped_value_errors(field_path):
-            return CastingFailureRules(
+            casting_failure = CastingFailureRules(
                 fumble_floor=self.integer(
                     fields["fumble_floor"], f"{field_path}.fumble_floor"
                 ),
@@ -473,6 +527,50 @@ class _MagicRulesFileReader(RulesFileReader):
                     fields["runaway_total"], f"{field_path}.runaway_total"
                 ),
             )
+        self.totals_rolled_on(
+            [casting_failure.fumble_floor], CASTING_DICE, f"{field_path}.fumble_floor"
+        )
+        # The Runaway total before the mana-lost totals it is one of, so a
+        # Runaway total past the dice is named as itself.
+        if casting_failure.runaway_total is not None:
+            self.totals_rolled_on(
+                [casting_failure.runaway_total],
+                CASTING_DICE,
+                f"{field_path}.runaway_total",
+            )
+        self.totals_rolled_on(
+            casting_failure.mana_lost_totals,
+            CASTING_DICE,
+            f"{field_path}.mana_lost_totals",
+        )
+        return casting_failure
+
+    def tiers_below_the_fumble_floor(
+        self,
+        tiers: tuple[CastingSuccessTier, ...],
+        casting_failure: CastingFailureRules | None,
+    ) -> None:
+        """Every success tier's totals below the casting roll's fumble floor.
+
+        A natural total at or above the floor fails whatever the attribute,
+        so a tier there would never be played (issue #48).
+
+        Args:
+            tiers: The file's ``casting_success_tiers``, in its order.
+            casting_failure: Its ``casting_failure``, or ``None``.
+        """
+        if casting_failure is None:
+            return
+        floor = casting_failure.fumble_floor
+        for index, tier in enumerate(tiers):
+            failing = sorted(total for total in tier.natural_totals if total >= floor)
+            if failing:
+                self.fail(
+                    f"casting_success_tiers[{index}].natural_totals",
+                    f"has {failing}, at or above casting_failure.fumble_floor "
+                    f"{floor}: a natural total there fails, so the tier is never "
+                    "played",
+                )
 
     def magic_rules(self, value: Any) -> MagicRules:
         """The whole file."""
@@ -494,13 +592,15 @@ class _MagicRulesFileReader(RulesFileReader):
         borrowing = self.borrowing(fields["borrowing"], "borrowing")
         with self.wrapped_value_errors("borrowing"):
             rules = replace(rules, borrowing=borrowing)
+        casting_failure = self.casting_failure(
+            fields["casting_failure"], "casting_failure"
+        )
+        self.tiers_below_the_fumble_floor(tiers, casting_failure)
         return replace(
             rules,
             runaway=self.runaway(fields["runaway"], "runaway"),
             counterspell=self.counterspell(fields["counterspell"], "counterspell"),
-            casting_failure=self.casting_failure(
-                fields["casting_failure"], "casting_failure"
-            ),
+            casting_failure=casting_failure,
         )
 
 
@@ -524,6 +624,22 @@ def load_magic_rules(path: Path) -> MagicRules:
     """
     reader = _MagicRulesFileReader(path)
     return reader.magic_rules(reader.parsed_file())
+
+
+def totals_in_words(totals: Iterable[int]) -> str:
+    """Natural totals as the prompt and the turn menu say them: "17 or 18".
+
+    The one place a set of the canon's natural totals (a tier's, the casting
+    roll's mana-spending ones, the Debt Roll's automatic failures) is put into
+    words, lowest first (issue #48).
+
+    Args:
+        totals: The natural totals, in any order.
+
+    Returns:
+        The totals ascending, joined with " or "; "" when there are none.
+    """
+    return " or ".join(str(total) for total in sorted(totals))
 
 
 @functools.cache

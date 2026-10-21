@@ -79,7 +79,7 @@ from tarmar_engine.spells import get_spell
 from tarmar_engine.state import BattleState, CombatantState
 
 from . import magic_bounds
-from .magic_rules import magic_rules
+from .magic_rules import magic_rules, totals_in_words
 from .persistence import TARMAR_PROFILE
 
 #: What DODGE and DEFEND guard against, in the words of the "Defending and
@@ -504,12 +504,11 @@ def _when_mana_is_paid() -> str:
     """
     casting_failure = magic_rules().casting_failure
     lost_totals = (
-        [] if casting_failure is None else sorted(casting_failure.mana_lost_totals)
+        frozenset() if casting_failure is None else casting_failure.mana_lost_totals
     )
     if not lost_totals:
         return "paid only if it succeeds"
-    named = " or ".join(str(total) for total in lost_totals)
-    return f"paid only if it succeeds or the roll is {named}"
+    return f"paid only if it succeeds or the roll is {totals_in_words(lost_totals)}"
 
 
 def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
