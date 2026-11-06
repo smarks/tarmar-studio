@@ -1,0 +1,10 @@
+gate: pass
+commit: 4a237fd4b16f136e8820cf127eeaa4dd08244e38
+recorded: 2026-11-06T22:45:52Z
+host: Spencers-MacBook-Pro.local
+canon: tarmar
+canon-dir: /Users/sam/dev/tarmar-canon
+canon-commit: 8f95a6d18c442c484ff2bd62e57a30f55379fc82
+e2e-port: 8480
+default-canon-e2e-port: 8481
+steps: ruff, ruff format, pyright, makemigrations, build_guides, pytest (Tarmar canon), jest (Tarmar canon), playwright (Tarmar canon), pytest (default canon), jest (default canon), playwright (default canon)
