@@ -139,17 +139,46 @@ def test_dry_run_changes_nothing_but_shows_every_step(
     assert "kickstart" not in dry_run_output
 
 
-def plan_with_pg_hba(tmp_path: Path, hba_text: str) -> str:
-    """The dry-run plan with the installer pointed at a given pg_hba.conf."""
-    hba = tmp_path / "pg_hba.conf"
-    hba.write_text(hba_text)
+PASSWORD_ONLY_HBA = (
+    "local   all   all   peer\nhost all all 127.0.0.1/32 scram-sha-256\n"
+    "# host all all ::1/128 trust\n"
+)
+INSTALLER_HBA_LINE = 'POSTGRES_HBA="/opt/homebrew/var/postgresql@16/pg_hba.conf"'
+INSTALLER_HOME_LINE = 'INVOKING_HOME="/Users/${INVOKING_USER}"'
+needs_bsd_stat = pytest.mark.skipif(
+    subprocess.run(["stat", "-f", "%Lp", "/"], capture_output=True).returncode != 0,
+    reason="BSD stat (macOS), as the installer runs on",
+)
+
+
+def hermetic_dry_run_plan(
+    tmp_path: Path, *, hba_text: str = PASSWORD_ONLY_HBA, home_mode: int = 0o700
+) -> str:
+    """The dry-run plan with both preflight inputs supplied by the test.
+
+    The installer checks the developer's home folder and Postgres's
+    pg_hba.conf. Both are pointed at files under ``tmp_path``, each defaulting
+    to the state the preflight accepts, so a test that varies one is never
+    failed by how the machine running it happens to be set up (issue #171).
+    """
+    hba_file = tmp_path / "pg_hba.conf"
+    hba_file.write_text(hba_text)
+    home_folder = tmp_path / "developer"
+    home_folder.mkdir()
+    home_folder.chmod(home_mode)
     # The installer sources repository.sh from its own directory.
     (tmp_path / "repository.sh").write_text(REPOSITORY_PATH.read_text())
+    source = INSTALLER_PATH.read_text()
+    assert INSTALLER_HBA_LINE in source, (
+        "the installer no longer names pg_hba.conf this way"
+    )
+    assert INSTALLER_HOME_LINE in source, (
+        "the installer no longer sets INVOKING_HOME this way"
+    )
     patched = tmp_path / "install-runner.sh"
     patched.write_text(
-        INSTALLER_PATH.read_text().replace(
-            'POSTGRES_HBA="/opt/homebrew/var/postgresql@16/pg_hba.conf"',
-            f'POSTGRES_HBA="{hba}"',
+        source.replace(INSTALLER_HBA_LINE, f'POSTGRES_HBA="{hba_file}"').replace(
+            INSTALLER_HOME_LINE, f'INVOKING_HOME="{home_folder}"'
         )
     )
     completed = subprocess.run(
@@ -158,6 +187,7 @@ def plan_with_pg_hba(tmp_path: Path, hba_text: str) -> str:
         text=True,
         check=False,
     )
+    home_folder.chmod(0o700)
     assert completed.returncode == 0, completed.stderr
     return completed.stdout
 
@@ -166,8 +196,9 @@ def test_installer_sees_a_trusting_postgres(tmp_path: Path):
     # The hole the separate account exists to close: a local Postgres that
     # trusts every local connection lets a job act as its superuser. The dry
     # run reports where the real run stops; the message names the fix.
-    plan = plan_with_pg_hba(
-        tmp_path, "local   all   all   trust\nhost all all 127.0.0.1/32 trust\n"
+    plan = hermetic_dry_run_plan(
+        tmp_path,
+        hba_text="local   all   all   trust\nhost all all 127.0.0.1/32 trust\n",
     )
     assert "would refuse" in plan
     assert "trusts local connections" in plan
@@ -175,44 +206,12 @@ def test_installer_sees_a_trusting_postgres(tmp_path: Path):
 
 
 def test_installer_accepts_a_postgres_that_asks_for_a_password(tmp_path: Path):
-    plan = plan_with_pg_hba(
-        tmp_path,
-        "local   all   all   peer\nhost all all 127.0.0.1/32 scram-sha-256\n"
-        "# host all all ::1/128 trust\n",
-    )
+    plan = hermetic_dry_run_plan(tmp_path, hba_text=PASSWORD_ONLY_HBA)
     assert "would refuse" not in plan
     assert "does not trust local connections" in plan
 
 
-def plan_with_home_mode(tmp_path: Path, mode: int) -> str:
-    """The dry-run plan with the developer's home a directory of ``mode``."""
-    home = tmp_path / "developer"
-    home.mkdir()
-    home.chmod(mode)
-    (tmp_path / "repository.sh").write_text(REPOSITORY_PATH.read_text())
-    patched = tmp_path / "install-runner.sh"
-    source = INSTALLER_PATH.read_text()
-    assert 'INVOKING_HOME="/Users/${INVOKING_USER}"' in source
-    patched.write_text(
-        source.replace(
-            'INVOKING_HOME="/Users/${INVOKING_USER}"', f'INVOKING_HOME="{home}"'
-        )
-    )
-    completed = subprocess.run(
-        ["bash", str(patched), "--dry-run", "--fresh"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    home.chmod(0o700)
-    assert completed.returncode == 0, completed.stderr
-    return completed.stdout
-
-
-@pytest.mark.skipif(
-    subprocess.run(["stat", "-f", "%Lp", "/"], capture_output=True).returncode != 0,
-    reason="BSD stat (macOS), as the installer runs on",
-)
+@needs_bsd_stat
 @pytest.mark.parametrize("mode", [0o750, 0o711, 0o705])
 def test_a_home_staff_or_anyone_can_enter_is_refused_before_the_account(
     tmp_path: Path, mode: int
@@ -220,19 +219,16 @@ def test_a_home_staff_or_anyone_can_enter_is_refused_before_the_account(
     # macOS puts every local account in staff, the runner's included, so a
     # primary group of its own keeps nothing out (issue #946): the home's
     # mode must, and the plan says so before it creates the account.
-    plan = plan_with_home_mode(tmp_path, mode)
+    plan = hermetic_dry_run_plan(tmp_path, home_mode=mode)
     assert "would refuse" in plan
     assert "chmod 700" in plan
     assert "~/Public" in plan
     assert plan.index("chmod 700") < plan.index("sysadminctl -addUser")
 
 
-@pytest.mark.skipif(
-    subprocess.run(["stat", "-f", "%Lp", "/"], capture_output=True).returncode != 0,
-    reason="BSD stat (macOS), as the installer runs on",
-)
+@needs_bsd_stat
 def test_a_home_only_its_owner_can_enter_passes_the_preflight(tmp_path: Path):
-    plan = plan_with_home_mode(tmp_path, 0o700)
+    plan = hermetic_dry_run_plan(tmp_path, home_mode=0o700)
     assert "is drwx------" in plan
     assert "would refuse" not in plan
 
