@@ -12,15 +12,16 @@ from unittest.mock import patch
 
 from django.utils import timezone
 
-from accounts import views as accounts_views
+from accounts import login_limit
 from common.models import RateLimitCounter
-from common.test_helpers import TEST_PASSWORD, BaseTestCase
+from common.test_helpers import TEST_CLIENT_ADDRESS, TEST_PASSWORD, BaseTestCase
 
 LOGIN_URL = "/tarmar/accounts/login/"
 PASSWORD = TEST_PASSWORD
 WRONG_PASSWORD = "not-the-password"
 ATTEMPTS_BEFORE_BLOCK = 10
-LOGIN_FAILURES_KEY = "rate_limit:login_failures:ip_127.0.0.1"
+#: The counter key for the address Django's test client arrives from.
+LOGIN_FAILURES_KEY = login_limit.login_failures_key(TEST_CLIENT_ADDRESS)
 
 
 class LoginRateLimitTest(BaseTestCase):
@@ -132,14 +133,15 @@ class LoginRateLimitExpiryTest(BaseTestCase):
     def test_a_refund_that_lands_after_the_window_expired_still_signs_you_in(self):
         """The window can elapse between the charge and the refund too.
 
-        Patches ``accounts.views.release`` -- the call the view makes after
-        confirming the login -- so that, just before it runs for real, the
-        counter's window is pushed into the past from underneath it. That
-        reproduces "the window closed while the password was being
-        checked" without needing the 300-second wait, and without knowing
-        anything about how release() itself is implemented.
+        Patches ``accounts.login_limit.release`` -- the call the limiter
+        makes after confirming the login (it moved there from the view when
+        issue #173 made the admin's sign-in share it) -- so that, just before
+        it runs for real, the counter's window is pushed into the past from
+        underneath it. That reproduces "the window closed while the password
+        was being checked" without needing the 300-second wait, and without
+        knowing anything about how release() itself is implemented.
         """
-        real_release = accounts_views.release
+        real_release = login_limit.release
 
         def expire_then_release(key, *args, **kwargs):
             RateLimitCounter.objects.filter(pk=key).update(
@@ -147,7 +149,7 @@ class LoginRateLimitExpiryTest(BaseTestCase):
             )
             return real_release(key, *args, **kwargs)
 
-        with patch.object(accounts_views, "release", side_effect=expire_then_release):
+        with patch.object(login_limit, "release", side_effect=expire_then_release):
             response = self._attempt()
 
         self.assertEqual(response.status_code, 302)

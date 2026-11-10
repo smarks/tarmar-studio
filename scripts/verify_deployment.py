@@ -330,9 +330,10 @@ def main(argv: list[str] | None = None) -> int:
         referer=referer_for(origin, base, "/gate/"),
         origin=origin,
     )
-    # Not the status alone: a refused passphrase, a CSRF failure and a session
-    # cookie that never came back all answer 200 with the gate page again, and
-    # every page after this one would then be checked against that page.
+    # Not the status alone: a refused passphrase and a session cookie that
+    # never came back both answer 200 with the gate page again (a CSRF failure
+    # is Django's 403 since #175), and every page after this one would then
+    # be checked against that page.
     gate_passed = status == 200 and "passphrase" not in body
     if not check(
         "POST /gate/ authenticates",

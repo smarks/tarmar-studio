@@ -121,11 +121,17 @@ from the account, never from the request body:
 
 `common/middleware.py::PublicPathPassphraseMiddleware` subclasses
 `speak_friend.middleware.PassphraseMiddleware` and sits between CSRF and
-authentication in `settings.MIDDLEWARE`. A `POST /gate/` is intercepted by the
-middleware — there is no `/gate/` route in `tarmar_studio/urls.py`. The answer
-is compared as a SHA-256 of the normalised string
-(`common/gate.py::normalize_passphrase`, `strip().lower()`), and a pass sets the
-session flag `passphrase_authenticated`.
+authentication in `settings.MIDDLEWARE`. A `POST /gate/` (the path is
+`common/gate.py::GATE_PATH`) is intercepted by the middleware — there is no
+`/gate/` route in `tarmar_studio/urls.py`. Because it never reaches a view,
+`CsrfViewMiddleware.process_view` never sees it; `GateRateLimitMiddleware`,
+listed just before the gate, runs Django's CSRF check on it itself and counts
+only a POST to that path as a guess (#175). The answer is compared as a SHA-256
+of the normalised string (`common/gate.py::normalize_passphrase`,
+`strip().lower()`), and a pass sets the session flag `passphrase_authenticated`.
+`XFrameOptionsMiddleware` is listed before both, since a response the gate
+answers itself passes back only through what precedes it (#176);
+`common/middleware.py::require_gate_middleware_order` refuses to start otherwise.
 
 The gate is not in front of *quite* everything. `common/public_paths.py` carves
 out `PUBLIC_PATH_PREFIXES = ("/tarmar/battles/", "/tarmar/accounts/login/",
@@ -383,16 +389,19 @@ Middleware order matters and is fixed in `tarmar_studio/settings.py`:
 1. `common.middleware.TrustedProxyClientIPMiddleware` — first, so everything
    downstream reading `REMOTE_ADDR` agrees on the client.
 2. `SecurityMiddleware`
-3. `WhiteNoiseMiddleware`
-4. `SessionMiddleware` (database-backed; no `SESSION_ENGINE` is set anywhere, so
+3. `XFrameOptionsMiddleware` — outside the gate, so the gate's own pages carry
+   the header too (#176)
+4. `WhiteNoiseMiddleware`
+5. `SessionMiddleware` (database-backed; no `SESSION_ENGINE` is set anywhere, so
    Django's default applies)
-5. `CommonMiddleware`
-6. `CsrfViewMiddleware`
-7. `common.middleware.GateRateLimitMiddleware`
-8. `common.middleware.PublicPathPassphraseMiddleware`
-9. `AuthenticationMiddleware`
-10. `MessageMiddleware`
-11. `XFrameOptionsMiddleware`
+6. `CommonMiddleware`
+7. `CsrfViewMiddleware`
+8. `common.middleware.GateRateLimitMiddleware` — the gate POST's CSRF check and
+   guess count (#175)
+9. `common.middleware.PublicPathPassphraseMiddleware`
+10. `AuthenticationMiddleware`
+11. `common.middleware.RenderedMethodNotAllowedMiddleware`
+12. `MessageMiddleware`
 
 ```mermaid
 sequenceDiagram

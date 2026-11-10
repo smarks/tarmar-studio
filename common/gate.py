@@ -40,6 +40,27 @@ def normalize_passphrase(value: str) -> str:
     return value.strip().lower()
 
 
+#: The path the gate's form posts to. speak_friend answers exactly this path
+#: in ``PassphraseMiddleware.__call__`` and spells it there itself; this is the
+#: one spelling on this side of the dependency, read by the limiter that
+#: counts guesses (``common.middleware.GateRateLimitMiddleware``) and by the
+#: form in ``templates/gate.html`` through the ``gate`` context processor
+#: (issue #175). There is no URL route for it, so ``reverse()`` cannot name it.
+GATE_PATH = "/gate/"
+
+#: The middleware the gate is made of, and the header middleware that has to
+#: stand outside it, as ``settings.MIDDLEWARE`` names them. Declared here so
+#: settings.py and the order check in ``common.middleware`` read one spelling.
+#: A response the gate middleware returns itself never passes back through a
+#: middleware listed after it, so the clickjacking header is only on the gate's
+#: own pages when its middleware comes first (issue #176); and the limiter must
+#: come before the gate, since it is the limiter that checks the POST's CSRF
+#: token and counts the guess before the gate reads the passphrase (issue
+#: #175). ``PublicPathPassphraseMiddleware`` refuses to start otherwise.
+FRAME_OPTIONS_MIDDLEWARE = "django.middleware.clickjacking.XFrameOptionsMiddleware"
+GATE_LIMITER_MIDDLEWARE = "common.middleware.GateRateLimitMiddleware"
+GATE_MIDDLEWARE = "common.middleware.PublicPathPassphraseMiddleware"
+
 # The dev/default passphrase. speak_friend needs *a* configured value, and the
 # same one has to be known to the gate middleware's fallback and to the
 # deployment verifier that types it into the form, so it is declared here

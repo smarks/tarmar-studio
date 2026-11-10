@@ -47,6 +47,9 @@ from common.base_url import (  # noqa: E402
 )
 from common.gate import (  # noqa: E402
     DEV_GATE_PASSPHRASE,
+    FRAME_OPTIONS_MIDDLEWARE,
+    GATE_LIMITER_MIDDLEWARE,
+    GATE_MIDDLEWARE,
     load_gate_hints,
     normalize_passphrase,
 )
@@ -445,7 +448,11 @@ _FIRST_PARTY_APPS = [
 ]
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # Django's admin, with its login form held to the site's login limiter
+    # (issue #173): the default AdminSite is replaced through AdminConfig's
+    # one hook for that, so ``admin.site`` and every ``@admin.register`` stay
+    # as they are.
+    "accounts.apps.LimitedAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -459,21 +466,29 @@ MIDDLEWARE = [
     # origami_common's rate_limit decorator) must see the same client address.
     "common.middleware.TrustedProxyClientIPMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Outside the gate, with the other header middleware (issue #176): a
+    # response the gate answers itself passes back only through what is
+    # listed before it, so its own pages carried no X-Frame-Options while
+    # this sat last. It only sets a header; nothing else depends on where.
+    FRAME_OPTIONS_MIDDLEWARE,
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "common.middleware.GateRateLimitMiddleware",
+    # The gate's door-keeper: Django's CSRF check on the gate's POST, then the
+    # guessing budget (issues #161, #175). Before the gate on purpose; the
+    # gate refuses to start otherwise (common.middleware.
+    # require_gate_middleware_order).
+    GATE_LIMITER_MIDDLEWARE,
     # The passphrase gate, minus the arena (issue #305). Subclasses
     # speak_friend.PassphraseMiddleware; common.public_paths is the one
     # statement of which prefixes it lets through.
-    "common.middleware.PublicPathPassphraseMiddleware",
+    GATE_MIDDLEWARE,
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # A 405 gets a page rather than a blank screen (#716, low finding).
     # Inside the gate, so a POST-only URL still meets the passphrase first.
     "common.middleware.RenderedMethodNotAllowedMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 # Pinned dice for the browser tests (issue #959). With this on, a request
@@ -507,6 +522,8 @@ TEMPLATES = [
                 "common.context_processors.project_links",
                 "common.context_processors.theme",
                 "common.context_processors.canon",
+                # The gate form's action (issue #175); gate.html has no view.
+                "common.context_processors.gate",
             ],
         },
     },

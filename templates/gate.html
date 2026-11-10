@@ -73,7 +73,7 @@
 <body>
     <h1>{{ theme.site_name }}</h1>
     <p class="prompt">{% if theme.tagline %}{{ theme.tagline }} &mdash; s{% else %}S{% endif %}peak, friend, and enter.</p>
-    <form method="post" action="/gate/">
+    <form method="post" action="{{ gate_path }}">
         {% csrf_token %}
         {% comment %} The field's accessible name used to be the placeholder, so a screen
            reader announced it as "dot dot dot, password" (#716, low finding). {% endcomment %}

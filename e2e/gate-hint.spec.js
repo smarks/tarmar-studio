@@ -21,35 +21,38 @@
  */
 
 const { test, expect } = require('./fixtures');
-const { readDjangoShell, runDjangoShell } = require('./django');
+const { readDjangoJson, runDjangoShell, TEST_CLIENT_ADDRESS } = require('./django');
 
 const WRONG_PASSPHRASE = 'gandalf';
 
-/** The gate limiter's counter key for the address Playwright arrives from. */
-const TEST_CLIENT_GATE_COUNTER_KEY = 'rate_limit:gate:127.0.0.1';
-
 /**
  * settings.GATE_HINTS and settings.GATE_HINT_AFTER_WRONG_GUESSES, as the server
- * in hand has them. The shell prints its own "N objects imported" line first,
- * so the values follow a marker, the way seedCharacterFromExport reads an id.
- * @returns {{hints: string[], wrongGuessesBeforeHint: number}}
+ * in hand has them, with the gate's path and the limiter's counter key for
+ * this client's address (common/gate.py, common/middleware.py), so neither is
+ * retyped here. The shell prints its own "N objects imported" line first, so
+ * the values follow a marker, the way seedCharacterFromExport reads an id.
+ * @returns {{hints: string[], wrongGuessesBeforeHint: number, path: string, counterKey: string}}
  */
 function gateHintSettings() {
-    const output = readDjangoShell(`
+    return readDjangoJson(`
 import json
 from django.conf import settings
-print('GATE_HINT_SETTINGS', json.dumps({'hints': list(settings.GATE_HINTS), 'wrongGuessesBeforeHint': settings.GATE_HINT_AFTER_WRONG_GUESSES}))
-`);
-    const match = output.match(/GATE_HINT_SETTINGS (.*)/);
-    expect(match, `no gate hint settings in: ${output}`).not.toBeNull();
-    return JSON.parse(match[1]);
+from common.gate import GATE_PATH
+from common.middleware import gate_counter_key
+print('GATE_HINT_SETTINGS', json.dumps({
+    'hints': list(settings.GATE_HINTS),
+    'wrongGuessesBeforeHint': settings.GATE_HINT_AFTER_WRONG_GUESSES,
+    'path': GATE_PATH,
+    'counterKey': gate_counter_key(${JSON.stringify(TEST_CLIENT_ADDRESS)}),
+}))
+`, 'GATE_HINT_SETTINGS');
 }
 
 /** Release the wrong guesses this spec charged against the test client's address. */
-function releaseGateGuesses() {
+function releaseGateGuesses(counterKey) {
     runDjangoShell(`
 from common.models import RateLimitCounter
-deleted, _ = RateLimitCounter.objects.filter(key=${JSON.stringify(TEST_CLIENT_GATE_COUNTER_KEY)}).delete()
+deleted, _ = RateLimitCounter.objects.filter(key=${JSON.stringify(counterKey)}).delete()
 print(f'Released {deleted} gate counter row(s) for the test client')
 `);
 }
@@ -57,6 +60,7 @@ print(f'Released {deleted} gate counter row(s) for the test client')
 test('the gate offers its hint under the refusal after enough wrong guesses', async ({ browser }) => {
     // The shared `page` fixture answers the gate before every test, so a
     // visitor who has not is a context of this spec's own.
+    const { hints, wrongGuessesBeforeHint, path, counterKey } = gateHintSettings();
     const context = await browser.newContext();
     try {
         const page = await context.newPage();
@@ -67,14 +71,13 @@ test('the gate offers its hint under the refusal after enough wrong guesses', as
         // The click waits for the navigation it starts, so the refusal check
         // runs against the new document; the response wait is there so a
         // POST the click did not start is never mistaken for one it did.
-        const { hints, wrongGuessesBeforeHint } = gateHintSettings();
         expect(wrongGuessesBeforeHint).toBeGreaterThan(0);
         expect(hints.length).toBeGreaterThan(0);
         for (let guess = 0; guess < wrongGuessesBeforeHint; guess += 1) {
             await passphraseField.fill(WRONG_PASSPHRASE);
             await Promise.all([
                 page.waitForResponse(response =>
-                    response.request().method() === 'POST' && new URL(response.url()).pathname === '/gate/'),
+                    response.request().method() === 'POST' && new URL(response.url()).pathname === path),
                 page.click('button[type="submit"]'),
             ]);
             await expect(page.locator('.error')).toBeVisible();
@@ -86,7 +89,7 @@ test('the gate offers its hint under the refusal after enough wrong guesses', as
     } finally {
         // The release first: it is what the header promises, and it must not
         // depend on the browser context closing cleanly.
-        releaseGateGuesses();
+        releaseGateGuesses(counterKey);
         await context.close();
     }
 });

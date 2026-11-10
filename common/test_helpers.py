@@ -107,6 +107,11 @@ def skip_unless_canon_expects(
 # project's password validators when a test drives the real signup form.
 TEST_PASSWORD = "GalleonMist7q"
 
+#: The address Django's test client arrives from (its default ``REMOTE_ADDR``),
+#: and the one the per-address limiters key on in a test. The browser specs
+#: declare the same once in ``e2e/django.js``.
+TEST_CLIENT_ADDRESS = "127.0.0.1"
+
 
 def mark_gate_passed(client: Client) -> None:
     """Mark a test client's session as past the passphrase gate.

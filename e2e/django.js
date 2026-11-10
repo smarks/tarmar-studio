@@ -82,4 +82,17 @@ function readDjangoJson(script, tag) {
     return JSON.parse(line.slice(prefix.length));
 }
 
-module.exports = { runDjangoCommand, runDjangoShell, readDjangoShell, readDjangoJson };
+/**
+ * The address every Playwright worker reaches the dev server from, and so the
+ * one the per-address limiters key on in a spec. Declared once here, as
+ * common/test_helpers.py declares it once for the Python tests.
+ */
+const TEST_CLIENT_ADDRESS = '127.0.0.1';
+
+module.exports = {
+    runDjangoCommand,
+    runDjangoShell,
+    readDjangoShell,
+    readDjangoJson,
+    TEST_CLIENT_ADDRESS,
+};
