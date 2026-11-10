@@ -93,7 +93,7 @@
 
 {% block extra_js %}
 <script src="{% static 'js/point-buy.js' %}"></script>
-<script>
+<script nonce="{{ csp_nonce }}">
     initPointBuy({
         total: {{ point_buy_total }},
         min: {{ point_buy_min }},

@@ -19,6 +19,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import Client, SimpleTestCase, TestCase
 
 from common.gate import (
+    CSP_MIDDLEWARE,
     DEV_GATE_PASSPHRASE,
     FRAME_OPTIONS_MIDDLEWARE,
     GATE_LIMITER_MIDDLEWARE,
@@ -163,32 +164,44 @@ class GatePagesCarryFrameOptionsTest(TestCase):
 class GateMiddlewareOrderTest(SimpleTestCase):
     """The order the gate's parts must keep, and the refusal when they don't."""
 
+    #: The gate's parts, outermost first, as the settings must list them.
+    IN_ORDER = (
+        CSP_MIDDLEWARE,
+        FRAME_OPTIONS_MIDDLEWARE,
+        GATE_LIMITER_MIDDLEWARE,
+        GATE_MIDDLEWARE,
+    )
+
     def test_the_settings_keep_the_order(self):
         require_gate_middleware_order(settings.MIDDLEWARE)
-        positions = [
-            settings.MIDDLEWARE.index(name)
-            for name in (
-                FRAME_OPTIONS_MIDDLEWARE,
-                GATE_LIMITER_MIDDLEWARE,
-                GATE_MIDDLEWARE,
-            )
-        ]
+        positions = [settings.MIDDLEWARE.index(name) for name in self.IN_ORDER]
         self.assertEqual(positions, sorted(positions))
 
-    def test_the_header_middleware_inside_the_gate_is_refused(self):
-        with self.assertRaises(ImproperlyConfigured) as refusal:
-            require_gate_middleware_order(
-                [GATE_LIMITER_MIDDLEWARE, GATE_MIDDLEWARE, FRAME_OPTIONS_MIDDLEWARE]
-            )
-        self.assertIn("#176", str(refusal.exception))
+    def test_a_header_middleware_inside_the_gate_is_refused(self):
+        """Either header middleware listed after the gate (issues #176, #178)."""
+        for inside in (FRAME_OPTIONS_MIDDLEWARE, CSP_MIDDLEWARE):
+            with self.subTest(inside=inside):
+                disordered = [name for name in self.IN_ORDER if name != inside]
+                disordered.append(inside)
+                with self.assertRaises(ImproperlyConfigured) as refusal:
+                    require_gate_middleware_order(disordered)
+                self.assertIn("#176", str(refusal.exception))
+                self.assertIn("#178", str(refusal.exception))
 
     def test_the_limiter_behind_the_gate_is_refused(self):
         with self.assertRaises(ImproperlyConfigured):
             require_gate_middleware_order(
-                [FRAME_OPTIONS_MIDDLEWARE, GATE_MIDDLEWARE, GATE_LIMITER_MIDDLEWARE]
+                [
+                    CSP_MIDDLEWARE,
+                    FRAME_OPTIONS_MIDDLEWARE,
+                    GATE_MIDDLEWARE,
+                    GATE_LIMITER_MIDDLEWARE,
+                ]
             )
 
     def test_a_missing_part_is_refused_and_named(self):
         with self.assertRaises(ImproperlyConfigured) as refusal:
-            require_gate_middleware_order([FRAME_OPTIONS_MIDDLEWARE, GATE_MIDDLEWARE])
+            require_gate_middleware_order(
+                [CSP_MIDDLEWARE, FRAME_OPTIONS_MIDDLEWARE, GATE_MIDDLEWARE]
+            )
         self.assertIn(GATE_LIMITER_MIDDLEWARE, str(refusal.exception))

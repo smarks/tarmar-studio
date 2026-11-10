@@ -1,6 +1,7 @@
 import functools
 import json
 import logging
+import re
 import string
 import threading
 import time
@@ -111,6 +112,32 @@ TEST_PASSWORD = "GalleonMist7q"
 #: and the one the per-address limiters key on in a test. The browser specs
 #: declare the same once in ``e2e/django.js``.
 TEST_CLIENT_ADDRESS = "127.0.0.1"
+
+
+#: What a rendered page carries that differs on every render, for a test that
+#: compares two renders of the same page (issues #929, #178): the masked CSRF
+#: token in base.html's meta tag and in a form's hidden field, and the nonce
+#: on an inline <script> block, minted per response for the
+#: Content-Security-Policy.
+PER_REQUEST_TOKENS = (
+    re.compile(rb'name="csrf-token" content="[^"]*"'),
+    re.compile(rb'name="csrfmiddlewaretoken" value="[^"]*"'),
+    re.compile(rb' nonce="[^"]*"'),
+)
+
+
+def without_per_request_tokens(page: bytes) -> bytes:
+    """``page`` with every per-render token blanked, so two renders compare.
+
+    Args:
+        page: A response's body.
+
+    Returns:
+        The body with the CSRF tokens and the script nonces taken out.
+    """
+    for token in PER_REQUEST_TOKENS:
+        page = token.sub(b"", page)
+    return page
 
 
 def mark_gate_passed(client: Client) -> None:

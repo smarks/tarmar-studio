@@ -50,7 +50,7 @@ from common.mixins import ActivePageMixin
 from common.pagination import query_without
 from common.pickers import NO_SUCH_PICKER, asked_for, picker_body_response
 from common.services.ollama_client import HangUp, StreamDeadlinePassed
-from reference.rendering import render_reference_markdown
+from reference.rendering import render_model_markdown
 
 from . import roster
 from .attach import attach_refusal
@@ -1452,6 +1452,8 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             turn.mode,
             is_game_master=is_dm(session.user if session is not None else request.user),
             latest=latest,
+            # What a bare "yes" answers (issue #177).
+            proposal=turn_history.latest_assistant_reply_before(history, latest_index),
         )
 
     def ensure_session() -> GMSession:
@@ -2611,7 +2613,8 @@ def gm_review_detail(request: HttpRequest, review_id: int) -> HttpResponse:
         "gm/review.html",
         {
             "review": review,
-            "findings_html": render_reference_markdown(review.findings)
+            # Model-written, so no image and no link off this site (#177).
+            "findings_html": render_model_markdown(review.findings)
             if review.findings
             else "",
             "other_reviews": other_reviews,

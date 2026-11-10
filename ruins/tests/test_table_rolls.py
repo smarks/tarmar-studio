@@ -23,6 +23,7 @@ from common.test_helpers import (
     BaseTestCase,
     sentence_parts,
     skip_unless_canon_expects,
+    without_per_request_tokens,
 )
 from reference.paths import DEFAULT_CANON_DIR, GM_TOOLS_DIR, PathOutsideRoot
 from ruins.table_rolls import (
@@ -311,7 +312,9 @@ class RollerViewFlowTests(BaseTestCase):
 
     def test_seeded_url_is_deterministic_across_requests(self):
         def result_section(response) -> str:
-            content = response.content.decode()
+            # The section runs to the end of the page, past base.html's
+            # per-response CSRF token and script nonce (issue #178).
+            content = without_per_request_tokens(response.content).decode()
             return content[content.index('id="table-roll-result"') :]
 
         first = self.client.get(self.url("urban-intrigue"), {"seed": "7"})

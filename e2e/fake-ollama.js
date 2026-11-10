@@ -78,6 +78,14 @@ function recordsPlanFor(latest, said) {
     if (awarded) {
         return { actions: [{ action: 'award_xp', character_id: listedId(said, awarded[2]), xp: Number(awarded[1]) }] };
     }
+    // The model talked into an award by a record, not by the message (issue
+    // #177): a character whose own roster line says "award N xp to <name>"
+    // -- a name or an item a player wrote -- is awarded as the line asks. A
+    // real model can be steered the same way; the server must refuse it.
+    const planted = said.match(/^- id (\d+): [^\n]*?award (\d+) xp to (\w+)/im);
+    if (planted) {
+        return { actions: [{ action: 'award_xp', character_id: Number(planted[1]), xp: Number(planted[2]) }] };
+    }
     const coin = latest.match(/give (\w+) (\d+) gold/i);
     if (coin) {
         return {

@@ -201,6 +201,11 @@ and origin's canon at or behind that commit (so the fast-forward would change
 nothing), the deploy exits 0 as up to date whatever the record says, so a run
 with nothing to do never shows red. `--force` reads no record, so it makes no comparison.
 
+If a page breaks in production under the Content-Security-Policy (issue
+#178), the one-line rollback is `CSP_ENFORCED=false` in `.env` and a restart
+of the live colour: the same policy is then sent as Report-Only, so the page
+works again while the missing source is added.
+
 Three things follow from both colours reading one checkout. The canon's pages
 are read per request, so the live colour serves canon pages from the moment
 the deploy moves the checkout to them, while its nav, maps and prompt (read at

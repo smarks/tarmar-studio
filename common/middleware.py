@@ -12,6 +12,7 @@ from django.utils.functional import SimpleLazyObject
 from speak_friend.middleware import PassphraseMiddleware
 
 from common.gate import (
+    CSP_MIDDLEWARE,
     DEV_GATE_PASSPHRASE,
     FRAME_OPTIONS_MIDDLEWARE,
     GATE_LIMITER_MIDDLEWARE,
@@ -224,18 +225,20 @@ def require_gate_middleware_order(middleware: Sequence[str]) -> None:
 
     The gate answers requests itself, so what stands outside it in
     ``settings.MIDDLEWARE`` decides what its own responses carry and what
-    reaches it: the clickjacking header is added only by a middleware outside
-    it (issue #176), and the limiter in front of it is what checks the POST's
-    CSRF token and counts the guess (issue #175). Both are facts about the
-    list, so they are checked once, at startup, instead of being trusted.
+    reaches it: the Content-Security-Policy and clickjacking headers are added
+    only by a middleware outside it (issues #178, #176), and the limiter in
+    front of it is what checks the POST's CSRF token and counts the guess
+    (issue #175). All are facts about the list, so they are checked once, at
+    startup, instead of being trusted.
 
     Args:
         middleware: ``settings.MIDDLEWARE``, or a list under test.
 
     Raises:
-        ImproperlyConfigured: When one of the three is missing or out of order.
+        ImproperlyConfigured: When one of the four is missing or out of order.
     """
     expected_order = (
+        CSP_MIDDLEWARE,
         FRAME_OPTIONS_MIDDLEWARE,
         GATE_LIMITER_MIDDLEWARE,
         GATE_MIDDLEWARE,
@@ -245,12 +248,12 @@ def require_gate_middleware_order(middleware: Sequence[str]) -> None:
     except ValueError as missing:
         raise ImproperlyConfigured(
             f"MIDDLEWARE must list each of {expected_order}; the passphrase gate "
-            "needs all three (issues #175, #176)."
+            "needs all of them (issues #175, #176, #178)."
         ) from missing
     if positions != sorted(positions):
         raise ImproperlyConfigured(
             "MIDDLEWARE must list the gate's parts in this order: "
-            f"{', '.join(expected_order)} (issues #175, #176)."
+            f"{', '.join(expected_order)} (issues #175, #176, #178)."
         )
 
 

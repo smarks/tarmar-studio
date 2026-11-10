@@ -46,7 +46,7 @@
     <p class="attribution">&mdash; Concerning the whereabouts of missing pages</p>
     <div class="path">{{ request_path }}</div>
     <a href="/">Return to the Shire</a>
-    <script>
+    <script nonce="{{ csp_nonce }}">
         (function() {
             var s = document.getElementById('stars');
             for (var i = 0; i < 60; i++) {

@@ -389,19 +389,44 @@ Middleware order matters and is fixed in `tarmar_studio/settings.py`:
 1. `common.middleware.TrustedProxyClientIPMiddleware` — first, so everything
    downstream reading `REMOTE_ADDR` agrees on the client.
 2. `SecurityMiddleware`
-3. `XFrameOptionsMiddleware` — outside the gate, so the gate's own pages carry
+3. `django.middleware.csp.ContentSecurityPolicyMiddleware` — the
+   Content-Security-Policy header (#178), outside the gate for the same reason
+   as the next one
+4. `XFrameOptionsMiddleware` — outside the gate, so the gate's own pages carry
    the header too (#176)
-4. `WhiteNoiseMiddleware`
-5. `SessionMiddleware` (database-backed; no `SESSION_ENGINE` is set anywhere, so
+5. `WhiteNoiseMiddleware`
+6. `SessionMiddleware` (database-backed; no `SESSION_ENGINE` is set anywhere, so
    Django's default applies)
-6. `CommonMiddleware`
-7. `CsrfViewMiddleware`
-8. `common.middleware.GateRateLimitMiddleware` — the gate POST's CSRF check and
+7. `CommonMiddleware`
+8. `CsrfViewMiddleware`
+9. `common.middleware.GateRateLimitMiddleware` — the gate POST's CSRF check and
    guess count (#175)
-9. `common.middleware.PublicPathPassphraseMiddleware`
-10. `AuthenticationMiddleware`
-11. `common.middleware.RenderedMethodNotAllowedMiddleware`
-12. `MessageMiddleware`
+10. `common.middleware.PublicPathPassphraseMiddleware`
+11. `AuthenticationMiddleware`
+12. `common.middleware.RenderedMethodNotAllowedMiddleware`
+13. `MessageMiddleware`
+
+### Content-Security-Policy (issue #178)
+
+`settings.CONTENT_SECURITY_POLICY` is sent on every response by Django's own
+middleware, enforced (`SECURE_CSP`) unless `CSP_ENFORCED=false` moves the same
+policy to the Report-Only header. Every source is `'self'`: the site serves its
+own scripts, styles, images and fonts and uses no CDN. `script-src` admits no
+`'unsafe-inline'`; the few inline `<script>` blocks (`base.html`'s menu,
+`404.html`'s stars, the create, profile, register, party-edit and reference
+pages) carry `nonce="{{ csp_nonce }}"` from the `csp` context processor, and
+`common/tests/test_no_inline_scripts.py` sweeps every template for a block
+without one or an `on*=` handler, so the GM chat's controls are wired by
+`chat.js` from `data-action`, `data-command` and `data-delete-session`
+attributes. `style-src` keeps `'unsafe-inline'` for the `style="..."`
+attributes the templates and scripts still write. `img-src 'self'` is what
+closes #177's image leak; `frame-ancestors 'none'`, `object-src 'none'`,
+`base-uri 'self'` and `form-action 'self'` close the rest. The Playwright
+`page` fixture and the auto fixture that watches every context a test opens
+(`e2e/fixtures.js`) fail any test whose page logs a policy violation, so a
+missed source is caught by the suite rather than in production. Should one
+reach production anyway, `CSP_ENFORCED=false` in `.env` and a restart is the
+one-line rollback: the same policy goes out as Report-Only (DEPLOY.md).
 
 ```mermaid
 sequenceDiagram
@@ -1371,6 +1396,31 @@ finishes or its budget ends it; that is the bound on it.
 `character_export.views.export_pdf`, the one export that renders on the
 request thread, is limited to `CHARACTER_EXPORT_PDF_MAX_PER_MINUTE` an account
 through `common.decorators.rate_limit`.
+
+### Player-written text in a Game Master's prompt (issue #177)
+
+A Game Master's session lists every attached character in its state block, and
+some of that text a player wrote: the name, the items, the skills. The model
+can be talked into an action by what it reads there. The hard containment is
+the executor's (`RecordsExecutor._require_addressed`): every action on a
+character the session owner does not own (`CHARACTER_ACTIONS`: XP, coin, a
+death, stated scores, but equally a gift of equipment, a reroll, a rename or a
+year of experience) runs only when the owner's own typed message names that
+character (its name or its session label, as a whole word) or the party in a
+collective word, *and* says what the action does in one of that action's
+subject words; the words are configuration, `config/gm-address-words.toml`
+(`GM_ADDRESS_WORDS_FILE`). A message that is only an affirmative ("yes", "do
+it") answers the Games Master's own proposal, so the names and subjects are
+read from the last visible reply instead (`TurnPolicy.proposal`); with no
+proposal, an affirmative asks for nothing. The refusal is `[policy]
+unaddressed_player_character` and, since it depends on the message, is never
+settled. The owner's own characters are not held, and a player's session is
+unchanged. The softer containment is the prompt's: `RosterLine.line` keeps
+each record's text on its own line (`record_text` collapses newlines, so no
+record can forge a heading or the speaker line), and the block ends its roster
+with `RECORDS_ARE_DATA_NOTE`. Model-written markdown — a reply in `chat.js`, a
+review's findings through `reference.rendering.render_model_markdown` — emits no
+image and links only to this site, whatever the page's policy.
 
 ### Streaming
 

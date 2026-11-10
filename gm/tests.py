@@ -629,15 +629,14 @@ class GMViewTest(BaseTestCase):
         """
         session = GMSession.objects.create(name="Test", user=self.user)
         response = self.client.get("/tarmar/gm/")
-        # The date is the third argument since #705: two sessions named after
-        # the same first message are one question otherwise. Since #62 it is
-        # read from the row's own <time>, which the page writes in the
-        # reader's zone, not baked in as the server's UTC date.
-        self.assertContains(
-            response,
-            f"deleteSession({session.pk}, 'Test', "
-            f"document.getElementById('session-date-{session.pk}').textContent)",
-        )
+        # Since #178 the button carries no inline handler: chat.js reads the
+        # session's id off ``data-delete-session`` and its name and date off
+        # the row's own elements (#705, #62) when the button is pressed, so
+        # the date is the reader's zone's, never the server's UTC date.
+        self.assertContains(response, f'data-delete-session="{session.pk}"')
+        self.assertContains(response, f'id="session-name-{session.pk}">Test<')
+        self.assertContains(response, f'id="session-date-{session.pk}"')
+        self.assertNotContains(response, "deleteSession(")
         self.assertNotContains(response, session.created_at.strftime("'%b %d, %Y'"))
         self.assertEqual(self._chat_config(response)["deleteUrl"], "/tarmar/gm/delete/")
 
@@ -669,13 +668,19 @@ class GMViewTest(BaseTestCase):
         )
         self.assertContains(response, f'data-started-at="{instant}"')
 
-    def test_chat_sessions_list_escapes_session_name_for_inline_js(self):
-        """A session name with a quote must not break out of the onclick string."""
+    def test_chat_sessions_list_escapes_session_name(self):
+        """A session name with a quote is HTML-escaped where the rail shows it.
+
+        It used to be escaped for an inline onclick string as well; since #178
+        the page carries no inline handler, so the row's name element is the
+        one place the name is written, and chat.js reads it back as text.
+        """
         session = GMSession.objects.create(name="Bob's Game", user=self.user)
         response = self.client.get("/tarmar/gm/")
         content = response.content.decode()
-        self.assertNotIn(f"deleteSession({session.pk}, 'Bob's Game')", content)
-        self.assertIn(f"deleteSession({session.pk}, 'Bob\\u0027s Game', ", content)
+        self.assertIn(f'id="session-name-{session.pk}">Bob&#x27;s Game<', content)
+        self.assertNotIn("onclick=", content)
+        self.assertNotIn("Bob's Game'", content)
 
     def test_chat_page_invalid_session_404(self):
         """Chat page returns 404 for invalid session ID."""

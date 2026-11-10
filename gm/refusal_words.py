@@ -78,6 +78,7 @@ class PolicyWords:
     player_stated_fatigue: str = sentence()
     game_master_records: str = sentence()
     aide_unasked_roll: str = sentence()
+    unaddressed_player_character: str = sentence("name", required=("name",))
 
 
 @dataclass(frozen=True)

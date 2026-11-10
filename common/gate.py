@@ -57,6 +57,9 @@ GATE_PATH = "/gate/"
 #: come before the gate, since it is the limiter that checks the POST's CSRF
 #: token and counts the guess before the gate reads the passphrase (issue
 #: #175). ``PublicPathPassphraseMiddleware`` refuses to start otherwise.
+#: The Content-Security-Policy header (issue #178) stands outside the gate for
+#: the same reason as the clickjacking header.
+CSP_MIDDLEWARE = "django.middleware.csp.ContentSecurityPolicyMiddleware"
 FRAME_OPTIONS_MIDDLEWARE = "django.middleware.clickjacking.XFrameOptionsMiddleware"
 GATE_LIMITER_MIDDLEWARE = "common.middleware.GateRateLimitMiddleware"
 GATE_MIDDLEWARE = "common.middleware.PublicPathPassphraseMiddleware"

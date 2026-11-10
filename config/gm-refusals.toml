@@ -71,6 +71,11 @@ player_stated_fatigue = "a player's Fatigue roll is rolled, not stated; only a G
 game_master_records = "only the Game Master marks a death, awards XP, or gives or takes coin; a player's coin moves when they buy something"
 # What an aide is told when a plan rolls dice nobody asked for (issue #598).
 aide_unasked_roll = "the Game Master did not ask for a roll, and dice do not decide what happened at his table; that is his to say"
+# When a Game Master's plan acts on another player's character that his
+# message never named (issue #177): a player's record is read by the model,
+# and only the Game Master's own words may spend his authority on it. {name}
+# is the character's name.
+unaddressed_player_character = "the message did not name {name} (or the party) and say what to do, and only the words typed at this table decide what is done to a player's character"
 
 [views]
 # What the player reads when a turn or a fight fails on an exception nobody

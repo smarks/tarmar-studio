@@ -1074,3 +1074,51 @@ class GateHintSettingsTest(DotenvStagingMixin, TestCase):
         env["GATE_HINT_AFTER_WRONG_GUESSES"] = "5"
 
         self.assertEqual(self._gate_hint_settings(env)["threshold"], 5)
+
+
+class ContentSecurityPolicySwitchTest(DotenvStagingMixin, TestCase):
+    """CSP_ENFORCED moves the one policy between the two headers (issue #178).
+
+    Enforced by default; ``false`` is the one-line rollback if a page breaks in
+    production: the same policy goes out as Report-Only.
+    """
+
+    def _import_settings(
+        self, env_overrides: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        env = self.subprocess_environment()
+        env.update(env_overrides)
+        program = (
+            "import sys;"
+            "sys.argv = ['manage.py', 'test'];"
+            "import tarmar_studio.settings as s;"
+            "print('ENFORCED', s.SECURE_CSP is s.CONTENT_SECURITY_POLICY,"
+            " 'REPORT_ONLY', s.SECURE_CSP_REPORT_ONLY is s.CONTENT_SECURITY_POLICY)"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=BASE_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_enforced_unless_switched_off(self):
+        result = self._import_settings({})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "ENFORCED True REPORT_ONLY False")
+
+    def test_the_switch_sends_the_same_policy_as_report_only(self):
+        for spelling in ("false", "False", "FALSE"):
+            with self.subTest(spelling=spelling):
+                result = self._import_settings({"CSP_ENFORCED": spelling})
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                self.assertEqual(
+                    result.stdout.strip(), "ENFORCED False REPORT_ONLY True"
+                )
+
+    def test_a_bad_report_uri_refuses_to_start(self):
+        result = self._import_settings({"CSP_REPORT_URI": "not a url"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CSP_REPORT_URI", result.stderr)

@@ -103,9 +103,47 @@ describe('renderMarkdown', () => {
         expect(html).toContain('const x = 1;');
     });
 
-    test('still renders a plain markdown link', () => {
+    // Issue #177: a reply can be steered by text a player wrote, so it may
+    // link only to this site and may not load an image at all. The link to
+    // another host used to be kept whole; now its text stays and its href
+    // goes. jsdom's location is http://localhost/, which is "this site" here.
+    test('keeps a link to this site', () => {
+        const html = renderMarkdown('[the sheet](/tarmar/characters/7/)');
+        expect(html).toContain('<a href="/tarmar/characters/7/">the sheet</a>');
+    });
+
+    test('keeps an absolute link to this origin', () => {
+        const html = renderMarkdown('[here](http://localhost/tarmar/gm/)');
+        expect(html).toContain('href="http://localhost/tarmar/gm/"');
+    });
+
+    test('drops the href of a link to another host, keeping its text', () => {
         const html = renderMarkdown('[Tarmar Studio](https://example.com)');
-        expect(html).toContain('<a href="https://example.com">Tarmar Studio</a>');
+        expect(html).toContain('<a>Tarmar Studio</a>');
+        expect(html).not.toContain('example.com');
+    });
+
+    test('drops a protocol-relative link too', () => {
+        const html = renderMarkdown('[go](//example.com/x)');
+        expect(html).not.toContain('href=');
+    });
+
+    test('renders no image, whatever its source', () => {
+        for (const source of ['https://example.com/pixel.png', '/static/x.png', 'data:image/gif;base64,R0lGOD']) {
+            const html = renderMarkdown(`![spy](${source})`);
+            expect(html).not.toMatch(/<img/i);
+            expect(html).not.toContain(source);
+        }
+    });
+
+    test('linksToThisSite judges by origin and refuses what does not parse', () => {
+        const { linksToThisSite } = require('../chat.js');
+        expect(linksToThisSite('/tarmar/')).toBe(true);
+        expect(linksToThisSite('http://localhost/x')).toBe(true);
+        expect(linksToThisSite('https://localhost/x')).toBe(false);
+        expect(linksToThisSite('https://example.com/')).toBe(false);
+        expect(linksToThisSite('//example.com/')).toBe(false);
+        expect(linksToThisSite('http://[bad')).toBe(false);
     });
 
     // Issue #168: the allowlist omitted <input> and align, so GFM task

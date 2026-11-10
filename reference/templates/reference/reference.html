@@ -32,7 +32,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
     (function () {
         var toggle = document.getElementById('tocToggle');
         var list = document.getElementById('tocList');

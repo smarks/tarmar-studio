@@ -4,9 +4,9 @@
         <span class="session-name" id="session-name-{{ s.pk }}">{{ s.name }}</span>
         <span class="session-meta"><span id="session-date-{{ s.pk }}">{% local_time s.created_at "M d, Y" style="date" %}</span> &middot; <span class="session-count">{{ s.message_count_label }}</span></span>
     </a>
-    {# The date is read from the row's own <time> as the viewer's zone has written it, so the label and the confirm prompt say what the rail shows (issue #62). #}
+    {# The date is read from the row's own <time> as the viewer's zone has written it, so the label and the confirm prompt say what the rail shows (issue #62). chat.js reads the name and the date off the row when the button is pressed; no inline handler (issue #178). #}
     <span class="sr-only" id="session-started-{{ s.pk }}">started</span>
     <button type="button" class="session-delete-btn" id="session-delete-{{ s.pk }}"
             aria-label="Delete session" aria-labelledby="session-delete-{{ s.pk }} session-name-{{ s.pk }} session-started-{{ s.pk }} session-date-{{ s.pk }}" title="Delete session"
-            onclick="deleteSession({{ s.pk }}, '{{ s.name|escapejs }}', document.getElementById('session-date-{{ s.pk }}').textContent)">&times;</button>
+            data-delete-session="{{ s.pk }}">&times;</button>
 </li>
