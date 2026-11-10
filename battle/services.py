@@ -49,7 +49,6 @@ from . import agreement, control, magic_bounds, policy, profiles, turn_menu
 from .access import (
     Actor,
     claimed_seat_q,
-    commands_foes,
     decides_for,
     is_dm,
     seat_is_held,
@@ -2341,16 +2340,28 @@ def _resettle_pending(battle: Battle) -> None:
 
 
 def set_battle_control_mode(
-    battle_id: int, mode: str, *, apply_to_all: bool = False
+    battle_id: int, mode: str, *, actor: Actor, apply_to_all: bool = False
 ) -> tuple[Battle, BattleEvent | None]:
     """Set the battle's default control mode (issue #308).
 
     The default is inherited by every combatant that has no mode of its
     own. ``apply_to_all`` is the "set them all to X" action Spencer asked
-    for, expressed the honest way: it *clears* the per-combatant overrides
+    for, expressed the plain way: it *clears* the per-combatant overrides
     rather than stamping the mode on every row. Stamping would leave a
     battle that looks uniform but ignores its own default forever; clearing
     leaves one that says what it is — everybody follows the battle.
+
+    A seat somebody holds keeps its own mode unless ``actor`` may act for
+    it (:func:`battle.access.decides_for`, issue #180): a held seat belongs
+    to its holder, so the maker's "set them all" reaches the unseated
+    figures and leaves the seated players as they chose, while a Game
+    Master's reaches every row.
+
+    Args:
+        battle_id: The battle.
+        mode: ``automatic`` or ``manual``.
+        actor: Who is setting it; already allowed to run the battle.
+        apply_to_all: Clear the per-combatant overrides this actor may clear.
 
     Raises:
         ValueError: for a mode that is not automatic or manual.
@@ -2360,9 +2371,13 @@ def set_battle_control_mode(
         battle = Battle.objects.select_for_update().get(pk=battle_id)
         battle.control_mode = mode
         if apply_to_all:
-            battle.combatants.exclude(control_mode=control.INHERIT).update(
-                control_mode=control.INHERIT
-            )
+            overridden = battle.combatants.exclude(control_mode=control.INHERIT)
+            kept = [
+                combatant.pk
+                for combatant in overridden.select_related("player")
+                if not decides_for(actor, battle, combatant)
+            ]
+            overridden.exclude(pk__in=kept).update(control_mode=control.INHERIT)
         _resettle_pending(battle)
         event = _control_event(
             battle,
@@ -3636,11 +3651,11 @@ def record_player_action(
         candidates = pending.get("candidates", [])
         actor = Actor.for_user_or_guest(user, guest_key)
         if as_ai:
-            # Widened from DM-only (#308): whoever runs the battle may hand
-            # an awaited choice to the AI, and so may the combatant's own
-            # owner. A guest's battle has no DM at all, so the old rule left
-            # a guest-run battle with no way past an absent player.
-            if not (commands_foes(actor, battle) or decides_for(actor, battle, seat)):
+            # Whoever acts for the figure may hand its choice to the AI, and
+            # nobody else (#308, #180): for a held seat that is its holder
+            # or a Game Master, never the battle's maker; for an unseated
+            # figure, whoever runs the battle. One rule, decides_for's.
+            if not decides_for(actor, battle, seat):
                 raise BattleRefusal(refusal_words().services.hand_choice_to_ai_denied)
             if not candidates:
                 raise BattleRefusal(refusal_words().services.no_pending_menu)
@@ -3768,6 +3783,16 @@ def rename_combatant(
     Future engine events (the state is the engine's only name source) use
     the new name; already-written ``BattleEvent`` text stays historical.
 
+    A lobby has no state yet: its figures reach ``state_json`` when it
+    starts, each from its row's ``snapshot_json`` (``_start_locked``).
+    Renaming the state there raised on the missing figure and answered the
+    page with a 500 (issue #181), so in a lobby the row -- its display name
+    and the name in its snapshot, which the start will read -- is the whole
+    rename.
+
+    Who may rename is the view's question (:func:`battle.access.decides_for`
+    through ``battle.views.battle_rename``); this writes what it is given.
+
     Raises:
         ValueError: for a combatant not in this battle, or a name another
             combatant in the battle already carries.
@@ -3785,10 +3810,16 @@ def rename_combatant(
         if name_taken:
             raise BattleRefusal(refusal_words().services.name_taken)
         combatant.display_name = new_name
-        combatant.save(update_fields=["display_name"])
-        profile = profiles.for_battle(battle)
-        state = profile.load(battle.state_json)
-        profile.rename(state, combatant_id, new_name)
-        battle.state_json = dump_state(state)
-        battle.save()
+        changed = ["display_name"]
+        if battle.status == Battle.STATUS_LOBBY:
+            if combatant.snapshot_json:
+                combatant.snapshot_json = {**combatant.snapshot_json, "name": new_name}
+                changed.append("snapshot_json")
+        combatant.save(update_fields=changed)
+        if battle.status != Battle.STATUS_LOBBY:
+            profile = profiles.for_battle(battle)
+            state = profile.load(battle.state_json)
+            profile.rename(state, combatant_id, new_name)
+            battle.state_json = dump_state(state)
+            battle.save()
     return battle, combatant

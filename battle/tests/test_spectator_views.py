@@ -64,11 +64,6 @@ class SpectatorTestMixin(BaseTestCase):
         self.assertEqual(battle.status, Battle.STATUS_AWAITING)
         return battle, seat
 
-    def switch_to(self, user):
-        """Change users without losing the passphrase gate (see lobby tests)."""
-        self.logout()
-        self.login_as(user)
-
 
 class SpectatorReadTest(SpectatorTestMixin):
     def test_anonymous_viewers_cannot_read_a_battle_of_private_characters(self):
@@ -194,6 +189,8 @@ class ResponseShapePerRoleTest(SpectatorTestMixin):
         # The advice scores ride inside the candidates — present here...
         self.assertIn("score", player_pending["candidates"][0])
 
+        # The seat is the player's to play, so the DM is not "you"; a Game
+        # Master may act for it (#180), so the menu reaches them too.
         dm_pending = self.pending_for(battle, self.dm)
         self.assertFalse(dm_pending["is_you"])
         self.assertTrue(dm_pending["candidates"])
@@ -238,7 +235,8 @@ class SpectatorWriteRefusalTest(SpectatorTestMixin):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        # A 403 before the body is read (#182).
+        self.assertEqual(response.status_code, 403)
         self.assertIn(
             refusal_words().services.not_your_combatant, response.json()["error"]
         )

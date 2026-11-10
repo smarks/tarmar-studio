@@ -77,7 +77,7 @@ no_input_pending = "No player input is pending"
 stale_choice = "That choice was made for {chosen_name} on turn {chosen_turn}, but the battle is waiting on {awaited_name}'s turn {awaited_turn}. The menu has moved on — choose again."
 # {chosen_name} above, when the figure the choice named is not in the battle.
 stale_choice_unknown_figure = "another combatant"
-hand_choice_to_ai_denied = "Only this battle's DM, its owner, or the combatant's own player can hand the choice to the AI"
+hand_choice_to_ai_denied = "Only the player sitting in this seat, or a Game Master, can hand its choice to the AI; whoever runs the battle decides for a figure nobody sits in"
 no_pending_menu = "No pending menu to choose from"
 not_your_combatant = "That is not your combatant"
 option_not_on_menu = "That option is not on the pending menu"
@@ -97,6 +97,10 @@ still_in_lobby = "This battle is still in its lobby"
 control_denied = "Only this battle's DM or the person who made it can do that"
 foes_belong_to_game_master = "This fight came from a Games Master session: its foes belong to the Game Master, so only a Game Master can restart it or change who decides"
 combatant_control_denied = "Only this battle's DM, the person who made it, or the combatant's own player can do that"
+# A figure another player is seated in (issue #180, Spencer's decision of
+# 2026-11-10): its holder acts for it, a Game Master may override, and the
+# battle's maker may not.
+seat_belongs_to_holder = "That figure is another player's seat: only the player sitting in it, or a Game Master, can act for it"
 start_denied = "Only this battle's DM or the person who made it can start it"
 
 # The setup page's terms and muster.

@@ -304,19 +304,42 @@ def commands_foes(actor: Actor, battle: Battle) -> bool:
     return can_control(actor, battle) and not battle.foes_belong_to_game_master
 
 
+def plays(actor: Actor, battle: Battle, combatant: BattleCombatant) -> bool:
+    """True when ``actor`` is the one who plays this combatant (#308).
+
+    What the page says and offers by default: a held seat is played by its
+    holder; an unseated figure by whoever commands the foes. The Game
+    Master's override (:func:`decides_for`) is authority, not play -- a Game
+    Master does not sit in a player's seat by reading the page, so the card
+    still names the player and the awaited menu is still the player's.
+    """
+    if seat_is_held(combatant):
+        return actor.holds_seat(combatant)
+    return commands_foes(actor, battle)
+
+
 def decides_for(actor: Actor, battle: Battle, combatant: BattleCombatant) -> bool:
-    """True when ``actor`` supplies this combatant's manual decisions (#308).
+    """True when ``actor`` may act for this combatant (#308, #180).
+
+    The one statement of who acts for a figure, which every path that writes
+    a seated figure asks -- its choice on a paused turn, handing that choice
+    to the AI, its control mode, its name (:func:`battle.services.record_player_action`,
+    :func:`battle.services.set_combatant_control_mode`,
+    :func:`battle.services.rename_combatant` and the views in front of them).
 
     Two owners, in order. A combatant somebody is *sitting in* belongs to
-    that person and to nobody else — not even a DM, who may only hand the
-    choice to the AI (:func:`battle.services.record_player_action`'s
-    ``as_ai``). Every other combatant — a generated fighter, a beast, a
-    saved character on the muster — belongs to whoever runs the battle,
+    that person and to nobody else at the table: Spencer's decision of
+    2026-11-10 (issue #180) is that a battle's maker may not take over,
+    rename or otherwise act for a figure another player is seated in. The
+    standing rule's other half holds too: a Game Master account may override
+    (players are held to the rules, the Game Master decides), so a DM acts
+    for any seat. Every other combatant -- a generated fighter, a beast, a
+    saved character on the muster -- belongs to whoever runs the battle,
     which is what makes a fully manual battle playable: otherwise "manual"
     on an unseated figure would name an owner who does not exist. In a
     fight whose foes belong to the Game Master that is a Game Master
     account, not the player who made it (:func:`commands_foes`, #762).
     """
     if seat_is_held(combatant):
-        return actor.holds_seat(combatant)
-    return commands_foes(actor, battle)
+        return actor.is_dm or actor.holds_seat(combatant)
+    return plays(actor, battle, combatant)

@@ -23,7 +23,7 @@ from common.helpers import (
 from .. import attack
 from ..equipment_service import validate_equipment_index
 from ..models import MAX_COMBAT_LOG_ENTRIES
-from .access import edit_denied, locked_character_or_404
+from .access import edit_denied, edit_right_first, locked_character_or_404
 from .characters import _log_character_event, sheet_repaint
 
 
@@ -31,6 +31,7 @@ from .characters import _log_character_event, sheet_repaint
 @require_POST
 @rate_limit("resolve_attack", max_requests=60, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first(json_not_found=False)
 def character_resolve_attack(request, pk):
     """Resolve one d20 attack from the sheet's Attack Resolution panel (issue #101).
 

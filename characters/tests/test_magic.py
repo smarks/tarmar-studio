@@ -133,7 +133,9 @@ class ManaTest(BaseTestCase):
         learn_url = reverse("characters:learn_spell", args=[character.pk])
         mana_url = reverse("characters:grant_mana", args=[character.pk])
         self.login_as(owner)
-        self.assertEqual(self.post_json(mana_url, {"amount": 3}).status_code, 400)
+        # A Game Master's endpoint: a player is refused before the row is
+        # read (#182), with the plain 403.
+        self.assertEqual(self.post_json(mana_url, {"amount": 3}).status_code, 403)
         self.assertEqual(
             self.post_json(learn_url, {"spell": "fire_missile"}).status_code, 200
         )

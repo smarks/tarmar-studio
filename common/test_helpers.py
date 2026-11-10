@@ -432,6 +432,17 @@ class BaseTestCase(TestCase):
         self.client.logout()
         mark_gate_passed(self.client)
 
+    def switch_to(self, user, password=TEST_PASSWORD):
+        """Sign in as ``user`` in place of whoever is signed in, gate kept.
+
+        Django's ``login()`` flushes the session when the account changes,
+        and the passphrase flag goes with it: a test that signed in a second
+        user with :meth:`login_as` was then answered the gate page (200) by
+        every gated URL, and an assertion of "not 403" passed against it.
+        """
+        self.logout()
+        self.login_as(user, password)
+
     def post_json(self, url, data):
         """POST JSON data to a URL."""
         return self.client.post(url, json.dumps(data), content_type="application/json")

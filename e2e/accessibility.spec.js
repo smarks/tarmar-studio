@@ -463,9 +463,11 @@ print('DOWN')
         await page.locator('.combatant-rename-input').fill('Down and out');
         await down.evaluate((node) => { node.dataset.beforePoll = 'yes'; });
         readDjangoShell(`
+from battle.access import Actor
+from battle.models import Battle
 from battle.services import rename_combatant, set_battle_control_mode
 rename_combatant(${battleId}, ${downedId}, 'Renamed Elsewhere')
-set_battle_control_mode(${battleId}, 'manual')
+set_battle_control_mode(${battleId}, 'manual', actor=Actor.for_user_or_guest(Battle.objects.get(pk=${battleId}).created_by, ''))
 print('DONE')
 `);
         await expect(page.locator('#battle-roster [data-before-poll]')).toHaveCount(0);

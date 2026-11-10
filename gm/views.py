@@ -1158,18 +1158,9 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     if error_response:
         return error_response
     session_id = data.get("session_id")
-    user_message = data.get("message", "")
-    if not isinstance(user_message, str):
-        return _json_error(refusal_words().views.message_not_text)
-    user_message = user_message.strip()
-    command = data.get("command")
-
-    # Bound user input before it is appended to history / sent to the model.
-    refusal = too_long("Message", user_message, MAX_GM_MESSAGE_CHARS)
-    if refusal:
-        return _json_error(refusal)
-
-    # Load or create session (scoped to the requesting user)
+    # Load or create session (scoped to the requesting user) before the
+    # message is judged (#182): a stranger to the session is answered its
+    # 404, never a note on their message.
     if session_id:
         session, err = _get_gm_session(session_id, request.user)
         if err:
@@ -1185,6 +1176,16 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     else:
         session = None
         history = []
+    user_message = data.get("message", "")
+    if not isinstance(user_message, str):
+        return _json_error(refusal_words().views.message_not_text)
+    user_message = user_message.strip()
+    command = data.get("command")
+
+    # Bound user input before it is appended to history / sent to the model.
+    refusal = too_long("Message", user_message, MAX_GM_MESSAGE_CHARS)
+    if refusal:
+        return _json_error(refusal)
 
     # How this turn is answered (issue #372). An existing session carries its
     # own mode; the turn that creates one takes the mode the page was showing,
@@ -2029,23 +2030,24 @@ def gm_save(request: HttpRequest) -> JsonResponse:
     if error_response:
         return error_response
     session_id = data.get("session_id")
+    if not session_id:
+        return _json_error(refusal_words().views.no_session_id)
+    # The session is the caller's or a 404 before the name is read (#182):
+    # the id has to come from the body, but nothing else in it is judged
+    # until the session is known to be theirs.
+    session, err = _get_gm_session(session_id, request.user)
+    if err:
+        return err
+    assert session is not None
     name = data.get("name", "")
     if not isinstance(name, str):
         return _json_error(refusal_words().views.name_not_text)
     name = name.strip()
-
-    if not session_id:
-        return _json_error(refusal_words().views.no_session_id)
     if not name:
         return _json_error(refusal_words().views.session_needs_name)
     refusal = too_long("Name", name, SESSION_NAME_MAX_STORED)
     if refusal:
         return _json_error(refusal)
-
-    session, err = _get_gm_session(session_id, request.user)
-    if err:
-        return err
-    assert session is not None
     session.name = name
     session.save(update_fields=["name", "updated_at"])
 

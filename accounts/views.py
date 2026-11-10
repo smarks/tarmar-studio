@@ -931,6 +931,11 @@ def profile_update_field(
         The library's response, or a 400 naming the reason the write was
         refused.
     """
+    # Another account's profile is a manager's to edit, and that is decided
+    # before the body is read (#182): the library answers the same 403 later,
+    # for a well-formed body, so nothing about who may do what changes here.
+    if user_id is not None and not request.user.can_manage_users:
+        return _permission_denied()
     data, parse_error = _parse_json_body(request)
     if parse_error:
         return parse_error

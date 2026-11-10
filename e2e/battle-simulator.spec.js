@@ -260,9 +260,11 @@ test.describe('Battle simulator', () => {
         // Meanwhile another seat renames that figure, and the log moves on:
         // the next poll has something new and redraws the roster.
         readDjangoShell(`
+from battle.access import Actor
+from battle.models import Battle
 from battle.services import rename_combatant, set_battle_control_mode
 rename_combatant(${battleId}, ${combatantId}, 'Shell Renamed')
-set_battle_control_mode(${battleId}, 'manual')
+set_battle_control_mode(${battleId}, 'manual', actor=Actor.for_user_or_guest(Battle.objects.get(pk=${battleId}).created_by, ''))
 print('DONE')
 `);
         await expect(adminPage.locator('#battle-roster [data-before-poll]')).toHaveCount(0);

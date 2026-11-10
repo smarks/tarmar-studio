@@ -531,12 +531,35 @@ class RemotePlayerTurnTest(BaseTestCase):
                 letter=chosen["letter"],
                 target_id=chosen.get("target_id"),
             )
+        # A Game Master overrides (#180): the standing rule holds players to
+        # the rules and lets the Game Master decide, a held seat included.
+        battle, _events = record_player_action(
+            battle.pk,
+            self.dm,
+            combatant_id=battle.pending_input_json["combatant_id"],
+            turn=battle.pending_input_json["turn"],
+            letter=chosen["letter"],
+            target_id=chosen.get("target_id"),
+        )
+        self.assertNotEqual(battle.status, Battle.STATUS_AWAITING)
+
+    def test_a_maker_who_is_not_a_game_master_may_not_choose_for_a_held_seat(self):
+        """Spencer's decision on #180: the battle's maker is not the seat's
+        holder, and only a Game Master account may override."""
+        maker = self.create_player(username="maker180")
+        battle = open_battle(maker, seats=1, count=1, seed=11)
+        seat = battle.combatants.get(is_open_seat=True)
+        claim_seat(battle.pk, seat.pk, self.player, archetype="armoured fighter")
+        set_seat_ready(battle.pk, seat.pk, self.player, ready=True)
+        battle = start_battle(battle.pk)
+        battle, _events = advance_turn(battle.pk)
+        chosen = battle.pending_input_json["candidates"][0]
         with self.assertRaisesMessage(
             ValueError, refusal_words().services.not_your_combatant
         ):
             record_player_action(
                 battle.pk,
-                self.dm,
+                maker,
                 combatant_id=battle.pending_input_json["combatant_id"],
                 turn=battle.pending_input_json["turn"],
                 letter=chosen["letter"],

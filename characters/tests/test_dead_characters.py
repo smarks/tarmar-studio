@@ -23,6 +23,7 @@ from tarmar_engine.spells import SPELLS
 from characters import services
 from characters.models import Character
 from characters.services import CharacterChangeError, DeadCharacterWrite
+from characters.tests.test_edit_right_first import GAME_MASTER_ONLY_ENDPOINTS
 from characters.urls import urlpatterns
 from common.test_helpers import BaseTestCase, create_character
 
@@ -346,15 +347,21 @@ class EverySheetEndpointRefusesTheDeadTest(BaseTestCase):
         self.assertEqual(on_a_character, set(REFUSED_ENDPOINTS) | EXEMPT_ENDPOINTS)
 
     def test_each_refuses_a_player_and_a_game_master_in_words(self) -> None:
+        """Except that a Game Master's own endpoint refuses a player before
+        the row is read (#182): the plain 403, with the dead character
+        unmentioned, since the player may not reach it alive either."""
         before = snapshot(self.character.pk)
         for user in (self.owner, self.game_master):
-            self.logout()
-            self.login_as(user)
+            self.switch_to(user)
             for name, request in REFUSED_ENDPOINTS.items():
                 with self.subTest(endpoint=name, user=user.username):
                     response = self.post_json(
                         self.url(name, request.get("kwargs")), request.get("body", {})
                     )
+                    if user is self.owner and name in GAME_MASTER_ONLY_ENDPOINTS:
+                        self.assertEqual(response.status_code, 403, response.content)
+                        self.assertEqual(snapshot(self.character.pk), before)
+                        continue
                     self.assertEqual(response.status_code, 400, response.content)
                     # The sheet prints a 400's error where the control is, as
                     # it prints every other refusal.

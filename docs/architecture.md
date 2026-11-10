@@ -739,6 +739,21 @@ as it stands first, so an impossible value is refused rather than dropped.
 What was dropped is stored on `Character.import_notice`, shown on the sheet
 until dismissed, and returned under `import_notice` in the import response.
 
+### The edit right comes before the body (issue #182)
+
+Every `<pk>` endpoint that writes a character is wrapped in
+`characters/views/access.py::edit_right_first`, which answers a missing
+character with the view's own 404 shape and a stranger with the usual 403 from
+one read of the row, before the view parses or validates anything; the view's
+own lock-and-authorize inside `services.changing` stays the authoritative
+check. `characters/tests/test_edit_right_first.py` reads every such endpoint
+off `characters.urls` and posts a malformed body as a stranger, so an endpoint
+added without the decorator fails there. The same order holds elsewhere by
+hand where the id is in the URL or has to be read first: `battle_act` judges
+`decides_for` on the awaited seat before the body, `profile_update_field`
+refuses a non-manager another account's profile before parsing, and `gm_save`
+looks the session up before judging the name.
+
 ### Incomplete characters
 
 Since issue #571 the six attributes and `fatigue_roll` are nullable, and
@@ -894,12 +909,27 @@ Issue #308 replaced an arrangement with a setting. `battle/control.py`:
 
 `Battle.control_mode` is the default; `BattleCombatant.control_mode` overrides
 it; `control.effective_mode(battle, combatant)` is the one resolution. Who may
-act is `battle/access.py::decides_for`: a seat that someone has actually taken
-(`player_id` or `guest_key` set) belongs to its holder alone; everything else
-belongs to whoever can control the battle (`is_dm` or the owner). Claiming a
-seat sets it to `MANUAL`; releasing resets it to `INHERIT`. Hiding buttons is
-never the enforcement — `battle_control`, `combatant_control` and
-`record_player_action` each re-check.
+act for a figure is `battle/access.py::decides_for`, the one statement every
+writing path asks (#180, Spencer's decision of 2026-11-10): a seat that
+someone has actually taken (`player_id` or `guest_key` set) belongs to its
+holder, and only a Game Master account overrides — the battle's maker may not
+take over, rename or otherwise act for it; everything else belongs to whoever
+commands the foes (`commands_foes`: the runner, or in a session fight a Game
+Master). The paths: the choice on a paused turn and handing it to the AI
+(`record_player_action`), the control mode (`combatant_control`), the name
+(`battle_rename`), and the maker's "set them all" (`set_battle_control_mode`,
+which leaves held seats as their players chose unless the actor is a Game
+Master). The page offers each control on exactly the figures `decides_for`
+admits (`seat_summaries.can_set_control`/`can_rename`), and the awaited menu
+reaches only whoever acts for the figure (`pending_payload`). Claiming a seat
+sets it to `MANUAL`; releasing resets it to `INHERIT`. Hiding buttons is never
+the enforcement — every endpoint re-checks, and `battle_act` does so before it
+reads the body (#182). A lobby seat is renamed on its row and snapshot alone,
+since the lobby has no state yet (#181). Two override surfaces, deliberately
+different: `decides_for` lets *any* Game Master account act for a held seat
+(Spencer's 2026-11-10 decision on #180), while the seat hand-offs `take_seat`
+and `return_seat` are the battle's runner's alone, and only while that account
+is a Game Master (`runs_the_seats`, #853).
 
 ### A Game Master's rulings on a battle
 

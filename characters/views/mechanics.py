@@ -46,7 +46,7 @@ from ..refusal_words import game_master_call_note
 from ..skill_checks import skill_check
 from ..skills import normalize_skill_name, skill_name_refusal
 from ..weapon_skill import record_weapon_skill
-from .access import answer_change, may_edit
+from .access import answer_change, edit_right_first, may_edit
 from .characters import render_injury_thresholds, sheet_repaint
 
 
@@ -107,6 +107,7 @@ def _change(
 @require_POST
 @rate_limit("weapon_skill", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_record_weapon_skill(request: HttpRequest, pk: int) -> HttpResponse:
     """Tie a Weapon skill to the weapon it was taken for (issue #753)."""
     is_game_master = request.user.can_manage_users
@@ -131,6 +132,7 @@ GAME_MASTER_CALL_NOTE = "game_master_call_note"
 @require_POST
 @rate_limit("skill_check", max_requests=60, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_skill_check(request: HttpRequest, pk: int) -> HttpResponse:
     """Roll one skill check and keep it in the history (issue #756)."""
     is_game_master = request.user.can_manage_users
@@ -175,6 +177,7 @@ def character_skill_check(request: HttpRequest, pk: int) -> HttpResponse:
 @require_POST
 @rate_limit("move_coin", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first(game_master_only=True)
 def character_move_coin(request: HttpRequest, pk: int) -> HttpResponse:
     """A Game Master gives or takes coin (issue #757)."""
     is_game_master = request.user.can_manage_users
@@ -208,6 +211,7 @@ def character_move_coin(request: HttpRequest, pk: int) -> HttpResponse:
 @require_POST
 @rate_limit("learn_spell", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_learn_spell(request: HttpRequest, pk: int) -> HttpResponse:
     """Put skill points into a spell (issue #774)."""
     is_game_master = request.user.can_manage_users
@@ -228,6 +232,7 @@ def character_learn_spell(request: HttpRequest, pk: int) -> HttpResponse:
 @require_POST
 @rate_limit("choose_school", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_choose_school(request: HttpRequest, pk: int) -> HttpResponse:
     """Choose the school of magic the school roll opened (issue #18)."""
     is_game_master = request.user.can_manage_users
@@ -248,6 +253,7 @@ CAST_HISTORY_FIELD = "spell_cast"
 @require_POST
 @rate_limit("cast_spell", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_cast_spell(request: HttpRequest, pk: int) -> HttpResponse:
     """Cast a spell outside a battle and keep it in the history (issue #18).
 
@@ -289,6 +295,7 @@ def character_cast_spell(request: HttpRequest, pk: int) -> HttpResponse:
 @require_POST
 @rate_limit("grant_mana", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first(game_master_only=True)
 def character_grant_mana(request: HttpRequest, pk: int) -> HttpResponse:
     """A Game Master grants mana (issue #774)."""
     is_game_master = request.user.can_manage_users
@@ -312,6 +319,7 @@ def character_grant_mana(request: HttpRequest, pk: int) -> HttpResponse:
 @require_POST
 @rate_limit("survival_save", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_roll_survival_save(request: HttpRequest, pk: int) -> HttpResponse:
     """Roll a dying character's survival save off the board (issue #839).
 

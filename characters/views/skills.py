@@ -34,7 +34,7 @@ from ..skills import (
 )
 from ..templatetags.dice_display import survival_roll
 from ..weapon_skill import needs_weapon_tie, weapon_choices
-from .access import answer_change, may_edit
+from .access import answer_change, edit_right_first, may_edit
 from .characters import (
     can_grant_skill_points,
     render_injury_thresholds,
@@ -186,6 +186,7 @@ def _build_add_years_response(
 @require_POST
 @rate_limit("add_years", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_add_experience_years(request, pk):
     """Play a run of prior-experience years for a character (issue #221)."""
     data, err = _parse_json_body(request)
@@ -231,6 +232,7 @@ def character_add_experience_years(request, pk):
 @require_POST
 @rate_limit("allocate_skill", max_requests=25, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first()
 def character_allocate_skill_point(request, pk):
     """Allocate a free skill point to a skill."""
     data, err = _parse_json_body(request)
@@ -309,6 +311,7 @@ def character_allocate_skill_point(request, pk):
 @require_POST
 @rate_limit("rename_skill", max_requests=30, window_seconds=60)
 @internal_errors_logged(json_only=True)
+@edit_right_first(json_not_found=False)
 def character_rename_skill(request, pk):
     """Rename a skill."""
     data, err = _parse_json_body(request)

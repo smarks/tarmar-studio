@@ -59,24 +59,11 @@ class SessionFightSeatsTest(BaseTestCase):
             words().control.manual_line.format(owner="alice"),
         )
 
-    def test_the_owner_chooses_for_their_character_and_the_game_master_cannot(
-        self,
-    ):
+    def test_the_owner_chooses_for_their_character(self):
         battle = self._await(self.aldwin)
         pending = battle.pending_input_json
         candidate = pending["candidates"][0]
-        with self.assertRaisesMessage(
-            ValueError, refusal_words().services.not_your_combatant
-        ):
-            record_player_action(
-                battle.pk,
-                self.game_master,
-                combatant_id=pending["combatant_id"],
-                turn=pending["turn"],
-                letter=candidate["letter"],
-                target_id=candidate.get("target_id"),
-            )
-        record_player_action(
+        battle, _events = record_player_action(
             battle.pk,
             self.alice,
             combatant_id=pending["combatant_id"],
@@ -84,6 +71,25 @@ class SessionFightSeatsTest(BaseTestCase):
             letter=candidate["letter"],
             target_id=candidate.get("target_id"),
         )
+        self.assertNotEqual(battle.status, Battle.STATUS_AWAITING)
+
+    def test_a_game_master_may_choose_for_a_seated_player_s_character(self):
+        """The standing rule's override (#180, Spencer's decision of
+        2026-11-10): a held seat is its holder's, and a Game Master account
+        may act for it. Before #180 the Game Master was refused here and had
+        only the seat hand-off (#853) or the AI to fall back on."""
+        battle = self._await(self.aldwin)
+        pending = battle.pending_input_json
+        candidate = pending["candidates"][0]
+        battle, _events = record_player_action(
+            battle.pk,
+            self.game_master,
+            combatant_id=pending["combatant_id"],
+            turn=pending["turn"],
+            letter=candidate["letter"],
+            target_id=candidate.get("target_id"),
+        )
+        self.assertNotEqual(battle.status, Battle.STATUS_AWAITING)
 
     def test_a_game_master_takes_an_absent_owners_seat_and_the_log_says_so(self):
         seat, event = take_seat(

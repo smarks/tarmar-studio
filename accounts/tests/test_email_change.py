@@ -456,16 +456,17 @@ class AdminSetsAddressTest(EmailChangeTestCase):
         self.assertEqual(mail.outbox, [])
 
     def test_a_dm_and_a_player_are_refused(self) -> None:
-        for account in (
-            self.create_dm(username="dungeon"),
-            self.create_player(username="player"),
-        ):
-            with self.subTest(account=account.username):
-                self.logout()
-                self.login_as(account)
-                response = self.set_address()
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json()["error"], EMAIL_FIELD_REFUSAL)
+        """A DM manages accounts, so the address refusal is theirs to read; a
+        player manages nobody's and is refused the profile before the body
+        is read (#182), so they learn nothing about the field."""
+        self.switch_to(self.create_dm(username="dungeon"))
+        response = self.set_address()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], EMAIL_FIELD_REFUSAL)
+
+        self.switch_to(self.create_player(username="player"))
+        response = self.set_address()
+        self.assertEqual(response.status_code, 403)
         self.assert_unchanged()
         self.assertEqual(mail.outbox, [])
 

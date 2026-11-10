@@ -41,16 +41,6 @@ class LobbyViewTestMixin(BaseTestCase):
     def open_seat(self, battle):
         return battle.combatants.filter(is_open_seat=True, player=None).first()
 
-    def switch_to(self, user):
-        """Change the logged-in user without losing the passphrase gate.
-
-        Logging a *different* user into the same client flushes the session
-        (Django's fixation guard), passphrase flag included; ``logout``
-        re-seeds the flag first.
-        """
-        self.logout()
-        self.login_as(user)
-
 
 class LobbyPageTest(LobbyViewTestMixin):
     def test_open_lobby_is_visible_to_any_player(self):
@@ -362,8 +352,9 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
         rival = self.create_user(username="rival")
         self.login_as(rival)
         response = self.act(battle, {"letter": chosen["letter"]})
-        # Watchable since the spectator flow — but never theirs to act in.
-        self.assertEqual(response.status_code, 400)
+        # Watchable since the spectator flow — but never theirs to act in. A
+        # 403, before the body is read (#182).
+        self.assertEqual(response.status_code, 403)
         self.assertIn(
             refusal_words().services.not_your_combatant, response.json()["error"]
         )
@@ -384,9 +375,11 @@ class ActAndStateEndpointTest(LobbyViewTestMixin):
         rival = self.create_user(username="ai-rival")
         self.login_as(rival)
         response = self.act(battle, {"ai": True})
-        self.assertEqual(response.status_code, 400)
+        # Refused before the body is read (#182), so the sentence is the one
+        # every stranger gets, not the hand-off's own.
+        self.assertEqual(response.status_code, 403)
         self.assertIn(
-            refusal_words().services.hand_choice_to_ai_denied, response.json()["error"]
+            refusal_words().services.not_your_combatant, response.json()["error"]
         )
 
     def test_the_seats_own_player_may_stand_the_ai_in_for_one_decision(self):
