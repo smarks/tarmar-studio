@@ -148,7 +148,10 @@ from .turn_engine.state import (
     write_carried_recap,
 )
 from .turn_record import (
+    REFUSED_ACCOUNT_CAP,
+    REFUSED_SESSION_BUSY,
     TurnRecorder,
+    TurnRefusal,
     claim_turn,
     expire_stale_running_turns,
     released_on_failure,
@@ -1244,19 +1247,12 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
 
     # One turn at a time per session (issue #515). A turn now runs to the end
     # even after its page leaves, so a second message sent meanwhile -- from a
-    # reloaded page, another tab, or a Retry -- would interleave with it.
-    already_running = claim_turn(recorder)
-    if already_running is not None:
-        recorder.finish(
-            GMTurnRecord.OUTCOME_REJECTED,
-            error=refusal_words().views.turn_already_running,
-        )
-        return JsonResponse(
-            {
-                "error": refusal_words().views.turn_already_running,
-                "running_turn": already_running.pk,
-            },
-            status=409,
+    # reloaded page, another tab, or a Retry -- would interleave with it. And
+    # only so many turns at once per account and for the whole site (#174).
+    refusal = claim_turn(recorder)
+    if refusal is not None:
+        return _refused_claim(
+            recorder, refusal, refusal_words().views.turn_already_running
         )
 
     # From here the turn is claimed: a failure before the stream is returned
@@ -1332,6 +1328,50 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
                 stored_entries=stored_entries,
             ),
         )
+
+
+#: The status a refused claim answers with: a session's running turn is a
+#: conflict the page waits out by id (issue #515); a cap reached is too many
+#: requests, to be sent again once a turn has finished (issue #174).
+SESSION_BUSY_STATUS = 409
+CAP_REACHED_STATUS = 429
+
+
+def _refused_claim(
+    recorder: TurnRecorder, refusal: TurnRefusal, session_busy_words: str
+) -> JsonResponse:
+    """Answer a turn :func:`claim_turn` refused, and record the refusal.
+
+    The page shows the error as a notice that stays, with the message put
+    back in the box (``chat.js`` ``failTurn``), so every refusal here is a
+    state the player reads and acts on, never a passing banner.
+
+    Args:
+        recorder: The refused turn, finished here as rejected so the record
+            says why.
+        refusal: What ``claim_turn`` answered.
+        session_busy_words: The sentence for a session whose turn is still
+            running: the message's or the fight's own.
+
+    Returns:
+        409 naming the running turn for a busy session; 429 in the cap's
+        words for an account or a site with as many turns running as it may.
+    """
+    words = refusal_words().views
+    if refusal.reason == REFUSED_SESSION_BUSY:
+        assert refusal.running is not None
+        recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=session_busy_words)
+        return JsonResponse(
+            {"error": session_busy_words, "running_turn": refusal.running.pk},
+            status=SESSION_BUSY_STATUS,
+        )
+    error = (
+        words.too_many_turns_running
+        if refusal.reason == REFUSED_ACCOUNT_CAP
+        else words.site_turns_full
+    )
+    recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=error)
+    return _json_error(error, status=CAP_REACHED_STATUS)
 
 
 @dataclass
@@ -2410,18 +2450,10 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
         model=get_gm_model(),
         options=get_gm_options(),
     )
-    already_running = claim_turn(recorder)
-    if already_running is not None:
-        recorder.finish(
-            GMTurnRecord.OUTCOME_REJECTED,
-            error=refusal_words().views.fight_while_turn_running,
-        )
-        return JsonResponse(
-            {
-                "error": refusal_words().views.fight_while_turn_running,
-                "running_turn": already_running.pk,
-            },
-            status=409,
+    refusal = claim_turn(recorder)
+    if refusal is not None:
+        return _refused_claim(
+            recorder, refusal, refusal_words().views.fight_while_turn_running
         )
     # A failure the handlers below do not answer releases the claim as it is
     # raised on to ``internal_errors_logged``; the record, which ``gm:turn``

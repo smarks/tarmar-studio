@@ -78,6 +78,12 @@ aide_unasked_roll = "the Game Master did not ask for a roll, and dice do not dec
 server_error = "The Game Master ran into an error on the server and could not finish. It has been logged; send your message again in a moment."
 # A second message to a session whose turn is still running (issue #515).
 turn_already_running = "The Game Master is still answering your last message in this session. Its reply will appear here when it is ready; send this one after that."
+# A message or a fight sent while the account already has as many turns
+# running as it may at once, across all its sessions (issue #174).
+too_many_turns_running = "The Game Master is already answering as many of your messages as one account may have running at once. Wait for a reply to appear, then send this one."
+# A message or a fight sent while the site already has as many turns running
+# as it serves at once (issue #174).
+site_turns_full = "The Game Master is busy with as many tables as the site can serve at once. Wait a moment, then send this one again."
 # /fight while a message is still being answered (issue #836).
 fight_while_turn_running = "The Game Master is still answering your last message in this session. Start the fight once the reply has appeared."
 # /fight when the model cannot be asked who the party faces.

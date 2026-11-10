@@ -2,9 +2,12 @@
 
 import datetime
 import json
+import sys
+import types
 import unittest
 from unittest import mock
 
+from django.conf import settings
 from django.test import TestCase
 from django.utils import timezone
 
@@ -941,6 +944,99 @@ class ExportPdfViewTest(BaseTestCase):
         response = self.client.get(f"/tarmar/export/{self.character.id}/pdf/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
+
+
+class FakeWeasyPrintHtml:
+    """``weasyprint.HTML`` as the view calls it, rendering a fixed byte string.
+
+    WeasyPrint's native libraries are not on every machine this suite runs on
+    (the tests above skip without them), and the limiter under test is in
+    front of the render, not in it.
+    """
+
+    RENDERED = b"%PDF-1.4 fake"
+
+    def __init__(self, *, string: str, url_fetcher) -> None:
+        self.string = string
+        self.url_fetcher = url_fetcher
+
+    def write_pdf(self) -> bytes:
+        return self.RENDERED
+
+
+class ExportPdfRateLimitTest(BaseTestCase):
+    """One account may ask for only so many PDFs a minute (issue #174).
+
+    A PDF is rendered on the request thread, so an account could hold one
+    with a loop of exports. The limit is ``settings.CHARACTER_EXPORT_PDF_
+    MAX_PER_MINUTE``, keyed on the account by ``common.decorators.rate_limit``,
+    as the character import's is.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.user = self.create_user(username="pdfreader")
+        self.other_user = self.create_user(username="otherpdfreader")
+        self.character = Character.objects.create(
+            user=self.user,
+            name="Limited Hero",
+            strength=14,
+            dexterity=14,
+            intelligence=14,
+            wisdom=14,
+            constitution=14,
+            charisma=14,
+            appearance_roll="3",
+            height_roll="3",
+            weight_roll="3",
+            fatigue_roll=7,
+            is_public=True,
+        )
+        self.url = f"/tarmar/export/{self.character.id}/pdf/"
+        fake_weasyprint = types.ModuleType("weasyprint")
+        fake_weasyprint.HTML = FakeWeasyPrintHtml  # type: ignore[attr-defined]
+        patcher = mock.patch.dict(sys.modules, {"weasyprint": fake_weasyprint})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @property
+    def allowance(self) -> int:
+        return settings.CHARACTER_EXPORT_PDF_MAX_PER_MINUTE
+
+    def test_the_allowance_is_served_and_the_next_export_is_refused(self):
+        self.login_as(self.user)
+        for export in range(self.allowance):
+            response = self.client.get(self.url)
+            self.assertEqual(response.status_code, 200, msg=f"export {export}")
+            self.assertEqual(response.content, FakeWeasyPrintHtml.RENDERED)
+
+        refused = self.client.get(self.url)
+
+        self.assertEqual(refused.status_code, 429)
+
+    def test_the_allowance_is_the_account_s_not_the_character_s(self):
+        """Another account exporting the same public sheet is not held back by
+        this one's spending, and this one's spending covers every character."""
+        self.login_as(self.user)
+        for _export in range(self.allowance):
+            self.client.get(self.url)
+        self.assertEqual(self.client.get(self.url).status_code, 429)
+
+        self.logout()
+        self.login_as(self.other_user)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+
+    def test_the_other_exports_are_not_counted(self):
+        """Markdown and JSON cost a template and a dict; they stay unlimited."""
+        self.login_as(self.user)
+        for _export in range(self.allowance + 1):
+            self.assertEqual(
+                self.client.get(
+                    f"/tarmar/export/{self.character.id}/json/"
+                ).status_code,
+                200,
+            )
+        self.assertEqual(self.client.get(self.url).status_code, 200)
 
 
 class ExportUrlPatternsTest(BaseTestCase):

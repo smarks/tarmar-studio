@@ -350,6 +350,27 @@ def _message_from_environment(name: str, default: str, *fields: str) -> str:
         raise ImproperlyConfigured(str(error)) from error
 
 
+def _positive_count_from_environment(name: str, default: int) -> int:
+    """A cap or allowance from the environment, or its default (issue #174).
+
+    A value that is not a whole number of one or more stops startup with
+    ``ImproperlyConfigured``: a cap of zero would refuse every turn, and a
+    misspelt one must not quietly become the default.
+    """
+    configured = os.environ.get(name, "")
+    if not configured.strip():
+        return default
+    try:
+        count = int(configured)
+    except ValueError:
+        count = 0
+    if count < 1:
+        raise ImproperlyConfigured(
+            f"{name} is {configured!r}; it must be a whole number of 1 or more."
+        )
+    return count
+
+
 def _page_message_from_environment(name: str, default: str, *fields: str) -> str:
     """A message the page fills in itself (#94): as
     :func:`_message_from_environment`, with every field a bare ``{name}``."""
@@ -677,6 +698,36 @@ GM_RECAP_BUDGET_SECONDS = float(os.environ.get("GM_RECAP_BUDGET_SECONDS", "300")
 # plain JSON POST that sends nothing until it answers, so past 60 s nginx
 # cuts it with an HTML 504 while the server would go on holding the model.
 GM_FIGHT_BUDGET_SECONDS = float(os.environ.get("GM_FIGHT_BUDGET_SECONDS", "50"))
+
+# --- Caps on turns running at once (issue #174) ---
+# A turn holds a request thread for as long as it runs -- up to
+# GM_STREAM_BUDGET_SECONDS, and on after its page leaves (issue #515) -- and
+# a message sent with no session starts a fresh turn every time, so without a
+# cap one account could hold every thread gunicorn has (3 workers x 4 threads
+# in tarmar.service.template). gm.turn_record.claim_turn counts the account's
+# running turn records, every process's, and refuses the one past its cap in
+# the words of config/gm-refusals.toml [views]. A player plays one table and
+# may have a second tab open; a Game Master runs several. The site-wide cap
+# is what keeps threads free for ordinary pages when the accounts are many
+# (registration is open), so it stays below the thread count; the model
+# answers one call at a time anyway, so turns past it would only have waited.
+GM_MAX_RUNNING_TURNS_PER_PLAYER = _positive_count_from_environment(
+    "GM_MAX_RUNNING_TURNS_PER_PLAYER", 2
+)
+GM_MAX_RUNNING_TURNS_PER_GAME_MASTER = _positive_count_from_environment(
+    "GM_MAX_RUNNING_TURNS_PER_GAME_MASTER", 4
+)
+GM_MAX_RUNNING_TURNS_SITE_WIDE = _positive_count_from_environment(
+    "GM_MAX_RUNNING_TURNS_SITE_WIDE", 8
+)
+
+# How many PDF exports one account may ask for a minute (issue #174). A PDF
+# is rendered on the request thread by WeasyPrint, the one export that costs
+# the server real work, so it has the character import's own allowance; the
+# Markdown and JSON exports are a template and a dict and are not counted.
+CHARACTER_EXPORT_PDF_MAX_PER_MINUTE = _positive_count_from_environment(
+    "CHARACTER_EXPORT_PDF_MAX_PER_MINUTE", 10
+)
 
 # --- GM turn waiting and timeout messages (issue #64) ---
 # Ollama on the production host answers one request at a time, so a turn sent

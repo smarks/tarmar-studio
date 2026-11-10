@@ -19,7 +19,31 @@ from origami_common.decorators import rate_limit
 from common.helpers import _json_error, wants_json
 from common.refusal_words import refusal_words
 
-__all__ = ["DJANGO_ANSWERED_EXCEPTIONS", "internal_errors_logged", "rate_limit"]
+__all__ = [
+    "DJANGO_ANSWERED_EXCEPTIONS",
+    "internal_errors_logged",
+    "rate_limit",
+    "signed_in_rate_limit_key",
+]
+
+
+def signed_in_rate_limit_key(key_prefix: str, user_pk: int) -> str:
+    """The cache key :func:`rate_limit` counts a signed-in account under.
+
+    ``origami_common.decorators.rate_limit`` builds it as
+    ``rate_limit:<key_prefix>:user_<pk>`` and exports no helper for it; this
+    is the one spelling on this side of the library, for a test or a browser
+    spec that has to release an account's allowance (issue #174).
+
+    Args:
+        key_prefix: The bucket the view was decorated with.
+        user_pk: The signed-in account's primary key.
+
+    Returns:
+        The key in ``CACHES["default"]``.
+    """
+    return f"rate_limit:{key_prefix}:user_{user_pk}"
+
 
 #: The exceptions Django answers itself, each with a 4xx of its own
 #: (``django.core.handlers.exception.response_for_exception``): a page that

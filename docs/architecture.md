@@ -1344,6 +1344,34 @@ first turn spends it before its own, issue #936). A genuine retry
 False` and feeds the already-filed results back as `known_results`, so the turn
 is **narrated, not re-run** — nothing is applied twice.
 
+### Caps on running turns (issue #174)
+
+A turn holds its request thread for as long as it runs — up to
+`GM_STREAM_BUDGET_SECONDS`, and on after its page leaves, by #515's design —
+and a message sent with no `session_id` starts a fresh turn every time, so one
+account could hold every thread gunicorn has (3 workers × 4 threads in
+`tarmar.service.template`). `gm.turn_record.claim_turn` therefore refuses, in
+this order: a session whose turn is still running (409, `running_turn` named,
+#515); an account with `GM_MAX_RUNNING_TURNS_PER_PLAYER` (or, for a Game
+Master, `GM_MAX_RUNNING_TURNS_PER_GAME_MASTER`) turns running across all its
+sessions (429); and a site with `GM_MAX_RUNNING_TURNS_SITE_WIDE` running (429),
+which is what keeps threads free for other pages when the accounts are many,
+since registration is open. The counts are the `GMTurnRecord` rows with
+`outcome=running` started within the recap and stream budgets plus the grace —
+the same bound `turns_ahead_of` uses — so a slot a dead worker left is held no
+longer than a turn can run. The per-account count is serialised by the `FOR
+UPDATE` on the user's row; the site-wide one by a PostgreSQL transaction
+advisory lock (`TURN_CLAIM_LOCK_KEY`), skipped on SQLite. The refusals' words
+are `[views]` in `config/gm-refusals.toml`; `chat.js` shows them as it shows
+any refused send, a notice that stays with the message back in the box. The
+fight command claims through the same function and is capped the same way. A
+disconnected turn still runs to its end (#515) and keeps its slot until it
+finishes or its budget ends it; that is the bound on it.
+
+`character_export.views.export_pdf`, the one export that renders on the
+request thread, is limited to `CHARACTER_EXPORT_PDF_MAX_PER_MINUTE` an account
+through `common.decorators.rate_limit`.
+
 ### Streaming
 
 `gm:stream` answers a `StreamingHttpResponse` of `text/event-stream` with

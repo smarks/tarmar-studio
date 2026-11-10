@@ -114,6 +114,8 @@ class ViewsWords:
 
     server_error: str = sentence()
     turn_already_running: str = sentence()
+    too_many_turns_running: str = sentence()
+    site_turns_full: str = sentence()
     fight_while_turn_running: str = sentence()
     fight_model_unreachable: str = sentence()
     turn_already_answered: str = sentence()
