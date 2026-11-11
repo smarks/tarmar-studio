@@ -23,7 +23,7 @@ import re
 from django.conf import settings
 
 from characters.models import Character
-from common.test_helpers import create_character
+from common.test_helpers import create_character, inner_markup_of
 from reference.rendering import (
     CHAT_ALLOWED_TAGS,
     _link_stays_on_this_site,
@@ -536,6 +536,10 @@ class RecordTextStaysOnItsLineTest(ExecutorTestCase):
         self.assertNotIn(RECORDS_ARE_DATA_NOTE, state_block(policy, []))
 
 
+#: The element gm/review.html renders the findings into.
+REVIEW_FINDINGS_ID = "gm-review-findings"
+
+
 class ModelMarkdownRenderingTest(ExecutorTestCase):
     """A review's findings, model-written, carry no image and no link off this site."""
 
@@ -550,13 +554,7 @@ class ModelMarkdownRenderingTest(ExecutorTestCase):
         self.login_as(self.user)
         response = self.client.get(f"/tarmar/gm/reviews/{review.pk}/")
         self.assertEqual(response.status_code, 200)
-        match = re.search(
-            r'<div class="gm-review-findings"[^>]*>(.*?)</div>',
-            response.content.decode(),
-            re.S,
-        )
-        assert match is not None
-        return match.group(1)
+        return inner_markup_of(response.content.decode(), REVIEW_FINDINGS_ID)
 
     def test_an_image_and_an_outside_link_are_dropped_a_local_link_kept(self):
         rendered = self._rendered_findings(

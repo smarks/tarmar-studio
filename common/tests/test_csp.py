@@ -19,7 +19,12 @@ from django.utils.csp import CSP  # type: ignore[reportMissingImports]
 
 from common.gate import DEV_GATE_PASSPHRASE, GATE_PATH
 from common.middleware import GateRateLimitMiddleware
-from common.test_helpers import BaseTestCase, mark_gate_passed
+from common.test_helpers import (
+    NONCE_ATTRIBUTE,
+    BaseTestCase,
+    findings_in,
+    mark_gate_passed,
+)
 
 ENFORCED_HEADER = str(CSP.HEADER_ENFORCE)
 REPORT_ONLY_HEADER = str(CSP.HEADER_REPORT_ONLY)
@@ -29,7 +34,6 @@ WRONG_PASSPHRASE = "gandalf"
 #: A source that names another host; none of these may appear anywhere.
 OUTSIDE_HOST = re.compile(r"(?:https?:)?//")
 NONCE_IN_HEADER = re.compile(r"'nonce-([A-Za-z0-9+/=_-]+)'")
-NONCE_IN_SCRIPT_TAG = re.compile(r'<script nonce="([^"]+)"')
 
 
 def directives(header: str) -> dict[str, list[str]]:
@@ -142,7 +146,11 @@ class NonceTest(BaseTestCase):
         in_header = NONCE_IN_HEADER.search(header)
         self.assertIsNotNone(in_header, f"no nonce in {header}")
         assert in_header is not None
-        on_page = set(NONCE_IN_SCRIPT_TAG.findall(response.content.decode()))
+        on_page = {
+            tag.attributes[NONCE_ATTRIBUTE]
+            for tag in findings_in(response.content.decode()).script_tags
+            if NONCE_ATTRIBUTE in tag.attributes
+        }
         self.assertEqual(on_page, {in_header.group(1)})
 
     def test_the_404_page_s_script_carries_the_nonce(self):

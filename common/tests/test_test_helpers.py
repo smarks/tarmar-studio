@@ -12,6 +12,7 @@ from common.test_helpers import (
     BEAST_DEFAULTS,
     TEST_PASSWORD,
     BaseTestCase,
+    inner_markup_of,
     make_beast,
     mark_gate_passed,
     skip_unless_canon_expects,
@@ -102,3 +103,25 @@ class SkipUnlessCanonExpectsTest(SimpleTestCase):
                 self.assertEqual(result.skipped, [])
                 self.assertEqual(len(result.failures), 1)
                 self.assertIn("supplies no 'names'", result.failures[0][1])
+
+
+class InnerMarkupOfTest(SimpleTestCase):
+    """The markup inside one element, as a browser reads it."""
+
+    PAGE = (
+        '<html><body><div id="outer"><p>before</p>'
+        '<DIV ID="findings" class="x"><p>a &amp; b &#39;c</p>'
+        "<div><br/>inner <A HREF=/tarmar/gm/ hidden>in</A></div></div>"
+        "<p>after</p></div></body></html>"
+    )
+
+    def test_the_element_s_contents_come_back_with_nesting_kept(self):
+        self.assertEqual(
+            inner_markup_of(self.PAGE, "findings"),
+            "<p>a &amp; b &#39;c</p>"
+            '<div><br/>inner <a href="/tarmar/gm/" hidden>in</a></div>',
+        )
+
+    def test_a_missing_element_is_an_error_not_an_empty_string(self):
+        with self.assertRaisesRegex(AssertionError, "no element with id 'absent'"):
+            inner_markup_of(self.PAGE, "absent")
