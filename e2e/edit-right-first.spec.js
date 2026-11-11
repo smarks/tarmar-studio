@@ -6,13 +6,17 @@
  * browser against the running server for one of them, the sheet's field
  * update: a body that is not JSON, posted at another player's character,
  * answers 403 and not 400, while the same body at the player's own character
- * answers 400. The other player's character is made through the Django shell
- * for this worker's watcher account and removed afterwards.
+ * answers 400. The other player is an account of this spec's own (issue
+ * #889), made with its character through the Django shell and deleted
+ * afterwards, so the suite's shared accounts are left as other specs expect.
  */
 
-const { test, expect, TEST_WATCHER, createCharacter } = require('./fixtures');
+const { test, expect, createCharacter } = require('./fixtures');
 const { readDjangoShell, runDjangoShell } = require('./django');
+const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 const { uniqueName } = require('./unique-name');
+
+const strangerFor = (testInfo) => specAccount('bodystranger', 'bodystranger-pass-182', testInfo);
 
 /** POST a raw body from the page with its CSRF token; the status alone matters. */
 async function postRaw(page, path, body) {
@@ -28,11 +32,15 @@ async function postRaw(page, path, body) {
     }, { path, body });
 }
 
-function createCharacterFor(username, name) {
+/** The stranger's account and one character of theirs, made in one shell run. */
+function createStrangerWithCharacter(account, name) {
     const output = readDjangoShell(`
 from django.contrib.auth import get_user_model
 from common.test_helpers import create_character
-character = create_character(get_user_model().objects.get(username=${JSON.stringify(username)}), name=${JSON.stringify(name)})
+user, _created = get_user_model().objects.get_or_create(username=${JSON.stringify(account.username)})
+user.set_password(${JSON.stringify(account.password)})
+user.save()
+character = create_character(user, name=${JSON.stringify(name)})
 print('CHARACTER', character.pk)
 `);
     const match = output.match(/CHARACTER (\d+)/);
@@ -40,15 +48,10 @@ print('CHARACTER', character.pk)
     return Number(match[1]);
 }
 
-function deleteCharacter(characterId) {
-    runDjangoShell(`
-from characters.models import Character
-Character.objects.filter(pk=${Number(characterId)}).delete()
-`);
-}
 
 test('a bad body at another player\'s character is 403, at your own 400', async ({ authenticatedPage: page }, testInfo) => {
-    const theirs = createCharacterFor(TEST_WATCHER.username, uniqueName('Theirs'));
+    const stranger = strangerFor(testInfo);
+    const theirs = createStrangerWithCharacter(stranger, uniqueName('Theirs'));
     try {
         // The page's own character, made as every spec makes one, so it is
         // the signed-in player's.
@@ -58,6 +61,7 @@ test('a bad body at another player\'s character is 403, at your own 400', async 
         expect(await postRaw(page, `/tarmar/characters/${theirs}/update-field/`, '{not json')).toBe(403);
         expect(await postRaw(page, `/tarmar/characters/${mine}/update-field/`, '{not json')).toBe(400);
     } finally {
-        deleteCharacter(theirs);
+        // The stranger goes with their character (the FK cascades).
+        runDjangoShell(deleteSpecAccountsScript([stranger]));
     }
 });

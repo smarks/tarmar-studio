@@ -11,17 +11,49 @@
  * maker no rename on that seat (the flag battle.js draws the click from); and
  * a Game Master's rename of the same seat is taken.
  *
- * The accounts are this worker's own seeded ones: TEST_USER (a player) makes
- * the lobby, TEST_WATCHER (a player with no roles) holds the seat, TEST_ADMIN
- * is the Game Master. Every request is made from the page it belongs to, with
- * that page's CSRF token, so the browser's own session and cookies are what
- * the server judges.
+ * The accounts are this spec's own (issue #889): a player who makes the
+ * lobby, a player who holds the seat, and a Game Master, made in the Django
+ * shell for this worker and this repeat and deleted afterwards with their
+ * battles and the holder's generated fighter. The suite's shared accounts
+ * stay untouched, so a spec that expects TEST_WATCHER's journal empty
+ * (home-and-creation-flow) does not depend on whether this one ran first.
+ * Every request is made from the page it belongs to, with that page's CSRF
+ * token, so the browser's own session and cookies are what the server judges.
  */
 
-const {
-    test, expect, TEST_USER, TEST_WATCHER, TEST_ADMIN, loginAs, submitPassphrase, createBattleViaSetup,
-} = require('./fixtures');
+const { test, expect, loginAs, submitPassphrase, createBattleViaSetup } = require('./fixtures');
+const { runDjangoShell } = require('./django');
+const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 const { uniqueName } = require('./unique-name');
+
+const makerFor = (testInfo) => specAccount('seatmaker', 'seatmaker-pass-180', testInfo);
+const holderFor = (testInfo) => specAccount('seatholder', 'seatholder-pass-180', testInfo);
+const gameMasterFor = (testInfo) => specAccount('seatmaster', 'seatmaster-pass-180', testInfo);
+
+/** The three accounts, made afresh; the Game Master carries the DM role. */
+function createAccountsScript(maker, holder, gameMaster) {
+    return `
+from django.contrib.auth import get_user_model
+User = get_user_model()
+for username, password, is_dm in [
+    (${JSON.stringify(maker.username)}, ${JSON.stringify(maker.password)}, False),
+    (${JSON.stringify(holder.username)}, ${JSON.stringify(holder.password)}, False),
+    (${JSON.stringify(gameMaster.username)}, ${JSON.stringify(gameMaster.password)}, True),
+]:
+    user, _created = User.objects.get_or_create(username=username)
+    user.set_password(password)
+    user.is_dm = is_dm
+    user.save()
+`;
+}
+
+test.beforeEach(({}, testInfo) => {
+    runDjangoShell(createAccountsScript(makerFor(testInfo), holderFor(testInfo), gameMasterFor(testInfo)));
+});
+
+test.afterAll(({}, testInfo) => {
+    runDjangoShell(deleteSpecAccountsScript([makerFor(testInfo), holderFor(testInfo), gameMasterFor(testInfo)]));
+});
 
 /** POST JSON from the page, as battle.js does, with the page's CSRF token. */
 async function postFromPage(page, path, body) {
@@ -46,19 +78,26 @@ async function seatsFor(page, battleId) {
     return (await response.json()).seats;
 }
 
-test('the holder renames their lobby seat; the maker may not, a Game Master may', async ({ authenticatedPage: makerPage, browser }) => {
+test('the holder renames their lobby seat; the maker may not, a Game Master may', async ({ browser }, testInfo) => {
     test.setTimeout(90000);
-    const battleName = uniqueName('Held seat');
-    await createBattleViaSetup(makerPage, { name: battleName, fighters: 1, playerSeats: 1 });
-    const battleId = Number(makerPage.url().match(/\/battles\/(\d+)\//)[1]);
-
+    const maker = makerFor(testInfo);
+    const holder = holderFor(testInfo);
+    const gameMaster = gameMasterFor(testInfo);
+    const makerContext = await browser.newContext();
     const holderContext = await browser.newContext();
     const gameMasterContext = await browser.newContext();
     try {
+        const makerPage = await makerContext.newPage();
+        await submitPassphrase(makerPage);
+        await loginAs(makerPage, maker);
+        const battleName = uniqueName('Held seat');
+        await createBattleViaSetup(makerPage, { name: battleName, fighters: 1, playerSeats: 1 });
+        const battleId = Number(makerPage.url().match(/\/battles\/(\d+)\//)[1]);
+
         // The holder joins with a generated fighter.
         const holderPage = await holderContext.newPage();
         await submitPassphrase(holderPage);
-        await loginAs(holderPage, TEST_WATCHER);
+        await loginAs(holderPage, holder);
         await holderPage.goto(`/tarmar/battles/${battleId}/`);
         await holderPage.click('summary:has-text("Claim this seat")');
         await holderPage.selectOption('select[name="archetype"]', 'archer');
@@ -100,13 +139,14 @@ test('the holder renames their lobby seat; the maker may not, a Game Master may'
         // A Game Master overrides.
         const gameMasterPage = await gameMasterContext.newPage();
         await submitPassphrase(gameMasterPage);
-        await loginAs(gameMasterPage, TEST_ADMIN);
+        await loginAs(gameMasterPage, gameMaster);
         await gameMasterPage.goto(`/tarmar/battles/${battleId}/`);
         const ruled = await postFromPage(gameMasterPage, `/tarmar/battles/${battleId}/rename/`, {
             combatant_id: held.combatant_id, name: `${holderName} (ruled)`,
         });
         expect(ruled.status).toBe(200);
     } finally {
+        await makerContext.close();
         await holderContext.close();
         await gameMasterContext.close();
     }

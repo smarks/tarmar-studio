@@ -9,14 +9,34 @@
  * `page` fixture fails any test whose page logs a policy violation, so every
  * other spec in the suite is this policy's test too; the pages this spec
  * opens in contexts of its own watch for violations themselves.
+ *
+ * The GM chat test signs in as an account of this spec's own (issue #889),
+ * made in the Django shell for this worker and this repeat and deleted
+ * afterwards with the session its message starts, so no session is left on
+ * a shared account for other specs to find.
  */
 
-const { test, expect, loginAs, TEST_ADMIN } = require('./fixtures');
+const { test, expect, loginAs } = require('./fixtures');
+const { runDjangoShell } = require('./django');
+const { specAccount, deleteSpecAccountsScript } = require('./accounts');
 
 const PUBLIC_PAGE = '/tarmar/accounts/login/';
 const GATED_PAGE = '/tarmar/gm/';
 const HEADER = 'content-security-policy';
 const REPORT_ONLY_HEADER = 'content-security-policy-report-only';
+
+const gameMasterFor = (testInfo) => specAccount('cspmaster', 'cspmaster-pass-178', testInfo);
+
+/** The Game Master's account, made afresh with the role the chat's controls are drawn for. */
+function createGameMasterScript(gameMaster) {
+    return `
+from django.contrib.auth import get_user_model
+user, _created = get_user_model().objects.get_or_create(username=${JSON.stringify(gameMaster.username)})
+user.is_dm = True
+user.set_password(${JSON.stringify(gameMaster.password)})
+user.save()
+`;
+}
 
 /** The header's directives, each to its sources. */
 function directives(header) {
@@ -29,6 +49,10 @@ function directives(header) {
 }
 
 test.describe('Content-Security-Policy', () => {
+    test.afterAll(({}, testInfo) => {
+        runDjangoShell(deleteSpecAccountsScript([gameMasterFor(testInfo)]));
+    });
+
     test('a page carries the enforced policy the review asked for', async ({ page }) => {
         const response = await page.request.get(PUBLIC_PAGE);
         expect(response.status()).toBe(200);
@@ -69,8 +93,10 @@ test.describe('Content-Security-Policy', () => {
         await expect(page.locator('#menuToggle')).toHaveAttribute('aria-expanded', 'true');
     });
 
-    test('the GM chat\'s controls work without inline handlers', async ({ page }) => {
-        await loginAs(page, TEST_ADMIN);
+    test('the GM chat\'s controls work without inline handlers', async ({ page }, testInfo) => {
+        const gameMaster = gameMasterFor(testInfo);
+        runDjangoShell(createGameMasterScript(gameMaster));
+        await loginAs(page, gameMaster);
         await page.goto(GATED_PAGE);
         // Roll 3d6 asks for the dice in the page (data-command="roll").
         await page.click('.cmd-btn:has-text("Roll 3d6")');
