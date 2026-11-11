@@ -42,7 +42,7 @@ graph TB
     browser["Browser<br/>templates + static/js, no framework"]
 
     subgraph datahorde["datahorde - roots.origamisoftware.com"]
-        nginx["nginx<br/>nginx/tarmar.conf<br/>TLS, /static/, /references/"]
+        nginx["nginx<br/>nginx/tarmar.conf<br/>TLS, /static/, scanner block"]
         upstream["upstream tarmar_backend<br/>nginx/tarmar-upstream.conf"]
         blue["gunicorn tarmar-blue<br/>127.0.0.1:9066<br/>~/dev/tarmar-studio-blue"]
         green["gunicorn tarmar-green<br/>127.0.0.1:9067<br/>~/dev/tarmar-studio-green"]

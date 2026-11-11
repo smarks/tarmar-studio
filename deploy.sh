@@ -66,6 +66,12 @@ GREEN_PORT=9067
 # Overridable for the same reason TARMAR_APP_DIR is: the tests drive a real
 # switch, and its recovery path, against a file in a throwaway directory.
 UPSTREAM_CONF="${TARMAR_UPSTREAM_CONF:-/etc/nginx/conf.d/tarmar-upstream.conf}"
+# The site's nginx config and the scanner block it includes (issue #179), both
+# installed from the release checkout's nginx/ directory by install_nginx_config
+# so the repository is their one source of truth. Overridable for the same
+# reason UPSTREAM_CONF is: the tests install into a throwaway directory.
+NGINX_SITE_CONF="${TARMAR_NGINX_SITE_CONF:-/etc/nginx/sites-available/tarmar}"
+NGINX_SCANNER_CONF="${TARMAR_NGINX_SCANNER_CONF:-/etc/nginx/snippets/tarmar-scanner-block.conf}"
 STATE_FILE="$APP_DIR/.deploy-state"
 # The Tarmar canon commit the last successful deploy put live (issue #921). A
 # canon checkout at any other commit is a change to deploy, even if a deploy
@@ -724,6 +730,71 @@ verify_environment() {
     fi
 }
 
+# Install the repository's nginx files on the host (issue #179).
+#
+# Production's /etc/nginx/sites-available/tarmar had drifted from
+# nginx/tarmar.conf -- it kept a /references/ location that bypassed the
+# passphrase gate and listed a directory to any origin -- because nothing
+# ever installed the repository's copy. This does, from the release checkout
+# being deployed: the scanner block first (the site file includes it), then
+# the site file. A file that already matches is left alone, so a second run
+# changes nothing and reloads nothing. Each file replaced keeps a dated backup
+# beside it. nginx then tests the whole config; on a pass it is reloaded
+# gracefully, and on a failure every file this run touched is put back (the
+# backup, or removed where there was none), nginx is reloaded on the restored
+# config, and the deploy stops here, before any traffic moves.
+install_nginx_config() {
+    local release=$1
+    local stamp
+    stamp=$(date +%Y%m%d-%H%M%S)
+    local -a installed=() backups=()
+    local pair source target backup
+    for pair in "scanner-block.conf:$NGINX_SCANNER_CONF" "tarmar.conf:$NGINX_SITE_CONF"; do
+        source="$release/nginx/${pair%%:*}"
+        target="${pair#*:}"
+        [ -f "$source" ] || error "nginx config $source is missing from the release"
+        if [ -f "$target" ] && cmp -s "$source" "$target"; then
+            continue
+        fi
+        backup=""
+        if [ -f "$target" ]; then
+            backup="$target.bak-$stamp"
+            sudo cp -p "$target" "$backup"
+        fi
+        sudo mkdir -p "$(dirname "$target")"
+        sudo cp "$source" "$target"
+        sudo chmod 0644 "$target"
+        installed+=("$target")
+        backups+=("$backup")
+        log "Installed $target from $source${backup:+ (previous copy kept at $backup)}"
+    done
+    if [ "${#installed[@]}" -eq 0 ]; then
+        log "nginx config is already the repository's; nothing to install"
+        return 0
+    fi
+    if sudo nginx -t; then
+        sudo systemctl reload nginx
+        log "nginx reloaded with the repository's config"
+        return 0
+    fi
+    warn "nginx refused the new config; restoring the previous files"
+    local index
+    for index in "${!installed[@]}"; do
+        if [ -n "${backups[$index]}" ]; then
+            sudo cp -p "${backups[$index]}" "${installed[$index]}"
+        else
+            sudo rm -f "${installed[$index]}"
+        fi
+    done
+    if sudo nginx -t; then
+        sudo systemctl reload nginx
+        error "nginx config install failed; the previous config was restored and the deploy stopped before any traffic moved"
+    fi
+    # The restored files were live a moment ago, so a failure now is some
+    # other site's config on this host, not ours; nothing is reloaded.
+    error "nginx config install failed; restored the files, but nginx still refuses the host's config -- another site's config is broken; nothing was reloaded, and the deploy stopped before any traffic moved"
+}
+
 # Switch nginx to point to the specified environment
 switch_to() {
     local env=$1
@@ -911,6 +982,12 @@ main() {
     verify_release "$inactive" \
         || error "$inactive failed verification; traffic stays on $active and nothing was switched"
 
+    # The repository's nginx files go live before the traffic does (issue
+    # #179): a config nginx refuses stops the deploy here, with the old
+    # config restored and traffic still on $active.
+    log "Installing nginx config..."
+    install_nginx_config "$release"
+
     # Switch traffic
     switch_to "$inactive"
 
@@ -933,7 +1010,11 @@ main() {
     log "Rollback available: $active (run: ./deploy.sh rollback)"
 }
 
-# Rollback to previous environment
+# Rollback to previous environment. It switches the colour and nothing else:
+# the nginx files install_nginx_config put live stay as they are. To roll
+# those back by hand, copy the newest backup beside each file over it and
+# reload: sudo cp /etc/nginx/sites-available/tarmar.bak-<stamp>
+# /etc/nginx/sites-available/tarmar && sudo nginx -t && sudo systemctl reload nginx
 rollback() {
     local active=$(get_active)
     local inactive=$(get_inactive)
