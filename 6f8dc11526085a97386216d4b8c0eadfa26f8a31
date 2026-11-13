@@ -1,0 +1,10 @@
+gate: pass
+commit: 6f8dc11526085a97386216d4b8c0eadfa26f8a31
+recorded: 2026-11-13T17:04:21Z
+host: wintermute.local
+canon: tarmar
+canon-dir: /private/tmp/tarmar-ship-vdfbidfl/canon
+canon-commit: 8f95a6d18c442c484ff2bd62e57a30f55379fc82
+e2e-port: 8394
+default-canon-e2e-port: 8395
+steps: ruff, ruff format, pyright, makemigrations, build_guides, pytest (Tarmar canon), jest (Tarmar canon), playwright (Tarmar canon), pytest (default canon), jest (default canon), playwright (default canon)
