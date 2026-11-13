@@ -15,6 +15,7 @@ audit flagged that split, and it is real -- the front end depends on it -- so
 this module offers both rather than quietly picking one.
 """
 
+import functools
 from collections.abc import Callable
 
 from django.core.exceptions import PermissionDenied
@@ -87,6 +88,67 @@ def edit_denied(request: HttpRequest, character: Character) -> JsonResponse | No
 def character_not_found_json() -> JsonResponse:
     """The JSON 404 the fetch-only endpoints answer a missing character with."""
     return _json_error(refusal_words().views_access.not_found, status=404)
+
+
+def edit_right_first(
+    *,
+    json_not_found: bool = True,
+    is_deleted: bool = False,
+    game_master_only: bool = False,
+) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
+    """Answer a stranger before the view reads a word of the body (issue #182).
+
+    Every ``<pk>`` endpoint that writes a character locks the row and checks
+    the edit right inside its change, which is the authoritative check. But
+    most parse and validate the request body first, so a caller with no right
+    to the character was answered 400 for a bad body and learned what a good
+    one looks like before the 403. This decorator puts the question "may this
+    caller write this character at all?" in front of the view, from one cheap
+    read of the row, so the order cannot drift view by view: a missing
+    character is the view's own 404 shape, a stranger is the usual 403, and
+    only then does the view run and check again on the locked row. Which side
+    of the player/Game Master line a write sits on is unchanged: the rule is
+    still ``common.helpers._can_edit_object`` -- the owner, or a DM/admin.
+
+    Args:
+        json_not_found: Whether a missing character is the JSON 404
+            (``character_not_found_json``) or Django's HTML 404, matching
+            what the view answers from ``answer_change`` or
+            ``locked_character_or_404``.
+        is_deleted: The soft-delete state the row must be in, as
+            ``locked_character_or_404`` takes it: ``True`` for restore only.
+        game_master_only: The endpoint is a Game Master's alone (a death, a
+            revival, the pools, coin, mana). A caller who is not one is
+            refused before the row is read, so the refusal says nothing
+            about whether the character exists: a 403 for an existing id and
+            a 404 for a missing one would have been an existence oracle.
+
+    Returns:
+        The decorator.
+    """
+
+    def decorate(view: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+        @functools.wraps(view)
+        def guarded(request: HttpRequest, pk: int, *args, **kwargs) -> HttpResponse:
+            if game_master_only and not request.user.can_manage_users:
+                return _permission_denied()
+            character = (
+                Character.objects.filter(pk=pk, is_deleted=is_deleted)
+                .select_related("user")
+                .only("id", "user")
+                .first()
+            )
+            if character is None:
+                if json_not_found:
+                    return character_not_found_json()
+                raise Http404(refusal_words().views_access.not_found)
+            if not _can_edit_object(request, character):
+                return _permission_denied()
+            return view(request, pk, *args, **kwargs)
+
+        return guarded
+
+    return decorate
 
 
 class ChangeRefused(Exception):

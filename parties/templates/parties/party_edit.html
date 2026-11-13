@@ -31,7 +31,7 @@
 
 {% block extra_js %}
 <script src="{% static 'js/autosave.js' %}"></script>
-<script>
+<script nonce="{{ csp_nonce }}">
 initAutosave({
     updateUrl: '{% url "parties:update_field" party.pk %}',
     validate: (field, value) => field !== 'name' || value !== '' || 'A party needs a name.',

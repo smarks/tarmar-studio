@@ -1,11 +1,13 @@
 import functools
 import json
 import logging
+import re
 import string
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -106,6 +108,199 @@ def skip_unless_canon_expects(
 # The password every test user is created with. Strong enough to pass the
 # project's password validators when a test drives the real signup form.
 TEST_PASSWORD = "GalleonMist7q"
+
+#: The address Django's test client arrives from (its default ``REMOTE_ADDR``),
+#: and the one the per-address limiters key on in a test. The browser specs
+#: declare the same once in ``e2e/django.js``.
+TEST_CLIENT_ADDRESS = "127.0.0.1"
+
+
+#: What a rendered page carries that differs on every render, for a test that
+#: compares two renders of the same page (issues #929, #178): the masked CSRF
+#: token in base.html's meta tag and in a form's hidden field, and the nonce
+#: on an inline <script> block, minted per response for the
+#: Content-Security-Policy.
+PER_REQUEST_TOKENS = (
+    re.compile(rb'name="csrf-token" content="[^"]*"'),
+    re.compile(rb'name="csrfmiddlewaretoken" value="[^"]*"'),
+    re.compile(rb' nonce="[^"]*"'),
+)
+
+
+def without_per_request_tokens(page: bytes) -> bytes:
+    """``page`` with every per-render token blanked, so two renders compare.
+
+    Args:
+        page: A response's body.
+
+    Returns:
+        The body with the CSRF tokens and the script nonces taken out.
+    """
+    for token in PER_REQUEST_TOKENS:
+        page = token.sub(b"", page)
+    return page
+
+
+#: Markup is read the way a browser reads it, with the standard library's
+#: HTML parser, never matched by regular expression: the parser lowercases tag
+#: and attribute names, takes quoted and unquoted values alike, and skips HTML
+#: comments. The template sweep (common.tests.test_no_inline_scripts) and the
+#: policy tests (common.tests.test_csp) share the collector below.
+SCRIPT_ELEMENT = "script"
+SOURCE_ATTRIBUTE = "src"
+NONCE_ATTRIBUTE = "nonce"
+NONCE_VALUE = "{{ csp_nonce }}"
+TYPE_ATTRIBUTE = "type"
+DATA_BLOCK_TYPE = "application/json"
+HANDLER_PREFIX = "on"
+#: The attributes a browser follows as a URL, where ``javascript:`` runs.
+URL_ATTRIBUTES = frozenset({"href", "src", "action"})
+JAVASCRIPT_SCHEME = "javascript:"
+
+
+@dataclass
+class ScriptTag:
+    """One ``<script>`` start tag: its text as written and its attributes."""
+
+    text: str
+    attributes: dict[str, str | None]
+
+    @property
+    def runs_inline(self) -> bool:
+        """True when the block runs script of its own and carries no nonce."""
+        return (
+            SOURCE_ATTRIBUTE not in self.attributes
+            and self.attributes.get(TYPE_ATTRIBUTE) != DATA_BLOCK_TYPE
+            and self.attributes.get(NONCE_ATTRIBUTE) != NONCE_VALUE
+        )
+
+
+@dataclass
+class PolicyFindings:
+    """What the policy cares about in one template's markup."""
+
+    script_tags: list[ScriptTag] = field(default_factory=list)
+    inline_handlers: list[str] = field(default_factory=list)
+    javascript_urls: list[str] = field(default_factory=list)
+
+
+class PolicyCollector(HTMLParser):
+    """Gathers every ``<script>`` start tag, ``on*`` attribute and
+    ``javascript:`` URL attribute, as the browser would see them."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.findings = PolicyFindings()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == SCRIPT_ELEMENT:
+            self.findings.script_tags.append(
+                ScriptTag(text=self.get_starttag_text() or "", attributes=dict(attrs))
+            )
+        for name, value in attrs:
+            if name.startswith(HANDLER_PREFIX):
+                self.findings.inline_handlers.append(name)
+            if (
+                name in URL_ATTRIBUTES
+                and value is not None
+                and value.strip().casefold().startswith(JAVASCRIPT_SCHEME)
+            ):
+                self.findings.javascript_urls.append(f'{name}="{value}"')
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+
+def findings_in(markup: str) -> PolicyFindings:
+    """Parse ``markup`` and return what the policy cares about in it."""
+    collector = PolicyCollector()
+    collector.feed(markup)
+    collector.close()
+    return collector.findings
+
+
+class InnerMarkupCollector(HTMLParser):
+    """Collects the markup inside the element with ``element_id``, as written.
+
+    Tags are written back as the parser saw them (lowercased names, values in
+    double quotes), text and references untouched. Nesting is counted on the
+    container's own tag name, so a nested element of the same name does not
+    close it early; void elements inside need no end tag and count nothing.
+    """
+
+    def __init__(self, element_id: str) -> None:
+        super().__init__(convert_charrefs=False)
+        self.element_id = element_id
+        self.parts: list[str] = []
+        self.found = False
+        self._container: str | None = None
+        self._depth = 0
+
+    @property
+    def inside(self) -> bool:
+        return self._container is not None
+
+    def _tag_text(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        attributes = "".join(
+            f" {name}" if value is None else f' {name}="{value}"'
+            for name, value in attrs
+        )
+        return f"<{tag}{attributes}"
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.inside:
+            if tag == self._container:
+                self._depth += 1
+            self.parts.append(self._tag_text(tag, attrs) + ">")
+        elif dict(attrs).get("id") == self.element_id:
+            self._container = tag
+            self.found = True
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.inside:
+            self.parts.append(self._tag_text(tag, attrs) + "/>")
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.inside:
+            return
+        if tag == self._container:
+            if self._depth == 0:
+                self._container = None
+                return
+            self._depth -= 1
+        self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self.inside:
+            self.parts.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        if self.inside:
+            self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self.inside:
+            self.parts.append(f"&#{name};")
+
+
+def inner_markup_of(page: str, element_id: str) -> str:
+    """The markup inside the element with ``element_id`` on ``page``.
+
+    Args:
+        page: A rendered page.
+        element_id: The ``id`` of the element whose contents are wanted.
+
+    Returns:
+        The element's inner markup, as :class:`InnerMarkupCollector` writes it.
+
+    Raises:
+        AssertionError: If no element on the page carries that id.
+    """
+    collector = InnerMarkupCollector(element_id)
+    collector.feed(page)
+    collector.close()
+    assert collector.found, f"no element with id {element_id!r} on the page"
+    return "".join(collector.parts)
 
 
 def mark_gate_passed(client: Client) -> None:
@@ -399,6 +594,17 @@ class BaseTestCase(TestCase):
         """Logout but preserve passphrase gate authentication."""
         self.client.logout()
         mark_gate_passed(self.client)
+
+    def switch_to(self, user, password=TEST_PASSWORD):
+        """Sign in as ``user`` in place of whoever is signed in, gate kept.
+
+        Django's ``login()`` flushes the session when the account changes,
+        and the passphrase flag goes with it: a test that signed in a second
+        user with :meth:`login_as` was then answered the gate page (200) by
+        every gated URL, and an assertion of "not 403" passed against it.
+        """
+        self.logout()
+        self.login_as(user, password)
 
     def post_json(self, url, data):
         """POST JSON data to a URL."""

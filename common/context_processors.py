@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from django.conf import settings
 
+from common.gate import GATE_PATH
 from common.helpers import request_theme
 
 
@@ -81,6 +82,22 @@ def theme(request) -> dict[str, object]:
     one place that is true without each view remembering to say so.
     """
     return {"theme": request_theme(request)}
+
+
+def gate(request) -> dict[str, str]:
+    """Add the path the passphrase form posts to (issue #175).
+
+    ``templates/gate.html`` is rendered by speak_friend's middleware with no
+    view context, so the form's action reaches it this way; the path itself
+    is declared once, in ``common.gate.GATE_PATH``.
+
+    Args:
+        request: The current request (unused; a context processor's signature).
+
+    Returns:
+        The template variable ``gate_path``.
+    """
+    return {"gate_path": GATE_PATH}
 
 
 def canon(request) -> dict[str, str]:

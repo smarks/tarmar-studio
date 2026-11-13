@@ -16,6 +16,9 @@ import warnings
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+
+# django-stubs has no stub for Django 6.0's csp module yet.
+from django.utils.csp import CSP  # type: ignore[reportMissingImports]
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -46,7 +49,11 @@ from common.base_url import (  # noqa: E402
     is_base_url_with_path,
 )
 from common.gate import (  # noqa: E402
+    CSP_MIDDLEWARE,
     DEV_GATE_PASSPHRASE,
+    FRAME_OPTIONS_MIDDLEWARE,
+    GATE_LIMITER_MIDDLEWARE,
+    GATE_MIDDLEWARE,
     load_gate_hints,
     normalize_passphrase,
 )
@@ -60,6 +67,7 @@ from common.refusal_words import (  # noqa: E402
     load_refusal_words as load_common_refusal_words,
 )
 from common.services import ollama_client  # noqa: E402
+from gm.address_words import load_address_words  # noqa: E402
 from gm.model_config import GMModelConfig, GMRetrievalConfig  # noqa: E402
 from gm.refusal_words import load_refusal_words as load_gm_refusal_words  # noqa: E402
 from parties.refusal_words import (  # noqa: E402
@@ -347,6 +355,27 @@ def _message_from_environment(name: str, default: str, *fields: str) -> str:
         raise ImproperlyConfigured(str(error)) from error
 
 
+def _positive_count_from_environment(name: str, default: int) -> int:
+    """A cap or allowance from the environment, or its default (issue #174).
+
+    A value that is not a whole number of one or more stops startup with
+    ``ImproperlyConfigured``: a cap of zero would refuse every turn, and a
+    misspelt one must not quietly become the default.
+    """
+    configured = os.environ.get(name, "")
+    if not configured.strip():
+        return default
+    try:
+        count = int(configured)
+    except ValueError:
+        count = 0
+    if count < 1:
+        raise ImproperlyConfigured(
+            f"{name} is {configured!r}; it must be a whole number of 1 or more."
+        )
+    return count
+
+
 def _page_message_from_environment(name: str, default: str, *fields: str) -> str:
     """A message the page fills in itself (#94): as
     :func:`_message_from_environment`, with every field a bare ``{name}``."""
@@ -445,7 +474,11 @@ _FIRST_PARTY_APPS = [
 ]
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # Django's admin, with its login form held to the site's login limiter
+    # (issue #173): the default AdminSite is replaced through AdminConfig's
+    # one hook for that, so ``admin.site`` and every ``@admin.register`` stay
+    # as they are.
+    "accounts.apps.LimitedAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -459,21 +492,33 @@ MIDDLEWARE = [
     # origami_common's rate_limit decorator) must see the same client address.
     "common.middleware.TrustedProxyClientIPMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # The Content-Security-Policy header (issue #178; the policy is SECURE_CSP
+    # below), outside the gate so its pages carry it too, and before every
+    # template renders so the nonce it hands them is the one in the header.
+    CSP_MIDDLEWARE,
+    # Outside the gate, with the other header middleware (issue #176): a
+    # response the gate answers itself passes back only through what is
+    # listed before it, so its own pages carried no X-Frame-Options while
+    # this sat last. It only sets a header; nothing else depends on where.
+    FRAME_OPTIONS_MIDDLEWARE,
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "common.middleware.GateRateLimitMiddleware",
+    # The gate's door-keeper: Django's CSRF check on the gate's POST, then the
+    # guessing budget (issues #161, #175). Before the gate on purpose; the
+    # gate refuses to start otherwise (common.middleware.
+    # require_gate_middleware_order).
+    GATE_LIMITER_MIDDLEWARE,
     # The passphrase gate, minus the arena (issue #305). Subclasses
     # speak_friend.PassphraseMiddleware; common.public_paths is the one
     # statement of which prefixes it lets through.
-    "common.middleware.PublicPathPassphraseMiddleware",
+    GATE_MIDDLEWARE,
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # A 405 gets a page rather than a blank screen (#716, low finding).
     # Inside the gate, so a POST-only URL still meets the passphrase first.
     "common.middleware.RenderedMethodNotAllowedMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 # Pinned dice for the browser tests (issue #959). With this on, a request
@@ -507,6 +552,11 @@ TEMPLATES = [
                 "common.context_processors.project_links",
                 "common.context_processors.theme",
                 "common.context_processors.canon",
+                # The gate form's action (issue #175); gate.html has no view.
+                "common.context_processors.gate",
+                # ``csp_nonce``, for the inline <script> blocks the policy
+                # below admits by nonce (issue #178).
+                "django.template.context_processors.csp",
             ],
         },
     },
@@ -661,6 +711,49 @@ GM_RECAP_BUDGET_SECONDS = float(os.environ.get("GM_RECAP_BUDGET_SECONDS", "300")
 # cuts it with an HTML 504 while the server would go on holding the model.
 GM_FIGHT_BUDGET_SECONDS = float(os.environ.get("GM_FIGHT_BUDGET_SECONDS", "50"))
 
+# --- Caps on turns running at once (issue #174) ---
+# A turn holds a request thread for as long as it runs -- up to
+# GM_STREAM_BUDGET_SECONDS, and on after its page leaves (issue #515) -- and
+# a message sent with no session starts a fresh turn every time, so without a
+# cap one account could hold every thread gunicorn has (3 workers x 4 threads
+# in tarmar.service.template). gm.turn_record.claim_turn counts the account's
+# running turn records, every process's, and refuses the one past its cap in
+# the words of config/gm-refusals.toml [views]. A player plays one table and
+# may have a second tab open; a Game Master runs several. The site-wide cap
+# is what keeps threads free for ordinary pages when the accounts are many
+# (registration is open), so it stays below the thread count; the model
+# answers one call at a time anyway, so turns past it would only have waited.
+GM_MAX_RUNNING_TURNS_PER_PLAYER = _positive_count_from_environment(
+    "GM_MAX_RUNNING_TURNS_PER_PLAYER", 2
+)
+GM_MAX_RUNNING_TURNS_PER_GAME_MASTER = _positive_count_from_environment(
+    "GM_MAX_RUNNING_TURNS_PER_GAME_MASTER", 4
+)
+GM_MAX_RUNNING_TURNS_SITE_WIDE = _positive_count_from_environment(
+    "GM_MAX_RUNNING_TURNS_SITE_WIDE", 8
+)
+
+# How many PDF exports one account may ask for a minute (issue #174). A PDF
+# is rendered on the request thread by WeasyPrint, the one export that costs
+# the server real work, so it has the character import's own allowance; the
+# Markdown and JSON exports are a template and a dict and are not counted.
+CHARACTER_EXPORT_PDF_MAX_PER_MINUTE = _positive_count_from_environment(
+    "CHARACTER_EXPORT_PDF_MAX_PER_MINUTE", 10
+)
+
+# --- The words that let the Games Master act on a player's character (#177) ---
+# An action on a character the session owner does not own runs only when the
+# owner's own message names that character (or the party, in a collective
+# word) and says what the action does (the action's subject words); a bare
+# affirmative answers the Games Master's proposal instead
+# (gm.turn_engine.policy.TurnPolicy.addresses). Content, not code: a TOML file
+# read once here, so an empty list refuses to start. GM_ADDRESS_WORDS_FILE
+# names another file, resolved as GATE_HINTS_FILE is; empty means the default.
+GM_ADDRESS_WORDS_FILE = BASE_DIR / (
+    os.environ.get("GM_ADDRESS_WORDS_FILE") or "config/gm-address-words.toml"
+)
+GM_ADDRESS_WORDS = load_address_words(GM_ADDRESS_WORDS_FILE)
+
 # --- GM turn waiting and timeout messages (issue #64) ---
 # Ollama on the production host answers one request at a time, so a turn sent
 # while other tables' turns are being answered waits in its line, saying
@@ -777,6 +870,56 @@ SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookie
 SESSION_COOKIE_SAMESITE = "Lax"  # Prevent CSRF via cross-site requests
 CSRF_COOKIE_HTTPONLY = True  # Prevent JavaScript access to CSRF cookie
 CSRF_COOKIE_SAMESITE = "Lax"  # Prevent CSRF via cross-site requests
+
+# --- Content-Security-Policy (issues #177, #178) ---
+# What a page may load and where a form may post, told to the browser on every
+# response by django.middleware.csp.ContentSecurityPolicyMiddleware. Every
+# script, stylesheet, image and font is this site's own (there is no CDN), so
+# each source is 'self'; the inline <script> blocks a few templates keep are
+# admitted one by one through the nonce the ``csp`` context processor hands
+# them as ``csp_nonce``, so script-src names no 'unsafe-inline'. style-src
+# does: some thirty ``style="..."`` attributes across the templates and the
+# markup the page's scripts build cannot carry a nonce (an attribute is not an
+# element), and taking them out is a cleanup of its own. img-src names no
+# outside host, which is what keeps a model-written or player-written image
+# from reporting a reader's address to a server of its author's choosing
+# (issue #177). frame-ancestors 'none' restates X-Frame-Options DENY for the
+# browsers that read this instead; object-src 'none', base-uri 'self' and
+# form-action 'self' close plugins, a planted <base> and a form posted
+# elsewhere. The GM's streaming fetch is same-origin (connect-src 'self'),
+# and the arena host serves its own pages from itself, so 'self' holds there
+# too. Enforced by default: the browser suite runs every page under it and
+# fails on any violation (e2e/fixtures.js). CSP_ENFORCED=false moves the same
+# policy to the Report-Only header, the switch to throw if a page breaks in
+# production; CSP_REPORT_URI names an endpoint the browser reports to, which
+# this site does not provide itself.
+CSP_ENFORCED = os.environ.get("CSP_ENFORCED", "True").lower() == "true"
+CSP_REPORT_URI = os.environ.get("CSP_REPORT_URI", "").strip()
+if CSP_REPORT_URI and not (
+    CSP_REPORT_URI.startswith("/") or is_base_url_with_path(CSP_REPORT_URI)
+):
+    raise ImproperlyConfigured(
+        f"CSP_REPORT_URI is {CSP_REPORT_URI!r}; it must be a path or "
+        f"{BASE_URL_WITH_PATH_RULE}."
+    )
+CONTENT_SECURITY_POLICY: dict[str, list[str]] = {
+    "default-src": [CSP.SELF],
+    "script-src": [CSP.SELF, CSP.NONCE],
+    "style-src": [CSP.SELF, CSP.UNSAFE_INLINE],
+    "img-src": [CSP.SELF],
+    "font-src": [CSP.SELF],
+    "connect-src": [CSP.SELF],
+    "frame-src": [CSP.NONE],
+    "frame-ancestors": [CSP.NONE],
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.SELF],
+    "form-action": [CSP.SELF],
+}
+if CSP_REPORT_URI:
+    CONTENT_SECURITY_POLICY["report-uri"] = [CSP_REPORT_URI]
+SECURE_CSP = CONTENT_SECURITY_POLICY if CSP_ENFORCED else None
+SECURE_CSP_REPORT_ONLY = None if CSP_ENFORCED else CONTENT_SECURITY_POLICY
+# --- end Content-Security-Policy ---
 
 # Production security settings (skip in DEBUG and tests)
 if not DEBUG and "pytest" not in sys.modules and "test" not in sys.argv:

@@ -17,7 +17,11 @@ placed against the layout, opens under the whole bar however many rows its
 session picker takes (issues #431, #864).{% endcomment %}
 <div class="mobile-session-bar">
     {% include "_picker.html" with picker=session_menu_picker %}
-    <button type="button" class="btn btn-sm" onclick="newSession()">+ New</button>
+    {% comment %}The controls on this page carry no inline handlers: the
+       Content-Security-Policy admits no inline script (issue #178). chat.js
+       wires every data-action, data-command and data-delete-session control
+       and the form from one listener each.{% endcomment %}
+    <button type="button" class="btn btn-sm" data-action="new-session">+ New</button>
     <button type="button" class="btn btn-sm" id="gm-panel-toggle" aria-controls="gm-panel" aria-expanded="false">Panel</button>
 </div>
 <div class="chat-layout">
@@ -26,7 +30,7 @@ session picker takes (issues #431, #864).{% endcomment %}
         {% include "_canon_line.html" %}
         <div class="sidebar-header">
             <h3>Sessions</h3>
-            <button class="btn btn-sm" onclick="newSession()">+ New</button>
+            <button type="button" class="btn btn-sm" data-action="new-session">+ New</button>
         </div>
         {% comment %}
         Every session in the rail carries its date (issues #705 and #712). Two
@@ -128,16 +132,16 @@ session picker takes (issues #431, #864).{% endcomment %}
 
         <!-- Command bar -->
         <div class="command-bar">
-            <button class="cmd-btn" onclick="sendCommand('roll', '3d6')" title="Roll 3d6">Roll 3d6</button>
-            <button class="cmd-btn" onclick="sendCommand('state')" title="Game state summary">State</button>
+            <button class="cmd-btn" type="button" data-command="roll" data-command-arg="3d6" title="Roll 3d6">Roll 3d6</button>
+            <button class="cmd-btn" type="button" data-command="state" title="Game state summary">State</button>
             <button class="cmd-btn" id="gm-fight-button" type="button" title="Take the fight to the hex board (the GM picks the foes)">Fight</button>
             {# It renames the session; it is called Rename (issue #339, item 10). #}
-            <button class="cmd-btn" onclick="promptSave()" title="Rename this session">Rename</button>
+            <button class="cmd-btn" type="button" data-action="rename-session" title="Rename this session">Rename</button>
             {# The whole session as a file, hidden entries included, for a bug report (issue #389). #}
-            <button class="cmd-btn" id="gm-transcript-button" type="button" onclick="sendCommand('transcript')" title="Download this whole session as a text file, for debugging">Transcript</button>
+            <button class="cmd-btn" id="gm-transcript-button" type="button" data-command="transcript" title="Download this whole session as a text file, for debugging">Transcript</button>
             {% if is_game_master %}
             {# The session, frozen, to Claude for review (issue #402). Game Masters only; the endpoint checks too. #}
-            <button class="cmd-btn" id="gm-review-button" type="button" onclick="sendCommand('review')" title="Send this whole session to Claude to review for problems">Send to Claude</button>
+            <button class="cmd-btn" id="gm-review-button" type="button" data-command="review" title="Send this whole session to Claude to review for problems">Send to Claude</button>
             {# Every review sent, and what each found (issue #572). #}
             <a class="cmd-btn" id="gm-reviews-link" href="{% url 'gm:reviews' %}" title="See every session sent to Claude and what the reviews found">Claude's reviews</a>
             {% endif %}
@@ -155,7 +159,7 @@ session picker takes (issues #431, #864).{% endcomment %}
         {% comment %}A turn the server is still running after the page lost its stream or
            was reloaded (issue #515). It stays until the reply lands or the turn fails.{% endcomment %}
         <p class="gm-status gm-turn-running" id="gm-turn-running" role="status" aria-live="polite" hidden></p>
-        <form class="chat-input" id="chat-form" onsubmit="return handleSubmit(event)">
+        <form class="chat-input" id="chat-form">
             {% csrf_token %}
             {% comment %}A textarea, not a single-line input (#716, low finding):
                a multi-paragraph action could not be typed at all. Enter still

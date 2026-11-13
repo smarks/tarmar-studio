@@ -147,7 +147,7 @@ Markdown tree; slugs map 1:1 to `reference/nav.py`.
 - `deploy.sh` — main blue-green deploy (pull + re-exec, check out origin/main into the inactive colour's release checkout, lint/types/tests, collectstatic+migrate+GM index, render and restart that colour's unit, health-check, flip nginx upstream, verify, warm GM); also `rollback`/`status`. See `DEPLOY.md` for the host layout.
 - `tarmar.service.template` — the one systemd unit, rendered per colour by `deploy.sh` (`__COLOUR__`, `__PORT__`, `__RELEASE_DIR__`, `__APP_DIR__`).
 - `setup-blue-green.sh` — one-time bootstrap; sources `deploy.sh` for its helpers (create both release checkouts, install units + nginx config, first deploy).
-- `nginx/tarmar.conf` — site config: HTTP→HTTPS redirect, two HTTPS blocks (origamisoftware.com primary, tarmar.duckdns.org legacy), `/references/` (same-origin, no autoindex/CORS) + `/static/`, proxy to `tarmar_backend`.
+- `nginx/tarmar.conf` — site config, installed on the host by `deploy.sh` (#179): HTTP→HTTPS redirect, two HTTPS blocks (origamisoftware.com primary, tarmar.duckdns.org legacy), each with `/static/`, the scanner block (`nginx/scanner-block.conf`, probes dropped with 444) and the proxy to `tarmar_backend`.
 - `nginx/tarmar-upstream.conf` — single-line upstream pointing at the active port; rewritten by `deploy.sh` (do not edit by hand).
 - `tarmar-blue.service` / `tarmar-green.service` — gunicorn systemd units on :9066 / :9067 (localhost).
 - `DEPLOY.md` — operator guide. `docs/cert-reissue-runbook.md` — how TLS certificates are issued and repointed on the deploy host (the #30/#12 reissue itself was done in #272).

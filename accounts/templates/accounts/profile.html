@@ -95,7 +95,7 @@
 <script src="{% static 'js/autosave.js' %}"></script>
 <script src="{% static 'accounts/js/preferred_contact.js' %}"></script>
 {% if admin_sets_email %}<script src="{% static 'js/admin-email.js' %}"></script>{% endif %}
-<script>
+<script nonce="{{ csp_nonce }}">
     {% if profile_user.pk != user.pk %}
     const updateUrl = '{% url "user_profile_update_field" profile_user.pk %}';
     {% else %}

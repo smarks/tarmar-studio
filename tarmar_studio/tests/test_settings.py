@@ -237,6 +237,57 @@ class SecuritySettingsTest(TestCase):
             os.environ["ALLOWED_HOSTS"] = original
 
 
+class PositiveCountFromEnvironmentTest(TestCase):
+    """The caps on running turns and PDF exports come from the environment (#174).
+
+    ``_positive_count_from_environment`` reads each: the default when the
+    variable is unset or blank, the number when it is one, and a refusal to
+    start for anything else -- a cap of zero would refuse every turn, and a
+    misspelt one must not quietly become the default.
+    """
+
+    VARIABLE = "GM_MAX_RUNNING_TURNS_PER_PLAYER"
+
+    def _read(self, configured: str | None) -> int:
+        from unittest.mock import patch
+
+        from tarmar_studio.settings import _positive_count_from_environment
+
+        environment = {} if configured is None else {self.VARIABLE: configured}
+        with patch.dict(os.environ, environment, clear=True):
+            return _positive_count_from_environment(self.VARIABLE, 2)
+
+    def test_unset_and_blank_take_the_default(self):
+        self.assertEqual(self._read(None), 2)
+        self.assertEqual(self._read(""), 2)
+        self.assertEqual(self._read("  "), 2)
+
+    def test_a_whole_number_is_read(self):
+        self.assertEqual(self._read("5"), 5)
+        self.assertEqual(self._read(" 12 "), 12)
+
+    def test_zero_a_negative_and_a_word_refuse_to_start(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        for configured in ("0", "-1", "many", "1.5"):
+            with self.subTest(configured=configured):
+                with self.assertRaises(ImproperlyConfigured) as refusal:
+                    self._read(configured)
+                self.assertIn(self.VARIABLE, str(refusal.exception))
+
+    def test_the_caps_are_whole_numbers_of_one_or_more(self):
+        from django.conf import settings
+
+        for name in (
+            "GM_MAX_RUNNING_TURNS_PER_PLAYER",
+            "GM_MAX_RUNNING_TURNS_PER_GAME_MASTER",
+            "GM_MAX_RUNNING_TURNS_SITE_WIDE",
+            "CHARACTER_EXPORT_PDF_MAX_PER_MINUTE",
+        ):
+            with self.subTest(setting=name):
+                self.assertGreaterEqual(getattr(settings, name), 1)
+
+
 class EnvExampleTest(TestCase):
     """Guards against .env.example lines that silently defeat a fallback.
 
@@ -1023,3 +1074,51 @@ class GateHintSettingsTest(DotenvStagingMixin, TestCase):
         env["GATE_HINT_AFTER_WRONG_GUESSES"] = "5"
 
         self.assertEqual(self._gate_hint_settings(env)["threshold"], 5)
+
+
+class ContentSecurityPolicySwitchTest(DotenvStagingMixin, TestCase):
+    """CSP_ENFORCED moves the one policy between the two headers (issue #178).
+
+    Enforced by default; ``false`` is the one-line rollback if a page breaks in
+    production: the same policy goes out as Report-Only.
+    """
+
+    def _import_settings(
+        self, env_overrides: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        env = self.subprocess_environment()
+        env.update(env_overrides)
+        program = (
+            "import sys;"
+            "sys.argv = ['manage.py', 'test'];"
+            "import tarmar_studio.settings as s;"
+            "print('ENFORCED', s.SECURE_CSP is s.CONTENT_SECURITY_POLICY,"
+            " 'REPORT_ONLY', s.SECURE_CSP_REPORT_ONLY is s.CONTENT_SECURITY_POLICY)"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=BASE_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_enforced_unless_switched_off(self):
+        result = self._import_settings({})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "ENFORCED True REPORT_ONLY False")
+
+    def test_the_switch_sends_the_same_policy_as_report_only(self):
+        for spelling in ("false", "False", "FALSE"):
+            with self.subTest(spelling=spelling):
+                result = self._import_settings({"CSP_ENFORCED": spelling})
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                self.assertEqual(
+                    result.stdout.strip(), "ENFORCED False REPORT_ONLY True"
+                )
+
+    def test_a_bad_report_uri_refuses_to_start(self):
+        result = self._import_settings({"CSP_REPORT_URI": "not a url"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CSP_REPORT_URI", result.stderr)

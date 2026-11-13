@@ -20,9 +20,11 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import connection, transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 
+from accounts.models import User
 from characters.services import record_entry_into_play
 from common.context_processors import git_info
 from common.refusal_words import refusal_words as common_refusal_words
@@ -365,17 +367,146 @@ def released_on_failure(recorder: TurnRecorder) -> Iterator[None]:
         raise
 
 
-def claim_turn(recorder: TurnRecorder) -> GMTurnRecord | None:
-    """Start ``recorder``'s turn unless its session already has one running.
+#: Why :func:`claim_turn` refused a turn. The session already has one running
+#: (issue #515); the account has as many running as it may (issue #174); the
+#: site has as many running as it serves at once (issue #174).
+REFUSED_SESSION_BUSY = "session_busy"
+REFUSED_ACCOUNT_CAP = "account_cap"
+REFUSED_SITE_CAP = "site_cap"
 
-    The check and the start happen under a lock on the user's row, so two
-    messages sent to one session at the same moment cannot both start
-    (issue #515). A turn with no session yet is never refused: it will make a
-    session of its own, so there is nothing to interleave with.
+#: The key of the one advisory lock every claim takes on PostgreSQL, so the
+#: site-wide count and the start it guards cannot interleave across gunicorn's
+#: worker processes. Any fixed 64-bit number does; this one is arbitrary.
+TURN_CLAIM_LOCK_KEY = 174_515_064
+
+
+@dataclass(frozen=True)
+class TurnRefusal:
+    """Why a turn was not started, for the view to answer in its own words.
+
+    Attributes:
+        reason: One of ``REFUSED_SESSION_BUSY``, ``REFUSED_ACCOUNT_CAP`` and
+            ``REFUSED_SITE_CAP``.
+        running: The session's turn still running, when that is the reason;
+            the page asks after it by id. ``None`` for the two caps, which
+            name no single turn.
+    """
+
+    reason: str
+    running: GMTurnRecord | None = None
+
+
+def running_turn_cap(*, is_game_master: bool) -> int:
+    """How many turns an account may have running at once (issue #174).
+
+    Args:
+        is_game_master: Whether the account carries Game Master authority,
+            read off the account (``battle.access.is_dm``), never the request.
 
     Returns:
-        The turn already running, when this one was refused; ``None`` when
-        this one started.
+        ``settings.GM_MAX_RUNNING_TURNS_PER_GAME_MASTER`` for a Game Master,
+        who runs several tables, else ``GM_MAX_RUNNING_TURNS_PER_PLAYER``.
+    """
+    if is_game_master:
+        return int(settings.GM_MAX_RUNNING_TURNS_PER_GAME_MASTER)
+    return int(settings.GM_MAX_RUNNING_TURNS_PER_PLAYER)
+
+
+def _running_turns() -> QuerySet[GMTurnRecord]:
+    """The turns running now, as far as the records can tell (issue #174).
+
+    A record left running by a worker that died keeps its row until
+    :func:`expire_stale_running_turns` marks it, so the count reads only the
+    rows a live turn could still own: those started within the recap and
+    stream budgets plus the grace, the same bound :func:`turns_ahead_of`
+    applies. A slot a dead worker left is therefore held for exactly that
+    bound -- 300 + 300 + 180 s, 780 s, on the default settings -- and no
+    longer. It cannot be freed sooner, because nothing but time tells a dead
+    worker's row from a slow turn's: a turn writes its record only when it
+    starts and when it ends. Holding a slot for the longest a turn can live
+    is the price of never counting a live turn as dead, and it is the same
+    bound a session already waits under before it takes a new message (#515).
+    """
+    return GMTurnRecord.objects.filter(
+        outcome=GMTurnRecord.OUTCOME_RUNNING,
+        started_at__gte=_running_turns_alive_since(),
+    )
+
+
+def running_turns_of(user: User) -> int:
+    """How many turns ``user`` has running now, every session's and sessionless.
+
+    Args:
+        user: The account.
+
+    Returns:
+        The count of its live running records.
+    """
+    return _running_turns().filter(user=user).count()
+
+
+def running_turns_site_wide() -> int:
+    """How many turns are running now across every account."""
+    return _running_turns().count()
+
+
+#: The statement that takes the claim lock on PostgreSQL. The key is cast, so
+#: the driver's parameter is read as the ``bigint`` the one-argument form
+#: takes rather than left for PostgreSQL to resolve against both overloads.
+TURN_CLAIM_LOCK_SQL = "SELECT pg_advisory_xact_lock(%s::bigint)"
+
+
+def _lock_turn_claims() -> None:
+    """Serialize every claim across processes while this transaction lasts.
+
+    The per-account count is already serialized by the lock on the user's
+    row (issue #515), but the site-wide count (issue #174) spans accounts, and
+    two accounts' claims read on two gunicorn workers at once would each see
+    a count one short and both start. On PostgreSQL, production's database,
+    a transaction-scoped advisory lock keyed on :data:`TURN_CLAIM_LOCK_KEY`
+    holds the second claim until the first has started or been refused; it
+    costs no table and is released with the transaction. SQLite, the test and
+    dev database, has no advisory locks and serializes its writers itself, so
+    there the step is skipped, as ``select_for_update`` already is.
+
+    Taken after the user's row and the account's count, never before: a user
+    row can be held for seconds elsewhere (an Admin's address change holds it
+    across a mail send, ``accounts.views._admin_sets_email``), and a claim
+    waiting on that row must not hold every other account's claim with it.
+    """
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(TURN_CLAIM_LOCK_SQL, [TURN_CLAIM_LOCK_KEY])
+
+
+def claim_turn(recorder: TurnRecorder) -> TurnRefusal | None:
+    """Start ``recorder``'s turn unless the session, the account or the site is full.
+
+    The checks and the start happen under a lock on the user's row and the
+    claim lock (:func:`_lock_turn_claims`), so two messages sent at the same
+    moment cannot both start past a limit (issues #515, #174). Three refusals,
+    in this order:
+
+    * the session already has a turn running (``REFUSED_SESSION_BUSY``); a
+      turn with no session yet is never refused on this count, since it will
+      make a session of its own;
+    * the account has :func:`running_turn_cap` turns running
+      (``REFUSED_ACCOUNT_CAP``), the sessionless ones included -- a message
+      sent with no session used to start a fresh turn every time, without
+      bound;
+    * the site has ``settings.GM_MAX_RUNNING_TURNS_SITE_WIDE`` running
+      (``REFUSED_SITE_CAP``), which keeps request threads free for every
+      other page.
+
+    The locks are taken in this order, and only as far as needed: the user's
+    row, then the session and account checks under it; the claim lock
+    (:func:`_lock_turn_claims`) only once those pass, so a claim waiting on a
+    busy user row never holds the site's lock while it waits; then the site
+    count and the start under both.
+
+    Returns:
+        The refusal, or ``None`` when this turn started.
     """
     with transaction.atomic():
         # Evaluated in full, so the FOR UPDATE really is sent.
@@ -388,6 +519,17 @@ def claim_turn(recorder: TurnRecorder) -> GMTurnRecord | None:
         if recorder.session_id is not None:
             running = running_turn_for(recorder.user, recorder.session_id)
             if running is not None:
-                return running
+                return TurnRefusal(REFUSED_SESSION_BUSY, running)
+        else:
+            # running_turn_for expired the stale rows for a session turn;
+            # a sessionless one has to, or a dead worker's rows would count
+            # against its account until something else asked.
+            expire_stale_running_turns()
+        cap = running_turn_cap(is_game_master=recorder.is_game_master)
+        if running_turns_of(recorder.user) >= cap:
+            return TurnRefusal(REFUSED_ACCOUNT_CAP)
+        _lock_turn_claims()
+        if running_turns_site_wide() >= int(settings.GM_MAX_RUNNING_TURNS_SITE_WIDE):
+            return TurnRefusal(REFUSED_SITE_CAP)
         recorder.start()
     return None

@@ -9,11 +9,16 @@ model writes, and nothing typed in the chat, changes it (issue #352).
 
 import functools
 import re
+import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
+
+from django.conf import settings
 
 from characters.constants import CHARACTER_ATTRIBUTE_FIELDS
 from characters.rules import character_rules, game_master_origins_in_words
 from characters.skill_rules import skill_rules
+from reference.rendering import visible_text_of_markdown
 from reference.rules_file import derived_from_rules
 
 from ..engine import MODE_AIDE, MODE_PLAY
@@ -104,6 +109,9 @@ REASON_PLAYER_STATED_SCORES = "player_stated_scores"
 REASON_PLAYER_STATED_FATIGUE = "player_stated_fatigue"
 REASON_GAME_MASTER_RECORDS = "game_master_records"
 REASON_AIDE_UNASKED_ROLL = "aide_unasked_roll"
+#: A Game Master's action on another player's character that his own message
+#: never named (issue #177). Depends on the message, so never settled.
+REASON_UNADDRESSED_PLAYER_CHARACTER = "unaddressed_player_character"
 
 #: The key an action's procedure frame records its policy refusal under, so a
 #: later turn reads the reason rather than its words.
@@ -262,6 +270,82 @@ AIDE_DICE_ACTIONS = frozenset(
 )
 
 
+#: What a short message is trimmed of before it is read as an affirmative: the
+#: punctuation and quotes around "Yes!" or "ok.".
+_AFFIRMATIVE_TRIM = " \t\r\n.!,;:\"'“”‘’"
+
+
+def is_affirmative(message: str, affirmatives: Iterable[str]) -> bool:
+    """Whether ``message`` is nothing but one of the configured affirmatives.
+
+    Compared whole, casefolded, with its punctuation and quotes trimmed and
+    its spaces collapsed, so "Yes!" and "  do it. " agree and "yes, but only
+    50" does not.
+
+    Args:
+        message: The message as typed.
+        affirmatives: The configured affirmatives, casefolded.
+    """
+    trimmed = " ".join(normalised(message).strip(_AFFIRMATIVE_TRIM).split())
+    return trimmed in {normalised(word) for word in affirmatives}
+
+
+def normalised(text: str) -> str:
+    """``text`` as it is compared (issue #177): NFKC, casefolded, and every
+    format character (Unicode category Cf: zero-width joiners, soft hyphens,
+    direction marks) dropped, so a name or a word is the same whether a
+    screen showed it in fullwidth letters or with an invisible character
+    inside it."""
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKC", text).casefold()
+        if unicodedata.category(character) != "Cf"
+    )
+
+
+def is_too_common(name: str, ignored_names: Iterable[str], min_characters: int) -> bool:
+    """Whether ``name`` is too ordinary a word to count as naming anybody (#177).
+
+    A player who names a character "a", or a session whose label is "the",
+    would otherwise be named by almost any sentence. A single token shorter
+    than ``min_characters`` (``min_name_characters`` in
+    ``config/gm-address-words.toml``), or one of the configured
+    ``ignored_names`` (pronouns and articles), is set aside; a name of several
+    words is always kept, since it is matched as a whole phrase.
+
+    Args:
+        name: The character's name or session label.
+        ignored_names: The configured words, casefolded.
+        min_characters: The shortest single-word name that counts.
+    """
+    tokens = normalised(name).split()
+    if len(tokens) != 1:
+        return False
+    return len(tokens[0]) < min_characters or tokens[0] in {
+        normalised(word) for word in ignored_names
+    }
+
+
+def mentions(text: str, phrases: Iterable[str]) -> bool:
+    """Whether ``text`` carries one of ``phrases`` as a whole word or phrase.
+
+    Casefolded on both sides, and bounded by anything that is not a word
+    character, so "Nym" is in "Nym's shot" and not in "Nymphs", and "a" is
+    in "a shot" and not in "shot at". A phrase with spaces or punctuation is
+    matched as written.
+
+    Args:
+        text: The message, or the proposal it answers.
+        phrases: The names, collective words or subject words to look for.
+    """
+    said = normalised(text)
+    return any(
+        re.search(rf"(?<!\w){re.escape(normalised(phrase))}(?!\w)", said)
+        for phrase in phrases
+        if phrase
+    )
+
+
 def dice_actions_asked_for(latest: str | None) -> frozenset[str]:
     """Which of :data:`AIDE_DICE_ACTIONS` ``latest`` asks for (issue #906).
 
@@ -337,12 +421,65 @@ class TurnPolicy:
             (issue #598).
         dice_asked_for: Which of :data:`AIDE_DICE_ACTIONS` the message asks
             for; in aide mode the others are refused (issue #906).
+        latest_message: The message the turn answers, as typed, or ``None``
+            when there is no chat message to read. What :meth:`addresses`
+            reads (issue #177).
+        proposal: The Games Master's last visible reply before that message,
+            or ``None``: what a bare affirmative answers (issue #177).
     """
 
     mode: str
     is_game_master: bool
     message_mentions_dice: bool = True
     dice_asked_for: frozenset[str] = AIDE_DICE_ACTIONS
+    latest_message: str | None = None
+    proposal: str | None = None
+
+    def addresses(self, names: Iterable[str], *, action: str) -> bool:
+        """Whether the session owner's own words ask for ``action`` on this character.
+
+        The server-side half of issue #177: an action on a character the
+        session owner does not own runs only when the owner's typed message
+        names that character -- its name or its session label, as a whole word
+        -- or the whole party in one of the configured collective words, AND
+        says what the action does in one of that action's configured subject
+        words (``settings.GM_ADDRESS_WORDS``, from
+        ``config/gm-address-words.toml``). Text that reached the model from a
+        player's record cannot put a word into that message, so whatever the
+        model is talked into planning, the action is refused here.
+
+        A message that is only an affirmative ("yes", "do it") answers the
+        Games Master's own proposal, so the names and the subjects are read
+        from ``proposal`` instead: a human confirmed what he was shown. With
+        no proposal to read, an affirmative asks for nothing.
+
+        Args:
+            names: The character's name and label; empty ones are ignored.
+            action: The planned action's name, the key of its subject words.
+                An action with no subject words configured is never asked for.
+
+        Returns:
+            True when the words ask for it, or when there is no message to
+            read (a test or tool running actions directly), as the dice rules
+            treat that case.
+        """
+        if self.latest_message is None:
+            return True
+        words = settings.GM_ADDRESS_WORDS
+        said = self.latest_message
+        if is_affirmative(said, words.affirmatives):
+            # What the Game Master saw of the proposal, never its source: a
+            # link's title, a reference definition or an HTML comment could
+            # otherwise name what the screen did not.
+            said = visible_text_of_markdown(self.proposal or "")
+        usable_names = [
+            name
+            for name in names
+            if name
+            and not is_too_common(name, words.ignored_names, words.min_name_characters)
+        ]
+        named = mentions(said, usable_names) or mentions(said, words.collective)
+        return named and mentions(said, words.subjects.get(action, ()))
 
     @property
     def is_aide(self) -> bool:
@@ -405,7 +542,12 @@ class TurnPolicy:
 
     @classmethod
     def for_turn(
-        cls, mode: str, *, is_game_master: bool, latest: str | None = None
+        cls,
+        mode: str,
+        *,
+        is_game_master: bool,
+        latest: str | None = None,
+        proposal: str | None = None,
     ) -> "TurnPolicy":
         """The policy for a turn in ``mode``; an unknown mode plays.
 
@@ -415,10 +557,14 @@ class TurnPolicy:
             latest: The message the turn answers. ``None`` when there is no
                 chat message to read, as when a test or tool runs actions
                 directly; such a turn may roll.
+            proposal: The Games Master's last visible reply before ``latest``,
+                for an affirmative to answer (issue #177); ``None`` for none.
         """
         return cls(
             mode=mode if mode in (MODE_PLAY, MODE_AIDE) else MODE_PLAY,
             is_game_master=bool(is_game_master),
             message_mentions_dice=latest is None or bool(_DICE_WORDS.search(latest)),
             dice_asked_for=dice_actions_asked_for(latest),
+            latest_message=latest,
+            proposal=proposal,
         )

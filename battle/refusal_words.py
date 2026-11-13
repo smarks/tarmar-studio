@@ -109,6 +109,7 @@ class ViewsWords:
     numeric_entry_index: str = sentence()
     numeric_party_id: str = sentence()
     combatant_control_denied: str = sentence()
+    seat_belongs_to_holder: str = sentence()
     numeric_combatant_id: str = sentence()
     combatant_needs_name: str = sentence()
     name_characters: str = sentence()

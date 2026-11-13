@@ -55,6 +55,7 @@ from .plan import PlannedAction, policy_refusal_reason
 from .policy import (
     CAMPAIGN_ACTIONS,
     REASON_GAME_MASTER_RECORDS,
+    REASON_UNADDRESSED_PLAYER_CHARACTER,
     REFUSAL_REASON,
     TurnPolicy,
     refusal_text,
@@ -80,6 +81,34 @@ RULING_CHIP_PREFIX = "📜"
 RULE_CHIP_PREFIX = "📖"
 
 #: What each action is called while it runs, before the character's name.
+#: The actions that act on one character's record, every one of which is held
+#: to the session owner's words when the character is another player's (issue
+#: #177); ``config/gm-address-words.toml`` gives each its subject words.
+CHARACTER_ACTIONS: frozenset[str] = frozenset(
+    {
+        "record_attributes",
+        "roll_attributes",
+        "roll_fatigue",
+        "roll_literacy",
+        "rule_literacy",
+        "roll_background",
+        "play_years",
+        "spend_skill_points",
+        "add_equipment",
+        "roll",
+        "rename_character",
+        "set_background",
+        "revive_character",
+        "remove_character",
+        "mark_dead",
+        "award_xp",
+        "set_coin",
+        "skill_check",
+        "survival_save",
+        "attribute_check",
+    }
+)
+
 ACTION_STATUS: dict[str, str] = {
     "record_attributes": "recording attributes",
     "roll_attributes": "rolling attributes",
@@ -410,9 +439,51 @@ class RecordsExecutor:
 
     # -- actions --------------------------------------------------------------
 
+    def _require_addressed(
+        self, action: PlannedAction, entry: roster.RosterEntry
+    ) -> None:
+        """Hold every action on another player's character to the owner's words (#177).
+
+        The model reads every attached character's record -- its name, label,
+        items, skills -- and some of that text a player wrote. A player may
+        not have the model act on his own record, or anyone's, by what he
+        wrote into it: not a Game Master's grant (XP, coin, a death, stated
+        scores), and not an ordinary action either, since a gift of
+        equipment, a reroll, a rename to "a" or a year of experience is a
+        grant too when nobody at the table asked for it. So every action on a
+        character the session owner does not own runs only when the owner's
+        typed message names that character and says what the action does
+        (:meth:`TurnPolicy.addresses`). The owner's own characters are not
+        held: those are his to write as he likes, under the rules his role
+        allows.
+
+        Server-side and decided from the words the owner typed (or, for a bare
+        "yes", the proposal he saw), so it holds whatever the model writes;
+        the prompt's framing of record text as data
+        (``gm.turn_engine.state.RECORDS_ARE_DATA_NOTE``) is the softer half.
+
+        Raises:
+            _Refused: The character is another player's and the owner's words
+                did not ask for this action on it.
+        """
+        if entry.character.user_id == self._owner_now().pk:
+            return
+        if self.policy.addresses(
+            (entry.character.name, entry.label), action=action.action
+        ):
+            return
+        raise _Refused(
+            refusal_text(REASON_UNADDRESSED_PLAYER_CHARACTER).format(
+                name=entry.character.name
+            ),
+            REASON_UNADDRESSED_PLAYER_CHARACTER,
+        )
+
     def _change(self, action: PlannedAction) -> ActionResult:
         """Run one character action inside the caller's transaction."""
         entry, started = self._target(action)
+        if not started:
+            self._require_addressed(action, entry)
         character_id = entry.character.pk
         is_game_master = self._is_game_master
         common: dict[str, Any] = {"actor": self.actor, "authorize": self._authorize}
@@ -972,6 +1043,7 @@ class RecordsExecutor:
         called_past = ""
         if action.character_id is not None:
             entry = self._entry(action.character_id)
+            self._require_addressed(action, entry)
             roller = _called(entry.character, entry.label)
             unconscious = unconscious_refusal(entry.character)
             if unconscious is not None:

@@ -317,9 +317,11 @@ class GameMasterCoinTest(BaseTestCase):
         self.url = reverse("characters:move_coin", args=[self.character.pk])
 
     def test_a_player_cannot_give_themselves_coin(self):
+        """A Game Master's endpoint refuses a player before the row is read
+        (#182): the plain 403, nothing about the purse."""
         self.login_as(self.owner)
         response = self.post_json(self.url, {"amount": "500"})
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 403)
         self.assertEqual(Character.objects.get(pk=self.character.pk).purse, Decimal(10))
 
     def test_a_game_master_gives_and_takes_coin_with_a_reason(self):

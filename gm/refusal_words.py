@@ -78,6 +78,7 @@ class PolicyWords:
     player_stated_fatigue: str = sentence()
     game_master_records: str = sentence()
     aide_unasked_roll: str = sentence()
+    unaddressed_player_character: str = sentence("name", required=("name",))
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,8 @@ class ViewsWords:
 
     server_error: str = sentence()
     turn_already_running: str = sentence()
+    too_many_turns_running: str = sentence()
+    site_turns_full: str = sentence()
     fight_while_turn_running: str = sentence()
     fight_model_unreachable: str = sentence()
     turn_already_answered: str = sentence()

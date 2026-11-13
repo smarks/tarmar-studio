@@ -126,7 +126,7 @@
             {% if theme.attribution %}<span class="theme-attribution">{{ theme.attribution }}</span>{% endif %}
         </div>
     </footer>
-    <script>
+    <script nonce="{{ csp_nonce }}">
         (function () {
             const menuToggle = document.getElementById('menuToggle');
             const menu = document.getElementById('menu');

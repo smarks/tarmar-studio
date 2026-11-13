@@ -54,6 +54,24 @@ class RequestsWords:
 
 
 @dataclass(frozen=True)
+class GateWords:
+    """The passphrase gate's lockout (``common.middleware.GateRateLimitMiddleware``):
+    the 429 page an address meets once it has spent its guesses (issues #161, #175)."""
+
+    lockout_headline: str = sentence()
+    lockout_message: str = sentence()
+
+
+@dataclass(frozen=True)
+class LoginWords:
+    """The sign-in lockout (``accounts.login_limit``), at the site's door and
+    the admin's alike (issues #160, #173)."""
+
+    lockout_headline: str = sentence()
+    lockout_message: str = sentence()
+
+
+@dataclass(frozen=True)
 class CommonRefusalWords:
     """The whole file: one table per module, and the sentences every app shares."""
 
@@ -61,6 +79,8 @@ class CommonRefusalWords:
     text_limits: TextLimitsWords
     seeds: SeedsWords
     requests: RequestsWords
+    gate: GateWords
+    login: LoginWords
 
 
 def load_refusal_words(path: Path) -> CommonRefusalWords:

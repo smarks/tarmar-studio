@@ -85,6 +85,7 @@ from .access import (
     detail_visible_ids,
     listable_battles,
     own_drafts,
+    plays,
     readable_battles,
     seat_is_held,
 )
@@ -186,6 +187,33 @@ def _actor_and_readable_battle(
     """
     actor = actor_of(request, claim=claim)
     return actor, get_object_or_404(readable_battles(actor), pk=pk)
+
+
+def _figure_refusal(
+    actor: Actor, battle: Battle, combatant: BattleCombatant
+) -> str | None:
+    """Why ``actor`` may not act for ``combatant``, or ``None`` when they may.
+
+    The one rule is :func:`battle.access.decides_for` (#308, #180); this
+    only picks the sentence. A held seat belongs to its holder, and a Game
+    Master may override; an unseated figure is the runner's, except in a
+    Games Master session's fight, whose foes are a Game Master's (#762).
+
+    Args:
+        actor: Who is acting.
+        battle: The battle.
+        combatant: The figure acted for.
+
+    Returns:
+        The configured refusal, or ``None``.
+    """
+    if decides_for(actor, battle, combatant):
+        return None
+    if seat_is_held(combatant):
+        return refusal_words().views.seat_belongs_to_holder
+    if can_control(actor, battle):
+        return refusal_words().views.foes_belong_to_game_master
+    return refusal_words().views.combatant_control_denied
 
 
 def _control_denied(actor: Actor, battle: Battle) -> JsonResponse | None:
@@ -1083,11 +1111,14 @@ def seat_summaries(battle, actor: Actor) -> list[dict]:
     a seat is ``open`` only while genuinely unclaimed.
     """
     summaries = []
-    # The side nobody sits in is commanded by whoever runs the battle, or in
-    # a Games Master session's fight by a Game Master only (#762).
-    controller = commands_foes(actor, battle)
     for combatant in battle.combatants.select_related("player", "character"):
         claimed = seat_is_held(combatant)
+        # Who plays the figure is what the card says and the menu follows;
+        # who may act for it, a Game Master included, is who gets the
+        # controls (#180): the two are one answer except for a Game Master
+        # looking at a player's seat.
+        plays_it = plays(actor, battle, combatant)
+        acts_for = decides_for(actor, battle, combatant)
         if combatant.beast_id:
             kind = "beast"
         elif combatant.is_open_seat and not claimed:
@@ -1120,19 +1151,15 @@ def seat_summaries(battle, actor: Actor) -> list[dict]:
                 "control_line": control.mode_line(battle, combatant),
                 # What the card says instead when this viewer plays it by hand.
                 "own_control_line": control.own_manual_line(),
-                "you_decide": decides_for(actor, battle, combatant),
-                # Who may change this combatant's mode (#339, item 3). The
-                # same two-sided answer ``combatant_control`` enforces:
-                # whoever runs the battle, and the player sitting in the
-                # seat — which is what "I have had enough, let the AI fight
-                # my figure" needs. It used to say "the controller", so the
-                # payload disagreed with the endpoint.
-                "can_set_control": controller or actor.holds_seat(combatant),
-                # Renaming follows the same line (#762): whoever runs the
-                # battle may rename a figure, but in a Games Master session's
-                # fight the player renames only their own; battle.js offers
-                # the click on exactly these.
-                "can_rename": controller or actor.holds_seat(combatant),
+                "you_decide": plays_it,
+                # Who may change this combatant's mode and its name (#339
+                # item 3, #762, #180): exactly who acts for it, the answer
+                # ``combatant_control`` and ``battle_rename`` enforce
+                # (``decides_for``) -- a held seat's own player or a Game
+                # Master, an unseated figure's runner -- so the page offers
+                # the click on exactly the figures the endpoint would take.
+                "can_set_control": acts_for,
+                "can_rename": acts_for,
                 # A character's owner plays it; a Game Master takes an absent
                 # owner's seat and the owner or he hands it back (#853).
                 # Empty where this viewer has no such control.
@@ -1201,7 +1228,7 @@ def pending_payload(battle, actor: Actor) -> dict | None:
     # sitting in belongs to whoever runs the battle, and they are the one
     # being asked. ``holds_seat`` alone would show them a prompt addressed
     # to nobody.
-    is_you = decides_for(actor, battle, seat)
+    is_you = plays(actor, battle, seat)
     profile = profiles.for_battle(battle)
     payload = {
         "combatant_id": seat.pk,
@@ -1214,7 +1241,10 @@ def pending_payload(battle, actor: Actor) -> dict | None:
         # The pool's name for a stage with no caster's payload (#145 review).
         "pool_label": profile.pool_label(),
     }
-    if is_you or commands_foes(actor, battle):
+    # The menu and a caster's hand go to whoever may act for the figure, and
+    # to nobody else (#180): the player who sits in the seat, or a Game
+    # Master; the maker of a battle sees who is up, not the options.
+    if decides_for(actor, battle, seat):
         payload["candidates"] = pending.get("candidates", [])
         payload["magic"] = profile.caster_magic(
             profile.load(battle.state_json), seat.pk
@@ -1485,6 +1515,7 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
             :data:`LOG_TURN_WINDOW` turns of it (#662).
     """
     events, earlier_turns = windowed_events(battle, show_all=show_all_turns)
+    seats = seat_summaries(battle, actor)
     return {
         "battle": battle,
         "event_turns": event_turns(events),
@@ -1520,7 +1551,11 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
         # Who runs this battle (#305): its DM, or whoever made it. The
         # template agrees with the endpoints rather than deciding anything.
         "can_control": can_control(actor, battle),
-        "seats": seat_summaries(battle, actor),
+        "seats": seats,
+        # Whether this viewer acts for any figure at all (#180): the roster
+        # carries its rename URL only then, and battle.js offers the click on
+        # exactly the seats whose facts say so. A spectator's page has none.
+        "can_rename_any": any(seat["can_rename"] for seat in seats),
         "pending": pending_payload(battle, actor),
         # The turn panel's own words (#94): config/battle-rulings.toml's
         # [turn_panel], once per page, since they cannot change while the
@@ -1899,6 +1934,7 @@ def battle_control(request, pk):
         battle, _event = set_battle_control_mode(
             battle.pk,
             str(data.get("control_mode") or ""),
+            actor=actor,
             apply_to_all=_form_flag(data.get("apply_to_all")),
         )
     except BattleRefusal as mode_error:
@@ -2012,23 +2048,13 @@ def combatant_control(request, pk, combatant_id):
     combatant = battle.combatants.filter(pk=combatant_id).first()
     if combatant is None:
         return _json_error(refusal_words().services.no_such_combatant, status=404)
-    # Whoever runs the battle sets any combatant's mode; a seated player
-    # sets their own, which is what "hand my fighter to the AI" needs. In a
-    # Games Master session's fight the foes are the Game Master's (#762).
-    if not (commands_foes(actor, battle) or actor.holds_seat(combatant)):
-        if can_control(actor, battle):
-            return _refuse(
-                request,
-                battle,
-                refusal_words().views.foes_belong_to_game_master,
-                status=403,
-            )
-        return _refuse(
-            request,
-            battle,
-            refusal_words().views.combatant_control_denied,
-            status=403,
-        )
+    # Whoever acts for the figure sets its mode (decides_for, #308, #180): a
+    # held seat's holder or a Game Master, never the battle's maker; an
+    # unseated figure's runner, or in a Games Master session's fight a Game
+    # Master only (#762).
+    refusal = _figure_refusal(actor, battle, combatant)
+    if refusal is not None:
+        return _refuse(request, battle, refusal, status=403)
     data, err = _posted_fields(request)
     if err:
         return err
@@ -2169,12 +2195,12 @@ COMBATANT_NAME_PATTERN = re.compile(
 def battle_rename(request, pk):
     """Rename one combatant: row, state_json, future event names.
 
-    The battle's DM or its maker (#305).
+    Whoever acts for the figure (:func:`battle.access.decides_for`, #180): a
+    held seat's own player or a Game Master, never the battle's maker; an
+    unseated figure's runner. The figure is read before the name is, so a
+    stranger's answer is the refusal, not a note on their spelling (#182).
     """
     actor, battle = _actor_and_readable_battle(request, pk)
-    denied = _control_denied(actor, battle)
-    if denied is not None:
-        return denied
     data, err = _parse_json_body(request)
     if err:
         return err
@@ -2185,12 +2211,12 @@ def battle_rename(request, pk):
         combatant_id = whole_number(combatant_id_raw)
     except ValueError:
         return _json_error(refusal_words().views.numeric_combatant_id)
-    if not commands_foes(actor, battle):
-        seat = battle.combatants.filter(pk=combatant_id).first()
-        if not actor.holds_seat(seat):
-            return _json_error(
-                refusal_words().views.foes_belong_to_game_master, status=403
-            )
+    combatant = battle.combatants.filter(pk=combatant_id).first()
+    if combatant is None:
+        return _json_error(refusal_words().services.no_such_combatant, status=404)
+    refusal = _figure_refusal(actor, battle, combatant)
+    if refusal is not None:
+        return _json_error(refusal, status=403)
     name = data.get("name") or ""
     # A list has no strip(); it raised AttributeError, a 500 (#767).
     if not isinstance(name, str):
@@ -2372,6 +2398,15 @@ def battle_act(request, pk):
     #31).
     """
     actor, battle = _actor_and_readable_battle(request, pk)
+    # Who may answer the pause is decided before the body is read (#182): a
+    # viewer who does not act for the awaited figure (decides_for, #180) is
+    # refused whatever they posted, and never learns what a good post looks
+    # like. With no pause to answer, the service says so from the body.
+    awaited = battle.combatants.filter(
+        pk=(battle.pending_input_json or {}).get("combatant_id")
+    ).first()
+    if awaited is not None and not decides_for(actor, battle, awaited):
+        return _json_error(refusal_words().services.not_your_combatant, status=403)
     data, err = _parse_json_body(request)
     if err:
         return err

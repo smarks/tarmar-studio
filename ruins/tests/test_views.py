@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils.html import escape
 
 from common.refusal_words import refusal_words as common_words
-from common.test_helpers import BaseTestCase, sentence_parts
+from common.test_helpers import BaseTestCase, sentence_parts, without_per_request_tokens
 from ruins.generation import MAX_ROOMS, generate_ruin
 
 
@@ -72,7 +72,9 @@ class GenerateFlowTest(RuinsViewTestCase):
         # Compare the rendered result section only: the surrounding chrome
         # carries a per-request CSRF token (the logout form).
         def result_section(response) -> str:
-            content = response.content.decode()
+            # The section runs to the end of the page, past base.html's
+            # per-response CSRF token and script nonce (issue #178).
+            content = without_per_request_tokens(response.content).decode()
             return content[content.index('id="ruin-result"') :]
 
         url = reverse("ruins:generate")

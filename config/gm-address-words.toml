@@ -1,0 +1,87 @@
+# The words a Game Master's own message must carry before the Games Master
+# acts on another player's character (issue #177).
+#
+# The model reads every attached character's record, and some of that text a
+# player wrote. So an action on a character the session owner does not own runs
+# only when the owner's typed message names that character (its name or its
+# session label, as whole words) or the party in one of the collective words
+# below, AND says what the action does in one of that action's subject words.
+# A short affirmative answers the Games Master's own proposal: then the names
+# and the subjects are read from the proposal the Game Master saw instead.
+#
+# Read once at startup (gm.address_words.load_address_words); every list must
+# hold at least one word, or the server refuses to start. Matching is
+# case-insensitive and by whole word or phrase: "xp" matches "500 XP" and not
+# "expert". GM_ADDRESS_WORDS_FILE names another file. Change the words freely;
+# changing a word never changes who is held to the rule.
+
+# Ways of addressing the whole party at once.
+collective = [
+    "everyone",
+    "everybody",
+    "every character",
+    "all of them",
+    "all of you",
+    "the party",
+    "the whole party",
+    "each of them",
+    "both of them",
+]
+
+# A whole message that only agrees to what the Games Master proposed; the
+# proposal is then what has to name the character and the action.
+affirmatives = [
+    "yes",
+    "yes please",
+    "yes, do it",
+    "do it",
+    "do that",
+    "go ahead",
+    "please do",
+    "ok",
+    "okay",
+    "sure",
+    "agreed",
+    "proceed",
+    "confirmed",
+    "make it so",
+]
+
+# Words too ordinary to count as naming a character: a player who names one
+# "the", or a session that labels one "it", would otherwise be named by almost
+# any sentence. A single-word name shorter than min_name_characters is set
+# aside as well (gm.turn_engine.policy.is_too_common); a name of several words
+# is kept. At 3, a two-letter name ("Al", "Bo") can only be addressed
+# collectively ("everyone"), or by a longer session label.
+min_name_characters = 3
+ignored_names = [
+    "a", "an", "the", "i", "me", "my", "we", "us", "our", "you", "your",
+    "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them",
+    "their", "this", "that", "these", "those", "one", "who", "all", "any",
+]
+
+# What each action does, in the Game Master's own words. One table key per
+# character action the engine can run (gm.turn_engine.executor.CHARACTER_ACTIONS).
+# Explicit verbs, so a sentence about a character cannot stand in for an order:
+# "Nym called out" is not a renaming and "Nym takes the stairs" is not a gift.
+[subjects]
+record_attributes = ["attributes", "attribute", "scores", "score", "stats", "strength", "dexterity", "intelligence", "wisdom", "constitution", "charisma", "str", "dex", "int", "wis", "con", "chr"]
+roll_attributes = ["roll", "rolls", "reroll", "rerolls", "attributes", "stats", "dice"]
+roll_fatigue = ["fatigue"]
+roll_literacy = ["literacy", "read", "reads", "literate", "illiterate"]
+rule_literacy = ["literacy", "read", "reads", "literate", "illiterate"]
+roll_background = ["background", "origin", "provenance", "wealth", "reroll", "rerolls"]
+set_background = ["background", "origin", "provenance", "grew up", "born", "raised", "hails from", "comes from"]
+play_years = ["year", "years", "experience", "track", "prior experience"]
+spend_skill_points = ["skill", "skills", "skill point", "skill points", "points", "spend", "spends", "learn", "learns", "trains", "training"]
+add_equipment = ["give", "gives", "given", "giving", "hand over", "hands over", "handed over", "gets a", "get a", "receives", "received", "is given", "are given", "equipment", "gear", "loot", "buys", "buy", "bought", "purchases", "purchased"]
+roll = ["roll", "rolls", "rolled", "reroll", "dice", "die", "d6", "d20", "3d6", "2d6", "1d6"]
+rename_character = ["rename", "renamed", "renames", "renaming", "new name", "change the name", "changes the name", "change her name", "change his name", "change their name"]
+revive_character = ["revive", "revived", "revives", "alive", "back to life", "resurrect", "resurrected", "lives again", "bring back", "brought back"]
+remove_character = ["remove", "removed", "removes", "removing", "leaves the party", "leaves the session", "left the party", "left the session", "out of the session", "take out of the session", "retire", "retires", "retired"]
+mark_dead = ["dies", "die", "died", "dead", "death", "killed", "kill", "kills", "slain", "slays", "slay", "falls", "fell", "perishes", "perished", "drowns", "drowned", "murdered", "executed", "is no more"]
+award_xp = ["xp", "experience", "experience points", "award", "awards", "awarded", "earns", "earned", "gains", "gain", "gained"]
+set_coin = ["gold", "coin", "coins", "silver", "copper", "gp", "sp", "purse", "pay", "pays", "paid", "payment", "buy", "buys", "bought", "price", "cost", "costs", "reward", "bounty", "money"]
+skill_check = ["check", "checks", "test", "tests", "roll", "rolls", "skill"]
+survival_save = ["survival", "save", "saves", "saving"]
+attribute_check = ["check", "checks", "test", "tests", "roll", "rolls"]

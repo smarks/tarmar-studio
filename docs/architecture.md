@@ -42,7 +42,7 @@ graph TB
     browser["Browser<br/>templates + static/js, no framework"]
 
     subgraph datahorde["datahorde - roots.origamisoftware.com"]
-        nginx["nginx<br/>nginx/tarmar.conf<br/>TLS, /static/, /references/"]
+        nginx["nginx<br/>nginx/tarmar.conf<br/>TLS, /static/, scanner block"]
         upstream["upstream tarmar_backend<br/>nginx/tarmar-upstream.conf"]
         blue["gunicorn tarmar-blue<br/>127.0.0.1:9066<br/>~/dev/tarmar-studio-blue"]
         green["gunicorn tarmar-green<br/>127.0.0.1:9067<br/>~/dev/tarmar-studio-green"]
@@ -121,11 +121,17 @@ from the account, never from the request body:
 
 `common/middleware.py::PublicPathPassphraseMiddleware` subclasses
 `speak_friend.middleware.PassphraseMiddleware` and sits between CSRF and
-authentication in `settings.MIDDLEWARE`. A `POST /gate/` is intercepted by the
-middleware — there is no `/gate/` route in `tarmar_studio/urls.py`. The answer
-is compared as a SHA-256 of the normalised string
-(`common/gate.py::normalize_passphrase`, `strip().lower()`), and a pass sets the
-session flag `passphrase_authenticated`.
+authentication in `settings.MIDDLEWARE`. A `POST /gate/` (the path is
+`common/gate.py::GATE_PATH`) is intercepted by the middleware — there is no
+`/gate/` route in `tarmar_studio/urls.py`. Because it never reaches a view,
+`CsrfViewMiddleware.process_view` never sees it; `GateRateLimitMiddleware`,
+listed just before the gate, runs Django's CSRF check on it itself and counts
+only a POST to that path as a guess (#175). The answer is compared as a SHA-256
+of the normalised string (`common/gate.py::normalize_passphrase`,
+`strip().lower()`), and a pass sets the session flag `passphrase_authenticated`.
+`XFrameOptionsMiddleware` is listed before both, since a response the gate
+answers itself passes back only through what precedes it (#176);
+`common/middleware.py::require_gate_middleware_order` refuses to start otherwise.
 
 The gate is not in front of *quite* everything. `common/public_paths.py` carves
 out `PUBLIC_PATH_PREFIXES = ("/tarmar/battles/", "/tarmar/accounts/login/",
@@ -383,16 +389,44 @@ Middleware order matters and is fixed in `tarmar_studio/settings.py`:
 1. `common.middleware.TrustedProxyClientIPMiddleware` — first, so everything
    downstream reading `REMOTE_ADDR` agrees on the client.
 2. `SecurityMiddleware`
-3. `WhiteNoiseMiddleware`
-4. `SessionMiddleware` (database-backed; no `SESSION_ENGINE` is set anywhere, so
+3. `django.middleware.csp.ContentSecurityPolicyMiddleware` — the
+   Content-Security-Policy header (#178), outside the gate for the same reason
+   as the next one
+4. `XFrameOptionsMiddleware` — outside the gate, so the gate's own pages carry
+   the header too (#176)
+5. `WhiteNoiseMiddleware`
+6. `SessionMiddleware` (database-backed; no `SESSION_ENGINE` is set anywhere, so
    Django's default applies)
-5. `CommonMiddleware`
-6. `CsrfViewMiddleware`
-7. `common.middleware.GateRateLimitMiddleware`
-8. `common.middleware.PublicPathPassphraseMiddleware`
-9. `AuthenticationMiddleware`
-10. `MessageMiddleware`
-11. `XFrameOptionsMiddleware`
+7. `CommonMiddleware`
+8. `CsrfViewMiddleware`
+9. `common.middleware.GateRateLimitMiddleware` — the gate POST's CSRF check and
+   guess count (#175)
+10. `common.middleware.PublicPathPassphraseMiddleware`
+11. `AuthenticationMiddleware`
+12. `common.middleware.RenderedMethodNotAllowedMiddleware`
+13. `MessageMiddleware`
+
+### Content-Security-Policy (issue #178)
+
+`settings.CONTENT_SECURITY_POLICY` is sent on every response by Django's own
+middleware, enforced (`SECURE_CSP`) unless `CSP_ENFORCED=false` moves the same
+policy to the Report-Only header. Every source is `'self'`: the site serves its
+own scripts, styles, images and fonts and uses no CDN. `script-src` admits no
+`'unsafe-inline'`; the few inline `<script>` blocks (`base.html`'s menu,
+`404.html`'s stars, the create, profile, register, party-edit and reference
+pages) carry `nonce="{{ csp_nonce }}"` from the `csp` context processor, and
+`common/tests/test_no_inline_scripts.py` sweeps every template for a block
+without one or an `on*=` handler, so the GM chat's controls are wired by
+`chat.js` from `data-action`, `data-command` and `data-delete-session`
+attributes. `style-src` keeps `'unsafe-inline'` for the `style="..."`
+attributes the templates and scripts still write. `img-src 'self'` is what
+closes #177's image leak; `frame-ancestors 'none'`, `object-src 'none'`,
+`base-uri 'self'` and `form-action 'self'` close the rest. The Playwright
+`page` fixture and the auto fixture that watches every context a test opens
+(`e2e/fixtures.js`) fail any test whose page logs a policy violation, so a
+missed source is caught by the suite rather than in production. Should one
+reach production anyway, `CSP_ENFORCED=false` in `.env` and a restart is the
+one-line rollback: the same policy goes out as Report-Only (DEPLOY.md).
 
 ```mermaid
 sequenceDiagram
@@ -705,6 +739,21 @@ as it stands first, so an impossible value is refused rather than dropped.
 What was dropped is stored on `Character.import_notice`, shown on the sheet
 until dismissed, and returned under `import_notice` in the import response.
 
+### The edit right comes before the body (issue #182)
+
+Every `<pk>` endpoint that writes a character is wrapped in
+`characters/views/access.py::edit_right_first`, which answers a missing
+character with the view's own 404 shape and a stranger with the usual 403 from
+one read of the row, before the view parses or validates anything; the view's
+own lock-and-authorize inside `services.changing` stays the authoritative
+check. `characters/tests/test_edit_right_first.py` reads every such endpoint
+off `characters.urls` and posts a malformed body as a stranger, so an endpoint
+added without the decorator fails there. The same order holds elsewhere by
+hand where the id is in the URL or has to be read first: `battle_act` judges
+`decides_for` on the awaited seat before the body, `profile_update_field`
+refuses a non-manager another account's profile before parsing, and `gm_save`
+looks the session up before judging the name.
+
 ### Incomplete characters
 
 Since issue #571 the six attributes and `fatigue_roll` are nullable, and
@@ -860,12 +909,27 @@ Issue #308 replaced an arrangement with a setting. `battle/control.py`:
 
 `Battle.control_mode` is the default; `BattleCombatant.control_mode` overrides
 it; `control.effective_mode(battle, combatant)` is the one resolution. Who may
-act is `battle/access.py::decides_for`: a seat that someone has actually taken
-(`player_id` or `guest_key` set) belongs to its holder alone; everything else
-belongs to whoever can control the battle (`is_dm` or the owner). Claiming a
-seat sets it to `MANUAL`; releasing resets it to `INHERIT`. Hiding buttons is
-never the enforcement — `battle_control`, `combatant_control` and
-`record_player_action` each re-check.
+act for a figure is `battle/access.py::decides_for`, the one statement every
+writing path asks (#180, Spencer's decision of 2026-11-10): a seat that
+someone has actually taken (`player_id` or `guest_key` set) belongs to its
+holder, and only a Game Master account overrides — the battle's maker may not
+take over, rename or otherwise act for it; everything else belongs to whoever
+commands the foes (`commands_foes`: the runner, or in a session fight a Game
+Master). The paths: the choice on a paused turn and handing it to the AI
+(`record_player_action`), the control mode (`combatant_control`), the name
+(`battle_rename`), and the maker's "set them all" (`set_battle_control_mode`,
+which leaves held seats as their players chose unless the actor is a Game
+Master). The page offers each control on exactly the figures `decides_for`
+admits (`seat_summaries.can_set_control`/`can_rename`), and the awaited menu
+reaches only whoever acts for the figure (`pending_payload`). Claiming a seat
+sets it to `MANUAL`; releasing resets it to `INHERIT`. Hiding buttons is never
+the enforcement — every endpoint re-checks, and `battle_act` does so before it
+reads the body (#182). A lobby seat is renamed on its row and snapshot alone,
+since the lobby has no state yet (#181). Two override surfaces, deliberately
+different: `decides_for` lets *any* Game Master account act for a held seat
+(Spencer's 2026-11-10 decision on #180), while the seat hand-offs `take_seat`
+and `return_seat` are the battle's runner's alone, and only while that account
+is a Game Master (`runs_the_seats`, #853).
 
 ### A Game Master's rulings on a battle
 
@@ -1334,6 +1398,59 @@ first turn spends it before its own, issue #936). A genuine retry
 (`data["retry"]` plus `resumes_interrupted_turn`) sets `TurnRequest.plan =
 False` and feeds the already-filed results back as `known_results`, so the turn
 is **narrated, not re-run** — nothing is applied twice.
+
+### Caps on running turns (issue #174)
+
+A turn holds its request thread for as long as it runs — up to
+`GM_STREAM_BUDGET_SECONDS`, and on after its page leaves, by #515's design —
+and a message sent with no `session_id` starts a fresh turn every time, so one
+account could hold every thread gunicorn has (3 workers × 4 threads in
+`tarmar.service.template`). `gm.turn_record.claim_turn` therefore refuses, in
+this order: a session whose turn is still running (409, `running_turn` named,
+#515); an account with `GM_MAX_RUNNING_TURNS_PER_PLAYER` (or, for a Game
+Master, `GM_MAX_RUNNING_TURNS_PER_GAME_MASTER`) turns running across all its
+sessions (429); and a site with `GM_MAX_RUNNING_TURNS_SITE_WIDE` running (429),
+which is what keeps threads free for other pages when the accounts are many,
+since registration is open. The counts are the `GMTurnRecord` rows with
+`outcome=running` started within the recap and stream budgets plus the grace —
+the same bound `turns_ahead_of` uses — so a slot a dead worker left is held no
+longer than a turn can run. The per-account count is serialised by the `FOR
+UPDATE` on the user's row; the site-wide one by a PostgreSQL transaction
+advisory lock (`TURN_CLAIM_LOCK_KEY`), skipped on SQLite. The refusals' words
+are `[views]` in `config/gm-refusals.toml`; `chat.js` shows them as it shows
+any refused send, a notice that stays with the message back in the box. The
+fight command claims through the same function and is capped the same way. A
+disconnected turn still runs to its end (#515) and keeps its slot until it
+finishes or its budget ends it; that is the bound on it.
+
+`character_export.views.export_pdf`, the one export that renders on the
+request thread, is limited to `CHARACTER_EXPORT_PDF_MAX_PER_MINUTE` an account
+through `common.decorators.rate_limit`.
+
+### Player-written text in a Game Master's prompt (issue #177)
+
+A Game Master's session lists every attached character in its state block, and
+some of that text a player wrote: the name, the items, the skills. The model
+can be talked into an action by what it reads there. The hard containment is
+the executor's (`RecordsExecutor._require_addressed`): every action on a
+character the session owner does not own (`CHARACTER_ACTIONS`: XP, coin, a
+death, stated scores, but equally a gift of equipment, a reroll, a rename or a
+year of experience) runs only when the owner's own typed message names that
+character (its name or its session label, as a whole word) or the party in a
+collective word, *and* says what the action does in one of that action's
+subject words; the words are configuration, `config/gm-address-words.toml`
+(`GM_ADDRESS_WORDS_FILE`). A message that is only an affirmative ("yes", "do
+it") answers the Games Master's own proposal, so the names and subjects are
+read from the last visible reply instead (`TurnPolicy.proposal`); with no
+proposal, an affirmative asks for nothing. The refusal is `[policy]
+unaddressed_player_character` and, since it depends on the message, is never
+settled. The owner's own characters are not held, and a player's session is
+unchanged. The softer containment is the prompt's: `RosterLine.line` keeps
+each record's text on its own line (`record_text` collapses newlines, so no
+record can forge a heading or the speaker line), and the block ends its roster
+with `RECORDS_ARE_DATA_NOTE`. Model-written markdown — a reply in `chat.js`, a
+review's findings through `reference.rendering.render_model_markdown` — emits no
+image and links only to this site, whatever the page's policy.
 
 ### Streaming
 

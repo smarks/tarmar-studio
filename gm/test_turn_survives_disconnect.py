@@ -25,6 +25,7 @@ from .retrieval import INTERRUPTED_KIND, PROCEDURE_KIND
 from .testing import gm_replies
 from .tests import FakeMonotonicClock, SlowFakeStream
 from .turn_record import (
+    REFUSED_SESSION_BUSY,
     RUNNING_TURN_GRACE_SECONDS,
     STALE_RUNNING_TURN_ERROR,
     TurnRecorder,
@@ -295,10 +296,11 @@ class TurnSurvivesDisconnectTest(BaseTestCase):
 
         first = recorder()
         self.assertIsNone(claim_turn(first))
-        running = claim_turn(recorder())
-        self.assertIsNotNone(running)
-        assert running is not None
-        self.assertEqual(running.pk, first.record_id)
+        refusal = claim_turn(recorder())
+        self.assertIsNotNone(refusal)
+        assert refusal is not None and refusal.running is not None
+        self.assertEqual(refusal.reason, REFUSED_SESSION_BUSY)
+        self.assertEqual(refusal.running.pk, first.record_id)
 
 
 @override_settings(GM_STREAM_BUDGET_SECONDS=0.05)

@@ -1,11 +1,13 @@
 """Views for exporting character data."""
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 
 from characters.models import Character, characters_visible_to
 from common.audit import audit_logger
+from common.decorators import rate_limit
 
 from .export_utils import (
     generate_character_html,
@@ -117,9 +119,23 @@ def export_json(request, character_id):
     return response
 
 
+#: The limiter's bucket; the account completes the key.
+PDF_EXPORT_RATE_LIMIT_KEY = "export_pdf"
+
+
 @login_required
+@rate_limit(
+    PDF_EXPORT_RATE_LIMIT_KEY,
+    max_requests=settings.CHARACTER_EXPORT_PDF_MAX_PER_MINUTE,
+    window_seconds=60,
+)
 def export_pdf(request, character_id):
-    """Export a character as a PDF file."""
+    """Export a character as a PDF file.
+
+    Rendered on the request thread by WeasyPrint, so one account may ask for
+    ``settings.CHARACTER_EXPORT_PDF_MAX_PER_MINUTE`` a minute (issue #174);
+    the limiter keys on the signed-in account, as the character import's does.
+    """
     character = _visible_character_or_404(request, character_id)
     refused = _incomplete_refusal(character)
     if refused is not None:

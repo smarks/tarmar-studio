@@ -36,14 +36,68 @@ async function submitPassphrase(page) {
 /**
  * Extended test fixture with login helper and coverage collection.
  */
+/**
+ * The browser's report of a Content-Security-Policy violation, as Chromium
+ * writes it to the console: "Refused to execute inline script because it
+ * violates the following Content Security Policy directive ...". The suite
+ * runs under the enforced policy (issue #178), so a source the policy misses
+ * fails the test that loaded it instead of breaking a page in production.
+ */
+const CSP_VIOLATION_PATTERN = /Content Security Policy/;
+
+/**
+ * Collect the page's CSP violations as they are logged, to be asserted
+ * empty when the test ends. Exported for a spec that opens a page of its own
+ * (``browser.newContext()``), which the shared fixture does not see.
+ * @param {import('@playwright/test').Page} page
+ * @returns {string[]} the violations seen so far, filled in as they happen
+ */
+function watchForCspViolations(page) {
+    const violations = [];
+    page.on('console', (message) => {
+        if (message.type() === 'error' && CSP_VIOLATION_PATTERN.test(message.text())) {
+            violations.push(message.text());
+        }
+    });
+    return violations;
+}
+
 const test = base.extend({
+    // Every browser context a test opens for itself (`browser.newContext()`)
+    // has its pages watched for policy violations as the shared page is,
+    // so the Content-Security-Policy is held across the whole suite (issue
+    // #178). The method is wrapped for the test's duration and restored.
+    contextsWatched: [async ({ browser }, use) => {
+        const violations = [];
+        const newContext = browser.newContext.bind(browser);
+        browser.newContext = async (...options) => {
+            const context = await newContext(...options);
+            context.on('page', (page) => {
+                page.on('console', (message) => {
+                    if (message.type() === 'error' && CSP_VIOLATION_PATTERN.test(message.text())) {
+                        violations.push(message.text());
+                    }
+                });
+            });
+            return context;
+        };
+        try {
+            await use(violations);
+        } finally {
+            browser.newContext = newContext;
+        }
+        expect(violations, 'a page in a context the test opened violated its Content-Security-Policy').toEqual([]);
+    }, { auto: true }],
+
     // Auto-collect coverage for all tests
     page: async ({ page }, use, testInfo) => {
         await startCoverage(page);
+        const cspViolations = watchForCspViolations(page);
         // Pass through the passphrase gate once per test
         await submitPassphrase(page);
         await use(page);
         await stopCoverage(page, testInfo.title);
+        expect(cspViolations, 'the page violated its Content-Security-Policy').toEqual([]);
     },
 
     // Authenticated page fixture
@@ -394,4 +448,5 @@ module.exports = {
     characterIdFromUrl,
     searchPicker,
     chooseToAttach,
+    watchForCspViolations,
 };

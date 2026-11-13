@@ -1,16 +1,26 @@
 """Project middleware."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from django.conf import settings
 from django.contrib.auth import get_user
-from django.core.exceptions import MiddlewareNotUsed
+from django.core.exceptions import ImproperlyConfigured, MiddlewareNotUsed
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.middleware.csrf import CsrfViewMiddleware
 from django.shortcuts import render
 from django.utils.functional import SimpleLazyObject
 from speak_friend.middleware import PassphraseMiddleware
 
-from common.gate import DEV_GATE_PASSPHRASE, choose_gate_hint, normalize_passphrase
+from common.gate import (
+    CSP_MIDDLEWARE,
+    DEV_GATE_PASSPHRASE,
+    FRAME_OPTIONS_MIDDLEWARE,
+    GATE_LIMITER_MIDDLEWARE,
+    GATE_MIDDLEWARE,
+    GATE_PATH,
+    choose_gate_hint,
+    normalize_passphrase,
+)
 from common.helpers import client_ip
 from common.public_paths import is_public_path
 from common.rate_limit import (
@@ -20,6 +30,7 @@ from common.rate_limit import (
     current_count,
     too_many_attempts,
 )
+from common.refusal_words import refusal_words
 from common.rolling import pinned_dice
 
 #: The session flag speak_friend sets once a visitor has answered the gate.
@@ -148,13 +159,124 @@ class TrustedProxyClientIPMiddleware:
         return self.get_response(request)
 
 
+#: The gate counter key's prefix; the client's address completes it.
+GATE_COUNTER_KEY_PREFIX = "rate_limit:gate:"
+
+
+def gate_counter_key(client_address: str) -> str:
+    """The counter key for wrong passphrases from ``client_address``.
+
+    Takes the address rather than the request so a test, or a browser spec
+    reading it back through the Django shell, can name the key for the
+    address it arrives from.
+
+    Args:
+        client_address: The client's address, as :func:`common.helpers.client_ip`
+            resolves it.
+
+    Returns:
+        The ``RateLimitCounter`` key ``GateRateLimitMiddleware`` charges.
+    """
+    return f"{GATE_COUNTER_KEY_PREFIX}{client_address}"
+
+
+def _answered_in_middleware(request: HttpRequest) -> HttpResponse:
+    """Stand in for the view a request answered in middleware does not have.
+
+    ``CsrfViewMiddleware.process_view`` only reads its callback's attributes
+    (``csrf_exempt``); it never calls it. Should that ever change, this fails
+    loudly rather than answering anything.
+    """
+    raise RuntimeError("the gate's POST is answered in middleware, never by a view")
+
+
+def csrf_rejection(
+    request: HttpRequest, get_response: Callable[[HttpRequest], HttpResponse]
+) -> HttpResponse | None:
+    """Django's CSRF verdict on a request a middleware is about to answer itself.
+
+    ``CsrfViewMiddleware`` checks the token in ``process_view``, which Django
+    calls only once a request has reached the URL resolver. A request a
+    middleware answers on its own -- the gate's POST, which has no view --
+    never gets there, so the token ``gate.html`` rendered was never read, and
+    a cross-site form could post to the gate (issue #175). This puts the same
+    question to the same middleware at the point the request is about to be
+    answered. Everything ``process_view`` honours still holds: the test
+    client's ``enforce_csrf_checks`` switch, the referer check on a secure
+    request, ``CSRF_TRUSTED_ORIGINS``, and the cookie the outer
+    ``CsrfViewMiddleware`` already read into ``request.META``.
+
+    Args:
+        request: The POST about to be answered.
+        get_response: The next handler, which the middleware needs to exist
+            and never calls here.
+
+    Returns:
+        Django's 403 for a missing or wrong token, or ``None`` when the
+        request may go on.
+    """
+    return CsrfViewMiddleware(get_response).process_view(
+        request, _answered_in_middleware, (), {}
+    )
+
+
+def require_gate_middleware_order(middleware: Sequence[str]) -> None:
+    """Refuse a ``MIDDLEWARE`` that puts the gate's parts in the wrong order.
+
+    The gate answers requests itself, so what stands outside it in
+    ``settings.MIDDLEWARE`` decides what its own responses carry and what
+    reaches it: the Content-Security-Policy and clickjacking headers are added
+    only by a middleware outside it (issues #178, #176), and the limiter in
+    front of it is what checks the POST's CSRF token and counts the guess
+    (issue #175). All are facts about the list, so they are checked once, at
+    startup, instead of being trusted.
+
+    Args:
+        middleware: ``settings.MIDDLEWARE``, or a list under test.
+
+    Raises:
+        ImproperlyConfigured: When one of the four is missing or out of order.
+    """
+    expected_order = (
+        CSP_MIDDLEWARE,
+        FRAME_OPTIONS_MIDDLEWARE,
+        GATE_LIMITER_MIDDLEWARE,
+        GATE_MIDDLEWARE,
+    )
+    try:
+        positions = [middleware.index(name) for name in expected_order]
+    except ValueError as missing:
+        raise ImproperlyConfigured(
+            f"MIDDLEWARE must list each of {expected_order}; the passphrase gate "
+            "needs all of them (issues #175, #176, #178)."
+        ) from missing
+    if positions != sorted(positions):
+        raise ImproperlyConfigured(
+            "MIDDLEWARE must list the gate's parts in this order: "
+            f"{', '.join(expected_order)} (issues #175, #176, #178)."
+        )
+
+
 class GateRateLimitMiddleware:
-    """Rate-limit *failed* passphrase-gate attempts by client IP.
+    """Admit, then count, the POSTs to the passphrase gate (issues #161, #175).
 
     The passphrase gate is a third-party middleware with no throttling, so a
     shared secret could otherwise be brute-forced unbounded. Only wrong guesses
     count toward the limit — correct submissions pass through freely — so normal
     use (and the e2e suite) is unaffected while brute-forcing is bounded.
+
+    Only a POST to the gate's own path, ``common.gate.GATE_PATH``, is a guess.
+    It used to be any POST carrying a ``passphrase`` field, so ten such posts
+    to a public page locked an address out of the gate without a single
+    passphrase ever being compared (issue #175). And before the guess is
+    counted, Django's CSRF check is run on it (:func:`csrf_rejection`): the
+    gate's POST has no view, so ``CsrfViewMiddleware`` never checked the
+    token the form carried. A POST refused there is not a guess -- its
+    passphrase is never read, by this middleware or the gate -- so it is
+    not charged; charging it would hand a hostile page the very lockout the
+    check exists to stop. The check lives here, in front of the gate, rather
+    than in both middlewares: ``PublicPathPassphraseMiddleware`` refuses to
+    start unless this one precedes it (:func:`require_gate_middleware_order`).
 
     "Correct" here must be classified exactly the way
     speak_friend.PassphraseMiddleware classifies it, or this middleware and
@@ -199,18 +321,20 @@ class GateRateLimitMiddleware:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        if request.method == "POST" and "passphrase" in request.POST:
-            identifier = client_ip(request)
-            cache_key = f"rate_limit:gate:{identifier}"
+        if request.method == "POST" and request.path == GATE_PATH:
+            rejection = csrf_rejection(request, self.get_response)
+            if rejection is not None:
+                return rejection
+            cache_key = gate_counter_key(client_ip(request))
             if current_count(cache_key) >= self.MAX_ATTEMPTS:
                 # A count at MAX_ATTEMPTS is already past
                 # settings.GATE_HINT_AFTER_WRONG_GUESSES, so the hint goes on
                 # the 429 without a second look at the threshold (issue #55).
                 return too_many_attempts(
-                    "Too many wrong passphrases from this address.",
+                    refusal_words().gate.lockout_message,
                     window_seconds=self.WINDOW_SECONDS,
+                    headline=refusal_words().gate.lockout_headline,
                     request=request,
-                    headline="The door has stopped answering.",
                     hint=choose_gate_hint(),
                 )
             submitted = normalize_passphrase(request.POST.get("passphrase", ""))
@@ -237,13 +361,20 @@ class PublicPathPassphraseMiddleware(PassphraseMiddleware):
     still entirely speak_friend's.
 
     Registered in place of the parent in ``settings.MIDDLEWARE``; the
-    parent stays the dependency it always was.
+    parent stays the dependency it always was. It refuses to start unless
+    ``GateRateLimitMiddleware`` (the CSRF check and the count, issue #175)
+    and ``XFrameOptionsMiddleware`` (the header on its own pages, issue
+    #176) are listed before it: see :func:`require_gate_middleware_order`.
     """
 
     #: The session flag speak_friend sets once a visitor has answered the
     #: gate. The public branch has to preserve it by hand; the name lives in
     #: this module's GATE_SESSION_FLAG so nothing spells it twice.
     SESSION_FLAG = GATE_SESSION_FLAG
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        super().__init__(get_response)
+        require_gate_middleware_order(settings.MIDDLEWARE)
 
     def __call__(self, request):
         if not is_public_path(request.path):

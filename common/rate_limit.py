@@ -53,8 +53,8 @@ def too_many_attempts(
     message: str,
     *,
     window_seconds: int,
+    headline: str,
     request: HttpRequest | None = None,
-    headline: str = "The door has stopped answering.",
     hint: str = "",
 ) -> HttpResponse:
     """The 429 a spent guessing budget answers with.
@@ -75,10 +75,12 @@ def too_many_attempts(
         message: What to say in the body.
         window_seconds: The limiter's fixed window, sent as ``Retry-After``
             and shown to the reader rounded up to whole minutes.
+        headline: The line above the message, so the gate and the sign-in can
+            each say what has stopped answering. Every caller's is wording
+            from its own configuration table (``config/common-refusals.toml``
+            for the gate and the sign-ins), so there is no default here.
         request: The request being refused, when there is one. Only a context
             for the template; the response is the same without it.
-        headline: The line above the message, so the gate and the sign-in can
-            each say what has stopped answering.
         hint: A line of help shown under the message, or empty for none. The
             gate passes one of ``settings.GATE_HINTS`` (issue #55): a visitor who
             spent ``GUESS_MAX_ATTEMPTS`` guesses on the riddle has not

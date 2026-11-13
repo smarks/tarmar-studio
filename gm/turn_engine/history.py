@@ -57,6 +57,29 @@ def latest_message_index(history: Sequence[ChatMessage]) -> int:
     raise ValueError("the session has no message to answer")
 
 
+def latest_assistant_reply_before(
+    history: Sequence[ChatMessage], index: int
+) -> str | None:
+    """The Games Master's last visible reply before the message at ``index``.
+
+    The proposal a short affirmative answers (issue #177): a Game Master who
+    says "yes" to "Shall I award Nym 500 XP?" has named the character and the
+    action in the only way a confirmation can, by what he was shown.
+
+    Args:
+        history: The session's history.
+        index: Where the message being answered sits.
+
+    Returns:
+        The reply's text, or ``None`` when nothing visible came before it.
+    """
+    for position in range(index - 1, -1, -1):
+        entry = history[position]
+        if entry.get("role") == "assistant" and not entry.get("kind"):
+            return str(entry.get("content", ""))
+    return None
+
+
 def results_filed_after(history: Sequence[ChatMessage], index: int) -> tuple[str, ...]:
     """The results already filed for the message at ``index``, as sentences.
 

@@ -57,7 +57,11 @@ const MARKDOWN_SANITIZE_CONFIG = {
     'code', 'pre', 'blockquote',
     'ul', 'ol', 'li',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'a', 'img',
+    // No 'img' (issue #177): a reply's image is fetched by the reader's
+    // browser from wherever its author pointed it, which hands that server
+    // the reader's address. A link stays, but only to this site (the hook
+    // below); the page's CSP (img-src 'self') is the second wall.
+    'a',
     'table', 'thead', 'tbody', 'tr', 'th', 'td',
     'span',
     // GFM task lists (marked emits <input disabled type="checkbox"> for
@@ -68,7 +72,7 @@ const MARKDOWN_SANITIZE_CONFIG = {
     'input',
   ],
   ALLOWED_ATTR: [
-    'href', 'src', 'alt', 'title', 'class', 'target', 'rel',
+    'href', 'title', 'class', 'target', 'rel',
     // GFM table column alignment (issue #168).
     'align',
     // GFM task-list checkboxes — locked down in the hook below.
@@ -82,6 +86,21 @@ const MARKDOWN_SANITIZE_CONFIG = {
 const SCROLL_CUE_CLASS = 'scroll-cue';
 const SCROLLING_TAGS = ['TABLE', 'PRE'];
 
+/**
+ * Whether a link's href stays on this site: a relative path, or an absolute
+ * address with this page's origin. Anything that does not parse is not a
+ * link to anywhere this page should send a reader.
+ * @param {string} href
+ * @returns {boolean}
+ */
+function linksToThisSite(href) {
+  try {
+    return new URL(href, window.location.href).origin === window.location.origin;
+  } catch (error) {
+    return false;
+  }
+}
+
 if (typeof DOMPurify !== 'undefined') {
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (SCROLLING_TAGS.includes(node.nodeName)) {
@@ -92,6 +111,15 @@ if (typeof DOMPurify !== 'undefined') {
     // tab a window.opener reference back into this session.
     if (node.hasAttribute('target')) {
       node.setAttribute('rel', 'noopener noreferrer');
+    }
+
+    // A link leads only to this site (issue #177): the model's reply is
+    // influenceable by text a player wrote, and a link to a host of that
+    // author's choosing would carry the reader there. The text stays; the
+    // href goes.
+    if (node.nodeName === 'A' && node.hasAttribute('href')
+        && !linksToThisSite(node.getAttribute('href'))) {
+      node.removeAttribute('href');
     }
 
     // 'input' is only on the allowlist for GFM task-list checkboxes. Every
@@ -1940,6 +1968,68 @@ if (RUNNING_TURN) {
 // Scroll to bottom on load
 scrollToBottom();
 
+// --- The page's controls, wired here rather than by inline handlers --------
+// The page runs under a Content-Security-Policy whose script-src admits no
+// inline script (issue #178), so no control in gm/chat.html or its partials
+// carries an onclick, onchange or onsubmit. Each kind of control names what
+// it does in a data attribute, and one listener per event reads it; the
+// session rail and the small screen's menu are re-rendered by picker.js, so
+// their listeners sit on the document and survive the re-render.
+
+/** What a ``data-action`` control does, by its name. */
+const PAGE_ACTIONS = {
+  'new-session': () => newSession(),
+  'rename-session': () => promptSave(),
+};
+const COMMAND_CONTROL_SELECTOR = '[data-command]';
+const ACTION_CONTROL_SELECTOR = '[data-action]';
+const DELETE_SESSION_CONTROL_SELECTOR = '[data-delete-session]';
+
+/**
+ * The text of the rail's ``session-<part>-<id>`` element, or ''.
+ * @param {string} part - 'name' or 'date'
+ * @param {number} id
+ */
+function railText(part, id) {
+  const element = document.getElementById(`session-${part}-${id}`);
+  return element ? element.textContent.trim() : '';
+}
+
+function wirePageControls() {
+  const chatForm = document.getElementById('chat-form');
+  if (chatForm) chatForm.addEventListener('submit', handleSubmit);
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const command = target.closest(COMMAND_CONTROL_SELECTOR);
+    if (command) {
+      sendCommand(command.dataset.command, command.dataset.commandArg);
+      return;
+    }
+    const action = target.closest(ACTION_CONTROL_SELECTOR);
+    if (action && PAGE_ACTIONS[action.dataset.action]) {
+      PAGE_ACTIONS[action.dataset.action]();
+      return;
+    }
+    const remove = target.closest(DELETE_SESSION_CONTROL_SELECTOR);
+    if (remove) {
+      const id = Number(remove.dataset.deleteSession);
+      deleteSession(id, railText('name', id), railText('date', id));
+    }
+  });
+
+  // The small screen's session menu opens the session it chooses.
+  document.addEventListener('change', (event) => {
+    const menu = event.target;
+    if (menu instanceof HTMLSelectElement && menu.id === SESSION_MENU_ID && menu.value) {
+      pageNavigation.go('?session=' + encodeURIComponent(menu.value));
+    }
+  });
+}
+
+wirePageControls();
+
 // Export for testing (Node.js environment)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -1967,6 +2057,8 @@ if (typeof module !== 'undefined' && module.exports) {
     showFinishedTurn,
     switchMode,
     paintMode,
+    linksToThisSite,
+    PAGE_ACTIONS,
     // sessionId is module-scoped now that it comes from #chat-config rather
     // than an inline <script>'s global, so read it through a getter — a
     // snapshot would miss the reassignment a /save or a first message makes.

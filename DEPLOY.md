@@ -19,6 +19,53 @@ source a live worker imports from, and a deploy that fails leaves the live
 colour's files untouched (issue #328). The shared directories are symlinks
 from each release checkout back to the main checkout.
 
+### nginx
+
+The repository is the one source of truth for the site's nginx config (issue
+#179). `nginx/tarmar.conf` is installed as `/etc/nginx/sites-available/tarmar`
+and `nginx/scanner-block.conf`, which it includes, as
+`/etc/nginx/snippets/tarmar-scanner-block.conf`; `nginx/tarmar-upstream.conf`
+is the shape of `/etc/nginx/conf.d/tarmar-upstream.conf`, which `deploy.sh`
+rewrites on every switch of colour. Production's site file had drifted from
+the repository's for months -- it kept a `/references/` location that nginx
+served itself, past the passphrase gate, with a directory listing and CORS for
+any origin -- because nothing ever installed the repository's copy.
+
+`deploy.sh` now does, from the release checkout, just before traffic is
+switched (`install_nginx_config`). A file that already matches the host's is
+left alone, so a deploy with no nginx change touches nothing. A file that
+differs is replaced after a dated backup is taken beside it
+(`tarmar.bak-YYYYMMDD-HHMMSS`); nginx then tests the whole config and, on a
+pass, is reloaded gracefully. On a failed test every file the run replaced is
+put back (the backup, or removed where there was none), nginx is reloaded on
+the restored config, and the deploy stops with an error before any traffic
+moves -- the colour already live keeps serving. Running it twice installs
+nothing the second time.
+
+Certbot's lines (`# managed by Certbot`) are kept in the repository's file
+exactly as Certbot wrote them, so a renewal finds its markers; a renewal that
+rewrites the live file will show up as drift and be put back by the next
+deploy, so a change Certbot makes belongs in `nginx/tarmar.conf` too (see
+`docs/cert-reissue-runbook.md`).
+
+The scanner block drops vulnerability probes (`/.env`, `/.git/`,
+`/wp-login.php`, ...) with no reply; its rules are a copy of the generated
+file datahorde's other site includes, kept here so a change there cannot break
+a deploy here. `tarmar_studio/tests/test_nginx_config.py` runs every URL
+pattern this app serves through the expression and refuses any it would drop.
+
+`deploy.sh rollback` switches the colour and nothing else: the nginx files a
+deploy installed stay as they are. To roll nginx back by hand: copy the newest
+`*.bak-*` beside the file over it,
+`sudo nginx -t && sudo systemctl reload nginx`. Should nginx refuse even the
+restored files, the fault is another site's config on the host, and the deploy
+says so and reloads nothing. After the first deploy that
+installs these files, check from outside: `curl -sI
+https://tarmar.origamisoftware.com/references/` answers the gate page (200) or
+a 404, never a listing; `curl -sI https://tarmar.origamisoftware.com/.env`
+gets no reply (the connection closes); and `/`, `/tarmar/battles/` and
+`/static/css/base.css` answer as before.
+
 ### Environment (`.env`)
 
 `.env` in the main checkout is the only source of production settings,
@@ -200,6 +247,11 @@ no new commit on `main`, the checkout at the commit `.deploy-canon` records,
 and origin's canon at or behind that commit (so the fast-forward would change
 nothing), the deploy exits 0 as up to date whatever the record says, so a run
 with nothing to do never shows red. `--force` reads no record, so it makes no comparison.
+
+If a page breaks in production under the Content-Security-Policy (issue
+#178), the one-line rollback is `CSP_ENFORCED=false` in `.env` and a restart
+of the live colour: the same policy is then sent as Report-Only, so the page
+works again while the missing source is added.
 
 Three things follow from both colours reading one checkout. The canon's pages
 are read per request, so the live colour serves canon pages from the moment
@@ -497,7 +549,9 @@ it and what it deliberately does not cover.
 
 ### Rollback
 
-If something goes wrong after deploy:
+If something goes wrong after deploy (this switches the colour back; it does
+not revert the nginx files a deploy installed -- see the nginx section above for
+that by hand):
 
 ```bash
 ./deploy.sh rollback

@@ -29,3 +29,18 @@ not_whole_number = "Seed must be a whole number, not “{text}”."
 # A request naming a character by anything but its number: the battle setup's
 # muster and seats, and a party's Add Members.
 numeric_character_id = "A numeric character_id is required"
+
+[gate]
+# The 429 page an address meets at the passphrase gate once it has spent its
+# wrong guesses for the window (issue #161). The page adds the wait and one of
+# the hints from config/gate-hints.txt.
+lockout_headline = "The door has stopped answering."
+lockout_message = "Too many wrong passphrases from this address."
+
+[login]
+# The 429 page an address meets at either sign-in form, the site's or the
+# admin's, once it has spent its wrong passwords for the window (issues #160,
+# #173). The count is per address: a shared network can reach it with nobody
+# guessing, which is why the message says so.
+lockout_headline = "Too many sign-in attempts."
+lockout_message = "Too many failed sign-in attempts from this address. The count is per address, not per account, so a shared network can reach it without anyone guessing."

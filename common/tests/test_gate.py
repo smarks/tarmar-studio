@@ -37,8 +37,10 @@ from common.gate import (
     load_gate_hints,
     normalize_passphrase,
 )
-from common.middleware import GateRateLimitMiddleware
+from common.middleware import GateRateLimitMiddleware, gate_counter_key
 from common.rate_limit import GUESS_WINDOW_SECONDS, current_count, too_many_attempts
+from common.refusal_words import refusal_words
+from common.test_helpers import TEST_CLIENT_ADDRESS
 
 if TYPE_CHECKING:
     # The test client's response type exists only in django-stubs.
@@ -86,7 +88,7 @@ class GateRateLimitAgreesWithGateTest(TestCase):
     itself rejects -- not more, not fewer (issue #138)."""
 
     def _attempts_for_test_client_ip(self):
-        return current_count("rate_limit:gate:127.0.0.1")
+        return current_count(gate_counter_key(TEST_CLIENT_ADDRESS))
 
     def test_correct_attempt_not_counted(self):
         response = self.client.post("/gate/", {"passphrase": "mellon2026"})
@@ -142,7 +144,6 @@ class GateHintTest(TestCase):
     GATED_PAGE = "/tarmar/"
     WRONG_PASSPHRASE = "gandalf"
     REFUSAL = "The doors remain shut."
-    LOCKOUT_HEADLINE = "The door has stopped answering."
     HINT_MARKUP = 'class="hint"'
     #: The one paragraph both gate.html and 429.html draw a hint in.
     HINT_PARAGRAPH = re.compile(r'<p class="hint">(.*?)</p>')
@@ -271,7 +272,14 @@ class GateHintTest(TestCase):
         self._guess_wrong_times(GateRateLimitMiddleware.MAX_ATTEMPTS)
         response = self._guess_wrong()
         self.assertEqual(response.status_code, 429)
-        self.assertContains(response, self.LOCKOUT_HEADLINE, status_code=429)
+        # The words are configuration ([gate] in config/common-refusals.toml),
+        # so the page is held to what was loaded, not to a sentence typed here.
+        self.assertContains(
+            response, refusal_words().gate.lockout_headline, status_code=429
+        )
+        self.assertContains(
+            response, refusal_words().gate.lockout_message, status_code=429
+        )
         self.assertIn(self._shown_hint(response), settings.GATE_HINTS)
 
     def test_reloading_the_gate_shows_no_hint(self):
@@ -288,7 +296,11 @@ class GateHintTest(TestCase):
         """The account limiters (login, password reset, email change) answer
         through the same ``too_many_attempts`` and pass no hint; their 429 must
         not carry the gate's, nor an empty hint paragraph."""
-        response = too_many_attempts("x", window_seconds=GUESS_WINDOW_SECONDS)
+        response = too_many_attempts(
+            refusal_words().login.lockout_message,
+            window_seconds=GUESS_WINDOW_SECONDS,
+            headline=refusal_words().login.lockout_headline,
+        )
         self.assertEqual(response.status_code, 429)
         self._assert_no_hint(response)
 

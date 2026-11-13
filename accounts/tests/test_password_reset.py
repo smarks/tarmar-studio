@@ -25,7 +25,7 @@ from accounts.models import User
 from accounts.views import PasswordResetView
 from common.models import RateLimitCounter
 from common.public_paths import is_public_path
-from common.test_helpers import TEST_PASSWORD
+from common.test_helpers import TEST_PASSWORD, without_per_request_tokens
 
 if TYPE_CHECKING:
     # The test client's response type exists only in django-stubs.
@@ -48,11 +48,6 @@ CONFIRM_LINK = re.compile(
 def sent_body() -> str:
     """The body of the one message sent so far."""
     return str(mail.outbox[0].body)
-
-
-def without_csrf(page: bytes) -> bytes:
-    """A page with its CSRF token blanked; the token is masked afresh per render."""
-    return re.sub(rb'name="csrf-token" content="[^"]*"', b"", page)
 
 
 class PasswordResetTestCase(TestCase):
@@ -157,7 +152,10 @@ class PasswordResetFormTest(PasswordResetTestCase):
         self.assertRedirects(response, DONE_URL)
         self.assertEqual(mail.outbox, [])
         unknown = self.client.get(response["Location"])
-        self.assertEqual(without_csrf(unknown.content), without_csrf(known.content))
+        self.assertEqual(
+            without_per_request_tokens(unknown.content),
+            without_per_request_tokens(known.content),
+        )
 
     def test_an_account_without_an_address_is_not_found_by_a_blank_one(
         self,
@@ -340,8 +338,8 @@ class PasswordResetPerTargetLimitTest(PasswordResetTestCase):
         tripped = self.request_from("198.51.100.1", ACCOUNT_EMAIL)
         self.assertRedirects(tripped, DONE_URL)
         self.assertEqual(
-            without_csrf(self.client.get(tripped["Location"]).content),
-            without_csrf(normal.content),
+            without_per_request_tokens(self.client.get(tripped["Location"]).content),
+            without_per_request_tokens(normal.content),
         )
 
     def test_other_addresses_are_unaffected(self) -> None:

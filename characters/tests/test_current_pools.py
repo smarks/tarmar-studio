@@ -311,12 +311,11 @@ class SetCurrentPoolsTest(BaseTestCase):
         self.assertEqual(result.character.current_mana, 2)
 
     def test_the_owner_is_refused_at_the_endpoint(self):
+        """A Game Master's endpoint refuses a player before the row is read
+        (#182), so the answer is the plain 403, not the rule's words."""
         self.login_as(self.owner)
         response = self.post_json(self.url, {"fatigue": 59, "body": 40})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.json()["error"], refusal_words().services.pools_game_master_only
-        )
+        self.assertEqual(response.status_code, 403)
         self.character.refresh_from_db()
         self.assertEqual(self.character.history, [])
 
@@ -560,10 +559,9 @@ class ManaOwedTest(BaseTestCase):
     def test_the_endpoint_takes_a_game_masters_owed_and_refuses_the_owner(self):
         self.login_as(self.owner)
         response = self.post_json(self.url, {"owed": 0})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.json()["error"], refusal_words().services.pools_game_master_only
-        )
+        # The plain 403 of a Game Master's endpoint, before the row is read
+        # (#182); the rule's own words are the service's, for a Game Master.
+        self.assertEqual(response.status_code, 403)
         self.login_as(self.create_dm())
         mark_gate_passed(self.client)
         response = self.post_json(self.url, {"owed": "2"})

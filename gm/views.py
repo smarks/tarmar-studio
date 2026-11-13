@@ -50,7 +50,7 @@ from common.mixins import ActivePageMixin
 from common.pagination import query_without
 from common.pickers import NO_SUCH_PICKER, asked_for, picker_body_response
 from common.services.ollama_client import HangUp, StreamDeadlinePassed
-from reference.rendering import render_reference_markdown
+from reference.rendering import render_model_markdown
 
 from . import roster
 from .attach import attach_refusal
@@ -148,7 +148,10 @@ from .turn_engine.state import (
     write_carried_recap,
 )
 from .turn_record import (
+    REFUSED_ACCOUNT_CAP,
+    REFUSED_SESSION_BUSY,
     TurnRecorder,
+    TurnRefusal,
     claim_turn,
     expire_stale_running_turns,
     released_on_failure,
@@ -1155,18 +1158,9 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     if error_response:
         return error_response
     session_id = data.get("session_id")
-    user_message = data.get("message", "")
-    if not isinstance(user_message, str):
-        return _json_error(refusal_words().views.message_not_text)
-    user_message = user_message.strip()
-    command = data.get("command")
-
-    # Bound user input before it is appended to history / sent to the model.
-    refusal = too_long("Message", user_message, MAX_GM_MESSAGE_CHARS)
-    if refusal:
-        return _json_error(refusal)
-
-    # Load or create session (scoped to the requesting user)
+    # Load or create session (scoped to the requesting user) before the
+    # message is judged (#182): a stranger to the session is answered its
+    # 404, never a note on their message.
     if session_id:
         session, err = _get_gm_session(session_id, request.user)
         if err:
@@ -1182,6 +1176,16 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     else:
         session = None
         history = []
+    user_message = data.get("message", "")
+    if not isinstance(user_message, str):
+        return _json_error(refusal_words().views.message_not_text)
+    user_message = user_message.strip()
+    command = data.get("command")
+
+    # Bound user input before it is appended to history / sent to the model.
+    refusal = too_long("Message", user_message, MAX_GM_MESSAGE_CHARS)
+    if refusal:
+        return _json_error(refusal)
 
     # How this turn is answered (issue #372). An existing session carries its
     # own mode; the turn that creates one takes the mode the page was showing,
@@ -1244,19 +1248,12 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
 
     # One turn at a time per session (issue #515). A turn now runs to the end
     # even after its page leaves, so a second message sent meanwhile -- from a
-    # reloaded page, another tab, or a Retry -- would interleave with it.
-    already_running = claim_turn(recorder)
-    if already_running is not None:
-        recorder.finish(
-            GMTurnRecord.OUTCOME_REJECTED,
-            error=refusal_words().views.turn_already_running,
-        )
-        return JsonResponse(
-            {
-                "error": refusal_words().views.turn_already_running,
-                "running_turn": already_running.pk,
-            },
-            status=409,
+    # reloaded page, another tab, or a Retry -- would interleave with it. And
+    # only so many turns at once per account and for the whole site (#174).
+    refusal = claim_turn(recorder)
+    if refusal is not None:
+        return _refused_claim(
+            recorder, refusal, refusal_words().views.turn_already_running
         )
 
     # From here the turn is claimed: a failure before the stream is returned
@@ -1332,6 +1329,50 @@ def gm_stream(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
                 stored_entries=stored_entries,
             ),
         )
+
+
+#: The status a refused claim answers with: a session's running turn is a
+#: conflict the page waits out by id (issue #515); a cap reached is too many
+#: requests, to be sent again once a turn has finished (issue #174).
+SESSION_BUSY_STATUS = 409
+CAP_REACHED_STATUS = 429
+
+
+def _refused_claim(
+    recorder: TurnRecorder, refusal: TurnRefusal, session_busy_words: str
+) -> JsonResponse:
+    """Answer a turn :func:`claim_turn` refused, and record the refusal.
+
+    The page shows the error as a notice that stays, with the message put
+    back in the box (``chat.js`` ``failTurn``), so every refusal here is a
+    state the player reads and acts on, never a passing banner.
+
+    Args:
+        recorder: The refused turn, finished here as rejected so the record
+            says why.
+        refusal: What ``claim_turn`` answered.
+        session_busy_words: The sentence for a session whose turn is still
+            running: the message's or the fight's own.
+
+    Returns:
+        409 naming the running turn for a busy session; 429 in the cap's
+        words for an account or a site with as many turns running as it may.
+    """
+    words = refusal_words().views
+    if refusal.reason == REFUSED_SESSION_BUSY:
+        assert refusal.running is not None
+        recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=session_busy_words)
+        return JsonResponse(
+            {"error": session_busy_words, "running_turn": refusal.running.pk},
+            status=SESSION_BUSY_STATUS,
+        )
+    error = (
+        words.too_many_turns_running
+        if refusal.reason == REFUSED_ACCOUNT_CAP
+        else words.site_turns_full
+    )
+    recorder.finish(GMTurnRecord.OUTCOME_REJECTED, error=error)
+    return _json_error(error, status=CAP_REACHED_STATUS)
 
 
 @dataclass
@@ -1412,6 +1453,8 @@ def _plan_turn(request: HttpRequest, turn: PlannedTurn) -> StreamingHttpResponse
             turn.mode,
             is_game_master=is_dm(session.user if session is not None else request.user),
             latest=latest,
+            # What a bare "yes" answers (issue #177).
+            proposal=turn_history.latest_assistant_reply_before(history, latest_index),
         )
 
     def ensure_session() -> GMSession:
@@ -1987,23 +2030,24 @@ def gm_save(request: HttpRequest) -> JsonResponse:
     if error_response:
         return error_response
     session_id = data.get("session_id")
+    if not session_id:
+        return _json_error(refusal_words().views.no_session_id)
+    # The session is the caller's or a 404 before the name is read (#182):
+    # the id has to come from the body, but nothing else in it is judged
+    # until the session is known to be theirs.
+    session, err = _get_gm_session(session_id, request.user)
+    if err:
+        return err
+    assert session is not None
     name = data.get("name", "")
     if not isinstance(name, str):
         return _json_error(refusal_words().views.name_not_text)
     name = name.strip()
-
-    if not session_id:
-        return _json_error(refusal_words().views.no_session_id)
     if not name:
         return _json_error(refusal_words().views.session_needs_name)
     refusal = too_long("Name", name, SESSION_NAME_MAX_STORED)
     if refusal:
         return _json_error(refusal)
-
-    session, err = _get_gm_session(session_id, request.user)
-    if err:
-        return err
-    assert session is not None
     session.name = name
     session.save(update_fields=["name", "updated_at"])
 
@@ -2410,18 +2454,10 @@ def gm_fight(request: HttpRequest) -> JsonResponse:
         model=get_gm_model(),
         options=get_gm_options(),
     )
-    already_running = claim_turn(recorder)
-    if already_running is not None:
-        recorder.finish(
-            GMTurnRecord.OUTCOME_REJECTED,
-            error=refusal_words().views.fight_while_turn_running,
-        )
-        return JsonResponse(
-            {
-                "error": refusal_words().views.fight_while_turn_running,
-                "running_turn": already_running.pk,
-            },
-            status=409,
+    refusal = claim_turn(recorder)
+    if refusal is not None:
+        return _refused_claim(
+            recorder, refusal, refusal_words().views.fight_while_turn_running
         )
     # A failure the handlers below do not answer releases the claim as it is
     # raised on to ``internal_errors_logged``; the record, which ``gm:turn``
@@ -2579,7 +2615,8 @@ def gm_review_detail(request: HttpRequest, review_id: int) -> HttpResponse:
         "gm/review.html",
         {
             "review": review,
-            "findings_html": render_reference_markdown(review.findings)
+            # Model-written, so no image and no link off this site (#177).
+            "findings_html": render_model_markdown(review.findings)
             if review.findings
             else "",
             "other_reviews": other_reviews,

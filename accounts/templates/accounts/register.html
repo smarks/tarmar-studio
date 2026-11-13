@@ -61,5 +61,5 @@
 
 {% block extra_js %}
 <script src="{% static 'accounts/js/preferred_contact.js' %}"></script>
-<script>initPreferredContact();</script>
+<script nonce="{{ csp_nonce }}">initPreferredContact();</script>
 {% endblock %}

@@ -420,8 +420,10 @@ class BattleRenameTest(BaseTestCase):
         self.assertIn("already", response.json()["error"].lower())
 
     def test_unknown_combatant_is_rejected(self):
+        """A 404, as ``combatant_control`` answers one: the figure is looked
+        up before anyone's right to it is judged (#180, #182)."""
         response = self.rename({"combatant_id": 424242, "name": "Nobody Home"})
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 404)
 
     def test_non_numeric_combatant_id_is_rejected(self):
         response = self.rename({"combatant_id": "abc", "name": "Nobody Home"})

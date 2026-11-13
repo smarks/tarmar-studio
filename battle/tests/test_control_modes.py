@@ -50,6 +50,12 @@ from battle.wording import words
 from common.guest import GUEST_KEY_SESSION_FIELD
 from common.test_helpers import BaseTestCase, says
 
+
+def dm_actor(test) -> Actor:
+    """The battle's maker, ``test.dm``, as the actor the control service needs (#180)."""
+    return Actor.for_user_or_guest(test.dm, "")
+
+
 # A seed whose first turn does not end the fight, so a battle has room to
 # be paused, resumed, and re-advanced inside one test.
 STEADY_SEED = 11
@@ -109,7 +115,7 @@ class PrecedenceTest(BaseTestCase):
         ignore it tomorrow."""
         set_combatant_control_mode(self.battle.pk, self.combatant.pk, control.MANUAL)
         battle, _event = set_battle_control_mode(
-            self.battle.pk, control.AUTOMATIC, apply_to_all=True
+            self.battle.pk, control.AUTOMATIC, actor=dm_actor(self), apply_to_all=True
         )
         self.assertEqual(battle.control_mode, control.AUTOMATIC)
         self.assertEqual(
@@ -119,7 +125,9 @@ class PrecedenceTest(BaseTestCase):
 
     def test_setting_the_default_alone_leaves_overrides_standing(self):
         set_combatant_control_mode(self.battle.pk, self.combatant.pk, control.AUTOMATIC)
-        battle, _event = set_battle_control_mode(self.battle.pk, control.MANUAL)
+        battle, _event = set_battle_control_mode(
+            self.battle.pk, control.MANUAL, actor=dm_actor(self)
+        )
         self.assertEqual(battle.control_mode, control.MANUAL)
         kept = battle.combatants.get(pk=self.combatant.pk)
         self.assertEqual(kept.control_mode, control.AUTOMATIC)
@@ -333,7 +341,9 @@ class SwitchingMidBattleTest(BaseTestCase):
     def test_a_recorded_choice_is_dropped_when_its_combatant_goes_automatic(self):
         """The stale-input case: the choice was the person's, and the
         person is no longer the one deciding."""
-        set_battle_control_mode(self.battle.pk, control.MANUAL, apply_to_all=True)
+        set_battle_control_mode(
+            self.battle.pk, control.MANUAL, actor=dm_actor(self), apply_to_all=True
+        )
         battle, _events = advance_turn(self.battle.pk)
         top = battle.pending_input_json["candidates"][0]
         awaited = battle.pending_input_json["combatant_id"]
@@ -349,7 +359,7 @@ class SwitchingMidBattleTest(BaseTestCase):
         battle = Battle.objects.get(pk=battle.pk)
         self.assertIn(str(awaited), battle.turn_inputs_json)
         battle, _event = set_battle_control_mode(
-            battle.pk, control.AUTOMATIC, apply_to_all=True
+            battle.pk, control.AUTOMATIC, actor=dm_actor(self), apply_to_all=True
         )
         self.assertEqual(battle.turn_inputs_json, {})
 
@@ -374,7 +384,9 @@ class ControlChangesAreLoggedTest(BaseTestCase):
         self.combatant = self.battle.combatants.first()
 
     def test_a_battle_level_change_is_filed(self):
-        _battle, event = set_battle_control_mode(self.battle.pk, control.MANUAL)
+        _battle, event = set_battle_control_mode(
+            self.battle.pk, control.MANUAL, actor=dm_actor(self)
+        )
         assert event is not None
         self.assertEqual(event.event_type, "status")
         said = words().control
@@ -387,7 +399,7 @@ class ControlChangesAreLoggedTest(BaseTestCase):
 
     def test_setting_them_all_says_so(self):
         _battle, event = set_battle_control_mode(
-            self.battle.pk, control.MANUAL, apply_to_all=True
+            self.battle.pk, control.MANUAL, actor=dm_actor(self), apply_to_all=True
         )
         assert event is not None
         self.assertIn("every combatant now follows the battle", event.message)
@@ -416,7 +428,9 @@ class ControlChangesAreLoggedTest(BaseTestCase):
     def test_the_line_takes_the_next_sequence_and_the_turn_after_it_agrees(self):
         """The numbering trap: a control line minted outside the engine's
         counter would collide with the next turn's events."""
-        _battle, event = set_battle_control_mode(self.battle.pk, control.AUTOMATIC)
+        _battle, event = set_battle_control_mode(
+            self.battle.pk, control.AUTOMATIC, actor=dm_actor(self)
+        )
         assert event is not None
         battle, events = advance_turn(self.battle.pk)
         self.assertTrue(events)
@@ -427,7 +441,9 @@ class ControlChangesAreLoggedTest(BaseTestCase):
     def test_a_lobby_has_no_log_to_write_to_yet(self):
         lobby = create_battle(self.dm, name="Lobby", count=2, seed=5, player_seats=1)
         self.assertEqual(lobby.status, Battle.STATUS_LOBBY)
-        battle, event = set_battle_control_mode(lobby.pk, control.MANUAL)
+        battle, event = set_battle_control_mode(
+            lobby.pk, control.MANUAL, actor=dm_actor(self)
+        )
         self.assertIsNone(event)
         self.assertEqual(battle.control_mode, control.MANUAL)
         self.assertEqual(BattleEvent.objects.filter(battle=battle).count(), 0)
@@ -530,9 +546,16 @@ class GuestSeatsAreControlledToneTest(BaseTestCase):
         stranger = Actor(user=None, guest_key="somebody-else")
         self.assertTrue(decides_for(holder, self.battle, seat))
         self.assertFalse(decides_for(stranger, self.battle, seat))
-        # A DM may not choose *for* a seated player; only hand it to the AI.
-        self.assertFalse(
+        # A Game Master overrides (#180, Spencer's decision of 2026-11-10);
+        # the battle's maker, when not a Game Master, does not.
+        self.assertTrue(
             decides_for(Actor(user=self.dm, guest_key=""), self.battle, seat)
+        )
+        maker = self.create_player(username="maker180")
+        self.battle.created_by = maker
+        self.battle.save(update_fields=["created_by"])
+        self.assertFalse(
+            decides_for(Actor(user=maker, guest_key=""), self.battle, seat)
         )
 
 
@@ -662,12 +685,35 @@ class AiStandsInForAnAbsentPlayerTest(BaseTestCase):
         set_seat_ready(self.battle.pk, self.seat.pk, self.player, ready=True)
         start_battle(self.battle.pk)
 
-    def test_the_battles_owner_may_hand_the_choice_to_the_ai(self):
+    def test_the_battles_maker_may_not_hand_a_held_seat_s_choice_to_the_ai(self):
+        """Spencer's decision on #180: a held seat belongs to its holder, so
+        the player who made the battle may not act for it. (Before #180 the
+        maker could; a guest-run battle has a Game Master to unstick it only
+        if one is at the table, which is the rule's cost.)"""
         battle, _events = advance_turn(self.battle.pk)
         self.assertEqual(battle.status, Battle.STATUS_AWAITING)
+        with self.assertRaisesMessage(
+            ValueError, refusal_words().services.hand_choice_to_ai_denied
+        ):
+            record_player_action(
+                battle.pk,
+                self.owner,
+                combatant_id=battle.pending_input_json["combatant_id"],
+                turn=battle.pending_input_json["turn"],
+                letter="",
+                as_ai=True,
+            )
+        battle.refresh_from_db()
+        self.assertEqual(battle.status, Battle.STATUS_AWAITING)
+
+    def test_a_game_master_may_hand_a_held_seat_s_choice_to_the_ai(self):
+        """The standing rule's other half: a Game Master account overrides,
+        whether or not it made the battle."""
+        battle, _events = advance_turn(self.battle.pk)
+        game_master = self.create_dm(username="overriding308")
         battle, _events = record_player_action(
             battle.pk,
-            self.owner,
+            game_master,
             combatant_id=battle.pending_input_json["combatant_id"],
             turn=battle.pending_input_json["turn"],
             letter="",

@@ -29,8 +29,12 @@ one arena per page is the rule and the ids need no prefix.
     <div class="battle-side">
         <div class="battle-panel">
             <h2>Roster</h2>
+            {% comment %}The rename URL is here for anyone who acts for some
+               figure (issue #180): a seated player renames their own whether or
+               not they run the battle, and battle.js offers the click only on
+               the figures whose seat facts say can_rename.{% endcomment %}
             <div id="battle-roster" class="battle-roster"
-                 {% if can_control %}data-rename-url="{% url 'battle:rename' battle.pk %}"{% endif %}></div>
+                 {% if can_rename_any %}data-rename-url="{% url 'battle:rename' battle.pk %}"{% endif %}></div>
         </div>
 
         <div class="battle-panel battle-log-panel">

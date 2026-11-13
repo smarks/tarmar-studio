@@ -71,6 +71,11 @@ player_stated_fatigue = "a player's Fatigue roll is rolled, not stated; only a G
 game_master_records = "only the Game Master marks a death, awards XP, or gives or takes coin; a player's coin moves when they buy something"
 # What an aide is told when a plan rolls dice nobody asked for (issue #598).
 aide_unasked_roll = "the Game Master did not ask for a roll, and dice do not decide what happened at his table; that is his to say"
+# When a Game Master's plan acts on another player's character that his
+# message never named (issue #177): a player's record is read by the model,
+# and only the Game Master's own words may spend his authority on it. {name}
+# is the character's name.
+unaddressed_player_character = "the message did not name {name} (or the party) and say what to do, and only the words typed at this table decide what is done to a player's character"
 
 [views]
 # What the player reads when a turn or a fight fails on an exception nobody
@@ -78,6 +83,12 @@ aide_unasked_roll = "the Game Master did not ask for a roll, and dice do not dec
 server_error = "The Game Master ran into an error on the server and could not finish. It has been logged; send your message again in a moment."
 # A second message to a session whose turn is still running (issue #515).
 turn_already_running = "The Game Master is still answering your last message in this session. Its reply will appear here when it is ready; send this one after that."
+# A message or a fight sent while the account already has as many turns
+# running as it may at once, across all its sessions (issue #174).
+too_many_turns_running = "The Game Master is already answering as many of your messages as one account may have running at once. Wait for a reply to appear, then send this one."
+# A message or a fight sent while the site already has as many turns running
+# as it serves at once (issue #174).
+site_turns_full = "The Game Master is busy with as many tables as the site can serve at once. Wait a moment, then send this one again."
 # /fight while a message is still being answered (issue #836).
 fight_while_turn_running = "The Game Master is still answering your last message in this session. Start the fight once the reply has appeared."
 # /fight when the model cannot be asked who the party faces.

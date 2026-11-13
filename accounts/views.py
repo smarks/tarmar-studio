@@ -54,6 +54,7 @@ from accounts.forms import (
     RegistrationForm,
     VerifiedAddressPasswordResetForm,
 )
+from accounts.login_limit import limit_failed_logins
 from accounts.mail_allowance import (
     ADDRESS_WINDOW_SECONDS,
     MAX_SENDS_PER_ADDRESS,
@@ -77,7 +78,6 @@ from common.rate_limit import (
     GUESS_WINDOW_SECONDS,
     charge,
     current_count,
-    release,
     too_many_attempts,
 )
 from gm.models import GMSession
@@ -212,25 +212,12 @@ class LoginView(AccountTextLimitsMixin, auth_views.LoginView):
     site it was successfully using. Issue #160.
 
     A brute-force limiter exists to bound *guessing*, and a login that
-    succeeded was not a guess, so only failures are charged here — the same
-    rule ``common.middleware.GateRateLimitMiddleware`` already applies to the
-    passphrase gate, and the same window and allowance it uses. A success does
-    not clear the counter: once an address has spent ten wrong passwords it
-    waits out the window, correct credentials included.
-
-    The charge is taken *before* the password is checked and refunded when the
-    login turns out to be genuine. Charging afterwards would mean every worker
-    read the same count, spent the length of a password hash checking a guess,
-    and only then wrote back — so N concurrent workers each get the full
-    allowance. Spending first closes that window.
-
-    The counter lives in ``common.rate_limit`` (a fixed-window count on
-    ``RateLimitCounter``) rather than ``cache.incr``/``cache.decr``:
-    ``DatabaseCache`` inherits ``BaseCache.incr()``, which is get-then-set in
-    Python and not atomic under concurrent workers, and its window used to be
-    rolling -- each wrong password re-touched the entry's expiry, pushing the
-    lockout's end further out instead of ever letting it close (issue #161,
-    the same fix ``common.middleware.GateRateLimitMiddleware`` needed).
+    succeeded was not a guess, so only failures are charged — the same rule
+    ``common.middleware.GateRateLimitMiddleware`` already applies to the
+    passphrase gate, and the same window and allowance it uses. The limiter
+    itself is :func:`accounts.login_limit.limit_failed_logins`, shared since
+    issue #173 with Django's admin sign-in (``accounts.admin_site``), so the
+    two doors spend one budget; that module says how the charge is taken.
 
     The library offers no hook for this, so the fix is the ordinary Django one:
     override ``post`` and skip exactly the library's decorated version of it.
@@ -263,35 +250,23 @@ class LoginView(AccountTextLimitsMixin, auth_views.LoginView):
         """
         return self.get_redirect_url() or signed_in_landing_url(self.request)
 
-    FAILED_LOGIN_MAX_ATTEMPTS = GUESS_MAX_ATTEMPTS
-    FAILED_LOGIN_WINDOW_SECONDS = GUESS_WINDOW_SECONDS
+    def post(
+        self, request: HttpRequest, *args: object, **kwargs: object
+    ) -> HttpResponse:
+        """Sign in, charging the address only for a wrong password.
 
-    def post(self, request, *args, **kwargs):
-        cache_key = f"rate_limit:login_failures:ip_{client_ip(request)}"
-        if current_count(cache_key) >= self.FAILED_LOGIN_MAX_ATTEMPTS:
-            return too_many_attempts(
-                "Too many failed sign-in attempts from this address. The "
-                "count is per address, not per account, so a shared network "
-                "can reach it without anyone guessing.",
-                window_seconds=self.FAILED_LOGIN_WINDOW_SECONDS,
-                request=request,
-                headline="Too many sign-in attempts.",
-            )
+        Args:
+            request: The sign-in POST.
+            *args: Passed through to Django's view.
+            **kwargs: Passed through to Django's view.
 
-        charge(cache_key, self.FAILED_LOGIN_WINDOW_SECONDS)
-
-        response = super(auth_views.LoginView, self).post(request, *args, **kwargs)
-
-        if request.user.is_authenticated:
-            # A genuine login is not a guess -- refund the charge. release()
-            # never touches expires_at, so this cannot extend the window; it
-            # only ever removes the row once nothing is left charged in it,
-            # so a clean login leaves no trace of a window at all.
-            release(cache_key)
-        # else: nothing further to do. charge() fixed this window's expiry
-        # on the first wrong guess and leaves it alone on every one since --
-        # a wrong password no longer pushes the lockout's end further out.
-        return response
+        Returns:
+            Django's response, or the limiter's 429.
+        """
+        return limit_failed_logins(
+            request,
+            lambda: super(auth_views.LoginView, self).post(request, *args, **kwargs),
+        )
 
 
 class LogoutView(auth_views.LogoutView):
@@ -956,6 +931,11 @@ def profile_update_field(
         The library's response, or a 400 naming the reason the write was
         refused.
     """
+    # Another account's profile is a manager's to edit, and that is decided
+    # before the body is read (#182): the library answers the same 403 later,
+    # for a well-formed body, so nothing about who may do what changes here.
+    if user_id is not None and not request.user.can_manage_users:
+        return _permission_denied()
     data, parse_error = _parse_json_body(request)
     if parse_error:
         return parse_error
