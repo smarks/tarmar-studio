@@ -89,6 +89,7 @@ DEBT_AUTOMATIC_BAND = r"always fails, whatever the margin, as an? (\w+)"
 DEBT_BAND = (
     r"by (\d+)(?: (?:or|to) (\d+)| or more), an? (\w+),"
     r" costing (?:nothing|(\d+) (\w+) for each point owed)"
+    r"( but starting a Runaway)?"
 )
 REFUNDS_PAY_DEBT_FIRST = "pays the Debt before it refills the pool"
 
@@ -159,8 +160,8 @@ def states(phrase: str, page: Page, *, expected: bool) -> bool:
 
 def debt_bands_of_page(page: Page) -> list[tuple[object, ...]]:
     """The Debt Roll's failure bands as a ``borrowing.md`` page states them:
-    each band's margins, label, and cost per point owed and its pool (both
-    ``None`` for a band costing nothing).
+    each band's margins, label, cost per point owed and its pool (both
+    ``None`` for a band costing nothing), and whether it starts a Runaway.
     """
     search(DEBT_BAND, page)
     return [
@@ -170,8 +171,9 @@ def debt_bands_of_page(page: Page) -> list[tuple[object, ...]]:
             label,
             int(cost) if cost else None,
             pool or None,
+            bool(runaway),
         )
-        for low, high, label, cost, pool in re.findall(DEBT_BAND, page.prose)
+        for low, high, label, cost, pool, runaway in re.findall(DEBT_BAND, page.prose)
     ]
 
 
@@ -213,6 +215,7 @@ def borrowing_claims_of_rules(rules: BorrowingRules) -> dict[str, object]:
                 band.label,
                 band.cost_per_debt or None,
                 band.cost_pool.capitalize() if band.cost_pool else None,
+                band.is_runaway,
             )
             for band in rules.failure_bands
         ],
@@ -440,11 +443,13 @@ class MagicPageDriftIsCaughtTest(SimpleTestCase):
                 ("against Wisdom", "against Intelligence"),
                 ("less 2 for each", "less 3 for each"),
                 ("a 12 always fails", "a 11 always fails"),
-                ("as a Backlash", "as a Flicker"),
+                ("as an Unravel", "as a Flicker"),
                 ("by 3 to 5", "by 3 to 6"),
                 ("a Fray, costing 2", "a Fray, costing 3"),
                 ("costing 1 Body", "costing 1 Fatigue"),
-                ("by 6 or more, a Backlash", "by 6 or more, a Setback"),
+                ("by 6 to 8, a Backlash", "by 6 to 9, a Backlash"),
+                ("by 9 or more, an Unravel", "by 9 or more, a Setback"),
+                (" but starting a Runaway", ""),
             ),
         )
 

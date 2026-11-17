@@ -23,16 +23,21 @@
  * borrowing copy is offered and that the debt roll is logged; why, and the
  * numbers, are the canon's.
  *
- * A failed Debt Roll (tarmar-studio #190), in the third test: before the
- * turn the wizard's pool is emptied, it is set owing Debt already, and its
- * WIS is lowered, all worked out in the Django shell from the loaded canon's
- * Borrowing block so every natural total of the Debt Roll misses by enough to
- * land in the canon's last, open-ended band. Under either canon the log then
- * names that band, and when the band takes a pool its cost is in the failure
- * line and in a cost line of its own; a band that is a Runaway starts one.
- * The spec names no band, pool or number: each is read from the canon.
+ * A failed Debt Roll (tarmar-studio #190), in the third and fourth tests,
+ * one for the canon's first band that takes a pool and one for its last,
+ * open-ended band. Before the turn the Django shell empties the wizard's
+ * pool and dry-runs the turn exactly as the server will, with the wizard's
+ * borrowing Fire Missile recorded, to read the Debt Roll's natural total off
+ * the fixed seed. It then sets the wizard's WIS (and, where WIS would fall
+ * below 1, Debt it already owes) so that total misses by the band's lowest
+ * margin, and dry-runs again to check the band. WIS feeds nothing rolled
+ * before the Debt Roll, so the real turn rolls the same total; the log
+ * assertions check that. Under either canon the log then names the band, its
+ * cost is in the failure line and in a cost line of its own when it takes a
+ * pool, and a band that is a Runaway starts one. The spec names no band,
+ * pool or number: each is read from the canon.
  *
- * Runaway (tarmar-engine #30), in the fourth test. Under the default canon
+ * Runaway (tarmar-engine #30), in the fifth test. Under the default canon
  * the turns' seed is pinned so the wizard's Fire Missile, pushed by two, is
  * a Runaway on its Control Roll's automatic total: the roster card shows it
  * running, the next turn's Renew Spells phase drains the wizard's mana, and
@@ -42,7 +47,7 @@
  * shows it, the wizard's own anchor is the AI's pick, and the drain and the
  * anchor roll are logged; the numbers are the canon's.
  *
- * Counterspell (tarmar-engine #31), in the fifth test: two seated wizards,
+ * Counterspell (tarmar-engine #31), in the sixth test: two seated wizards,
  * the test user's and the Game Master's, face each other. The test user's
  * counters the Game Master's with a commitment the counter control offers,
  * and the Game Master's casts Fire Missile at it. Under the default canon the
@@ -56,8 +61,8 @@
  * counter, the commitments rise one mana at a time, and the opposed roll
  * and its result are logged; the numbers are the canon's.
  *
- * A casting roll's failing totals (tarmar-engine #46), in the sixth and
- * seventh tests. The spec reads the loaded canon's casting_failure block
+ * A casting roll's failing totals (tarmar-engine #46), in the seventh and
+ * eighth tests. The spec reads the loaded canon's casting_failure block
  * through the Django shell and names no total of its own, so it asserts the
  * same under either canon: the wizard's plain Fire Missile fails when its
  * total is over the attribute or at or above the floor, and the wizard's
@@ -73,7 +78,7 @@
  * its dice (X-E2E-Dice-Seed, e2e/dice.js). The seeds were chosen, by
  * running the turn on the started battle for each seed, so the casting roll
  * succeeds under the default canon's fumble floor and the Control Roll (or
- * the debt roll) is made, and in the sixth and seventh tests so it fails; the
+ * the debt roll) is made, and in the seventh and eighth tests so it fails; the
  * log assertions are what prove the pin took.
  */
 
@@ -145,46 +150,85 @@ battle.save(update_fields=["state_json"])
 `);
 }
 
+/** Which of the loaded canon's Debt Roll bands each failed-debt test lands in. */
+const DEBT_BAND_CASES = [
+    { title: 'first band that takes a pool', band: 'first_costed' },
+    { title: 'last, open-ended band', band: 'last' },
+];
+
 /**
- * Before the turn, empty the battle's wizard's pool and sink its Debt Roll
- * into the loaded canon's last failure band, whatever the dice: the wizard
- * already owes enough Debt (within the canon's cap, counting the 1 mana Fire
- * Missile will borrow) and its WIS is lowered until the lowest total the Debt
- * dice can roll misses by the band's lowest margin. A target lowered further
- * by an injury or off-balance penalty only misses by more.
+ * Before the turn, empty the battle's wizard's pool and set its Debt Roll to
+ * miss by the chosen band's lowest margin. The turn is dry-run in the shell
+ * as the server runs it (the same roller, the same decider, the wizard's
+ * borrowing Fire Missile recorded as the stage's first borrowing copy), so
+ * the fixed seed's Debt Roll total is read rather than chosen; the wizard's
+ * WIS, and Debt already owed where WIS would otherwise fall below 1, are then
+ * set from it, and a second dry run checks the roll lands in the band.
  *
  * @param {number} battleId
+ * @param {'first_costed'|'last'} which - the band to land in
  * @returns {{label: string, cost_pool: string|null, cost: number,
- *   runaway: boolean, runaway_rules: boolean, owed: number}} the band, what
- *   it takes, whether it is a Runaway and the canon runs one, and the Debt
- *   owed at the roll
+ *   runaway: boolean, runaway_rules: boolean, owed: number, natural: number}}
+ *   the band, what it takes, whether it is a Runaway and the canon runs one,
+ *   the Debt owed at the roll, and the roll's natural total
  */
-function sinkTheWizardsDebtRoll(battleId) {
+function setTheWizardsDebtRoll(battleId, which) {
     return readDjangoJson(`
 import json
-from battle.magic_rules import magic_rules
+from battle import profiles
 from battle.models import Battle
-from battle.persistence import dump_state, load_state
-from common.rolling import dice_total_range
+from battle.magic_rules import magic_rules
+from battle.persistence import dump_state
+from battle.services import PlayerInputNeeded, _human_decider, manual_controllers
+from tarmar_engine.spells import get_spell
 rules = magic_rules()
 borrowing = rules.borrowing
-band = borrowing.failure_bands[-1]
-lowest_total, _ = dice_total_range(borrowing.debt_dice)
-borrowed = 1
-carried = 0
-def highest_wisdom(owed):
-    return lowest_total - band.lowest_margin + borrowing.penalty_per_debt * owed
-while highest_wisdom(carried + borrowed) < 1:
-    carried += 1
-    if borrowing.max_debt is not None and carried + borrowed > borrowing.max_debt:
-        raise SystemExit("the canon's debt cap leaves no way to sink the Debt Roll")
-owed = carried + borrowed
+bands = borrowing.failure_bands
+band = bands[-1] if ${JSON.stringify(which)} == "last" else next(
+    candidate for candidate in bands if candidate.cost_pool and candidate.cost_per_debt
+)
 battle = Battle.objects.get(pk=${battleId})
-state = load_state(battle.state_json, battle.rules_profile)
+profile = profiles.for_battle(battle)
+controllers = manual_controllers(battle)
+state = profile.load(battle.state_json)
 (wizard,) = [figure for figure in state.combatants if figure.spells]
 wizard.mana = 0
+def menu_of(state):
+    try:
+        profile.run_turn(state, profile.roller(), _human_decider(profile, controllers, {}))
+    except PlayerInputNeeded as needed:
+        return needed.candidates
+    raise SystemExit("the turn asked the wizard nothing")
+def dry_run(state, wizard_id, recorded):
+    trial = profile.load(dump_state(state))
+    events = profile.run_turn(
+        trial, profile.roller(),
+        _human_decider(profile, controllers, {str(wizard_id): recorded}),
+    )
+    return next(event["payload"] for event in events if "held" in event.get("payload", {}))
+wizard_id = profile.actor_id(wizard)
+borrowing_cast = next(
+    candidate for candidate in menu_of(profile.load(dump_state(state)))
+    if candidate.spell_key == "fire_missile" and candidate.borrow and not candidate.push_mana
+)
+recorded = borrowing_cast.to_payload()
+natural = dry_run(state, wizard_id, recorded)["natural"]
+if natural in borrowing.automatic_failure_totals and band is not bands[-1]:
+    raise SystemExit(f"the seed's Debt Roll is an automatic {natural}, the last band")
+borrowed = get_spell("fire_missile").level - wizard.mana
+def wisdom_for(owed):
+    return natural - band.lowest_margin + borrowing.penalty_per_debt * owed
+carried = 0
+while wisdom_for(carried + borrowed) < 1:
+    carried += 1
+    if borrowing.max_debt is not None and carried + borrowed > borrowing.max_debt:
+        raise SystemExit("the canon's debt cap leaves no WIS that lands the band")
+owed = carried + borrowed
 wizard.debt = carried
-wizard.wisdom = min(wizard.wisdom, highest_wisdom(owed))
+wizard.wisdom = wisdom_for(owed)
+checked = dry_run(state, wizard_id, recorded)
+if checked["natural"] != natural or checked["natural"] - checked["target"] < band.lowest_margin:
+    raise SystemExit(f"the dry run missed the band: {checked}")
 battle.state_json = dump_state(state)
 battle.save(update_fields=["state_json"])
 print("DEBT_BAND " + json.dumps({
@@ -194,6 +238,7 @@ print("DEBT_BAND " + json.dumps({
     "runaway": band.is_runaway,
     "runaway_rules": rules.runaway is not None,
     "owed": owed,
+    "natural": natural,
 }))
 `, 'DEBT_BAND');
 }
@@ -450,45 +495,51 @@ test.describe('Pushing mana into a cast', () => {
         await stopCoverage(playerPage, `${testInfo.title} (player context)`);
     });
 
-    test('a failed debt roll lands in the canon\'s band, and the log names it and what it cost', async ({ adminPage, browser }, testInfo) => {
-        test.setTimeout(120000);
-        await adminPage.goto('/tarmar/gm/');
-        let band = null;
-        playerPage = await openTheWizardsStage(
-            adminPage, browser, uniqueName('E2E Debt Band'),
-            { beforeTurn: (battleId) => { band = sinkTheWizardsDebtRoll(battleId); } }
-        );
-        const missileGroup = playerPage.locator('#turn-panel .turn-cast-stage .turn-spell-group', {
-            has: playerPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
-        });
-        await missileGroup.locator('.turn-borrow-amount').first().click();
-        await playerPage.click('#turn-panel .turn-confirm');
+    for (const { title, band: which } of DEBT_BAND_CASES) {
+        test(`a failed debt roll lands in the canon's ${title}, and the log names it and what it cost`, async ({ adminPage, browser }, testInfo) => {
+            test.setTimeout(120000);
+            await adminPage.goto('/tarmar/gm/');
+            let band = null;
+            playerPage = await openTheWizardsStage(
+                adminPage, browser, uniqueName('E2E Debt Band'),
+                { beforeTurn: (battleId) => { band = setTheWizardsDebtRoll(battleId, which); } }
+            );
+            const missileGroup = playerPage.locator('#turn-panel .turn-cast-stage .turn-spell-group', {
+                has: playerPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
+            });
+            await missileGroup.locator('.turn-borrow-amount').first().click();
+            await playerPage.click('#turn-panel .turn-confirm');
 
-        await expect(playerPage.locator('#battle-turn')).toHaveText('1');
-        await expect(playerPage.locator('.battle-event', {
-            hasText: `fails the debt roll for Fire Missile (${band.owed} owed)`,
-        })).toHaveCount(1);
-        // The failure names the band, and what it takes when it takes a pool.
-        const takes = band.cost ? `, costing ${band.cost} ${band.cost_pool}` : '';
-        const failure = playerPage.locator('.battle-event', {
-            hasText: `failed debt for Fire Missile: ${band.label}`,
-        });
-        await expect(failure).toHaveCount(1);
-        await expect(failure).toContainText(`: ${band.label}${takes}`);
-        // The cost comes off in a line of its own, through the engine's cost
-        // path, or not at all.
-        await expect(playerPage.locator('.battle-event', {
-            hasText: 'on the failed debt for Fire Missile',
-        })).toHaveText(band.cost ? [
-            new RegExp(`spends ${band.cost} ${band.cost_pool} on the failed debt for Fire Missile`),
-        ] : []);
-        // A Runaway band starts a Runaway when the canon runs one.
-        await expect(playerPage.locator('.battle-event', {
-            hasText: 'Fire Missile runs away and will feed on',
-        })).toHaveCount(band.runaway && band.runaway_rules ? 1 : 0);
+            await expect(playerPage.locator('#battle-turn')).toHaveText('1');
+            // The real turn rolled the total the dry run read: WIS fed nothing
+            // rolled before it.
+            await expect(playerPage.locator('.event-roll', { hasText: ' debt ' }))
+                .toContainText(`= ${band.natural} vs `);
+            await expect(playerPage.locator('.battle-event', {
+                hasText: `fails the debt roll for Fire Missile (${band.owed} owed)`,
+            })).toHaveCount(1);
+            // The failure names the band, and what it takes when it takes a pool.
+            const takes = band.cost ? `, costing ${band.cost} ${band.cost_pool}` : '';
+            const failure = playerPage.locator('.battle-event', {
+                hasText: `failed debt for Fire Missile: ${band.label}`,
+            });
+            await expect(failure).toHaveCount(1);
+            await expect(failure).toContainText(`: ${band.label}${takes}`);
+            // The cost comes off in a line of its own, through the engine's
+            // cost path, or not at all.
+            await expect(playerPage.locator('.battle-event', {
+                hasText: 'on the failed debt for Fire Missile',
+            })).toHaveText(band.cost ? [
+                new RegExp(`spends ${band.cost} ${band.cost_pool} on the failed debt for Fire Missile`),
+            ] : []);
+            // A Runaway band starts a Runaway when the canon runs one.
+            await expect(playerPage.locator('.battle-event', {
+                hasText: 'Fire Missile runs away and will feed on',
+            })).toHaveCount(band.runaway && band.runaway_rules ? 1 : 0);
 
-        await stopCoverage(playerPage, `${testInfo.title} (player context)`);
-    });
+            await stopCoverage(playerPage, `${testInfo.title} (player context)`);
+        });
+    }
 
     test('a pushed cast that runs away feeds on its caster, and the caster anchors it', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);

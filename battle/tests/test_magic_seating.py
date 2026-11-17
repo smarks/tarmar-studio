@@ -382,7 +382,8 @@ class BorrowingCastTurnTest(SimpleTestCase):
                 "cost": SLIP_BAND.cost_per_debt * outcome["debt"],
             },
         )
-        self.assertIn(f"{SLIP_BAND.label}, costing 1 fatigue", failure["message"])
+        taken = f"{SLIP_BAND.cost_per_debt * outcome['debt']} {SLIP_BAND.cost_pool}"
+        self.assertIn(f"{SLIP_BAND.label}, costing {taken}", failure["message"])
         cost = next(
             event
             for event in events
@@ -391,7 +392,7 @@ class BorrowingCastTurnTest(SimpleTestCase):
         )
         self.assertGreater(cost["sequence"], failure["sequence"])
         self.assertIn(
-            "spends 1 fatigue on the failed debt for Fire Missile", cost["message"]
+            f"spends {taken} on the failed debt for Fire Missile", cost["message"]
         )
         # The pool the cost left is the one the caster ends the turn with,
         # unless the foe's blow came after it.

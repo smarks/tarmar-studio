@@ -116,8 +116,9 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "where the rules set them, bound a casting.",
             "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
             "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). Fail by 1-2: "
-            "Flicker. Fail by 3-5: Fray (lose 2 × the Debt in Fatigue). Fail by 6+: "
-            "Backlash (lose the Debt in Body). A natural 12 always fails: Backlash. "
+            "Flicker. Fail by 3-5: Fray (lose 2 × the Debt in Fatigue). Fail by 6-8: "
+            "Backlash (lose the Debt in Body). Fail by 9+: Unravel, a Runaway. A "
+            "natural 12 always fails: Unravel, a Runaway. "
             "The Debt is all the caster owes at the roll. A failed Debt Roll cannot "
             "undo the spell, which has resolved. Mana handed back pays the Debt "
             "before it refills the pool.",

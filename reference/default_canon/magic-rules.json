@@ -67,9 +67,18 @@
         "label": "Backlash",
         "is_runaway": false,
         "lowest_margin": 6,
-        "highest_margin": null,
+        "highest_margin": 8,
         "cost_pool": "body",
         "cost_per_debt": 1
+      },
+      {
+        "key": "unravel",
+        "label": "Unravel",
+        "is_runaway": true,
+        "lowest_margin": 9,
+        "highest_margin": null,
+        "cost_pool": null,
+        "cost_per_debt": 0
       }
     ],
     "automatic_failure_totals": [12],

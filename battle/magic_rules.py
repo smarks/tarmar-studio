@@ -105,7 +105,7 @@ import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from tarmar_engine.magic import (
     BorrowingRules,
@@ -252,6 +252,18 @@ class SchoolTable(PercentileTable[SchoolRow]):
         return next((row for row in self.rows if school in row.schools), None)
 
 
+class MarginBandFields(TypedDict):
+    """The fields every failure band carries (the engine's ``MarginBand``),
+    as :meth:`_MagicRulesFileReader.margin_band_fields` reads them, typed
+    for the band constructor they are unpacked into."""
+
+    key: str
+    label: str
+    is_runaway: bool
+    lowest_margin: int
+    highest_margin: int | None
+
+
 class MagicRulesError(RulesFileError):
     """The canon's ``magic-rules.json`` is missing or malformed.
 
@@ -319,7 +331,7 @@ class _MagicRulesFileReader(RulesFileReader):
 
     def margin_band_fields(
         self, fields: dict[str, Any], field_path: str
-    ) -> dict[str, Any]:
+    ) -> MarginBandFields:
         """The fields every failure band shares (the engine's ``MarginBand``),
         read from one band's object, keyed as the band's constructor takes
         them.
@@ -328,19 +340,17 @@ class _MagicRulesFileReader(RulesFileReader):
             fields: The band's object, already checked for its keys.
             field_path: Where the band is in the file.
         """
-        return {
-            "key": self.text(fields["key"], f"{field_path}.key"),
-            "label": self.text(fields["label"], f"{field_path}.label"),
-            "is_runaway": self.boolean(
-                fields["is_runaway"], f"{field_path}.is_runaway"
-            ),
-            "lowest_margin": self.integer(
+        return MarginBandFields(
+            key=self.text(fields["key"], f"{field_path}.key"),
+            label=self.text(fields["label"], f"{field_path}.label"),
+            is_runaway=self.boolean(fields["is_runaway"], f"{field_path}.is_runaway"),
+            lowest_margin=self.integer(
                 fields["lowest_margin"], f"{field_path}.lowest_margin"
             ),
-            "highest_margin": self.optional_integer(
+            highest_margin=self.optional_integer(
                 fields["highest_margin"], f"{field_path}.highest_margin"
             ),
-        }
+        )
 
     def failure_bands[BandType: MarginBand](
         self,
