@@ -161,9 +161,13 @@ const DEBT_BAND_CASES = [
  * miss by the chosen band's lowest margin. The turn is dry-run in the shell
  * as the server runs it (the same roller, the same decider, the wizard's
  * borrowing Fire Missile recorded as the stage's first borrowing copy), so
- * the fixed seed's Debt Roll total is read rather than chosen; the wizard's
- * WIS, and Debt already owed where WIS would otherwise fall below 1, are then
- * set from it, and a second dry run checks the roll lands in the band.
+ * the fixed seed's Debt Roll total and target are read rather than chosen.
+ * The wizard's WIS, and Debt already owed where WIS would otherwise fall
+ * below 1, are then set so the target sits the band's lowest margin under
+ * that total. Working from the dry run's actual target keeps every other
+ * term in it (the per-Debt penalty and the action roll's injury and
+ * off-balance penalties) as the engine computed them. A second dry run
+ * checks the roll fails into the band itself.
  *
  * @param {number} battleId
  * @param {'first_costed'|'last'} which - the band to land in
@@ -205,19 +209,31 @@ def dry_run(state, wizard_id, recorded):
         trial, profile.roller(),
         _human_decider(profile, controllers, {str(wizard_id): recorded}),
     )
-    return next(event["payload"] for event in events if "held" in event.get("payload", {}))
+    payloads = [event.get("payload", {}) for event in events]
+    debt_roll = next(payload for payload in payloads if "debt_roll" in payload)
+    failure = next((payload for payload in payloads if "debt_failure" in payload), None)
+    return debt_roll, failure
 wizard_id = profile.actor_id(wizard)
 borrowing_cast = next(
     candidate for candidate in menu_of(profile.load(dump_state(state)))
     if candidate.spell_key == "fire_missile" and candidate.borrow and not candidate.push_mana
 )
 recorded = borrowing_cast.to_payload()
-natural = dry_run(state, wizard_id, recorded)["natural"]
+first_roll, _ = dry_run(state, wizard_id, recorded)
+natural = first_roll["natural"]
 if natural in borrowing.automatic_failure_totals and band is not bands[-1]:
     raise SystemExit(f"the seed's Debt Roll is an automatic {natural}, the last band")
 borrowed = get_spell("fire_missile").level - wizard.mana
+# The target moves one for one with WIS and down by the per-Debt penalty for
+# each point owed; everything else in it is the first dry run's as rolled.
+wanted_target = natural - band.lowest_margin
+first_wisdom = wizard.wisdom
+first_owed = first_roll["debt"]
 def wisdom_for(owed):
-    return natural - band.lowest_margin + borrowing.penalty_per_debt * owed
+    return (
+        first_wisdom + wanted_target - first_roll["target"]
+        + borrowing.penalty_per_debt * (owed - first_owed)
+    )
 carried = 0
 while wisdom_for(carried + borrowed) < 1:
     carried += 1
@@ -226,9 +242,13 @@ while wisdom_for(carried + borrowed) < 1:
 owed = carried + borrowed
 wizard.debt = carried
 wizard.wisdom = wisdom_for(owed)
-checked = dry_run(state, wizard_id, recorded)
-if checked["natural"] != natural or checked["natural"] - checked["target"] < band.lowest_margin:
-    raise SystemExit(f"the dry run missed the band: {checked}")
+checked_roll, checked_failure = dry_run(state, wizard_id, recorded)
+if (
+    checked_roll["natural"] != natural
+    or checked_failure is None
+    or checked_failure["debt_failure"] != band.key
+):
+    raise SystemExit(f"the dry run missed the band: {checked_roll} {checked_failure}")
 battle.state_json = dump_state(state)
 battle.save(update_fields=["state_json"])
 print("DEBT_BAND " + json.dumps({
