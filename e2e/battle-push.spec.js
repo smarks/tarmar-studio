@@ -226,22 +226,24 @@ if natural in borrowing.automatic_failure_totals and band is not bands[-1]:
 borrowed = get_spell("fire_missile").level - wizard.mana
 # The target moves one for one with WIS and down by the per-Debt penalty for
 # each point owed; everything else in it is the first dry run's as rolled.
+# Debt carried in is the only owed term setup changes: the borrowing and any
+# refund the seed's casting roll pays are the first dry run's, already in its
+# target, so the Debt owed at the roll moves by exactly the carried change.
 wanted_target = natural - band.lowest_margin
 first_wisdom = wizard.wisdom
-first_owed = first_roll["debt"]
-def wisdom_for(owed):
+original_debt = wizard.debt
+def wisdom_for(carried):
     return (
         first_wisdom + wanted_target - first_roll["target"]
-        + borrowing.penalty_per_debt * (owed - first_owed)
+        + borrowing.penalty_per_debt * (carried - original_debt)
     )
 carried = 0
-while wisdom_for(carried + borrowed) < 1:
+while wisdom_for(carried) < 1:
     carried += 1
     if borrowing.max_debt is not None and carried + borrowed > borrowing.max_debt:
         raise SystemExit("the canon's debt cap leaves no WIS that lands the band")
-owed = carried + borrowed
 wizard.debt = carried
-wizard.wisdom = wisdom_for(owed)
+wizard.wisdom = wisdom_for(carried)
 checked_roll, checked_failure = dry_run(state, wizard_id, recorded)
 if (
     checked_roll["natural"] != natural
@@ -249,6 +251,7 @@ if (
     or checked_failure["debt_failure"] != band.key
 ):
     raise SystemExit(f"the dry run missed the band: {checked_roll} {checked_failure}")
+owed = checked_roll["debt"]
 battle.state_json = dump_state(state)
 battle.save(update_fields=["state_json"])
 print("DEBT_BAND " + json.dumps({
