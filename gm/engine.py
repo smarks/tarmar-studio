@@ -42,7 +42,9 @@ from tarmar_engine.magic import (
     ChannelDerivation,
     ControlBand,
     CounterspellRules,
+    DebtBand,
     MagicRules,
+    MarginBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
@@ -1048,8 +1050,9 @@ def render_special_casting_results(rules: MagicRules) -> str:
 def render_borrowing(rules: MagicRules) -> str:
     """The body of ``### Borrowing``, from the canon's ``borrowing`` block (#48).
 
-    The debt cap, the Debt Roll's dice, attributes and penalty, its automatic
-    failures, what a failure is, and where mana handed back goes
+    The debt cap, the Debt Roll's dice, attributes and penalty, each failure
+    band and what it costs (tarmar-studio #190), the automatic failures and
+    the band they land in, and where mana handed back goes
     (``magic-rules.json``), as the battle board settles a borrowed cast.
 
     Args:
@@ -1070,17 +1073,17 @@ def render_borrowing(rules: MagicRules) -> str:
     elif borrowing.penalty_per_debt:
         target += f" − {borrowing.penalty_per_debt} × Debt"
     sentences.append(f"Debt Roll after the spell: {borrowing.debt_dice} ≤ ({target}).")
+    sentences.extend(_debt_band_sentence(band) for band in borrowing.failure_bands)
     if borrowing.automatic_failure_totals:
-        sentences.append(
-            "A natural "
-            f"{totals_in_words(borrowing.automatic_failure_totals, or_word=PROMPT_OR_WORD)} "
-            "always fails."
+        totals = totals_in_words(
+            borrowing.automatic_failure_totals, or_word=PROMPT_OR_WORD
         )
-    failure = borrowing.failure
-    named = with_article(failure.label)
-    if failure.is_runaway and failure.label.casefold() != _RUNAWAY.casefold():
-        named += f", {with_article(_RUNAWAY)}"
-    sentences.append(f"A failed Debt Roll is {named}; the spell has already resolved.")
+        sentences.append(
+            f"A natural {totals} always fails: "
+            f"{_band_label(borrowing.automatic_band())}."
+        )
+    sentences.append("The Debt is all the caster owes at the roll.")
+    sentences.append("A failed Debt Roll cannot undo the spell, which has resolved.")
     sentences.append(
         "Mana handed back pays the Debt before it refills the pool."
         if borrowing.refunds_pay_debt_first
@@ -1161,24 +1164,60 @@ def _control_target(push: PushRules) -> str:
     )
 
 
+def _band_margins(band: MarginBand) -> str:
+    """A failure band's margins as the prompt writes them: "1-3" or "7+".
+
+    Args:
+        band: A band of the Control Roll's or the Debt Roll's failures.
+    """
+    if band.highest_margin is None:
+        return f"{band.lowest_margin}+"
+    return _span_text(band.lowest_margin, band.highest_margin)
+
+
+def _band_label(band: MarginBand) -> str:
+    """A failure band's label, said to be a Runaway when it is one.
+
+    Args:
+        band: A band of the Control Roll's or the Debt Roll's failures.
+    """
+    return _named_runaway(band.label) if band.is_runaway else band.label
+
+
 def _control_band_sentence(band: ControlBand) -> str:
     """One failure band of the Control Roll: its margins, label and effect.
 
     Args:
         band: A band of the canon's ``push.failure_bands``.
     """
-    margins = (
-        f"{band.lowest_margin}+"
-        if band.highest_margin is None
-        else _span_text(band.lowest_margin, band.highest_margin)
-    )
     if band.spell_takes_effect:
         bonus = "with" if band.push_bonus_applies else "without"
         effect = f"spell takes effect {bonus} the push's bonus"
     else:
         effect = "spell fails"
-    label = _named_runaway(band.label) if band.is_runaway else band.label
-    return f"Fail by {margins}: {label} ({effect})."
+    return f"Fail by {_band_margins(band)}: {_band_label(band)} ({effect})."
+
+
+def _pool_name(pool: str) -> str:
+    """A combatant pool as the prompt names it: "Fatigue", "Body".
+
+    Args:
+        pool: The pool's engine name (``tarmar_engine.state.CASTER_POOLS``).
+    """
+    return pool.title()
+
+
+def _debt_band_sentence(band: DebtBand) -> str:
+    """One failure band of the Debt Roll: its margins, label and cost.
+
+    Args:
+        band: A band of the canon's ``borrowing.failure_bands``.
+    """
+    sentence = f"Fail by {_band_margins(band)}: {_band_label(band)}"
+    if band.cost_pool is not None and band.cost_per_debt:
+        lost = _times(band.cost_per_debt, "the Debt")
+        sentence += f" (lose {lost} in {_pool_name(band.cost_pool)})"
+    return f"{sentence}."
 
 
 #: The push payoff's phrases, each said in more than one of its sentences.
@@ -1402,7 +1441,7 @@ def render_runaway(rules: MagicRules) -> str:
             "; once anchored, the anchorer's next cast of that spell adds "
             f"{bonus} to its rolled effect for each turn it ran"
         )
-    pool = runaway.overflow_pool.title()
+    pool = _pool_name(runaway.overflow_pool)
     helper_cost = _mana_reckoned_from_the_cost(
         runaway.helper_cost_multiplier_of_cost, 0
     )

@@ -85,7 +85,11 @@ DEBT_ROLL = (
     r"(\d+d\d+) against (\w+), less (\d+) for each point owed;"
     r" a (\d+) always fails"
 )
-FAILURE_NAME = r"A failed Debt Roll is a (\w+),"
+DEBT_AUTOMATIC_BAND = r"always fails, whatever the margin, as an? (\w+)"
+DEBT_BAND = (
+    r"by (\d+)(?: (?:or|to) (\d+)| or more), an? (\w+),"
+    r" costing (?:nothing|(\d+) (\w+) for each point owed)"
+)
 REFUNDS_PAY_DEBT_FIRST = "pays the Debt before it refills the pool"
 
 RUNAWAY_DRAIN = r"drains (its|twice|three times) original casting cost plus (\d+)"
@@ -153,6 +157,24 @@ def states(phrase: str, page: Page, *, expected: bool) -> bool:
     return phrase in page.prose
 
 
+def debt_bands_of_page(page: Page) -> list[tuple[object, ...]]:
+    """The Debt Roll's failure bands as a ``borrowing.md`` page states them:
+    each band's margins, label, and cost per point owed and its pool (both
+    ``None`` for a band costing nothing).
+    """
+    search(DEBT_BAND, page)
+    return [
+        (
+            int(low),
+            int(high) if high else None,
+            label,
+            int(cost) if cost else None,
+            pool or None,
+        )
+        for low, high, label, cost, pool in re.findall(DEBT_BAND, page.prose)
+    ]
+
+
 def borrowing_claims_of_page(page: Page, rules: BorrowingRules) -> dict[str, object]:
     """What a ``borrowing.md`` page says about the Debt Roll.
 
@@ -165,7 +187,8 @@ def borrowing_claims_of_page(page: Page, rules: BorrowingRules) -> dict[str, obj
         "debt_attribute": debt_roll.group(2),
         "penalty_per_debt": int(debt_roll.group(3)),
         "automatic_failure_total": int(debt_roll.group(4)),
-        "failure_label": search(FAILURE_NAME, page).group(1),
+        "automatic_band": search(DEBT_AUTOMATIC_BAND, page).group(1),
+        "failure_bands": debt_bands_of_page(page),
         "refunds_pay_debt_first": states(
             REFUNDS_PAY_DEBT_FIRST, page, expected=rules.refunds_pay_debt_first
         ),
@@ -182,7 +205,17 @@ def borrowing_claims_of_rules(rules: BorrowingRules) -> dict[str, object]:
         "debt_attribute": ATTRIBUTE_NAMES[attribute],
         "penalty_per_debt": rules.penalty_per_debt,
         "automatic_failure_total": automatic_failure_total,
-        "failure_label": rules.failure.label,
+        "automatic_band": rules.automatic_band().label,
+        "failure_bands": [
+            (
+                band.lowest_margin,
+                band.highest_margin,
+                band.label,
+                band.cost_per_debt or None,
+                band.cost_pool.capitalize() if band.cost_pool else None,
+            )
+            for band in rules.failure_bands
+        ],
         "refunds_pay_debt_first": rules.refunds_pay_debt_first,
     }
 
@@ -407,7 +440,11 @@ class MagicPageDriftIsCaughtTest(SimpleTestCase):
                 ("against Wisdom", "against Intelligence"),
                 ("less 2 for each", "less 3 for each"),
                 ("a 12 always fails", "a 11 always fails"),
-                ("is a Backlash", "is a Setback"),
+                ("as a Backlash", "as a Flicker"),
+                ("by 3 to 5", "by 3 to 6"),
+                ("a Fray, costing 2", "a Fray, costing 3"),
+                ("costing 1 Body", "costing 1 Fatigue"),
+                ("by 6 or more, a Backlash", "by 6 or more, a Setback"),
             ),
         )
 

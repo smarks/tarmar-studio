@@ -1416,7 +1416,7 @@ Fail badly enough—or roll an 18—and the magic slips your grasp entirely. Thi
 
 ### Borrowing
 
-When you don't have enough mana, you can attempt to Borrow—drawing on reserves you may not have. This creates Debt, and Debt must be paid. The deeper the Debt, the more likely something goes wrong.
+When you don't have enough mana, you can attempt to Borrow—drawing on reserves you may not have. This creates Debt, and Debt must be paid. The deeper the Debt, the more likely something goes wrong. A failed Debt roll can cost you Fatigue or, on a worse miss, Body, and a bad enough miss can tip the spell into Runaway.
 
 ---
 

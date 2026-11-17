@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
-    BorrowingFailure,
     BorrowingRules,
     CastingFailureRules,
     CastingSuccessTier,
@@ -23,6 +22,7 @@ from tarmar_engine.magic import (
     ChannelRules,
     ControlBand,
     CounterspellRules,
+    DebtBand,
     MagicRules,
     PushRules,
     RollUnderRule,
@@ -126,7 +126,35 @@ INVENTED_RULES: dict[str, Any] = {
         "debt_dice": "2d8",
         "debt_attributes": ["WIS", "INT"],
         "penalty_per_debt": 2,
-        "failure": {"key": "backlash", "label": "Backlash", "is_runaway": False},
+        "failure_bands": [
+            {
+                "key": "fizzle",
+                "label": "Fizzle",
+                "is_runaway": False,
+                "lowest_margin": 1,
+                "highest_margin": 2,
+                "cost_pool": None,
+                "cost_per_debt": 0,
+            },
+            {
+                "key": "backlash",
+                "label": "Backlash",
+                "is_runaway": False,
+                "lowest_margin": 3,
+                "highest_margin": 5,
+                "cost_pool": "fatigue",
+                "cost_per_debt": 2,
+            },
+            {
+                "key": "rupture",
+                "label": "Rupture",
+                "is_runaway": True,
+                "lowest_margin": 6,
+                "highest_margin": None,
+                "cost_pool": "body",
+                "cost_per_debt": 1,
+            },
+        ],
         "automatic_failure_totals": [16],
         "max_debt": 6,
         "refunds_pay_debt_first": False,
@@ -234,7 +262,35 @@ INVENTED_MAGIC_RULES = MagicRules(
         debt_dice="2d8",
         debt_attributes=("WIS", "INT"),
         penalty_per_debt=2,
-        failure=BorrowingFailure(key="backlash", label="Backlash", is_runaway=False),
+        failure_bands=(
+            DebtBand(
+                key="fizzle",
+                label="Fizzle",
+                is_runaway=False,
+                lowest_margin=1,
+                highest_margin=2,
+                cost_pool=None,
+                cost_per_debt=0,
+            ),
+            DebtBand(
+                key="backlash",
+                label="Backlash",
+                is_runaway=False,
+                lowest_margin=3,
+                highest_margin=5,
+                cost_pool="fatigue",
+                cost_per_debt=2,
+            ),
+            DebtBand(
+                key="rupture",
+                label="Rupture",
+                is_runaway=True,
+                lowest_margin=6,
+                highest_margin=None,
+                cost_pool="body",
+                cost_per_debt=1,
+            ),
+        ),
         automatic_failure_totals=frozenset({16}),
         max_debt=6,
         refunds_pay_debt_first=False,
@@ -546,18 +602,69 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         "borrowing.penalty_per_debt",
         lambda rules: rules["borrowing"].update(penalty_per_debt=True),
     ),
-    ("borrowing.failure", lambda rules: rules["borrowing"].update(failure=None)),
     (
-        "borrowing.failure.label",
-        lambda rules: rules["borrowing"]["failure"].update(label=""),
+        "borrowing.failure_bands",
+        lambda rules: rules["borrowing"].update(failure_bands=None),
     ),
     (
-        "borrowing.failure.is_runaway",
-        lambda rules: rules["borrowing"]["failure"].update(is_runaway=1),
+        "borrowing.failure_bands",
+        lambda rules: rules["borrowing"].pop("failure_bands"),
     ),
     (
-        "borrowing.failure.spell_takes_effect",
-        lambda rules: rules["borrowing"]["failure"].update(spell_takes_effect=True),
+        "borrowing.failure",
+        lambda rules: rules["borrowing"].update(
+            failure={"key": "backlash", "label": "Backlash", "is_runaway": False}
+        ),
+    ),
+    (
+        "borrowing.failure_bands[1].label",
+        lambda rules: rules["borrowing"]["failure_bands"][1].update(label=""),
+    ),
+    (
+        "borrowing.failure_bands[0].is_runaway",
+        lambda rules: rules["borrowing"]["failure_bands"][0].update(is_runaway=1),
+    ),
+    (
+        "borrowing.failure_bands[2].highest_margin",
+        lambda rules: rules["borrowing"]["failure_bands"][2].update(highest_margin="9"),
+    ),
+    (
+        "borrowing.failure_bands[1].spell_takes_effect",
+        lambda rules: rules["borrowing"]["failure_bands"][1].update(
+            spell_takes_effect=True
+        ),
+    ),
+    (
+        "borrowing.failure_bands[1].cost_pool",
+        lambda rules: rules["borrowing"]["failure_bands"][1].update(cost_pool=""),
+    ),
+    (
+        "borrowing.failure_bands[1]: cost_pool must be one of",
+        lambda rules: rules["borrowing"]["failure_bands"][1].update(cost_pool="mana"),
+    ),
+    (
+        "borrowing.failure_bands[1].cost_per_debt",
+        lambda rules: rules["borrowing"]["failure_bands"][1].pop("cost_per_debt"),
+    ),
+    (
+        "borrowing.failure_bands[1]: a debt band's cost must not be negative",
+        lambda rules: rules["borrowing"]["failure_bands"][1].update(cost_per_debt=-1),
+    ),
+    (
+        "borrowing.failure_bands[0]: a debt band with a cost must name its pool",
+        lambda rules: rules["borrowing"]["failure_bands"][0].update(cost_per_debt=1),
+    ),
+    (
+        "borrowing.failure_bands repeats the key",
+        lambda rules: rules["borrowing"]["failure_bands"][2].update(key="backlash"),
+    ),
+    (
+        "borrowing: failure bands must be contiguous from margin 1",
+        lambda rules: rules["borrowing"]["failure_bands"][1].update(lowest_margin=4),
+    ),
+    (
+        "borrowing: the last failure band must be open-ended",
+        lambda rules: rules["borrowing"]["failure_bands"][2].update(highest_margin=9),
     ),
     (
         "borrowing.automatic_failure_totals",
@@ -1043,7 +1150,16 @@ class TarmarMagicRulesTest(SimpleTestCase):
                 "debt_dice": rules.borrowing.debt_dice,
                 "debt_attributes": list(rules.borrowing.debt_attributes),
                 "penalty_per_debt": rules.borrowing.penalty_per_debt,
-                "failure_is_runaway": rules.borrowing.failure.is_runaway,
+                "failure_bands": [
+                    [
+                        band.lowest_margin,
+                        band.highest_margin,
+                        band.is_runaway,
+                        band.cost_pool,
+                        band.cost_per_debt,
+                    ]
+                    for band in rules.borrowing.failure_bands
+                ],
                 "automatic_failure_totals": sorted(
                     rules.borrowing.automatic_failure_totals
                 ),

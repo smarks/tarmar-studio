@@ -14,7 +14,6 @@ from dataclasses import replace
 
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
-    BorrowingFailure,
     BorrowingRules,
     CastingFailureRules,
     CastingSuccessTier,
@@ -22,6 +21,7 @@ from tarmar_engine.magic import (
     ChannelRules,
     ControlBand,
     CounterspellRules,
+    DebtBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
@@ -115,9 +115,12 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "There is no Channel: only the caster's mana, and the push and debt caps "
             "where the rules set them, bound a casting.",
             "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
-            "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). A natural 12 always "
-            "fails. A failed Debt Roll is a Backlash; the spell has already "
-            "resolved. Mana handed back pays the Debt before it refills the pool.",
+            "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). Fail by 1-2: "
+            "Flicker. Fail by 3-5: Fray (lose 2 × the Debt in Fatigue). Fail by 6+: "
+            "Backlash (lose the Debt in Body). A natural 12 always fails: Backlash. "
+            "The Debt is all the caster owes at the roll. A failed Debt Roll cannot "
+            "undo the spell, which has resolved. Mana handed back pays the Debt "
+            "before it refills the pool.",
             "The spell feeds on the caster: each turn it drains mana equal to 1 more "
             "than the original casting cost and its effect grows unpredictably (GM "
             "decides; once anchored, the anchorer's next cast of that spell adds +2 "
@@ -181,7 +184,35 @@ UNLIKE_EITHER_CANONS_MAGIC_RULES = replace(
         debt_dice="2d8",
         debt_attributes=("WIS", "INT"),
         penalty_per_debt=3,
-        failure=BorrowingFailure(key="surge", label="Arcane surge", is_runaway=True),
+        failure_bands=(
+            DebtBand(
+                key="drain",
+                label="Drain",
+                is_runaway=False,
+                lowest_margin=1,
+                highest_margin=2,
+                cost_pool="fatigue",
+                cost_per_debt=3,
+            ),
+            DebtBand(
+                key="mote",
+                label="Mote",
+                is_runaway=False,
+                lowest_margin=3,
+                highest_margin=3,
+                cost_pool=None,
+                cost_per_debt=0,
+            ),
+            DebtBand(
+                key="surge",
+                label="Arcane surge",
+                is_runaway=True,
+                lowest_margin=4,
+                highest_margin=None,
+                cost_pool="body",
+                cost_per_debt=1,
+            ),
+        ),
         automatic_failure_totals=frozenset({16, 2}),
         max_debt=5,
         refunds_pay_debt_first=False,
@@ -701,10 +732,12 @@ class InventedRulesTest(SimpleTestCase):
         self.assertEqual(
             body,
             "Spend all remaining mana, borrow the rest as Debt, up to 5 owed in all. "
-            "Debt Roll after the spell: 2d8 ≤ (WIS + INT − 3 × Debt). A natural 2 "
-            "or 16 always fails. A failed Debt Roll is an Arcane surge, a Runaway; the "
-            "spell has already resolved. Mana handed back refills the pool; the "
-            "Debt stays owed.",
+            "Debt Roll after the spell: 2d8 ≤ (WIS + INT − 3 × Debt). Fail by 1-2: "
+            "Drain (lose 3 × the Debt in Fatigue). Fail by 3: Mote. Fail by 4+: "
+            "Arcane surge, a Runaway (lose the Debt in Body). A natural 2 or 16 "
+            "always fails: Arcane surge, a Runaway. The Debt is all the caster "
+            "owes at the roll. A failed Debt Roll cannot undo the spell, which has "
+            "resolved. Mana handed back refills the pool; the Debt stays owed.",
         )
 
     def test_a_runaway_named_runaway_is_named_once(self) -> None:
@@ -714,8 +747,16 @@ class InventedRulesTest(SimpleTestCase):
             rules,
             borrowing=replace(
                 rules.borrowing,
-                failure=BorrowingFailure(
-                    key="runaway", label="runaway", is_runaway=True
+                failure_bands=(
+                    DebtBand(
+                        key="runaway",
+                        label="runaway",
+                        is_runaway=True,
+                        lowest_margin=1,
+                        highest_margin=None,
+                        cost_pool=None,
+                        cost_per_debt=0,
+                    ),
                 ),
                 automatic_failure_totals=frozenset(),
                 max_debt=None,
@@ -727,9 +768,10 @@ class InventedRulesTest(SimpleTestCase):
         self.assertEqual(
             body,
             "Spend all remaining mana, borrow the rest as Debt. Debt Roll after the "
-            "spell: 2d8 ≤ (WIS + INT − Debt). A failed Debt Roll is a runaway; the "
-            "spell has already resolved. Mana handed back refills the pool; the "
-            "Debt stays owed.",
+            "spell: 2d8 ≤ (WIS + INT − Debt). Fail by 1+: runaway. The Debt is all "
+            "the caster owes at the roll. A failed Debt Roll cannot undo the spell, "
+            "which has resolved. Mana handed back refills the pool; the Debt stays "
+            "owed.",
         )
 
     def test_a_debt_roll_with_no_penalty_names_the_attributes_alone(self) -> None:

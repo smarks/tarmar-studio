@@ -21,7 +21,7 @@ from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from django.utils.html import escape
 from tarmar_engine.engine import TurnRunner
-from tarmar_engine.magic import BorrowingFailure, BorrowingRules, CastingSuccessTier
+from tarmar_engine.magic import BorrowingRules, CastingSuccessTier, DebtBand
 from tarmar_engine.policy import choose_option
 from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 from tarmar_engine.state import BattleState, ContestState, RunawayState
@@ -92,7 +92,17 @@ BORROWING = BorrowingRules(
     debt_dice="2d6",
     debt_attributes=("WIS",),
     penalty_per_debt=2,
-    failure=BorrowingFailure(key="hex", label="Hexed purse", is_runaway=True),
+    failure_bands=(
+        DebtBand(
+            key="hex",
+            label="Hexed purse",
+            is_runaway=True,
+            lowest_margin=1,
+            highest_margin=None,
+            cost_pool="fatigue",
+            cost_per_debt=2,
+        ),
+    ),
     automatic_failure_totals=frozenset({12}),
     max_debt=4,
 )
@@ -231,7 +241,8 @@ class WithheldCastNarrationTest(SimpleTestCase):
 
 
 class BorrowingCastNarrationTest(BothReadersTestCase):
-    """The debt roll and its outcome (tarmar-engine #28), on both readers."""
+    """The debt roll, its outcome, and a failure's band and cost
+    (tarmar-engine #28, #74), on both readers."""
 
     def test_the_borrowing_and_a_held_debt_roll_read(self) -> None:
         self.assert_both_read(
@@ -247,13 +258,16 @@ class BorrowingCastNarrationTest(BothReadersTestCase):
             events,
             "= 6 vs WIS 10 (need 10 or less) — failed",
             "Caster fails the debt roll for Fire Missile (1 owed)",
-            "Caster's failed debt for Fire Missile: Hexed purse",
+            "Caster's failed debt for Fire Missile: Hexed purse, costing 2 fatigue",
+            "Caster spends 2 fatigue on the failed debt for Fire Missile",
         )
-        # The failure is a status line of its own, in the log's order.
+        # The failure and its cost are status lines of their own, in the
+        # log's order.
         report = gm_report_text(events)
         self.assertLess(
             report.index("fails the debt roll"), report.index("Hexed purse")
         )
+        self.assertLess(report.index("Hexed purse"), report.index("spends 2 fatigue"))
 
 
 def runaway_runner(

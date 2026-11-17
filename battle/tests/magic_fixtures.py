@@ -12,13 +12,13 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from tarmar_engine.magic import (
-    BorrowingFailure,
     BorrowingRules,
     CastingFailureRules,
     ChannelDerivation,
     ChannelRules,
     ControlBand,
     CounterspellRules,
+    DebtBand,
     MagicRules,
     PushRules,
     RollUnderRule,
@@ -88,18 +88,39 @@ INVENTED_RULES = MagicRules(
 )
 
 
-#: :data:`INVENTED_RULES` with Borrowing (tarmar-engine #28): a 2d6 debt roll
-#: under WIS less two per point owed, a natural 12 failing it whatever the
-#: target, a non-Runaway failure, and a cap of three owed.
+#: The invented Debt Roll's first failure band: missed by 1 to 3, 1 Fatigue
+#: per point owed.
+SLIP_BAND = DebtBand(
+    key="slip",
+    label="Slip of the purse",
+    is_runaway=False,
+    lowest_margin=1,
+    highest_margin=3,
+    cost_pool="fatigue",
+    cost_per_debt=1,
+)
+#: Its last: missed by 4 or more, 2 Body per point owed.
+TORN_BAND = DebtBand(
+    key="torn",
+    label="Torn purse",
+    is_runaway=False,
+    lowest_margin=4,
+    highest_margin=None,
+    cost_pool="body",
+    cost_per_debt=2,
+)
+
+#: :data:`INVENTED_RULES` with Borrowing (tarmar-engine #28, #74): a 2d6
+#: debt roll under WIS less two per point owed, a natural 12 failing it
+#: whatever the target, the two non-Runaway bands above, and a cap of three
+#: owed.
 BORROWING_RULES = replace(
     INVENTED_RULES,
     borrowing=BorrowingRules(
         debt_dice="2d6",
         debt_attributes=("WIS",),
         penalty_per_debt=2,
-        failure=BorrowingFailure(
-            key="slip", label="Slip of the purse", is_runaway=False
-        ),
+        failure_bands=(SLIP_BAND, TORN_BAND),
         automatic_failure_totals=frozenset({12}),
         max_debt=3,
     ),
