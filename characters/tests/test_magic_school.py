@@ -29,6 +29,7 @@ from characters.magic import (
     spells_open_to,
 )
 from characters.models import CHARACTER_FIELDS, Character
+from characters.refusal_words import refusal_words
 from characters.services import (
     CharacterChangeError,
     apply_school_roll,
@@ -158,7 +159,7 @@ class SchoolGatesSpellsTest(SchoolTestCase):
         self.assertEqual(spells_open_to(self.character, is_game_master=False), [])
         with self.assertRaises(CharacterChangeError) as refused:
             learn_spell(self.character, "fire_missile", is_game_master=False)
-        self.assertIn("Roll and choose a school of magic first", str(refused.exception))
+        self.assertEqual(str(refused.exception), refusal_words().magic.school_first)
         self.assertEqual(self.character.free_skill_points, 4)
 
     def test_a_player_learns_only_their_schools_spells(self):
@@ -173,9 +174,11 @@ class SchoolGatesSpellsTest(SchoolTestCase):
         )
         with self.assertRaises(CharacterChangeError) as refused:
             learn_spell(self.character, "fire_missile", is_game_master=False)
-        self.assertIn(
-            "Fire Missile is of the Elemental school and this character's is Mending",
+        self.assertEqual(
             str(refused.exception),
+            refusal_words().magic.outside_school.format(
+                spell="Fire Missile", spell_school="Elemental", school="Mending"
+            ),
         )
         learn_spell(self.character, "heal", is_game_master=False)
         self.assertEqual(self.character.spells, {"heal": 1})
@@ -184,11 +187,12 @@ class SchoolGatesSpellsTest(SchoolTestCase):
         self.roll(23)
         choose_school(self.character, "Mending", is_game_master=False)
         line = learn_spell(self.character, "fire_missile", is_game_master=True)
-        self.assertIn("(Game Master, outside the caster's school: Mending)", line)
+        outside = refusal_words().magic.game_master_outside_school
+        self.assertIn(f"({outside.format(school='Mending')})", line)
         learn_spell(self.character, "fire_missile", is_game_master=False)
         self.assertEqual(self.character.spells, {"fire_missile": 2})
         raised = learn_spell(self.character, "fire_missile", is_game_master=True)
-        self.assertNotIn("outside the caster's school", raised)
+        self.assertNotIn(f"({outside.format(school='Mending')})", raised)
 
     def test_a_game_master_teaches_any_spell(self):
         self.assertEqual(
@@ -196,7 +200,8 @@ class SchoolGatesSpellsTest(SchoolTestCase):
             len(spells_open_to(Character(), is_game_master=True)),
         )
         line = learn_spell(self.character, "wound", is_game_master=True)
-        self.assertIn("outside the caster's school: unchosen", line)
+        outside = refusal_words().magic.game_master_outside_school
+        self.assertIn(f"({outside.format(school='unchosen')})", line)
 
     def test_a_canon_with_no_table_gates_nothing(self):
         with seated_schools(None):

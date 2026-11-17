@@ -15,7 +15,8 @@
  *   roll lands on, and learns only that school's spells.
  * - #191: a player climbs an element tier by tier: the sheet offers each
  *   element's first tier, refuses a tier whose rung below is not held, and
- *   offers it once the rung is learned.
+ *   offers it once the rung is learned; a Game Master teaches a tier past its
+ *   rung, and the history says so.
  * - #18: a spell is cast in the story from the sheet, by the player (a
  *   spell they know, from their Pool) and by a Game Master (any spell, with
  *   a total rolled at his table); the page shows the server's line and Mana.
@@ -440,7 +441,7 @@ test.describe('Sheet mechanics', () => {
         }
     });
 
-    test('#191: a player climbs an element tier by tier, and a rung skipped is refused', async ({ page, browser }) => {
+    test('#191: a player climbs an element tier by tier, a rung skipped is refused, and a Game Master teaches past it', async ({ page, browser }) => {
         const ladder = elementalLadder();
         test.skip(
             ladder.schoolTable && !ladder.tableNamesSchool,
@@ -495,5 +496,20 @@ test.describe('Sheet mechanics', () => {
             await expect(page.locator(`.known-spell[data-spell="${rung.key}"]`)).toBeVisible();
             await expect(page.locator('#free-points')).toHaveText(freeAfter);
         }
+
+        // A Game Master teaches another element's second tier with its first
+        // not held: allowed, no point spent, and the history line names the
+        // rung he taught past, in the server's words.
+        const pastTheRung = ladder.secondRungs[1];
+        const taught = await postAsGameMaster(
+            browser, `/tarmar/characters/${characterId}/learn-spell/`, { spell: pastTheRung.key }
+        );
+        expect(taught.status).toBe(200);
+        await page.reload();
+        await expect(page.locator(`.known-spell[data-spell="${pastTheRung.key}"]`)).toBeVisible();
+        await expect(page.locator('#free-points')).toHaveText('0');
+        const note = refusal('characters', 'magic', 'game_master_past_the_rung', { rung_below: pastTheRung.below });
+        await expect(page.locator('#recent-changes-rows')).toContainText(`${pastTheRung.name}: 0 → 1 points`);
+        await expect(page.locator('#recent-changes-rows')).toContainText(`(${note})`);
     });
 });

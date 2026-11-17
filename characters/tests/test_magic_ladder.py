@@ -34,6 +34,7 @@ from characters.magic import (
 from characters.models import Character
 from characters.refusal_words import refusal_words
 from characters.services import CharacterChangeError
+from characters.skills import format_skill_level
 from characters.tests.fixed_refusals import with_fixed_refusals
 from common.test_helpers import BaseTestCase, create_character
 
@@ -147,7 +148,11 @@ class PlayerClimbsTheLadderTest(LadderTestCase):
         line = learn_spell(self.character, top_rung.key, is_game_master=False)
         self.assertEqual(self.character.spells, {top_rung.key: 2})
         self.assertEqual(self.character.free_skill_points, 9)
-        self.assertNotIn("game_master_past_the_rung", line)
+        # The whole line: a player's raise carries no Game Master's note.
+        self.assertEqual(
+            line,
+            f"{top_rung.name}: 1 → 2 points, mastery {format_skill_level(2)}",
+        )
 
     def test_a_spell_of_no_element_has_no_ladder(self):
         for spell in SPELLS.values():
@@ -243,6 +248,24 @@ class LadderOrderTest(SimpleTestCase):
                 self.assertEqual(order[start : start + len(keys)], keys)
         schools = [spell.school for spell in learnable_spells()]
         self.assertEqual(schools, sorted(schools))
+
+    def test_the_elements_follow_the_page_not_the_alphabet(self):
+        """Each element first appears in ``ELEMENTS``' order, the order
+        schools-of-magic.md lists them."""
+        first_seen: list[str] = []
+        for spell in learnable_spells():
+            if spell.element is not None and spell.element not in first_seen:
+                first_seen.append(spell.element)
+        self.assertEqual(tuple(first_seen), ELEMENTS)
+
+    def test_a_spell_of_no_element_comes_first_in_its_school(self):
+        for school in {spell.school for spell in SPELLS.values()}:
+            in_school = [
+                spell for spell in learnable_spells() if spell.school == school
+            ]
+            with self.subTest(school=school):
+                elements = [spell.element is not None for spell in in_school]
+                self.assertEqual(elements, sorted(elements))
 
 
 class SpellDescriptionsStateTheLadderTest(SimpleTestCase):

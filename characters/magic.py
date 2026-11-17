@@ -31,7 +31,7 @@ The rules, from ``reference/content``:
 
 from dataclasses import dataclass
 
-from tarmar_engine.spells import SPELLS, Spell, lower_tier
+from tarmar_engine.spells import ELEMENTS, SPELLS, Spell, lower_tier
 
 from battle.magic_rules import (
     CASTING_DICE,
@@ -106,13 +106,19 @@ class SpellLoadout:
 def learnable_spells() -> list[Spell]:
     """Every spell the battle can cast, by school, element and level.
 
-    Each element's ladder reads in order, Missile to Bolt, beside the next
-    element's (tarmar-studio#191); a school with no elements is by level.
+    Each element's ladder reads in order, Missile to Bolt, and the elements
+    in the order schools-of-magic.md lists them (``ELEMENTS``,
+    tarmar-studio#191); a spell of no element comes first in its school, by
+    level.
     """
-    return sorted(
-        SPELLS.values(),
-        key=lambda spell: (spell.school, spell.element or "", spell.level),
-    )
+    return sorted(SPELLS.values(), key=_catalog_order)
+
+
+def _catalog_order(spell: Spell) -> tuple[str, int, int]:
+    """Where ``spell`` sorts: its school, its element's place on the page (a
+    spell of no element before any), then its level."""
+    element_place = -1 if spell.element is None else ELEMENTS.index(spell.element)
+    return (spell.school, element_place, spell.level)
 
 
 def spell_points(character: Character, spell_key: str) -> int:
@@ -146,15 +152,12 @@ def school_refusal(character: Character, spell: Spell) -> str | None:
     if spell_points(character, spell.key) > 0:
         return None
     school = character.magic_school
+    words = refusal_words().magic
     if not school:
-        return (
-            "Roll and choose a school of magic first; a player learns only the "
-            "spells of their school"
-        )
+        return words.school_first
     if spell.school != school:
-        return (
-            f"{spell.name} is of the {spell.school} school and this character's is "
-            f"{school}; only a Game Master can teach a spell of another school"
+        return words.outside_school.format(
+            spell=spell.name, spell_school=spell.school, school=school
         )
     return None
 
@@ -430,16 +433,16 @@ def learn_spell(
     free = character.free_skill_points
     game_master_notes = ""
     if is_game_master:
+        words = refusal_words().magic
         if held == 0 and school_refusal(character, spell) is not None:
             school = character.magic_school or "unchosen"
-            game_master_notes += (
-                f" (Game Master, outside the caster's school: {school})"
-            )
+            outside = words.game_master_outside_school.format(school=school)
+            game_master_notes += f" ({outside})"
         if (rung_below := rung_not_held(character, spell)) is not None:
-            past_the_rung = refusal_words().magic.game_master_past_the_rung
-            game_master_notes += (
-                f" ({past_the_rung.format(rung_below=rung_below.name)})"
+            past_the_rung = words.game_master_past_the_rung.format(
+                rung_below=rung_below.name
             )
+            game_master_notes += f" ({past_the_rung})"
     else:
         if refusal := learning_refusal(character, spell):
             raise CharacterChangeError(refusal)

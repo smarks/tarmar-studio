@@ -82,12 +82,13 @@ module.exports.catalogSpells = catalogSpells;
 module.exports.lastStoryCast = lastStoryCast;
 
 /**
- * The first element's ladder as the server's catalog holds it (#191): its
- * spells from tier 1 up, each with the rung below it
+ * The first two elements' ladders as the server's catalog holds them (#191):
+ * each one's spells from tier 1 up, with the rung below each
  * (``tarmar_engine.spells.lower_tier``), and how the loaded canon's school
  * table stands to the Elemental school, so a spec types no spell or school.
  * @returns {{school: string, schoolTable: boolean, tableNamesSchool: boolean,
  *     rungs: {key: string, name: string, below: string | null}[],
+ *     secondRungs: {key: string, name: string, below: string | null}[],
  *     tierOnes: string[]}}
  */
 function elementalLadder() {
@@ -96,22 +97,24 @@ import json
 from tarmar_engine.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS, lower_tier
 from battle.magic_rules import magic_schools
 table = magic_schools()
-rungs = sorted(
-    (spell for spell in SPELLS.values() if spell.element == ELEMENTS[0]),
-    key=lambda spell: spell.level,
-)
-print("LADDER " + json.dumps({
-    "school": ELEMENTAL_SCHOOL,
-    "schoolTable": table is not None,
-    "tableNamesSchool": table is not None and ELEMENTAL_SCHOOL in table.schools,
-    "rungs": [
+def rungs(element):
+    return [
         {
             "key": spell.key,
             "name": spell.name,
             "below": None if lower_tier(spell) is None else lower_tier(spell).name,
         }
-        for spell in rungs
-    ],
+        for spell in sorted(
+            (spell for spell in SPELLS.values() if spell.element == element),
+            key=lambda spell: spell.level,
+        )
+    ]
+print("LADDER " + json.dumps({
+    "school": ELEMENTAL_SCHOOL,
+    "schoolTable": table is not None,
+    "tableNamesSchool": table is not None and ELEMENTAL_SCHOOL in table.schools,
+    "rungs": rungs(ELEMENTS[0]),
+    "secondRungs": rungs(ELEMENTS[1]),
     "tierOnes": [
         spell.key for spell in SPELLS.values()
         if spell.school == ELEMENTAL_SCHOOL and lower_tier(spell) is None
