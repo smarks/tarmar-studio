@@ -102,3 +102,14 @@ unnamed_character = "Unnamed character"
 # A character that is not there, as the sheet's fetch-only endpoints answer it.
 [views_access]
 not_found = "Character not found"
+
+# characters.magic's ladder (tarmar-studio#191, the canon's
+# elemental_tracks_climb_tier_by_tier ruling): an Elemental spell is learned
+# tier by tier in its element. {spell}: the spell asked for; {rung_below}: the
+# same element's spell one tier down, which the character does not hold.
+[magic]
+# What a player putting a point into a spell above an unknown rung is told.
+lower_rung_first = "Learn {rung_below} first: each element is its own track, climbed tier by tier, and {spell} is the rung above it. Only a Game Master can teach a spell past its rung."
+# Ends the history line when a Game Master teaches such a spell, inside the
+# line's parentheses: "Fire Bolt: 0 → 1 points, mastery I (Game Master, ...)".
+game_master_past_the_rung = "Game Master, past the ladder: {rung_below} not held"

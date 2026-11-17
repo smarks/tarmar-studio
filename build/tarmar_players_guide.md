@@ -1549,11 +1549,13 @@ spell.
 
 ### Elemental
 
-Common school. Every spell below can be cast in any of the five elemental
-flavors — **water, fire, lightning, earth, wind** — chosen when you learn
-it; a caster who wants more than one flavor of the same spell learns it
-again. All Elemental spells are **INT**: shaping a bolt of flame or a wall
-of stone into an exact form is technique, not insight.
+Common school. Each of the five elements — **water, fire, lightning,
+earth, wind** — is its own track. A student of Elemental magic picks an
+element and learns it from tier 1, climbing it tier by tier: a spell of
+the element needs the one below it, so Fire Bolt needs Fire Ball and Fire
+Ball needs Fire Missile. A mage may take up another element, but starts it
+at tier 1. All Elemental spells are **INT**: shaping a bolt of flame or a
+wall of stone into an exact form is technique, not insight.
 
 | Spell | Lvl | Affinity | Why | Description |
 | ----- | --- | -------- | --- | ------------ |
@@ -1658,9 +1660,6 @@ sense-impression or raw compulsion (technique, so **INT**).
 
 ### Open questions for the author
 
-- **Element choice at character creation vs. per-spell:** whether a caster
-  fixes one elemental flavor for their whole Elemental track or picks it
-  spell-by-spell is left to the GM until ruled.
 - **"Force …, etc." (Control 6):** the source list leaves this open-ended;
   treat Paralyze/Move/Breath/Run/Sleep as the known set and let the GM add
   more at the same level.

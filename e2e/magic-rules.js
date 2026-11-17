@@ -13,8 +13,9 @@ const { readDjangoJson } = require('./django');
  * The row of the loaded canon's school table a percentile roll lands on.
  *
  * Read through the server's own lookup (``SchoolTable.row_for``), with each
- * of the row's schools mapped to the keys of the battle's spells filed under
- * it (``characters.magic.learnable_spells``), in catalog order.
+ * of the row's schools mapped to the keys of the spells a new caster of it is
+ * offered (``characters.magic.spells_open_to``: the school's spells, each
+ * element's first tier only, #191), in catalog order.
  * @param {number} face - A d100 result, 1 to 100.
  * @returns {{label: string, schools: string[], spells: Object<string, string[]>} | null}
  *     The row, or null under a canon whose ``schools`` block is null, which
@@ -24,14 +25,18 @@ function schoolRowForPercentile(face) {
     return readDjangoJson(`
 import json
 from battle.magic_rules import magic_schools
-from characters.magic import learnable_spells
+from characters.magic import spells_open_to
+from characters.models import Character
 table = magic_schools()
 row = None if table is None else table.row_for(${Number(face)})
 print("SCHOOL_ROW " + json.dumps(None if row is None else {
     "label": row.label,
     "schools": list(row.schools),
     "spells": {
-        school: [spell.key for spell in learnable_spells() if spell.school == school]
+        school: [
+            spell.key
+            for spell in spells_open_to(Character(magic_school=school), is_game_master=False)
+        ]
         for school in row.schools
     },
 }))
@@ -75,3 +80,44 @@ print("CAST " + json.dumps({"line": lines[-1], "current_mana": character.current
 
 module.exports.catalogSpells = catalogSpells;
 module.exports.lastStoryCast = lastStoryCast;
+
+/**
+ * The first element's ladder as the server's catalog holds it (#191): its
+ * spells from tier 1 up, each with the rung below it
+ * (``tarmar_engine.spells.lower_tier``), and how the loaded canon's school
+ * table stands to the Elemental school, so a spec types no spell or school.
+ * @returns {{school: string, schoolTable: boolean, tableNamesSchool: boolean,
+ *     rungs: {key: string, name: string, below: string | null}[],
+ *     tierOnes: string[]}}
+ */
+function elementalLadder() {
+    return readDjangoJson(`
+import json
+from tarmar_engine.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS, lower_tier
+from battle.magic_rules import magic_schools
+table = magic_schools()
+rungs = sorted(
+    (spell for spell in SPELLS.values() if spell.element == ELEMENTS[0]),
+    key=lambda spell: spell.level,
+)
+print("LADDER " + json.dumps({
+    "school": ELEMENTAL_SCHOOL,
+    "schoolTable": table is not None,
+    "tableNamesSchool": table is not None and ELEMENTAL_SCHOOL in table.schools,
+    "rungs": [
+        {
+            "key": spell.key,
+            "name": spell.name,
+            "below": None if lower_tier(spell) is None else lower_tier(spell).name,
+        }
+        for spell in rungs
+    ],
+    "tierOnes": [
+        spell.key for spell in SPELLS.values()
+        if spell.school == ELEMENTAL_SCHOOL and lower_tier(spell) is None
+    ],
+}))
+`, 'LADDER');
+}
+
+module.exports.elementalLadder = elementalLadder;

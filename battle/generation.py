@@ -107,9 +107,13 @@ HEAVIEST_GENERATED_LOAD = "medium"
 _SKILL_LEVEL_CYCLE: tuple[int, ...] = (4, 3, 5)
 
 # Spell loadouts rotate per caster index. Keys are battle.spells catalog keys.
+# Each Elemental spell carries the rungs below it in its element, as a player's
+# own caster must (the canon's elemental_tracks_climb_tier_by_tier ruling,
+# tarmar-studio#191): the first wizard climbs fire to its Bolt, the second
+# holds the Missile under its Ball.
 _WIZARD_LOADOUTS: tuple[tuple[str, ...], ...] = (
-    ("fire_missile", "lightning_bolt", "shield"),
-    ("fire_ball", "fatigue", "blur"),
+    ("fire_missile", "fire_ball", "fire_bolt", "shield"),
+    ("fire_missile", "fire_ball", "fatigue", "blur"),
     ("fire_missile", "wound", "heal"),
 )
 _FIGHTER_MAGE_LOADOUTS: tuple[tuple[str, ...], ...] = (
@@ -120,6 +124,17 @@ _FIGHTER_MAGE_LOADOUTS: tuple[tuple[str, ...], ...] = (
 # Spell Points (= Mana Pool, see module docstring) rotate too.
 _MANA_CYCLE: tuple[int, ...] = (10, 12, 8)
 _FIGHTER_MAGE_MANA_CYCLE: tuple[int, ...] = (6, 8)
+
+#: Each caster archetype's loadouts, which :func:`spell_loadout` rotates and a
+#: test reads whole.
+SPELL_LOADOUTS_BY_ARCHETYPE: dict[str, tuple[tuple[str, ...], ...]] = {
+    "wizard": _WIZARD_LOADOUTS,
+    "fighter-mage": _FIGHTER_MAGE_LOADOUTS,
+}
+_MANA_CYCLES_BY_ARCHETYPE: dict[str, tuple[int, ...]] = {
+    "wizard": _MANA_CYCLE,
+    "fighter-mage": _FIGHTER_MAGE_MANA_CYCLE,
+}
 
 # Name-part tables for generated combatants (issue #187). A given name is a
 # stem plus an ending; the epithet doubles as a surname. All parts satisfy
@@ -288,15 +303,11 @@ def archetype_for_index(index: int, archetypes: tuple[str, ...] = ARCHETYPES) ->
 
 def spell_loadout(archetype: str, variant: int) -> tuple[tuple[str, ...], int]:
     """(spell keys, spell points) for a caster archetype, varied by index."""
-    if archetype == "wizard":
-        loadout = _WIZARD_LOADOUTS[variant % len(_WIZARD_LOADOUTS)]
-        mana = _MANA_CYCLE[variant % len(_MANA_CYCLE)]
-        return loadout, mana
-    if archetype == "fighter-mage":
-        loadout = _FIGHTER_MAGE_LOADOUTS[variant % len(_FIGHTER_MAGE_LOADOUTS)]
-        mana = _FIGHTER_MAGE_MANA_CYCLE[variant % len(_FIGHTER_MAGE_MANA_CYCLE)]
-        return loadout, mana
-    return (), 0
+    loadouts = SPELL_LOADOUTS_BY_ARCHETYPE.get(archetype)
+    if loadouts is None:
+        return (), 0
+    mana_cycle = _MANA_CYCLES_BY_ARCHETYPE[archetype]
+    return loadouts[variant % len(loadouts)], mana_cycle[variant % len(mana_cycle)]
 
 
 def _equipment_entries(

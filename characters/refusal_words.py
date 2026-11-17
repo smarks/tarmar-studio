@@ -111,6 +111,16 @@ class ViewsAccessWords:
 
 
 @dataclass(frozen=True)
+class MagicWords:
+    """``characters.magic``'s ladder words (tarmar-studio#191): why a player
+    may not learn an Elemental spell above a rung they do not hold, and how a
+    Game Master teaching one past it is recorded."""
+
+    lower_rung_first: str = sentence("spell", "rung_below", required=("rung_below",))
+    game_master_past_the_rung: str = sentence("rung_below", required=("rung_below",))
+
+
+@dataclass(frozen=True)
 class CharactersRefusalWords:
     """The whole file: one table per module, and the phrases they share."""
 
@@ -119,6 +129,7 @@ class CharactersRefusalWords:
     purse: PurseWords
     constants: ConstantsWords
     views_access: ViewsAccessWords
+    magic: MagicWords
 
 
 def load_refusal_words(path: Path) -> CharactersRefusalWords:
