@@ -111,6 +111,22 @@ class ViewsAccessWords:
 
 
 @dataclass(frozen=True)
+class MagicWords:
+    """``characters.magic``'s words for learning a spell: why a player may not
+    learn one outside their school (issue #18) or above an Elemental rung they
+    do not hold (tarmar-studio#191), and how a Game Master teaching one past
+    either is recorded."""
+
+    school_first: str = sentence()
+    outside_school: str = sentence(
+        "spell", "spell_school", "school", required=("spell_school", "school")
+    )
+    game_master_outside_school: str = sentence("school", required=("school",))
+    lower_rung_first: str = sentence("spell", "rung_below", required=("rung_below",))
+    game_master_past_the_rung: str = sentence("rung_below", required=("rung_below",))
+
+
+@dataclass(frozen=True)
 class CharactersRefusalWords:
     """The whole file: one table per module, and the phrases they share."""
 
@@ -119,6 +135,7 @@ class CharactersRefusalWords:
     purse: PurseWords
     constants: ConstantsWords
     views_access: ViewsAccessWords
+    magic: MagicWords
 
 
 def load_refusal_words(path: Path) -> CharactersRefusalWords:

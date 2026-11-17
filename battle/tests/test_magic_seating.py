@@ -49,6 +49,7 @@ from .magic_fixtures import (
     CASTING_FAILURE,
     CASTING_FAILURE_RULES,
     INVENTED_RULES,
+    SLIP_BAND,
     casting_faces,
     rules_with_channel,
     seated_rules,
@@ -357,17 +358,45 @@ class BorrowingCastTurnTest(SimpleTestCase):
             1,
         )
 
-    def test_a_failed_debt_roll_names_the_injected_failure(self) -> None:
-        _state, events = self.run_borrowing_turn(DEBT_FAILED_SEED)
+    def test_a_failed_debt_roll_narrates_its_band_and_costs_its_pool(self) -> None:
+        # tarmar-engine #74: the margin picks the band, and the band's pool
+        # pays its cost per point owed, through the engine's cost path.
+        state, events = self.run_borrowing_turn(DEBT_FAILED_SEED)
         _rolls, outcomes = self.debt_events(events)
-        self.assertFalse(outcomes[0]["payload"]["held"])
+        outcome = outcomes[0]["payload"]
+        self.assertFalse(outcome["held"])
+        self.assertEqual(outcome["natural"] - outcome["target"], 2)
         failure = next(
             event
             for event in events
             if event["event_type"] == "status" and "debt_failure" in event["payload"]
         )
-        self.assertEqual(failure["payload"]["label"], "Slip of the purse")
-        self.assertFalse(failure["payload"]["runaway"])
+        self.assertEqual(
+            failure["payload"],
+            {
+                "spell": "fire_missile",
+                "debt_failure": SLIP_BAND.key,
+                "label": SLIP_BAND.label,
+                "runaway": False,
+                "cost_pool": SLIP_BAND.cost_pool,
+                "cost": SLIP_BAND.cost_per_debt * outcome["debt"],
+            },
+        )
+        taken = f"{SLIP_BAND.cost_per_debt * outcome['debt']} {SLIP_BAND.cost_pool}"
+        self.assertIn(f"{SLIP_BAND.label}, costing {taken}", failure["message"])
+        cost = next(
+            event
+            for event in events
+            if event["event_type"] == "status"
+            and event["payload"].get("reason", "").startswith("on the failed debt")
+        )
+        self.assertGreater(cost["sequence"], failure["sequence"])
+        self.assertIn(
+            f"spends {taken} on the failed debt for Fire Missile", cost["message"]
+        )
+        # The pool the cost left is the one the caster ends the turn with,
+        # unless the foe's blow came after it.
+        self.assertGreaterEqual(cost["payload"]["fatigue"], state.by_id(1).fatigue)
 
 
 class SeatedMagicLevelsTest(BaseTestCase):

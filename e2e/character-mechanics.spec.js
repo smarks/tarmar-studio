@@ -13,6 +13,10 @@
  *   saved caster is seated in a battle with it and its Mana Pool.
  * - #18: the player rolls a school of magic once, chooses from the row the
  *   roll lands on, and learns only that school's spells.
+ * - #191: a player climbs an element tier by tier: the sheet offers each
+ *   element's first tier, refuses a tier whose rung below is not held, and
+ *   offers it once the rung is learned; a Game Master teaches a tier past its
+ *   rung, and the history says so.
  * - #18: a spell is cast in the story from the sheet, by the player (a
  *   spell they know, from their Pool) and by a Game Master (any spell, with
  *   a total rolled at his table); the page shows the server's line and Mana.
@@ -36,7 +40,9 @@ const { runDjangoShell } = require('./django');
 const { refusal, refusalFixedParts, gameMasterCallNote } = require('./refusals');
 const { loadedSkillRules } = require('./skill-rules');
 const { item, sheetValues } = require('./equipment-rules');
-const { catalogSpells, lastStoryCast, schoolRowForPercentile } = require('./magic-rules');
+const {
+    catalogSpells, elementalLadder, lastStoryCast, schoolRowForPercentile,
+} = require('./magic-rules');
 
 /** The school roll's dice pinned (issue #959) to a known face. */
 const SCHOOL_ROLL_SEED = 1;
@@ -433,5 +439,77 @@ test.describe('Sheet mechanics', () => {
         } finally {
             await context.close();
         }
+    });
+
+    test('#191: a player climbs an element tier by tier, a rung skipped is refused, and a Game Master teaches past it', async ({ page, browser }) => {
+        const ladder = elementalLadder();
+        test.skip(
+            ladder.schoolTable && !ladder.tableNamesSchool,
+            "the loaded canon's school table names no Elemental school, so no player learns its spells"
+        );
+        const name = uniqueName('Ladder Climber');
+        await loginAs(page, TEST_USER);
+        await importCharacter(page, name);
+        const characterId = characterIdFromUrl(page);
+        if (ladder.schoolTable) {
+            // A Game Master sets the school, as the roll-and-choose test walks
+            // a player through it; the ladder is what this test is about.
+            const chosen = await postAsGameMaster(
+                browser, `/tarmar/characters/${characterId}/choose-school/`, { school: ladder.school }
+            );
+            expect(chosen.status).toBe(200);
+            await page.reload();
+        }
+        const [tierOne, tierTwo] = ladder.rungs;
+
+        // Every element's first tier is offered, and no rung above one.
+        for (const key of ladder.tierOnes) {
+            await expect(page.locator(`#learn-spell-select option[value="${key}"]`)).toHaveCount(1);
+        }
+        await expect(page.locator(`#learn-spell-select option[value="${tierTwo.key}"]`)).toHaveCount(0);
+
+        // The refusal is the server's: a hand-built POST for the rung above is
+        // refused in the configured words, and spends nothing.
+        const refused = await page.evaluate(async ({ id, spell }) => {
+            const token = document.querySelector('meta[name="csrf-token"]').content;
+            const response = await fetch(`/tarmar/characters/${id}/learn-spell/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+                body: JSON.stringify({ spell }),
+            });
+            return { status: response.status, body: await response.json() };
+        }, { id: characterId, spell: tierTwo.key });
+        expect(refused.status).toBe(400);
+        expect(refused.body.error).toBe(
+            refusal('characters', 'magic', 'lower_rung_first', { spell: tierTwo.name, rung_below: tierTwo.below })
+        );
+        await page.reload();
+        await expect(page.locator('#free-points')).toHaveText('2');
+
+        // The first tier learned, the second is offered and learned in turn.
+        for (const [rung, freeAfter] of [[tierOne, '1'], [tierTwo, '0']]) {
+            await page.locator('#learn-spell-select').selectOption(rung.key);
+            await Promise.all([
+                page.waitForEvent('load'),
+                page.locator('#learn-spell-btn').click(),
+            ]);
+            await expect(page.locator(`.known-spell[data-spell="${rung.key}"]`)).toBeVisible();
+            await expect(page.locator('#free-points')).toHaveText(freeAfter);
+        }
+
+        // A Game Master teaches another element's second tier with its first
+        // not held: allowed, no point spent, and the history line names the
+        // rung he taught past, in the server's words.
+        const pastTheRung = ladder.secondRungs[1];
+        const taught = await postAsGameMaster(
+            browser, `/tarmar/characters/${characterId}/learn-spell/`, { spell: pastTheRung.key }
+        );
+        expect(taught.status).toBe(200);
+        await page.reload();
+        await expect(page.locator(`.known-spell[data-spell="${pastTheRung.key}"]`)).toBeVisible();
+        await expect(page.locator('#free-points')).toHaveText('0');
+        const note = refusal('characters', 'magic', 'game_master_past_the_rung', { rung_below: pastTheRung.below });
+        await expect(page.locator('#recent-changes-rows')).toContainText(`${pastTheRung.name}: 0 → 1 points`);
+        await expect(page.locator('#recent-changes-rows')).toContainText(`(${note})`);
     });
 });

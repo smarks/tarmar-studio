@@ -10,6 +10,7 @@ from battle import generation
 from battle.checks import GENERATOR_CATALOG_CHECK_ID, check_generator_catalog_ids
 from battle.generation import (
     ARCHETYPES,
+    SPELL_LOADOUTS_BY_ARCHETYPE,
     archetype_for_index,
     deal_equipment,
     generate_character,
@@ -18,7 +19,7 @@ from battle.generation import (
     spell_loadout,
 )
 from battle.services import snapshot_combatant
-from battle.spells import get_spell
+from battle.spells import get_spell, lower_tier
 from characters.constants import CHARACTER_NAME_PATTERN
 from characters.equipment import get_item
 from characters.equipment_rules import equipment_rules
@@ -115,6 +116,28 @@ class SpellLoadoutTest(BaseTestCase):
 
     def test_non_casters_get_nothing(self):
         self.assertEqual(spell_loadout("archer", 0), ((), 0))
+
+    def test_every_loadout_holds_the_rungs_below_each_elemental_spell(self):
+        """tarmar-studio#191: an element is climbed tier by tier, so a
+        generated caster holds the rung below each Elemental spell it knows,
+        as a player's own caster must."""
+        for archetype, loadouts in SPELL_LOADOUTS_BY_ARCHETYPE.items():
+            for loadout in loadouts:
+                for key in loadout:
+                    rung_below = lower_tier(get_spell(key))
+                    if rung_below is None:
+                        continue
+                    with self.subTest(archetype=archetype, loadout=loadout, spell=key):
+                        self.assertIn(rung_below.key, loadout)
+
+    def test_every_caster_archetype_has_loadouts(self):
+        for archetype in ARCHETYPES:
+            loadout, mana = spell_loadout(archetype, 0)
+            with self.subTest(archetype=archetype):
+                self.assertEqual(
+                    bool(loadout), archetype in SPELL_LOADOUTS_BY_ARCHETYPE
+                )
+                self.assertEqual(bool(mana), bool(loadout))
 
     def test_every_generated_caster_can_cast_each_of_its_spells(self):
         """Issue #960: a generated spell is at a mastery equal to its level.

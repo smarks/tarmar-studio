@@ -43,7 +43,44 @@
     "debt_dice": "2d6",
     "debt_attributes": ["WIS"],
     "penalty_per_debt": 2,
-    "failure": { "key": "backlash", "label": "Backlash", "is_runaway": false },
+    "failure_bands": [
+      {
+        "key": "flicker",
+        "label": "Flicker",
+        "is_runaway": false,
+        "lowest_margin": 1,
+        "highest_margin": 2,
+        "cost_pool": null,
+        "cost_per_debt": 0
+      },
+      {
+        "key": "fray",
+        "label": "Fray",
+        "is_runaway": false,
+        "lowest_margin": 3,
+        "highest_margin": 5,
+        "cost_pool": "fatigue",
+        "cost_per_debt": 2
+      },
+      {
+        "key": "backlash",
+        "label": "Backlash",
+        "is_runaway": false,
+        "lowest_margin": 6,
+        "highest_margin": 8,
+        "cost_pool": "body",
+        "cost_per_debt": 1
+      },
+      {
+        "key": "unravel",
+        "label": "Unravel",
+        "is_runaway": true,
+        "lowest_margin": 9,
+        "highest_margin": null,
+        "cost_pool": null,
+        "cost_per_debt": 0
+      }
+    ],
     "automatic_failure_totals": [12],
     "max_debt": 4,
     "refunds_pay_debt_first": true

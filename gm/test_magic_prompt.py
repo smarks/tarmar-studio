@@ -69,8 +69,13 @@ from .turn_record import prompt_hash
 # stated the push's payoff from the same file, which the section had never
 # said: +1 to the spell's rolled damage or healing for each mana pushed, and
 # only a spell that rolls damage or healing can be pushed.
+#
+# e366288c7f1051d571e0c160f7d5cf2a08ad4d5d0ed405b1fe3baee0e7307cea until #190
+# graded the Debt Roll in bands, as the Control Roll is: Borrowing now rolls
+# against WIS alone, states each band and the pool and cost it takes, the band
+# a natural 18 lands in, and that the Debt is all the caster owes at the roll.
 TARMAR_MAGIC_SECTION_HASH = (
-    "e366288c7f1051d571e0c160f7d5cf2a08ad4d5d0ed405b1fe3baee0e7307cea"
+    "04e9d3d6fe119fc75cd82dc0dbe38ae7b3a4529cb833decf8cca5c41d5d4a7c6"
 )
 
 # The subsections every magic section carries, in this order: checked here

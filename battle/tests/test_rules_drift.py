@@ -13,7 +13,7 @@ from django.test import SimpleTestCase
 from battle.engine import actions, engine, hexes
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
 from battle.magic_rules import CASTING_DICE, load_magic_schools
-from battle.spells import SPELLS
+from battle.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS
 from reference.markdown_tables import table_rows_under_heading as _table_rows
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
@@ -387,9 +387,22 @@ class SpellCatalogDriftGuard(SimpleTestCase):
         for spell in SPELLS.values():
             self.assertGreaterEqual(spell.level, 1)
 
-    def test_catalog_size_is_six_to_ten(self):
-        self.assertGreaterEqual(len(SPELLS), 6)
-        self.assertLessEqual(len(SPELLS), 10)
+    def test_catalog_size_is_the_ladders_plus_three_to_seven_others(self):
+        # The engine's catalog since tarmar-engine #75: every element's ladder,
+        # one spell per element at each Elemental tier, beside a small set of
+        # other schools' spells, the bound the whole catalog held at six to
+        # ten when the Elemental school had three spells.
+        elemental = [
+            spell for spell in SPELLS.values() if spell.school == ELEMENTAL_SCHOOL
+        ]
+        tiers = {spell.level for spell in elemental}
+        self.assertEqual(
+            sorted((spell.element, spell.level) for spell in elemental),
+            sorted((element, tier) for element in ELEMENTS for tier in tiers),
+        )
+        others = len(SPELLS) - len(elemental)
+        self.assertGreaterEqual(others, 3)
+        self.assertLessEqual(others, 7)
 
 
 class PackageSpecSnapshotGuard(SimpleTestCase):

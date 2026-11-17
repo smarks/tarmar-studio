@@ -102,3 +102,25 @@ unnamed_character = "Unnamed character"
 # A character that is not there, as the sheet's fetch-only endpoints answer it.
 [views_access]
 not_found = "Character not found"
+
+# characters.magic's words for learning a spell. The school (issue #18, the
+# canon's school_gates_a_new_spell ruling): a player learns a new spell only
+# from their own school, rolled and chosen first. The ladder (tarmar-studio
+# #191, the canon's elemental_tracks_climb_tier_by_tier ruling): an Elemental
+# spell is learned tier by tier in its element. {spell}: the spell asked for;
+# {spell_school}: its school; {school}: the character's school ("unchosen"
+# when none is); {rung_below}: the same element's spell one tier down, which
+# the character does not hold.
+[magic]
+# What a player with no school yet is told.
+school_first = "Roll and choose a school of magic first; a player learns only the spells of their school"
+# What a player learning a spell of another school is told.
+outside_school = "{spell} is of the {spell_school} school and this character's is {school}; only a Game Master can teach a spell of another school"
+# Ends the history line when a Game Master teaches a spell of another school,
+# inside the line's parentheses.
+game_master_outside_school = "Game Master, outside the caster's school: {school}"
+# What a player putting a point into a spell above an unknown rung is told.
+lower_rung_first = "Learn {rung_below} first: each element is its own track, climbed tier by tier, and {spell} is the rung above it. Only a Game Master can teach a spell past its rung."
+# Ends the history line when a Game Master teaches such a spell, inside the
+# line's parentheses: "Fire Bolt: 0 → 1 points, mastery I (Game Master, ...)".
+game_master_past_the_rung = "Game Master, past the ladder: {rung_below} not held"

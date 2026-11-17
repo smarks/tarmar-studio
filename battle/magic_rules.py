@@ -40,7 +40,11 @@ The file is a JSON object::
       "borrowing": null | {
         "debt_dice": str, "debt_attributes": [str, ...],
         "penalty_per_debt": int,
-        "failure": {"key": str, "label": str, "is_runaway": bool},
+        "failure_bands": [
+          {"key": str, "label": str, "is_runaway": bool,
+           "lowest_margin": int, "highest_margin": int | null,
+           "cost_pool": "fatigue" | "body" | null, "cost_per_debt": int}
+        ],
         "automatic_failure_totals": [int, ...],
         "max_debt": int | null,
         "refunds_pay_debt_first": bool
@@ -98,13 +102,12 @@ is checked for shape and not otherwise read (``reference.rules_file``).
 """
 
 import functools
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from tarmar_engine.magic import (
-    BorrowingFailure,
     BorrowingRules,
     CastingFailureRules,
     CastingSuccessTier,
@@ -112,7 +115,9 @@ from tarmar_engine.magic import (
     ChannelRules,
     ControlBand,
     CounterspellRules,
+    DebtBand,
     MagicRules,
+    MarginBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
@@ -136,15 +141,21 @@ from reference.rules_file import RulesFileError, RulesFileReader, repeats_proble
 CASTING_DICE = "3d6"
 
 TIER_FIELDS = ("key", "label", "natural_totals", "effect_bonus", "mana_refund")
-BAND_FIELDS = (
+#: The fields every failure band carries, the Control Roll's and the Debt
+#: Roll's alike: the engine's ``MarginBand``.
+MARGIN_BAND_FIELDS = (
     "key",
     "label",
     "is_runaway",
     "lowest_margin",
     "highest_margin",
+)
+CONTROL_BAND_FIELDS = (
+    *MARGIN_BAND_FIELDS,
     "spell_takes_effect",
     "push_bonus_applies",
 )
+DEBT_BAND_FIELDS = (*MARGIN_BAND_FIELDS, "cost_pool", "cost_per_debt")
 PUSH_FIELDS = (
     "control_dice",
     "control_attribute",
@@ -162,12 +173,11 @@ BORROWING_FIELDS = (
     "debt_dice",
     "debt_attributes",
     "penalty_per_debt",
-    "failure",
+    "failure_bands",
     "automatic_failure_totals",
     "max_debt",
     "refunds_pay_debt_first",
 )
-BORROWING_FAILURE_FIELDS = ("key", "label", "is_runaway")
 RUNAWAY_FIELDS = (
     "drain_multiplier_of_cost",
     "drain_flat",
@@ -242,6 +252,18 @@ class SchoolTable(PercentileTable[SchoolRow]):
         return next((row for row in self.rows if school in row.schools), None)
 
 
+class MarginBandFields(TypedDict):
+    """The fields every failure band carries (the engine's ``MarginBand``),
+    as :meth:`_MagicRulesFileReader.margin_band_fields` reads them, typed
+    for the band constructor they are unpacked into."""
+
+    key: str
+    label: str
+    is_runaway: bool
+    lowest_margin: int
+    highest_margin: int | None
+
+
 class MagicRulesError(RulesFileError):
     """The canon's ``magic-rules.json`` is missing or malformed.
 
@@ -307,10 +329,18 @@ class _MagicRulesFileReader(RulesFileReader):
         )
         return tier
 
-    def control_band(self, value: Any, field_path: str) -> ControlBand:
-        """One entry of ``push.failure_bands``."""
-        fields = self.json_object(value, field_path, BAND_FIELDS)
-        return ControlBand(
+    def margin_band_fields(
+        self, fields: dict[str, Any], field_path: str
+    ) -> MarginBandFields:
+        """The fields every failure band shares (the engine's ``MarginBand``),
+        read from one band's object, keyed as the band's constructor takes
+        them.
+
+        Args:
+            fields: The band's object, already checked for its keys.
+            field_path: Where the band is in the file.
+        """
+        return MarginBandFields(
             key=self.text(fields["key"], f"{field_path}.key"),
             label=self.text(fields["label"], f"{field_path}.label"),
             is_runaway=self.boolean(fields["is_runaway"], f"{field_path}.is_runaway"),
@@ -320,6 +350,33 @@ class _MagicRulesFileReader(RulesFileReader):
             highest_margin=self.optional_integer(
                 fields["highest_margin"], f"{field_path}.highest_margin"
             ),
+        )
+
+    def failure_bands[BandType: MarginBand](
+        self,
+        value: Any,
+        field_path: str,
+        read_band: Callable[[Any, str], BandType],
+    ) -> tuple[BandType, ...]:
+        """A roll's ``failure_bands``, each read by ``read_band``, no two
+        sharing a ``key``. Their margins are the engine's to check
+        (``tarmar_engine.magic.validate_margin_bands``), when the rules that
+        hold them are built.
+
+        Args:
+            value: The bands' list.
+            field_path: Where the list is in the file.
+            read_band: Reads one band.
+        """
+        bands = self.entries(value, field_path, read_band)
+        self.unique_keys(bands, field_path)
+        return bands
+
+    def control_band(self, value: Any, field_path: str) -> ControlBand:
+        """One entry of ``push.failure_bands``."""
+        fields = self.json_object(value, field_path, CONTROL_BAND_FIELDS)
+        return ControlBand(
+            **self.margin_band_fields(fields, field_path),
             spell_takes_effect=self.boolean(
                 fields["spell_takes_effect"], f"{field_path}.spell_takes_effect"
             ),
@@ -359,9 +416,9 @@ class _MagicRulesFileReader(RulesFileReader):
         if value is None:
             return None
         fields = self.json_object(value, field_path, PUSH_FIELDS)
-        bands_path = f"{field_path}.failure_bands"
-        bands = self.entries(fields["failure_bands"], bands_path, self.control_band)
-        self.unique_keys(bands, bands_path)
+        bands = self.failure_bands(
+            fields["failure_bands"], f"{field_path}.failure_bands", self.control_band
+        )
         with self.wrapped_value_errors(field_path):
             push = PushRules(
                 control_dice=self.text(
@@ -442,20 +499,27 @@ class _MagicRulesFileReader(RulesFileReader):
                 ),
             )
 
-    def borrowing_failure(self, value: Any, field_path: str) -> BorrowingFailure:
-        """``borrowing.failure``: what a failed debt roll does."""
-        fields = self.json_object(value, field_path, BORROWING_FAILURE_FIELDS)
-        return BorrowingFailure(
-            key=self.text(fields["key"], f"{field_path}.key"),
-            label=self.text(fields["label"], f"{field_path}.label"),
-            is_runaway=self.boolean(fields["is_runaway"], f"{field_path}.is_runaway"),
+    def debt_band(self, value: Any, field_path: str) -> DebtBand:
+        """One entry of ``borrowing.failure_bands``: a band of Debt Roll
+        failures and what it costs. The pool and its cost are the engine's to
+        check (``DebtBand``)."""
+        fields = self.json_object(value, field_path, DEBT_BAND_FIELDS)
+        shared = self.margin_band_fields(fields, field_path)
+        cost_pool = self.optional_text(fields["cost_pool"], f"{field_path}.cost_pool")
+        cost_per_debt = self.integer(
+            fields["cost_per_debt"], f"{field_path}.cost_per_debt"
         )
+        with self.wrapped_value_errors(field_path):
+            return DebtBand(**shared, cost_pool=cost_pool, cost_per_debt=cost_per_debt)
 
     def borrowing(self, value: Any, field_path: str) -> BorrowingRules | None:
         """``borrowing``, or ``None`` when no caster may borrow."""
         if value is None:
             return None
         fields = self.json_object(value, field_path, BORROWING_FIELDS)
+        bands = self.failure_bands(
+            fields["failure_bands"], f"{field_path}.failure_bands", self.debt_band
+        )
         with self.wrapped_value_errors(field_path):
             borrowing = BorrowingRules(
                 debt_dice=self.text(fields["debt_dice"], f"{field_path}.debt_dice"),
@@ -465,9 +529,7 @@ class _MagicRulesFileReader(RulesFileReader):
                 penalty_per_debt=self.integer(
                     fields["penalty_per_debt"], f"{field_path}.penalty_per_debt"
                 ),
-                failure=self.borrowing_failure(
-                    fields["failure"], f"{field_path}.failure"
-                ),
+                failure_bands=bands,
                 automatic_failure_totals=self.integer_set(
                     fields["automatic_failure_totals"],
                     f"{field_path}.automatic_failure_totals",

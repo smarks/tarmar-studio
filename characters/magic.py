@@ -22,11 +22,16 @@ The rules, from ``reference/content``:
   chosen from the row it lands on (:func:`choose_school`); a player learns a
   new spell only from that school (:func:`school_refusal`), and a Game Master
   may teach any.
+* The canon's ``elemental_tracks_climb_tier_by_tier`` ruling (Spencer's,
+  tarmar-studio#191): each element is its own track, learned from tier 1 and
+  climbed tier by tier, so a player learns an Elemental spell only with the
+  same element's tier below it on the record (:func:`ladder_refusal`); a
+  Game Master may teach any.
 """
 
 from dataclasses import dataclass
 
-from tarmar_engine.spells import SPELLS, Spell
+from tarmar_engine.spells import ELEMENTS, SPELLS, Spell, lower_tier
 
 from battle.magic_rules import (
     CASTING_DICE,
@@ -40,7 +45,7 @@ from common.rolling import Roller
 from .constants import CORE_ATTRIBUTE_FIELDS
 from .dice import roll_dice_logged
 from .models import CHARACTER_INT_FIELD_MAX, Character, magic_school_refusal
-from .refusal_words import game_master_call_note
+from .refusal_words import game_master_call_note, refusal_words
 from .rules import DiceRollRules
 from .services import (
     CAST_ON_THE_BOARD,
@@ -99,8 +104,21 @@ class SpellLoadout:
 
 
 def learnable_spells() -> list[Spell]:
-    """Every spell the battle can cast, by school and level."""
-    return sorted(SPELLS.values(), key=lambda spell: (spell.school, spell.level))
+    """Every spell the battle can cast, by school, element and level.
+
+    Each element's ladder reads in order, Missile to Bolt, and the elements
+    in the order schools-of-magic.md lists them (``ELEMENTS``,
+    tarmar-studio#191); a spell of no element comes first in its school, by
+    level.
+    """
+    return sorted(SPELLS.values(), key=_catalog_order)
+
+
+def _catalog_order(spell: Spell) -> tuple[str, int, int]:
+    """Where ``spell`` sorts: its school, its element's place on the page (a
+    spell of no element before any), then its level."""
+    element_place = -1 if spell.element is None else ELEMENTS.index(spell.element)
+    return (spell.school, element_place, spell.level)
 
 
 def spell_points(character: Character, spell_key: str) -> int:
@@ -134,29 +152,78 @@ def school_refusal(character: Character, spell: Spell) -> str | None:
     if spell_points(character, spell.key) > 0:
         return None
     school = character.magic_school
+    words = refusal_words().magic
     if not school:
-        return (
-            "Roll and choose a school of magic first; a player learns only the "
-            "spells of their school"
-        )
+        return words.school_first
     if spell.school != school:
-        return (
-            f"{spell.name} is of the {spell.school} school and this character's is "
-            f"{school}; only a Game Master can teach a spell of another school"
+        return words.outside_school.format(
+            spell=spell.name, spell_school=spell.school, school=school
         )
     return None
 
 
+def rung_not_held(character: Character, spell: Spell) -> Spell | None:
+    """The rung below ``spell`` that a new learning of it lacks (#191).
+
+    The canon's ``elemental_tracks_climb_tier_by_tier`` ruling: tier N of an
+    element needs tier N-1 of the same element on the record, so a mage who
+    takes up another element starts it at tier 1. A spell already on the
+    record lacks nothing, whatever is below it, and may be raised.
+
+    Args:
+        character: The character.
+        spell: A spell of the catalog.
+
+    Returns:
+        The same element's spell one tier down, when the character holds no
+        points in it and none in ``spell``; otherwise ``None``, as for a
+        tier-1 spell or one of no element.
+    """
+    if spell_points(character, spell.key) > 0:
+        return None
+    rung_below = lower_tier(spell)
+    if rung_below is None or spell_points(character, rung_below.key) > 0:
+        return None
+    return rung_below
+
+
+def ladder_refusal(character: Character, spell: Spell) -> str | None:
+    """Why a player may not put points into ``spell``, by its element's ladder.
+
+    tarmar-studio#191: :func:`rung_not_held`'s rung, in the words of
+    ``config/characters-refusals.toml``. A Game Master is never asked this.
+
+    Args:
+        character: The character.
+        spell: A spell of the catalog.
+
+    Returns:
+        The refusal, or ``None`` when the ladder allows it.
+    """
+    rung_below = rung_not_held(character, spell)
+    if rung_below is None:
+        return None
+    return refusal_words().magic.lower_rung_first.format(
+        spell=spell.name, rung_below=rung_below.name
+    )
+
+
+def learning_refusal(character: Character, spell: Spell) -> str | None:
+    """Why a player may not put points into ``spell``: its school, then its
+    element's ladder (issues #18, #191); ``None`` when both allow it."""
+    return school_refusal(character, spell) or ladder_refusal(character, spell)
+
+
 def spells_open_to(character: Character, *, is_game_master: bool) -> list[Spell]:
-    """The spells this asker may put points into, in catalog order (#18).
+    """The spells this asker may put points into, in catalog order (#18, #191).
 
     The sheet's learn control lists these; :func:`learn_spell` refuses the
-    rest with :func:`school_refusal`'s reason.
+    rest with :func:`learning_refusal`'s reason.
     """
     return [
         spell
         for spell in learnable_spells()
-        if is_game_master or school_refusal(character, spell) is None
+        if is_game_master or learning_refusal(character, spell) is None
     ]
 
 
@@ -336,7 +403,9 @@ def learn_spell(
     do. A Game Master teaching a spell spends none of them (coordinator's
     ruling on the #774 review, marked for Spencer). A player learns a new
     spell only from their school of magic (:func:`school_refusal`, issue
-    #18); a Game Master teaching one from another school is recorded as such.
+    #18), and an element's tier above the first only with the tier below it
+    on the record (:func:`ladder_refusal`, #191); a Game Master teaching one
+    past either is recorded as such.
 
     Args:
         character: The character, changed in memory and not saved.
@@ -349,7 +418,8 @@ def learn_spell(
 
     Raises:
         CharacterChangeError: An unknown spell, a bad amount, or a player
-            without the free points or learning outside their school.
+            without the free points, learning outside their school or above a
+            rung they do not hold.
     """
     spell = SPELLS.get(spell_key)
     if spell is None:
@@ -361,13 +431,20 @@ def learn_spell(
     if held + points > MAX_SKILL_POINTS:
         raise CharacterChangeError(f"A spell holds at most {MAX_SKILL_POINTS} points")
     free = character.free_skill_points
-    outside_school = ""
+    game_master_notes = ""
     if is_game_master:
+        words = refusal_words().magic
         if held == 0 and school_refusal(character, spell) is not None:
             school = character.magic_school or "unchosen"
-            outside_school = f" (Game Master, outside the caster's school: {school})"
+            outside = words.game_master_outside_school.format(school=school)
+            game_master_notes += f" ({outside})"
+        if (rung_below := rung_not_held(character, spell)) is not None:
+            past_the_rung = words.game_master_past_the_rung.format(
+                rung_below=rung_below.name
+            )
+            game_master_notes += f" ({past_the_rung})"
     else:
-        if refusal := school_refusal(character, spell):
+        if refusal := learning_refusal(character, spell):
             raise CharacterChangeError(refusal)
         if points > free:
             raise CharacterChangeError(
@@ -379,7 +456,7 @@ def learn_spell(
     character.spells = spells
     return (
         f"{spell.name}: {held} → {held + points} points, mastery "
-        f"{format_skill_level(held + points)}{outside_school}"
+        f"{format_skill_level(held + points)}{game_master_notes}"
     )
 
 
