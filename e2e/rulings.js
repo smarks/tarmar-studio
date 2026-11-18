@@ -66,6 +66,20 @@ print('OFFERED_BOUNDS', json.dumps(list(offered_bounds())))
 }
 
 /**
+ * The engine's key for the liftable bounds a spec picks between, by the
+ * constant's name in battle.magic_bounds: ``{CHANNEL, PUSH_CAP}``.
+ * @returns {Object<string, string>}
+ */
+function boundKeys() {
+    return readDjangoJson(`
+import json
+from battle import magic_bounds
+names = ("CHANNEL", "PUSH_CAP")
+print('BOUND_KEYS', json.dumps({name: getattr(magic_bounds, name) for name in names}))
+`, 'BOUND_KEYS');
+}
+
+/**
  * The words for going past these lifted bounds, as the menu's cost line
  * carries them and as the battle log prints them beneath the line.
  * @param {string[]} bounds
@@ -144,5 +158,6 @@ module.exports = {
     chosenBy,
     ownManualLine,
     battleLineParts,
-    rulingWords, hthWholeBattleLogLine, magicBoundsLogLine, offeredBounds, pastByRuling,
+    rulingWords, hthWholeBattleLogLine, magicBoundsLogLine, offeredBounds, boundKeys,
+    pastByRuling,
 };

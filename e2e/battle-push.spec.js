@@ -2,9 +2,10 @@
  * E2E test for pushing mana into a cast (issue #960).
  *
  * The default canon's magic rules (the public configuration) offer Push for a
- * damage spell, rolled against INT with a cap of three pushed mana and no
- * Channel. What only a real browser proves: the seated wizard's spell stage
- * offers the push as a control beside the cast, listing exactly the amounts
+ * damage spell, rolled against INT with a cap of three pushed mana and a
+ * Channel that leaves room past that cap. What only a real browser proves:
+ * the seated wizard's spell stage offers the push as a control beside the
+ * cast, under a label naming the wizard's Channel, listing exactly the amounts
  * the engine put on the menu with none picked; picking one and taking the
  * action sends it; and the turn's log carries the pushed cast, its Control
  * Roll and that roll's outcome.
@@ -319,6 +320,30 @@ print("CASTING_FAILURE " + json.dumps(None if block is None else {
 }
 
 /**
+ * The Channel bounding the battle's wizard's casting of a spell, as the
+ * engine reckons it for the cast stage (MagicRules.channel_bound), or null
+ * when nothing bounds it.
+ *
+ * @param {number} battleId
+ * @param {string} spellKey - the engine's spell key, e.g. "fire_missile"
+ * @returns {number|null}
+ */
+function wizardsChannel(battleId, spellKey) {
+    return readDjangoJson(`
+import json
+from battle import profiles
+from battle.magic_rules import magic_rules
+from battle.models import Battle
+from tarmar_engine.spells import get_spell
+battle = Battle.objects.get(pk=${battleId})
+state = profiles.for_battle(battle).load(battle.state_json)
+(wizard,) = [figure for figure in state.combatants if figure.spells]
+channel = magic_rules().channel_bound(wizard, get_spell(${JSON.stringify(spellKey)}))
+print('WIZARDS_CHANNEL', json.dumps(channel))
+`, 'WIZARDS_CHANNEL');
+}
+
+/**
  * The seated wizard's pool as its roster card shows it ("10 / 10"): the one
  * card with a Mana row, since the opponent casts nothing.
  *
@@ -382,10 +407,14 @@ test.describe('Pushing mana into a cast', () => {
         await adminPage.goto('/tarmar/gm/');
         const pushOffered = (await loadedCanon(adminPage)) === DEFAULT_CANON;
         const battleName = uniqueName('E2E Push');
+        let wizardsBattle = null;
 
         playerPage = await openTheWizardsStage(adminPage, browser, battleName, {
             beforeTurn: pushOffered
-                ? (battleId) => pinTheTurns(battleId, PUSH_TURNS_SEED)
+                ? (battleId) => {
+                    wizardsBattle = battleId;
+                    pinTheTurns(battleId, PUSH_TURNS_SEED);
+                }
                 : undefined,
         });
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
@@ -422,6 +451,13 @@ test.describe('Pushing mana into a cast', () => {
             ...[1, 2, 3].map((mana) => menuLine(panel.push_amount, { mana: String(mana) })),
         ]);
         await expect(amounts.first()).toHaveAttribute('aria-pressed', 'true');
+        // The default canon bounds the cast by Channel, so the control's
+        // label names the wizard's, as the server reckons it.
+        await expect(missileGroup.locator('.turn-push-label')).toHaveText(
+            menuLine(panel.push_label_channel, {
+                channel: String(wizardsChannel(wizardsBattle, 'fire_missile')),
+            })
+        );
 
         await amounts.nth(2).click();
         await expect(amounts.nth(2)).toHaveAttribute('aria-pressed', 'true');
@@ -482,8 +518,8 @@ test.describe('Pushing mana into a cast', () => {
         const { panel } = menuWords();
         const borrowOne = menuLine(panel.borrow_amount, { borrowed: '1' });
         if (defaultCanon) {
-            // The default canon: no Channel, a debt cap of four, a push cap
-            // of three.
+            // The default canon: a debt cap of four and a push cap of three,
+            // within a Channel that leaves room past both.
             await expect(copies).toHaveText([borrowOne, ...[1, 2, 3].map((pushed) => menuLine(
                 panel.borrow_pushed, { pushed: String(pushed), borrowed: String(pushed + 1) }
             ))]);

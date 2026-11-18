@@ -1,6 +1,6 @@
 """The default canon's magic pages state the numbers in its magic-rules.json.
 
-``reference/default_canon/magic-mechanics/`` settles five mechanics for the
+``reference/default_canon/magic-mechanics/`` settles six mechanics for the
 battle board in hand-written sentences, and
 ``reference/default_canon/magic-rules.json`` holds the same numbers as data
 (issues #42 and #47):
@@ -17,10 +17,10 @@ battle board in hand-written sentences, and
 - ``counterspell.md``: what a defender may commit, the opposed roll, the bonus
   per mana and who wins a tie (the ``counterspell`` block);
 - ``push.md``: the Control Roll and the total that always starts a Runaway
-  (the ``push`` block).
-
-``channel.md`` states no number and the default canon's ``channel`` block is
-null, so there is nothing to pin.
+  (the ``push`` block);
+- ``channel.md``: one kind of magic for every spell, its Channel per level held
+  in the spell and the amount added, and the Channel of a caster who holds no
+  level (the ``channel`` block).
 
 They have no shared source: the rules-as-data prose of issue #68 builds the
 sheet's and the Games Master prompt's sentences from the loaded canon, but
@@ -42,8 +42,10 @@ from typing import NamedTuple
 
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
+    UNRECORDED_SKILL_LEVEL,
     BorrowingRules,
     CastingFailureRules,
+    ChannelRules,
     CounterspellRules,
     PushRules,
     RunawayRules,
@@ -60,6 +62,7 @@ RUNAWAY_PAGE = MAGIC_MECHANICS_DIR / "runaway.md"
 MANA_POOL_PAGE = MAGIC_MECHANICS_DIR / "mana-pool.md"
 COUNTERSPELL_PAGE = MAGIC_MECHANICS_DIR / "counterspell.md"
 PUSH_PAGE = MAGIC_MECHANICS_DIR / "push.md"
+CHANNEL_PAGE = MAGIC_MECHANICS_DIR / "channel.md"
 
 #: Attribute abbreviations (as ``magic-rules.json`` spells them) to the name
 #: the pages print.
@@ -118,6 +121,15 @@ COUNTERSPELL_TIE = r"a tie goes to the (defender|caster)"
 
 PUSH_CONTROL_ROLL = r"Control Roll \((\d+d\d+) against (\w+)\)"
 PUSH_AUTOMATIC_RUNAWAY = r"or roll an? (\d+), and the spell slips"
+
+CHANNEL_ONE_KIND = "every spell is of one kind of magic"
+CHANNEL_DERIVATION = (
+    r"Channel for a spell is (\d+) for each level they hold in (that spell|\w+),"
+    r" plus (\d+)\."
+)
+#: How ``channel.md`` names the level a Channel reads when it is the spell's own.
+CHANNEL_SPELL_LEVEL = "that spell"
+CHANNEL_WITH_NO_LEVEL = r"holds no level in the spell still has a Channel of (\d+)"
 
 
 class Page(NamedTuple):
@@ -351,6 +363,37 @@ def push_claims_of_rules(rules: PushRules) -> dict[str, object]:
     }
 
 
+def channel_claims_of_page(page: Page, rules: ChannelRules) -> dict[str, object]:
+    """What a ``channel.md`` page says about how Channel derives.
+
+    The page words a single kind of magic, so a block that adds a kind or
+    sorts a spell into one needs the page and this parser rewritten with it.
+    """
+    derivation = search(CHANNEL_DERIVATION, page)
+    return {
+        "one_kind_for_every_spell": states(CHANNEL_ONE_KIND, page, expected=True),
+        "reads_the_spell_level": derivation.group(2) == CHANNEL_SPELL_LEVEL,
+        "multiplier": int(derivation.group(1)),
+        "offset": int(derivation.group(3)),
+        "channel_with_no_level": int(search(CHANNEL_WITH_NO_LEVEL, page).group(1)),
+    }
+
+
+def channel_claims_of_rules(rules: ChannelRules) -> dict[str, object]:
+    """The same claims, from the loaded ``channel`` block."""
+    (kind,) = rules.derivations
+    derivation = rules.derivations[kind]
+    return {
+        "one_kind_for_every_spell": (
+            rules.default_kind == kind and not rules.kind_by_spell
+        ),
+        "reads_the_spell_level": derivation.source_skill is None,
+        "multiplier": derivation.multiplier,
+        "offset": derivation.offset,
+        "channel_with_no_level": derivation.channel_at(UNRECORDED_SKILL_LEVEL),
+    }
+
+
 class MagicPagesFollowTheRulesFileTest(SimpleTestCase):
     """Each hand-written paragraph states what the default canon's file holds."""
 
@@ -396,11 +439,13 @@ class MagicPagesFollowTheRulesFileTest(SimpleTestCase):
             push_claims_of_rules(rules),
         )
 
-    def test_the_channel_page_has_nothing_to_pin(self) -> None:
-        """channel.md states no number because the default canon has no Channel."""
-        self.assertIsNone(DEFAULT_MAGIC_RULES.channel)
-        channel_page = read_page(MAGIC_MECHANICS_DIR / "channel.md")
-        self.assertIsNone(re.search(r"\d", channel_page.prose))
+    def test_channel_page_matches_the_channel_block(self) -> None:
+        rules = DEFAULT_MAGIC_RULES.channel
+        assert rules is not None, "the default canon bounds a casting by Channel"
+        self.assertEqual(
+            channel_claims_of_page(read_page(CHANNEL_PAGE), rules),
+            channel_claims_of_rules(rules),
+        )
 
 
 class MagicPageDriftIsCaughtTest(SimpleTestCase):
@@ -530,6 +575,22 @@ class MagicPageDriftIsCaughtTest(SimpleTestCase):
                 ("(3d6 against Intelligence)", "(2d6 against Intelligence)"),
                 ("(3d6 against Intelligence)", "(3d6 against Wisdom)"),
                 ("or roll an 18,", "or roll a 17,"),
+            ),
+        )
+
+    def test_channel_page_edits_are_caught(self) -> None:
+        rules = DEFAULT_MAGIC_RULES.channel
+        assert rules is not None
+        self.assert_edits_are_caught(
+            CHANNEL_PAGE,
+            rules,
+            channel_claims_of_page,
+            channel_claims_of_rules(rules),
+            (
+                ("is 2 for each level", "is 3 for each level"),
+                ("they hold in that spell,", "they hold in Sword,"),
+                ("in that spell, plus 6.", "in that spell, plus 5."),
+                ("still has a Channel of 6,", "still has a Channel of 5,"),
             ),
         )
 

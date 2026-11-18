@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
+    UNRECORDED_SKILL_LEVEL,
     BorrowingRules,
     CastingFailureRules,
     CastingSuccessTier,
@@ -29,6 +30,7 @@ from tarmar_engine.magic import (
     RunawayRules,
     SpellEffectKind,
 )
+from tarmar_engine.spells import SPELLS
 
 from battle.magic_rules import (
     CASTING_DICE,
@@ -1070,9 +1072,9 @@ class CanonMagicRulesTest(SimpleTestCase):
     def test_the_default_canon_file_loads(self) -> None:
         rules = DEFAULT_MAGIC_RULES
         self.assertIsNotNone(rules.push)
-        # The default canon's channel.md sets no separate limit on Channel,
-        # so its invented Borrowing carries a debt cap to bound a casting.
-        self.assertIsNone(rules.channel)
+        # Its channel.md says Channel bounds every casting.
+        self.assertIsNotNone(rules.channel)
+        # Its borrowing.md caps the Debt as well.
         assert rules.borrowing is not None
         self.assertIsNotNone(rules.borrowing.max_debt)
         # Its runaway.md says a Runaway feeds on the caster each round.
@@ -1081,6 +1083,25 @@ class CanonMagicRulesTest(SimpleTestCase):
         self.assertIsNotNone(rules.counterspell)
         # Its mana-pool.md says how a casting roll's high results fail.
         self.assertIsNotNone(rules.casting_failure)
+
+    def test_the_default_canons_channel_covers_every_cast_within_the_push_cap(
+        self,
+    ) -> None:
+        """channel.md: a caster who holds no level in a spell still has the
+        Channel for it pushed to Push's cap, so Channel withholds no cast,
+        push or borrowing the other bounds allow. A spell above the catalog's
+        highest level, or a smaller offset, fails here."""
+        rules = DEFAULT_MAGIC_RULES
+        assert rules.channel is not None and rules.push is not None
+        max_push_mana = rules.push.max_push_mana
+        assert max_push_mana is not None, "the default canon caps Push"
+        for spell in SPELLS.values():
+            derivation = rules.channel.derivations[rules.channel.kind_for(spell)]
+            with self.subTest(spell=spell.key):
+                self.assertGreaterEqual(
+                    derivation.channel_at(UNRECORDED_SKILL_LEVEL),
+                    spell.level + max_push_mana,
+                )
 
     def test_the_default_canon_rolls_the_public_page_schools(self) -> None:
         # schools-of-magic.md: "Common Schools (0-70%)" and "Less Common

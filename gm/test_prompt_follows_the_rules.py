@@ -112,8 +112,9 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "cost + mana pushed). Fail by 1-4: Slip (spell takes effect without the "
             "push's bonus). Fail by 5+: Surge, a Runaway (spell fails). Natural 18: "
             "always Surge, a Runaway.",
-            "There is no Channel: only the caster's mana, and the push and debt caps "
-            "where the rules set them, bound a casting.",
+            "Hard cap on mana per casting, the spell's cost and any pushed mana "
+            "together. Rote Magic: equals 2 × skill level in that specific spell + "
+            "6. Channel cannot be exceeded even by Borrowing.",
             "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
             "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). Fail by 1-2: "
             "Flicker. Fail by 3-5: Fray (lose 2 × the Debt in Fatigue). Fail by 6-8: "
@@ -983,6 +984,18 @@ class InventedRulesTest(SimpleTestCase):
             body,
             "Hard cap on mana per casting, the spell's cost and any pushed mana "
             "together. Fixed Magic: is 6.",
+        )
+
+    def test_a_canon_with_no_channel_says_so(self) -> None:
+        """Neither shipped canon is without Channel since the default canon
+        gained one (#208), so a canon that sets none is seated here."""
+        rules = replace(UNLIKE_EITHER_CANONS_MAGIC_RULES, borrowing=None, channel=None)
+        with seated_rules(rules):
+            body = magic_body(CHANNEL)
+        self.assertEqual(
+            body,
+            "There is no Channel: only the caster's mana, and the push and debt caps "
+            "where the rules set them, bound a casting.",
         )
 
     def test_the_magic_section_states_the_runaway(self) -> None:

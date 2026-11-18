@@ -38,7 +38,13 @@
     "effect_bonus_per_mana_by_kind": { "damage": 1 },
     "spell_effect_bonus_per_mana": {}
   },
-  "channel": null,
+  "channel": {
+    "derivations": {
+      "rote": { "source_skill": null, "multiplier": 2, "offset": 6 }
+    },
+    "kind_by_spell": {},
+    "default_kind": "rote"
+  },
   "borrowing": {
     "debt_dice": "2d6",
     "debt_attributes": ["WIS"],
