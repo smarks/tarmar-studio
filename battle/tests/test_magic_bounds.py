@@ -87,19 +87,30 @@ class BoundsTheCanonImposesTest(BaseTestCase):
 
     def test_each_bound_is_imposed_only_when_the_rules_carry_it(self):
         default_canon = load_magic_rules(DEFAULT_CANON_DIR / "magic-rules.json")
-        # The default canon has no Channel, and caps Push.
+        # The default canon bounds a casting by Channel, and caps Push.
         self.assertEqual(
-            magic_bounds.bounds_imposed_by(default_canon), (PUSH_CAP, COUNTER_BOUNDS)
+            magic_bounds.bounds_imposed_by(default_canon),
+            (CHANNEL, PUSH_CAP, COUNTER_BOUNDS),
         )
         assert default_canon.push is not None
         uncapped = replace(
             default_canon, push=replace(default_canon.push, max_push_mana=None)
         )
         # The Tarmar canon's Push has no cap, so there is no push cap to lift.
-        self.assertEqual(magic_bounds.bounds_imposed_by(uncapped), (COUNTER_BOUNDS,))
+        self.assertEqual(
+            magic_bounds.bounds_imposed_by(uncapped), (CHANNEL, COUNTER_BOUNDS)
+        )
         self.assertEqual(
             magic_bounds.bounds_imposed_by(
                 replace(uncapped, push=None, counterspell=None)
+            ),
+            (CHANNEL,),
+        )
+        # Its Borrowing carries a debt cap, so it stands without Channel, and
+        # then nothing is left to lift.
+        self.assertEqual(
+            magic_bounds.bounds_imposed_by(
+                replace(uncapped, channel=None, push=None, counterspell=None)
             ),
             (),
         )

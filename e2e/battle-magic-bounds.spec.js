@@ -16,7 +16,7 @@ const { uniqueName } = require('./unique-name');
 const { stopCoverage } = require('./coverage');
 const { runDjangoShell } = require('./django');
 const {
-    rulingWords, magicBoundsLogLine, offeredBounds, pastByRuling,
+    rulingWords, magicBoundsLogLine, offeredBounds, boundKeys, pastByRuling,
 } = require('./rulings');
 const { PUSH_TURNS_SEED, pinTheTurns, openTheWizardsStage } = require('./wizard-stage');
 
@@ -89,16 +89,21 @@ test.describe('Magic bounds lifted', () => {
         })).toHaveCount(1);
     });
 
-    test("a Game Master lifts the canon's first bound for a wizard, whose menu then offers the cast past it", async ({ adminPage, browser }, testInfo) => {
-        // The bound is the loaded canon's to impose: under the Tarmar canon
-        // Channel (the wizard's Fire Missile level, which leaves no room to
-        // push), under the default canon Push's own cap of three. Either way
-        // the wizard's Fire Missile is offered pushed copies past it once
-        // the Game Master lifts it, and the log says the cast went past it by
-        // the ruling.
+    test("a Game Master lifts the bound that holds a wizard's push, whose menu then offers the cast past it", async ({ adminPage, browser }, testInfo) => {
+        // The bound is the one the loaded canon holds the wizard's Fire
+        // Missile to: under the Tarmar canon Channel (the wizard's Fire
+        // Missile level, which leaves no room to push), under the default
+        // canon Push's own cap of three, since its Channel leaves room past
+        // that cap at any level. Either way the wizard's Fire Missile is
+        // offered pushed copies past it once the Game Master lifts it, and
+        // the log says the cast went past it by the ruling. Under the
+        // default canon those copies now stop at the wizard's Channel,
+        // which stays held.
         await adminPage.goto('/tarmar/gm/');
         const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
-        const [bound] = offeredBounds();
+        const keys = boundKeys();
+        const bound = defaultCanon ? keys.PUSH_CAP : keys.CHANNEL;
+        expect(offeredBounds()).toContain(bound);
         const words = rulingWords().magic_bounds;
         const past = pastByRuling([bound]);
 

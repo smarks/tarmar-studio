@@ -2,4 +2,4 @@
 
 Channel is the mana a caster draws into a single casting. The public rules say only that the more mana a caster channels, the harder it becomes to keep control, which is what the Control Roll in [Push](/tarmar/reference/dm-rules/magic-mechanics/push/) measures.
 
-This default canon sets no separate limit on Channel. A Game Master who wants one decides it.
+On the battle board this default canon settles it (the `channel` block of its `magic-rules.json`): every spell is of one kind of magic, and a caster's Channel for a spell is **2** for each level they hold in that spell, plus **6**. Channel bounds the whole mana of one casting, the spell's cost and any mana pushed into it together, whether the caster pays it from the pool or borrows it. A caster who holds no level in the spell still has a Channel of 6, which covers the costliest spell this canon offers pushed to Push's cap, so Channel refuses no casting within that cap. A Game Master may lift a caster's Channel, and one who lifts a caster's push cap must lift the Channel as well before that caster may push past it.

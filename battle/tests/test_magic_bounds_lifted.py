@@ -6,9 +6,9 @@ Tarmar profile writes it onto each figure's ``lifted_magic_bounds`` every turn
 amounts and runs them, the studio's own readings (the cast stage, the turn
 menu's cost line) follow it through the engine's methods, and a cast or
 counter that went past a lifted bound says so in the battle log and the GM
-battle report. Every rule here is invented (``magic_fixtures``), so the tests
-read the same under either canon; the e2e spec lifts what the loaded canon
-imposes.
+battle report. Every rule here is invented (``magic_fixtures``), or the default
+canon's read from its own file, so the tests read the same under either
+canon; the e2e spec lifts what the loaded canon imposes.
 """
 
 from dataclasses import replace
@@ -20,6 +20,7 @@ from tarmar_engine.engine import TurnRunner
 from tarmar_engine.magic import LIFTED_BOUNDS_KEY
 from tarmar_engine.policy import Candidate, choose_option
 from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
+from tarmar_engine.spells import get_spell
 
 from battle import magic_bounds, profiles, turn_menu
 from battle.access import Actor
@@ -38,6 +39,7 @@ from common.test_helpers import BaseTestCase
 from .magic_fixtures import (
     BORROWING_RULES,
     COUNTER_RULES,
+    DEFAULT_MAGIC_RULES,
     INVENTED_RULES,
     rules_with_channel,
     seated_rules,
@@ -291,6 +293,52 @@ class LiftedPushCapTest(SimpleTestCase):
             if candidate.spell_key == "fire_missile" and candidate.push_mana == 3
         )
         self.assertEqual(past.lifted_bounds, (PUSH_CAP,))
+
+
+@with_fixed_words
+class DefaultCanonLiftedPushCapTest(SimpleTestCase):
+    """Under the default canon, lifting the push cap alone leaves Channel to
+    bound the push; lifting Channel too gives back the purse and the debt
+    cap (channel.md)."""
+
+    #: A purse wider than the wizard's Channel for Fire Missile.
+    PURSE = 12
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(seated_rules(DEFAULT_MAGIC_RULES))
+
+    def pushes(self, *bounds: str) -> list[int]:
+        """Every amount the menu offers the wizard to push into Fire Missile,
+        from the purse or borrowed, with ``bounds`` lifted."""
+        state = lifted(wizard_state(mana=self.PURSE, max_mana=self.PURSE), 1, *bounds)
+        return sorted(
+            candidate.push_mana
+            for candidate in menu(state)
+            if candidate.spell_key == "fire_missile" and candidate.push_mana
+        )
+
+    def test_the_lifted_cap_stops_at_channel_until_channel_is_lifted_too(self):
+        rules = DEFAULT_MAGIC_RULES
+        assert rules.push is not None and rules.push.max_push_mana is not None
+        assert rules.borrowing is not None and rules.borrowing.max_debt is not None
+        state = wizard_state(mana=self.PURSE, max_mana=self.PURSE)
+        wizard = state.by_id(1)
+        spell = get_spell("fire_missile")
+        channel = rules.channel_for(wizard, spell)
+        assert channel is not None
+        most_within_channel = channel - spell.level
+        most_from_purse_and_debt = self.PURSE + rules.borrowing.max_debt - spell.level
+        # The case is only a test while Channel is the tighter bound.
+        self.assertLess(rules.push.max_push_mana, most_within_channel)
+        self.assertLess(most_within_channel, most_from_purse_and_debt)
+
+        self.assertEqual(self.pushes(), list(range(1, rules.push.max_push_mana + 1)))
+        self.assertEqual(self.pushes(PUSH_CAP), list(range(1, most_within_channel + 1)))
+        self.assertEqual(
+            self.pushes(PUSH_CAP, CHANNEL),
+            list(range(1, most_from_purse_and_debt + 1)),
+        )
 
 
 @with_fixed_words
