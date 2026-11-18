@@ -304,7 +304,12 @@ Notes on the edges, each checkable:
   modifier limit). Callers read it through the cached `skill_rules()` when
   they run, never at import, and a refused file, or a skill name that is no
   glossary skill in its own right (`characters.skills.validate_skill_names`),
-  is reported by `characters.E002`. A value built from it and cached (the
+  is reported by `characters.E002`. Its `game_master_started` list names the
+  skills a player never starts and a Game Master does (Arcane, on the public
+  pages): `characters.services.allocation_refusal` holds a player to it
+  wherever a free point is spent, and `characters.E006` refuses a canon whose
+  track tables or Origin rows would grant such a skill unasked
+  (tarmar-studio #208). A value built from it and cached (the
   Games Master's prompts, the patterns naming its skills and tracks)
   registers with `reference.rules_file.derived_from_rules`, so a test seating
   other rules clears it.

@@ -317,6 +317,63 @@ class AuthorityFromTheAccountTest(BaseTestCase):
             {"brawling": 1, "knowledge (history)": 1, "broadsword": 1},
         )
 
+    def test_a_players_session_cannot_start_arcane(self):
+        """tarmar-studio #208: Arcane comes by invitation, so the chat holds a
+        player to the sheet's rule though the glossary names the skill."""
+        reason = refusal_words().services.game_master_started_skill.format(
+            skill="arcane"
+        )
+        session, outcome = self._play(
+            self.create_user(),
+            [{"action": "spend_skill_points", "skill": "Arcane", "points": 1}],
+            free_skill_points=3,
+        )
+
+        (result,) = outcome.results
+        self.assertFalse(result.ran)
+        self.assertEqual(result.error, reason)
+        self.assertIsNotNone(result.procedure)
+        self.assertEqual(
+            result.procedure["lines"][-1],
+            f"⚙️ Not done: spending skill points for Kael, because {reason}",
+        )
+        values = character_values(session)
+        self.assertEqual(values["skills"], {})
+        self.assertEqual(values["free_skill_points"], 3)
+
+    def test_a_players_session_raises_arcane_once_the_character_holds_it(self):
+        session, outcome = self._play(
+            self.create_user(),
+            [{"action": "spend_skill_points", "skill": "Arcane", "points": 2}],
+            free_skill_points=3,
+            skills={"arcane": 1},
+        )
+
+        (result,) = outcome.results
+        self.assertTrue(result.ran, result.error)
+        self.assertNotIn(services.GAME_MASTER_STARTED_SKILL_NOTE, result.note)
+        values = character_values(session)
+        self.assertEqual(values["skills"], {"arcane": 3})
+        self.assertEqual(values["free_skill_points"], 1)
+
+    def test_a_game_masters_session_starts_arcane_and_the_ledger_says_so(self):
+        session, outcome = self._play(
+            self.create_dm(),
+            [{"action": "spend_skill_points", "skill": "Arcane", "points": 1}],
+            free_skill_points=3,
+        )
+
+        (result,) = outcome.results
+        self.assertTrue(result.ran, result.error)
+        started = f"arcane {services.GAME_MASTER_STARTED_SKILL_NOTE}"
+        self.assertIn(started, result.note)
+        self.assertIsNotNone(result.procedure)
+        self.assertTrue(
+            any(started in line for line in result.procedure["lines"]),
+            result.procedure["lines"],
+        )
+        self.assertEqual(character_values(session)["skills"], {"arcane": 1})
+
 
 class TheSkillPointBreakdownNeverGoesNegativeTest(SimpleTestCase):
     """``spent`` was inferred from two sides kept apart (issue #690).

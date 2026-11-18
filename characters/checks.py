@@ -11,6 +11,12 @@ refuses, or a canon without one, would otherwise surface only then, as an
 error in the middle of whichever of those came first. Checked here, it fails
 ``manage.py check`` and the deploy's ``migrate`` (which runs the system
 checks) before anyone builds a character.
+
+One check reads two files together (tarmar-studio #208): a skill the canon
+leaves to a Game Master to start (``skill-rules.json``'s
+``game_master_started``) must be on no list that gives a skill without asking
+who may start it, a track's table or an Origin's row
+(:func:`check_game_master_started_skills`).
 """
 
 from collections.abc import Callable, Iterator, Sequence
@@ -48,8 +54,17 @@ from .rules import (
     CharacterRulesError,
     character_rules,
 )
-from .skill_rules import SkillRulesError, skill_rules
-from .skills import validate_skill_names
+from .skill_rules import (
+    GAME_MASTER_STARTED_BLOCK,
+    SkillRules,
+    SkillRulesError,
+    skill_rules,
+)
+from .skills import (
+    is_game_master_started,
+    normalize_skill_name,
+    validate_skill_names,
+)
 
 #: The check id a refused ``character-rules.json`` reports under.
 CHARACTER_RULES_CHECK_ID = "characters.E001"
@@ -62,6 +77,9 @@ EQUIPMENT_RULES_CHECK_ID = "characters.E004"
 #: The check id a canon table label too long for its ``Character`` column
 #: reports under (issue #66).
 CHARACTER_LABEL_COLUMNS_CHECK_ID = "characters.E005"
+#: The check id a canon list that grants a skill only a Game Master starts
+#: reports under (tarmar-studio #208).
+GAME_MASTER_STARTED_CHECK_ID = "characters.E006"
 
 
 def _rules_file_refusals(
@@ -318,3 +336,100 @@ def check_character_labels_fit_their_columns(
                 )
             )
     return messages
+
+
+def granted_game_master_started_skills(
+    canon_skill_rules: SkillRules, canon_character_rules: CharacterRules
+) -> list[str]:
+    """Each canon list that grants a skill only a Game Master starts.
+
+    Four paths give a character a skill from a canon list and ask nobody who
+    may start it: a year of prior experience (a track's d20 table, and the
+    skill its pay rides on), the Origin's grant, the background roll (the
+    sheet's and the Games Master chat's ``roll_background`` and
+    ``set_background``, which grant through the Origin), and a player's
+    import, which grants the Origin's skill. They read two lists between
+    them, so holding the lists holds all four.
+
+    Args:
+        canon_skill_rules: The canon's skill rules.
+        canon_character_rules: The canon's character rules.
+
+    Returns:
+        Where each such skill is named, as the two files spell it; empty when
+        none is.
+
+    Raises:
+        EquipmentCatalogError: The catalog, which says whether a name is a
+            Weapon skill, is refused.
+    """
+
+    def only_a_game_master_starts(written: str) -> bool:
+        return is_game_master_started(normalize_skill_name(written), canon_skill_rules)
+
+    found = []
+    for key, track in canon_skill_rules.tracks.tracks.items():
+        found.extend(
+            f"{CANON_SKILL_RULES_FILE_NAME} tracks.{key}.skills names {written!r}"
+            for written in dict.fromkeys(track.skills)
+            if only_a_game_master_starts(written)
+        )
+        if track.money_skill is not None and only_a_game_master_starts(
+            track.money_skill
+        ):
+            found.append(
+                f"{CANON_SKILL_RULES_FILE_NAME} tracks.{key}.money_skill names "
+                f"{track.money_skill!r}"
+            )
+    for row in canon_character_rules.location.rows:
+        found.extend(
+            f"{CANON_CHARACTER_RULES_FILE_NAME} location row {row.label!r} grants "
+            f"{written!r}"
+            for written in row.skills
+            if only_a_game_master_starts(written)
+        )
+    return found
+
+
+@register()
+def check_game_master_started_skills(
+    app_configs: Sequence[AppConfig] | None = None, **kwargs: Any
+) -> list[CheckMessage]:
+    """No track and no Origin grants a skill only a Game Master starts
+    (tarmar-studio #208).
+
+    A player is held to ``game_master_started`` where a free point is spent
+    (:func:`characters.services.allocation_refusal`). Prior experience, the
+    Origin's grant, the background roll and a player's import give a skill
+    from a canon list with no such question, so a canon that put Arcane on a
+    track's table would hand players the invitation. A canon whose rules or
+    catalog do not load is ``characters.E001``'s, ``E002``'s or ``E003``'s
+    to report.
+
+    Args:
+        app_configs: The apps being checked, or ``None`` for all; the canon
+            belongs to no one app, so it is checked whichever are named.
+        **kwargs: Django's other check arguments, unused.
+
+    Returns:
+        One :class:`Error` naming every list that grants such a skill, or no
+        messages.
+    """
+    try:
+        granted = granted_game_master_started_skills(skill_rules(), character_rules())
+    except (SkillRulesError, CharacterRulesError, EquipmentCatalogError):
+        return []
+    if not granted:
+        return []
+    return [
+        Error(
+            f"{'; '.join(granted)}: {GAME_MASTER_STARTED_BLOCK} leaves each to a "
+            "Game Master to start, and a track's table or an Origin's row gives "
+            "a skill to any character",
+            hint=(
+                "Take the skill off the track or the Origin, or out of "
+                f"{GAME_MASTER_STARTED_BLOCK} in {CANON_SKILL_RULES_FILE_NAME}."
+            ),
+            id=GAME_MASTER_STARTED_CHECK_ID,
+        )
+    ]

@@ -8,6 +8,9 @@ Keep entries short — one or two sentences. The wiki has the full rules.
 
 Every sentence that states a number a canon rules file holds is built from the
 loaded rules when the help is first asked for (issue #68), never at import.
+What is said of the skills only a Game Master starts is configured wording
+(``config/characters-refusals.toml``, tarmar-studio #208), filled with the
+canon's list.
 Left as written, because no rules file holds them: the injury bands and the
 survival save, the casting dice, Body's 2/3, Physical and Mental's halves, the
 Appearance roll, the skill cost ladder (1, 3, 6, ...), and the aim and dodge
@@ -278,8 +281,28 @@ def _location_help() -> str:
     )
 
 
-def _free_skill_points_help() -> str:
-    """Free points' help, with Arcane's cost multiple from the canon."""
+def _game_master_started_help(game_master_started_words: str) -> str:
+    """What the free points' help says of the skills only a Game Master
+    starts (tarmar-studio #208); nothing under a canon that names none.
+
+    Args:
+        game_master_started_words: The configured sentence, which names the
+            skills at ``{skills}``.
+    """
+    started = skill_rules().game_master_started
+    if not started:
+        return ""
+    skills = ", ".join(skill_name.title() for skill_name in started)
+    return f" {game_master_started_words.format(skills=skills)}"
+
+
+def _free_skill_points_help(game_master_started_words: str) -> str:
+    """Free points' help, with Arcane's cost multiple and the skills only a
+    Game Master starts, both from the canon.
+
+    Args:
+        game_master_started_words: The configured sentence for those skills.
+    """
     multiple = skill_rules().skill_cost.multiplier_for(ARCANE_SKILL_NAME)
     arcane = (
         ""
@@ -293,6 +316,7 @@ def _free_skill_points_help() -> str:
         "Unspent points from earned experience. Allocate via the + button on "
         "any skill. There is no maximum level: each level costs one point more "
         f"than the last (1, 3, 6, 10, 15, 21, ... points in total){arcane}."
+        f"{_game_master_started_help(game_master_started_words)}"
     )
 
 
@@ -352,15 +376,13 @@ def _movement_help() -> str:
     )
 
 
-@derived_from_rules
-@functools.cache
-def help_text() -> Mapping[str, str]:
-    """Every help entry by key, built from the loaded rules on first use.
+def _build_help(game_master_started_words: str) -> Mapping[str, str]:
+    """Every help entry by key: the written entries and the ones built from
+    the loaded rules together.
 
-    The written entries and the ones built from the rules together. Cached,
-    so the sheet renders the same text for the life of the process, and
-    cleared with the other values derived from the rules when a canon is
-    seated (issue #68).
+    Args:
+        game_master_started_words: The configured sentence for the skills
+            only a Game Master starts.
     """
     return MappingProxyType(
         {
@@ -370,9 +392,38 @@ def help_text() -> Mapping[str, str]:
             "fatigue_roll": _fatigue_roll_help(),
             "wealth_level": _wealth_level_help(),
             "location": _location_help(),
-            "free_skill_points": _free_skill_points_help(),
+            "free_skill_points": _free_skill_points_help(game_master_started_words),
             "skill_check": _skill_check_help(),
             "encumbrance": _encumbrance_help(),
             "movement": _movement_help(),
         }
     )
+
+
+@derived_from_rules
+@functools.cache
+def _help_by_wording() -> dict[str, Mapping[str, str]]:
+    """The help already built from the loaded rules, by the configured
+    sentence it was built with; :func:`help_text` fills it.
+
+    Cached, so the sheet renders the same text for the life of the process,
+    and cleared with the other values derived from the rules when a canon is
+    seated (issue #68). Keyed by the configured words, which are settings and
+    not rules, so help built under other words is never served for these.
+    """
+    return {}
+
+
+def help_text() -> Mapping[str, str]:
+    """Every help entry by key, built from the loaded rules on first use, with
+    the configured words for the skills only a Game Master starts
+    (``config/characters-refusals.toml``, tarmar-studio #208)."""
+    # Imported here: the words are Django settings, and this module is
+    # imported where there are none (the command-line Games Master).
+    from characters.refusal_words import refusal_words
+
+    words = refusal_words().help_text.game_master_started_skills
+    built = _help_by_wording()
+    if words not in built:
+        built[words] = _build_help(words)
+    return built[words]

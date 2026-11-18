@@ -21,6 +21,8 @@ from reference.paths import (
     PUBLIC_RULES_DIR,
 )
 
+from .magic_fixtures import DEFAULT_MAGIC_RULES
+
 RULES = PUBLIC_RULES_DIR
 COMBAT = RULES / "combat"
 
@@ -371,6 +373,43 @@ class SpellCatalogDriftGuard(SimpleTestCase):
         }
         self.assertTrue(page_rungs)
         self.assertEqual(catalog_rungs, page_rungs)
+
+    def test_no_default_canon_working_is_named_for_a_spell(self):
+        # tarmar-studio #208: the default canon's True Magic workings are
+        # invented, and one named for a spell the pages list reads as that
+        # spell (the narrated working was "Shaping", which is Mending 4). No
+        # working's key or label shares a word with a spell of the catalog,
+        # of schools-of-magic.md's lists or of spell-descriptions.md's tables.
+        magic_pages = RULES / "magic"
+        spell_names = [
+            *(spell.name for spell in SPELLS.values()),
+            *re.findall(
+                r"^\d+\. (.+)$",
+                (magic_pages / "schools-of-magic.md").read_text(),
+                re.MULTILINE,
+            ),
+            *re.findall(
+                r"^\| ([^|]+) \| \d",
+                (magic_pages / "spell-descriptions.md").read_text(),
+                re.MULTILINE,
+            ),
+        ]
+        spell_words = {
+            word.lower()
+            for spell_name in spell_names
+            for word in re.findall(r"[A-Za-z]+", spell_name)
+        }
+        self.assertLessEqual({"missile", "shaping", "counter", "sleep"}, spell_words)
+        true_magic = DEFAULT_MAGIC_RULES.true_magic
+        assert true_magic is not None, "the default canon has True Magic"
+        self.assertTrue(true_magic.effects)
+        for effect in true_magic.effects:
+            for written in (effect.key, effect.label):
+                with self.subTest(effect=effect.key, written=written):
+                    shared = spell_words.intersection(
+                        word.lower() for word in re.findall(r"[A-Za-z]+", written)
+                    )
+                    self.assertFalse(shared, f"{written!r} names a spell")
 
     def test_the_default_canon_school_table_is_the_page_lists(self):
         # Issue #18: schools-of-magic.md heads its lists "Common Schools

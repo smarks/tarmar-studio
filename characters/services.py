@@ -90,6 +90,7 @@ from .purse import (
 )
 from .refusal_words import ServicesWords, refusal_words
 from .rules import character_rules, game_master_origins_in_words
+from .skill_rules import skill_rules
 from .skills import (
     MAX_EXPERIENCE_YEARS_PER_RUN,
     MAX_SKILL_POINTS,
@@ -99,6 +100,7 @@ from .skills import (
     format_skill_level,
     get_random_track,
     glossary_skill,
+    is_game_master_started,
     normalize_skill_name,
     simulate_experience_years,
     skill_name_refusal,
@@ -1549,7 +1551,8 @@ KNOWLEDGE_FIELD_REFUSED_REASON = (
 #: What the history and the Games Master ledger record when a Game Master
 #: starts a skill a player could not (issue #902): the override is named, not
 #: silent. Worded to hold for every reason :func:`allocation_refusal` gives --
-#: a name the glossary does not know and a Knowledge field alike.
+#: a name the glossary does not know, a Knowledge field, and a skill the canon
+#: leaves to a Game Master to start (tarmar-studio #208) alike.
 GAME_MASTER_STARTED_SKILL_NOTE = (
     "started by the Game Master: a skill only a Game Master may start"
 )
@@ -1562,10 +1565,16 @@ def allocation_refusal(skills: Mapping[str, int] | None, skill: str) -> str | No
     starts one the skills glossary names
     (:func:`characters.skill_checks.is_glossary_skill`): a Weapon skill, the
     Maker Skill with its craft (the choice a rename also leaves a player,
-    :data:`PLAYER_CHOSEN_PARTS`), Arcane, and so on. A name no rule knows,
+    :data:`PLAYER_CHOSEN_PARTS`), and so on. A name no rule knows,
     "brawling" among them, and a Knowledge field are the Game Master's to
     allow. The standing rule applied (players held to the rules, a Game
     Master overrides): coordinator's ruling, Spencer may overrule.
+
+    A skill the canon lists under ``game_master_started`` (tarmar-studio
+    #208: Arcane, which comes by invitation) is the Game Master's to start
+    though the glossary names it; a player whose character holds it raises
+    it as any other skill (the canon's
+    ``arcane_once_granted_is_the_players_to_raise`` ruling).
 
     Args:
         skills: The character's stored skills.
@@ -1576,6 +1585,8 @@ def allocation_refusal(skills: Mapping[str, int] | None, skill: str) -> str | No
     target = allocation_target(skills, skill)
     if target in (skills or {}):
         return None
+    if is_game_master_started(target, skill_rules()):
+        return refusal_words().services.game_master_started_skill.format(skill=target)
     under, chosen_part = split_specialised_skill(target)
     if chosen_part and under not in PLAYER_CHOSEN_PARTS:
         return KNOWLEDGE_FIELD_REFUSED_REASON

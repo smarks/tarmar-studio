@@ -1,5 +1,6 @@
 {
   "skill_cost": { "multipliers": { "arcane": 2 } },
+  "game_master_started": ["arcane"],
   "tracks": {
     "merchant": {
       "label": "Merchant",

@@ -17,6 +17,7 @@ The file is a JSON object::
 
     {
       "skill_cost": {"multipliers": {str: int, ...}},
+      "game_master_started": [str, ...],
       "tracks": {
         str: {"label": str, "xp_per_year": int, "survival_target": int,
               "money_multiplier": int, "money_skill": str | null,
@@ -53,6 +54,13 @@ What the values mean, and what else is refused:
 - ``skill_cost.multipliers``: skills that cost a multiple of the ordinary
   triangular cost (Arcane costs double), by stored skill name; a skill not
   listed costs the ordinary amount. Each multiplier is at least 1.
+- ``game_master_started``: the skills a player never starts and a Game
+  Master does, by stored skill name, none named twice (tarmar-studio #208:
+  Arcane, which comes by invitation). A player who holds one raises it as
+  any skill. The list may be empty. No track's table and no Origin's grant
+  may name one, since those give a skill without asking who may start it;
+  that needs ``character-rules.json`` too, so the ``characters.E006`` system
+  check makes it (:func:`characters.checks.check_game_master_started_skills`).
 - ``tracks``: each prior-experience track by its key, with its label (no two
   alike), the XP a year in it gives (at least 1), the survival roll's target,
   the money a year pays per skill level (at least 1), the skill whose level
@@ -83,11 +91,13 @@ What the values mean, and what else is refused:
   attributes are the six core attributes' field names (``"strength"``), no
   skill is in both maps, ``governing_attributes`` names every skill the code
   reads by name (:data:`REQUIRED_SKILL_NAMES`), and every skill a track's
-  ``money_skill`` or ``skill_cost.multipliers`` names is in one of the maps.
+  ``money_skill``, ``skill_cost.multipliers`` or ``game_master_started``
+  names is in one of the maps.
 - ``attribute_check``: the dice, and the widest situational modifier a Game
   Master may set on the target, either way (0 or more).
 
-Skill names in ``skill_cost``, ``money_skill`` and the checks are written as
+Skill names in ``skill_cost``, ``game_master_started``, ``money_skill`` and
+the checks are written as
 they are stored (:func:`characters.skill_names.normalize_skill_name`: lower
 case, no level numeral), so a lookup by a stored name finds them, and each
 is a glossary skill in its own right: not a weapon's name, which falls under
@@ -169,8 +179,11 @@ SKILL_CHECK_FIELDS = (
     "implied_governing_attributes",
 )
 ATTRIBUTE_CHECK_FIELDS = ("dice", "game_master_modifier_limit")
+#: The block naming the skills only a Game Master starts.
+GAME_MASTER_STARTED_BLOCK = "game_master_started"
 TOP_LEVEL_FIELDS = (
     "skill_cost",
+    GAME_MASTER_STARTED_BLOCK,
     "tracks",
     "survival_roll",
     "experience_levels",
@@ -648,6 +661,8 @@ class SkillRules:
 
     Attributes:
         skill_cost: The skills that cost a multiple of the ordinary cost.
+        game_master_started: The skills a player never starts and a Game
+            Master does, by stored name.
         tracks: The prior-experience tracks.
         survival_roll: The survival roll's dice and automatic totals.
         experience: The experience ladder.
@@ -658,6 +673,7 @@ class SkillRules:
     """
 
     skill_cost: SkillCostRules
+    game_master_started: tuple[str, ...]
     tracks: SkillTrackRules
     survival_roll: SurvivalRollRules
     experience: ExperienceRules
@@ -667,21 +683,43 @@ class SkillRules:
     attribute_check: AttributeCheckRules
 
     def __post_init__(self) -> None:
-        unknown = [
-            f"tracks.{key}.money_skill {track.money_skill!r}"
-            for key, track in self.tracks.tracks.items()
-            if track.money_skill is not None
-            and not self.skill_check.names_skill(track.money_skill)
-        ] + [
-            f"skill_cost.multipliers {skill_name!r}"
-            for skill_name in self.skill_cost.multipliers
-            if not self.skill_check.names_skill(skill_name)
-        ]
+        unknown = (
+            [
+                f"tracks.{key}.money_skill {track.money_skill!r}"
+                for key, track in self.tracks.tracks.items()
+                if track.money_skill is not None
+                and not self.skill_check.names_skill(track.money_skill)
+            ]
+            + [
+                f"skill_cost.multipliers {skill_name!r}"
+                for skill_name in self.skill_cost.multipliers
+                if not self.skill_check.names_skill(skill_name)
+            ]
+            + [
+                f"{GAME_MASTER_STARTED_BLOCK} {skill_name!r}"
+                for skill_name in self.game_master_started
+                if not self.skill_check.names_skill(skill_name)
+            ]
+        )
         if unknown:
             raise ValueError(
                 f"{', '.join(unknown)} names a skill neither governing_attributes "
                 "nor implied_governing_attributes gives"
             )
+
+    def only_a_game_master_starts(self, skill_name: str) -> bool:
+        """Whether ``skill_name`` is a skill a player never starts.
+
+        Args:
+            skill_name: A glossary skill as it is stored. A stored skill
+                name, which may be a weapon's or carry a chosen part, is
+                asked through
+                :func:`characters.skills.is_game_master_started`.
+
+        Returns:
+            Whether ``game_master_started`` names it.
+        """
+        return skill_name in self.game_master_started
 
 
 class _SkillRulesFileReader(RulesFileReader):
@@ -703,6 +741,14 @@ class _SkillRulesFileReader(RulesFileReader):
         )
         with self.wrapped_value_errors(field_path):
             return SkillCostRules(multipliers=multipliers)
+
+    def game_master_started(self, value: Any, field_path: str) -> tuple[str, ...]:
+        """``game_master_started``: stored skill names, none named twice."""
+        skill_names = self.text_list(value, field_path)
+        with self.wrapped_value_errors(field_path):
+            for skill_name in skill_names:
+                _check_stored_skill_name(skill_name)
+        return skill_names
 
     def track(self, key: str, value: Any, field_path: str) -> SkillTrack:
         """One track of ``tracks``."""
@@ -821,6 +867,9 @@ class _SkillRulesFileReader(RulesFileReader):
         """The whole file."""
         fields = self.file_object(value, TOP_LEVEL_FIELDS)
         skill_cost = self.skill_cost(fields["skill_cost"], "skill_cost")
+        game_master_started = self.game_master_started(
+            fields[GAME_MASTER_STARTED_BLOCK], GAME_MASTER_STARTED_BLOCK
+        )
         tracks = self.tracks(fields["tracks"], "tracks")
         survival_roll = self.survival_roll(fields["survival_roll"], "survival_roll")
         experience = self.experience(fields["experience_levels"], "experience_levels")
@@ -832,11 +881,13 @@ class _SkillRulesFileReader(RulesFileReader):
         attribute_check = self.attribute_check(
             fields["attribute_check"], "attribute_check"
         )
-        # The one check across blocks: every skill money_skill and skill_cost
-        # name is one the skill check gives an attribute.
+        # The one check across blocks: every skill money_skill, skill_cost
+        # and game_master_started name is one the skill check gives an
+        # attribute.
         with self.wrapped_value_errors("skill_check"):
             return SkillRules(
                 skill_cost=skill_cost,
+                game_master_started=game_master_started,
                 tracks=tracks,
                 survival_roll=survival_roll,
                 experience=experience,

@@ -100,7 +100,10 @@ class AllocationRefusalTest(BaseTestCase):
     def test_arcane_and_luck_are_the_glossarys(self):
         self.assertTrue(is_glossary_skill("arcane"))
         self.assertTrue(is_glossary_skill("luck"))
-        self.assertIsNone(services.allocation_refusal({}, "arcane"))
+        self.assertIsNone(services.allocation_refusal({}, "luck"))
+        # The glossary names Arcane, and a player still may not start it
+        # (tarmar-studio #208; characters/tests/test_game_master_started.py).
+        self.assertIsNotNone(services.allocation_refusal({}, "arcane"))
 
     def test_a_bare_maker_skill_lands_on_the_craft_held(self):
         held = {"maker skill (smith)": 1}

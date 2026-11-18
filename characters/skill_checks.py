@@ -152,6 +152,10 @@ def is_glossary_skill(skill_name: str) -> bool:
     ``implied_governing_attributes``). "Brawling" and a freely typed
     "navigation" do not (issue #862).
 
+    Being named is not leave to start a skill: one the canon lists under
+    ``game_master_started``, Arcane among them, is a Game Master's to start
+    (:func:`characters.services.allocation_refusal`, tarmar-studio #208).
+
     Args:
         skill_name: A stored (normalised) skill name.
     """

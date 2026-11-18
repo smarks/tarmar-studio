@@ -81,10 +81,14 @@ TARMAR_MAGIC_SECTION_HASH = (
 # The subsections every magic section carries, in this order: checked here
 # file by file, and inside the whole prompt by ``gm.tests``, whose
 # ``REQUIRED_HEADINGS`` takes them from here.
+#: The hand-written subsection that restates the canon's school table; its
+#: first line is held to the table in ``gm.test_prompt_follows_the_rules``.
+SCHOOLS_OF_MAGIC_HEADING = "### Schools of Magic"
+
 MAGIC_HEADINGS = (
     "## Magic System",
     "### Special Casting Results",
-    "### Schools of Magic",
+    SCHOOLS_OF_MAGIC_HEADING,
     "### Spell Mastery",
     "### Push (Boosting)",
     "### Channel",

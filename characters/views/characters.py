@@ -713,7 +713,9 @@ def character_import(request):
     payload's name is saved as it stands: names are not unique per user
     (issue #571), so an import never renames what it is given. A player's
     import arrives without its rolled, earned or ruled values, and with a
-    notice saying so (issue #744). Audit-logs every import.
+    notice saying so (issue #744); a Game Master's keeps a skill only a Game
+    Master starts, and the history says so (tarmar-studio #208). Audit-logs
+    every import.
     """
     upload = request.FILES.get("file")
     if not upload:
@@ -745,6 +747,11 @@ def character_import(request):
             "import left out: " + "; ".join(imported.left_out),
             request.user.username,
         )
+    # A skill only a Game Master starts, kept by his import, is named as his
+    # (tarmar-studio #208).
+    for kept_line in imported.game_master_kept:
+        character.record_field_change("skills", "", kept_line, request.user.username)
+    if imported.left_out or imported.game_master_kept:
         character.save(update_fields=["history"])
 
     audit_logger.info(

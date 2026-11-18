@@ -1700,6 +1700,9 @@ class TarmarMagicRulesTest(SimpleTestCase):
         assert rules.casting_failure is not None, (
             "the Tarmar canon fails a casting roll on its high totals"
         )
+        true_magic = rules.true_magic
+        assert true_magic is not None, "the Tarmar canon has True Magic"
+        interruption = true_magic.interruption
         summary = {
             "tier_natural_totals": sorted(
                 total
@@ -1768,11 +1771,48 @@ class TarmarMagicRulesTest(SimpleTestCase):
                 "ties_go_to_caster": rules.counterspell.ties_go_to_caster,
                 "defender_min_mana": rules.counterspell.defender_min_mana,
                 "defender_max_mana": rules.counterspell.defender_max_mana,
+                "familiarity_per_level": rules.counterspell.familiarity_per_level,
             },
             "casting_failure": {
                 "fumble_floor": rules.casting_failure.fumble_floor,
                 "mana_lost_totals": sorted(rules.casting_failure.mana_lost_totals),
                 "runaway_total": rules.casting_failure.runaway_total,
+            },
+            # True Magic (tarmar-studio #208): each working effect as its key,
+            # kind, dice per tier and whether a Game Master must grant it; the
+            # interruption roll's bands as their margins and whether each is
+            # a Runaway; and the drain of each ending that has one.
+            "true_magic": {
+                "effects": [
+                    [
+                        effect.key,
+                        None if effect.kind is None else effect.kind.value,
+                        effect.dice_per_tier,
+                        effect.needs_grant,
+                    ]
+                    for effect in true_magic.effects
+                ],
+                "tiers_per_level": true_magic.tiers_per_level,
+                "turns_per_tier": true_magic.turns_per_tier,
+                "roll_attribute": true_magic.roll_attribute,
+                "roll_bonus_per_level": true_magic.roll_bonus_per_level,
+                "interruption": {
+                    "roll": [interruption.roll.dice, interruption.roll.attribute],
+                    "penalty_per_mana": interruption.penalty_per_mana,
+                    "failure_bands": [
+                        [band.lowest_margin, band.highest_margin, band.is_runaway]
+                        for band in interruption.failure_bands
+                    ],
+                    "automatic_runaway_totals": sorted(
+                        interruption.automatic_runaway_totals
+                    ),
+                },
+                "drain_pool": true_magic.drain_pool,
+                "drain_per_mana": true_magic.drain_per_mana,
+                "lost_drain_per_mana": {
+                    str(ending): drain
+                    for ending, drain in true_magic.lost_drain_per_mana.items()
+                },
             },
             # The school roll's table (issue #18): each row's reach, label and
             # schools, in order.

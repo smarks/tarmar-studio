@@ -9,6 +9,7 @@ the default canon by coincidence.
 """
 
 import hashlib
+import re
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -28,6 +29,7 @@ from tarmar_engine.magic import (
     SpellEffectKind,
 )
 
+from battle.magic_rules import SchoolTable, load_magic_schools, magic_schools
 from battle.tests.magic_fixtures import (
     DEFAULT_MAGIC_RULES,
     INVENTED_RULES,
@@ -54,9 +56,15 @@ from characters.tests.test_skill_rules import (
     SAILOR_SKILLS,
     SMITH_SKILLS,
 )
+from reference.paths import (
+    CANON_MAGIC_RULES_FILE_NAME,
+    DEFAULT_CANON_DIR,
+    DEFAULT_MAGIC_PROMPT_FILE,
+)
 
 from . import engine
 from .engine import MODE_PLAY
+from .test_magic_prompt import SCHOOLS_OF_MAGIC_HEADING
 from .turn_engine.messages import plan_message, planning_rules
 from .turn_engine.policy import TurnPolicy
 
@@ -1102,3 +1110,73 @@ class InventedRulesTest(SimpleTestCase):
         )
         self.assertNotIn("Control Roll", counterspell)
         self.assertTrue(counterspell.endswith("or let it through."))
+
+
+#: One row of the school table as a magic section's Schools line writes it:
+#: "Less Common (71-100%): Weather, Control."
+SCHOOL_ROW_SENTENCE = re.compile(
+    r"(?P<label>\w[^().:]*) \((?P<lowest>\d+)-(?P<up_to>\d+)%\): (?P<schools>[^.]+)\."
+)
+
+
+class SchoolsLineFollowsTheTableTest(SimpleTestCase):
+    """The magic section's Schools line is hand-written in the canon's
+    ``gm-prompt/magic.md``, and states the table the canon's
+    ``magic-rules.json`` rolls a school on (tarmar-studio #208, when Counter
+    and Arcane/True Magic left the table and nothing held the line to it).
+
+    The line is each row of ``schools`` as a sentence, in order, and nothing
+    else: the row's label, its reach on the d100 and its schools, so a school
+    the table does not name is on the line nowhere.
+    """
+
+    def assert_the_line_states_the_table(
+        self, section_file: str, table: SchoolTable
+    ) -> None:
+        """Hold a magic section's Schools line to a school table.
+
+        Args:
+            section_file: A canon's ``gm-prompt/magic.md``.
+            table: That canon's school table.
+        """
+        subsection = section_file.split(f"{SCHOOLS_OF_MAGIC_HEADING}\n", 1)[1]
+        line = subsection.split("\n", 1)[0]
+        stated = list(SCHOOL_ROW_SENTENCE.finditer(line))
+        # The rows are the whole line: no school is named outside one.
+        self.assertEqual(" ".join(match.group() for match in stated), line)
+        self.assertEqual(
+            [
+                (
+                    int(match["up_to"]),
+                    match["label"],
+                    tuple(
+                        # A school's flavours, "Elemental (water/fire/...)",
+                        # are the line's own and not the table's.
+                        re.sub(r"\s*\(.*\)$", "", school)
+                        for school in match["schools"].split(", ")
+                    ),
+                )
+                for match in stated
+            ],
+            [(row.up_to, row.label, row.schools) for row in table.rows],
+        )
+        # Each row after the first starts one past the reach of the row
+        # before it.
+        self.assertEqual(
+            [int(match["lowest"]) for match in stated[1:]],
+            [row.up_to + 1 for row in table.rows[:-1]],
+        )
+
+    def test_the_loaded_canons_line_states_its_school_table(self) -> None:
+        table = magic_schools()
+        if table is None:
+            self.skipTest("the loaded canon rolls no school")
+        self.assert_the_line_states_the_table(engine.load_magic_section(), table)
+
+    def test_the_default_canons_line_states_its_school_table(self) -> None:
+        # Whichever canon is loaded, as the default canon's pages are held.
+        table = load_magic_schools(DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME)
+        assert table is not None, "the default canon rolls a caster's school"
+        self.assert_the_line_states_the_table(
+            engine.load_magic_section(DEFAULT_MAGIC_PROMPT_FILE), table
+        )

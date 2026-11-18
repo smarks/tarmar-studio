@@ -60,6 +60,11 @@ roll_fixed_weight = "Weight was rolled, and a roll is final; only a Game Master 
 roll_fixed_origin = "The Origin was rolled, and a roll is final; only a Game Master can change it."
 # A field nobody sets by hand; {field}: its name.
 nobody_sets = "{field} is not something anyone sets by hand."
+# A skill only a Game Master starts (tarmar-studio #208): the canon's
+# skill-rules.json lists them under game_master_started, and on the public
+# pages that is Arcane. What a player whose character does not hold the skill
+# is told. {skill}: the skill, as the record stores it.
+game_master_started_skill = "Only a Game Master can start {skill}, which is learned by invitation; a character who holds it raises it with their own points"
 
 # The purse (issue #136): how it prints, the history lines a coin movement
 # writes, and why a purchase is refused. {coin} is an amount already printed
@@ -102,6 +107,19 @@ unnamed_character = "Unnamed character"
 # A character that is not there, as the sheet's fetch-only endpoints answer it.
 [views_access]
 not_found = "Character not found"
+
+# characters.import_service's words (tarmar-studio #208).
+[import_service]
+# What the history records when a Game Master's import keeps a skill only a
+# Game Master starts, which a player's import drops. {skill}: the skill, as
+# the record stores it; {points}: the points the file gives it.
+game_master_kept_skill = "import kept {skill} ({points} points): a skill only a Game Master may start, kept because a Game Master imported it"
+
+# characters.help_text's configured words (tarmar-studio #208).
+[help_text]
+# Ends the help beside the free skill points when the canon names skills only
+# a Game Master starts. {skills}: those skills, by name.
+game_master_started_skills = "By invitation only: {skills}. A Game Master starts such a skill, and once you hold it you raise it with your own points."
 
 # characters.magic's words for learning a spell. The school (issue #18, the
 # canon's school_gates_a_new_spell ruling): a player learns a new spell only

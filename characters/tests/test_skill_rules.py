@@ -44,6 +44,7 @@ from characters.skill_rules import (
     load_skill_rules,
     skill_rules,
 )
+from characters.skills import ARCANE_SKILL_NAME
 from characters.tests.rules_fixtures import DEFAULT_SKILL_RULES, seated_skill_rules
 from common.test_helpers import CANON_EXPECTATIONS, skip_unless_canon_expects
 from reference.paths import (
@@ -71,6 +72,8 @@ assert sorted(INVENTED_REQUIRED_SKILLS) == sorted(REQUIRED_SKILL_NAMES)
 #: A complete file with invented numbers.
 INVENTED_RULES: dict[str, Any] = {
     "skill_cost": {"multipliers": {"sorcery": 3}},
+    # Skills only a Game Master starts: one from each of the check's maps.
+    "game_master_started": ["sorcery", "fate"],
     "tracks": {
         "sailor": {
             "label": "Sailor",
@@ -149,6 +152,7 @@ INVENTED_RULES: dict[str, Any] = {
 
 INVENTED_SKILL_RULES = SkillRules(
     skill_cost=SkillCostRules(multipliers={"sorcery": 3}),
+    game_master_started=("sorcery", "fate"),
     tracks=SkillTrackRules(
         tracks={
             "sailor": SkillTrack(
@@ -256,6 +260,7 @@ def skill_rules_summary(rules: SkillRules) -> dict[str, Any]:
             for rung in rules.experience.levels
         ],
         "skill_cost_multipliers": dict(rules.skill_cost.multipliers),
+        "game_master_started": list(rules.game_master_started),
         "survival_totals": [
             rules.survival_roll.automatic_death_total,
             rules.survival_roll.automatic_survival_total,
@@ -332,6 +337,7 @@ class SkillRulesFileTest(SimpleTestCase):
     def test_a_missing_key_is_refused(self) -> None:
         cases: tuple[tuple[Callable[[dict[str, Any]], Any], str], ...] = (
             (lambda rules: rules.pop("experience_levels"), "experience_levels"),
+            (lambda rules: rules.pop("game_master_started"), "game_master_started"),
             (
                 lambda rules: rules["tracks"]["smith"].pop("money_skill"),
                 "tracks.smith.money_skill",
@@ -393,6 +399,16 @@ class SkillRulesFileTest(SimpleTestCase):
                 lambda rules: rules["skill_cost"]["multipliers"].update(sorcery="3"),
                 "skill_cost.multipliers.sorcery",
                 "must be an integer",
+            ),
+            (
+                lambda rules: rules.update(game_master_started="sorcery"),
+                "game_master_started",
+                "must be a list",
+            ),
+            (
+                lambda rules: rules.update(game_master_started=["sorcery", ""]),
+                "game_master_started[1]",
+                "a non-empty string",
             ),
             (
                 lambda rules: rules["tracks"]["smith"].update(money_skill=""),
@@ -665,6 +681,21 @@ class SkillRulesFileTest(SimpleTestCase):
                 "skill_cost.multipliers 'bellows' names a skill neither",
             ),
             (
+                lambda rules: rules.update(game_master_started=["Sorcery"]),
+                "game_master_started:",
+                "skill 'Sorcery' must be written as stored, 'sorcery'",
+            ),
+            (
+                lambda rules: rules.update(game_master_started=["fate", "fate"]),
+                "game_master_started",
+                "repeats the entry ['fate']",
+            ),
+            (
+                lambda rules: rules.update(game_master_started=["bellows"]),
+                "skill_check:",
+                "game_master_started 'bellows' names a skill neither",
+            ),
+            (
                 lambda rules: rules["attribute_check"].update(dice="2d8+0"),
                 "attribute_check:",
                 "dice '2d8+0' must be written '2d8'",
@@ -847,6 +878,8 @@ class CanonSkillRulesTest(SimpleTestCase):
         self.assertEqual(rules.skill_check.dice, "2d6")
         self.assertEqual(rules.attribute_check.dice, "3d6")
         self.assertEqual(rules.tracks.tracks["craft"].money_skill, "maker skill")
+        # The public pages' one skill by invitation (tarmar-studio #208).
+        self.assertEqual(rules.game_master_started, (ARCANE_SKILL_NAME,))
 
     def test_the_loaded_canon_file_loads_once_per_process(self) -> None:
         skill_rules.cache_clear()

@@ -40,7 +40,8 @@ class CommonWords:
 @dataclass(frozen=True)
 class ServicesWords:
     """``characters.services``'s refusals: why a player may not set a value
-    the field table gives a Game Master (issue #748)."""
+    the field table gives a Game Master (issue #748), or start a skill only a
+    Game Master starts (tarmar-studio #208)."""
 
     field_attribute: str = sentence("dice", "points")
     field_appearance_roll: str = sentence()
@@ -67,6 +68,7 @@ class ServicesWords:
     roll_fixed_weight: str = sentence()
     roll_fixed_origin: str = sentence()
     nobody_sets: str = sentence("field")
+    game_master_started_skill: str = sentence("skill", required=("skill",))
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,26 @@ class ViewsAccessWords:
 
 
 @dataclass(frozen=True)
+class ImportServiceWords:
+    """``characters.import_service``'s words: what the history records when a
+    Game Master's import keeps a skill only a Game Master starts
+    (tarmar-studio #208)."""
+
+    game_master_kept_skill: str = sentence(
+        "skill", "points", required=("skill", "points")
+    )
+
+
+@dataclass(frozen=True)
+class HelpTextWords:
+    """``characters.help_text``'s configured words: what the help beside the
+    free skill points says of the skills only a Game Master starts
+    (tarmar-studio #208)."""
+
+    game_master_started_skills: str = sentence("skills", required=("skills",))
+
+
+@dataclass(frozen=True)
 class MagicWords:
     """``characters.magic``'s words for learning a spell: why a player may not
     learn one outside their school (issue #18) or above a rung they do not
@@ -139,6 +161,8 @@ class CharactersRefusalWords:
     purse: PurseWords
     constants: ConstantsWords
     views_access: ViewsAccessWords
+    import_service: ImportServiceWords
+    help_text: HelpTextWords
     magic: MagicWords
 
 
