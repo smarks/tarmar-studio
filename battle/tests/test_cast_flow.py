@@ -26,6 +26,9 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from django.urls import reverse
+from tarmar_engine.magic import is_working_key
+from tarmar_engine.policy import Candidate
+from tarmar_engine.state import CraftState
 
 from battle import policy, profiles
 from battle.classic_adaptation import (
@@ -51,6 +54,10 @@ from .magic_fixtures import (
     BORROWING_RULES,
     CASTING_FAILURE,
     INVENTED_RULES,
+    REND_EFFECT,
+    TRUE_MAGIC,
+    TRUE_MAGIC_RULES,
+    TRUE_SKILL,
     seated_rules,
 )
 from .rulings_words import with_fixed_words
@@ -402,9 +409,20 @@ def replace_mana(state: BattleState, mana: int) -> BattleState:
     )
 
 
+def is_recipe_cast(candidate: Candidate) -> bool:
+    """Is this menu option the cast of a known spell by its recipe: neither a
+    True cast of it nor the craft of a working (tarmar-engine #77)?"""
+    return (
+        bool(candidate.spell_key)
+        and not candidate.true_cast
+        and not is_working_key(candidate.spell_key)
+    )
+
+
 def assert_stage_agrees_with_menu(test: SimpleTestCase, state: BattleState) -> None:
-    """The cast stage's castable and borrowable rows equal the engine menu's
-    plain and borrowing casts for combatant 1, on the seated rules."""
+    """The cast stage's castable and borrowable recipe rows equal the engine
+    menu's plain and borrowing recipe casts for combatant 1, on the seated
+    rules."""
     magic = caster_magic(state, 1)
     assert magic is not None
     # Keyed by (spell, target) rather than by spell: that pair is what a
@@ -428,14 +446,17 @@ def assert_stage_agrees_with_menu(test: SimpleTestCase, state: BattleState) -> N
     menu = policy.choose_option(
         state, actor, magic=profiles.tarmar_engine_profile().magic, every_target=True
     )
+    recipe_casts = [
+        candidate for candidate in menu.candidates if is_recipe_cast(candidate)
+    ]
     offered = {
         (candidate.spell_key, candidate.target_id)
-        for candidate in menu.candidates
-        if candidate.spell_key and not candidate.push_mana and not candidate.borrow
+        for candidate in recipe_casts
+        if not candidate.push_mana and not candidate.borrow
     }
     offered_borrowing = {
         (candidate.spell_key, candidate.target_id): borrowed_mana(actor, candidate)
-        for candidate in menu.candidates
+        for candidate in recipe_casts
         if candidate.borrow and not candidate.push_mana
     }
     test.assertEqual(shown, offered)
@@ -516,6 +537,66 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
         state = wizard_state(mana=0)
         state.by_id(2).alive = False
         self.assert_sets_agree(state)
+
+
+class TrueMageRecipeRowsAgreeWithPolicyTest(SimpleTestCase):
+    """A True mage's recipe rows are pinned to the menu as any caster's are
+    (tarmar-studio #208): the menu, built with the same magic rules, offers
+    the True casts and the crafts beside them, and neither moves a recipe row.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(
+            seated_rules(replace(TRUE_MAGIC_RULES, borrowing=BORROWING_RULES.borrowing))
+        )
+
+    def true_mage_state(self, **overrides) -> BattleState:
+        return wizard_state(skill_levels={TRUE_SKILL: 1}, **overrides)
+
+    def test_the_menu_offers_a_true_mage_more_than_its_recipe_casts(self):
+        state = self.true_mage_state()
+        menu = policy.choose_option(
+            state,
+            state.by_id(1),
+            magic=profiles.tarmar_engine_profile().magic,
+            every_target=True,
+        )
+        self.assertTrue(any(candidate.true_cast for candidate in menu.candidates))
+        self.assertTrue(
+            any(is_working_key(candidate.spell_key) for candidate in menu.candidates)
+        )
+
+    def test_agreement_with_a_full_pool(self):
+        assert_stage_agrees_with_menu(self, self.true_mage_state())
+
+    def test_agreement_when_mana_runs_short_or_out(self):
+        assert_stage_agrees_with_menu(self, self.true_mage_state(mana=1))
+        assert_stage_agrees_with_menu(self, self.true_mage_state(mana=0))
+
+    def test_agreement_when_the_channel_withholds_a_spell(self):
+        assert_stage_agrees_with_menu(
+            self,
+            self.true_mage_state(
+                spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+            ),
+        )
+
+    def test_agreement_for_a_true_mage_who_holds_a_counter(self):
+        assert_stage_agrees_with_menu(
+            self,
+            self.true_mage_state(
+                spells=[*WIZARD_SPELLS, "counter_1"],
+                spell_skill_levels={**WIZARD_SPELL_LEVELS, "counter_1": 1},
+            ),
+        )
+
+    def test_agreement_while_a_craft_stands(self):
+        # The mage's recipe casts stay on offer beside the continuation.
+        standing = CraftState(
+            TRUE_MAGIC.working_key(REND_EFFECT.key, 1), 0, False, 1, 0, 2
+        )
+        assert_stage_agrees_with_menu(self, self.true_mage_state(crafting=standing))
 
 
 def awaiting_wizard_battle(

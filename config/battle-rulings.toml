@@ -307,6 +307,98 @@ log_withdrawn = "{by} withdraws the working {working} from {name}"
 # is the working's key as the record holds it.
 unbuilt_working = "{key} (a working this canon no longer builds)"
 
+# True Magic on the turn menu, the cast stage and the roster card
+# (tarmar-studio #208): a True cast of a spell, and a working crafted over
+# several turns. {working} is a working as the board names it, its effect and
+# its tier; {line} and {cost} are another of these sentences, or of the turn
+# menu's, already filled; {pool} is the pool a casting drains, as the rules
+# name it.
+[true_magic]
+# A cast made as a True cast; {line} is the cast's own line.
+as_true_cast = "{line}, as a True cast"
+# Beginning a craft, and carrying one on: its turn {turn} of the {turns} it
+# takes.
+craft_begin = "Begin crafting {working}"
+craft_continue = "Go on crafting {working}: turn {turn} of {turns}"
+# The figure a craft action names: the one a damaging working is aimed at,
+# the one a healing working restores, and the one a working the Game Master
+# describes is named for.
+craft_aimed = "{line}, aimed at {aimed}"
+craft_healing = "{line}, to restore {aimed}"
+craft_named = "{line}, naming {aimed}"
+# What beginning a craft costs: its mana, a share each turn.
+craft_cost = "{mana} mana, gathered over {turns} turns"
+craft_push_cost = "{total} mana ({level} and {pushed} pushed), gathered over {turns} turns; a success makes a Control Roll"
+craft_borrowing_cost = "{cost}; each share your pool cannot pay is borrowed as debt, {owed} mana as things stand, and a debt roll follows the working"
+# What carrying a craft on costs this turn. {cost} below is craft_share.
+craft_share = "{share} mana this turn, {gathered} of {mana} gathered so far"
+craft_no_share = "no mana due this turn, {gathered} of {mana} gathered so far"
+craft_share_borrowed = "{cost}; your pool cannot pay it, and the {owed} it lacks is borrowed as debt"
+craft_share_unpaid = "{cost}; your pool of {mana_left} cannot pay it, so the working would be lost"
+# What a True cast or a working takes from its caster when it goes off;
+# {left} is what the pool would then hold.
+drains = "{cost}; drains {drain} {pool} when it goes off, leaving {left}"
+# The cast stage's note beside a working, which drains may follow.
+stage_craft = "{turns} turns to craft"
+# A working granted past the figure's own highest tier.
+granted_waits = "{working} is granted, and can be crafted only once Channel is lifted for {name}"
+# The roster card's line for a craft that stands; {target} is the figure its
+# latest turn named.
+card = "Crafting {working}: {done} of {turns} turns done"
+card_naming = "Crafting {working}, naming {target}: {done} of {turns} turns done"
+
+# The battle log's lines for True Magic (tarmar-studio #208). {name} is the
+# caster and {working} the working as the board names it. Each die still has
+# its own line above these, as every roll in the log has.
+[true_magic_log]
+# A craft action. {share} is one of the three share sentences, and {channel}
+# the caster's Channel for the working.
+craft_begun = "{name} begins crafting {working}, turn {turn} of {turns}: {share}; {gathered} of {mana_total} mana gathered; Channel {channel}"
+craft_continued = "{name} goes on crafting {working}, turn {turn} of {turns}: {share}; {gathered} of {mana_total} mana gathered; Channel {channel}"
+share_none = "no mana due, {mana_left} left"
+share_paid = "{share} mana, {mana_left} left"
+share_borrowed = "{share} mana of which {borrowed} is borrowed, {mana_left} left, debt {debt}"
+# A spell kept up ends when its caster begins a craft.
+spell_let_go = "{name} turns to the craft and lets {spell} go; it ends"
+# The roll to keep a craft through a hit: the {natural} total rolled and the
+# {target} it had to be at or under; {band} is the rules' name for how it
+# failed, and {margin} how far over the target it was (0 or less when a
+# natural total breaks the craft whatever the target).
+craft_kept = "{name} keeps the craft of {working} through the hit: {natural} rolled against {target}"
+craft_broken = "{name}'s craft of {working} is broken by the hit: {natural} rolled against {target}, {band}"
+craft_broken_runaway = "{name}'s craft of {working} is broken by the hit: {natural} rolled against {target}, {band}; the working runs away"
+# A craft lost before its working goes off, by how it ended; {mana_spent} is
+# the mana it had gathered.
+lost_abandoned = "{name}'s craft of {working} is lost, abandoned for another action: {mana_spent} mana spent"
+lost_blocked = "{name}'s craft of {working} is lost, since no working may be crafted where they are: {mana_spent} mana spent"
+lost_unpaid = "{name}'s craft of {working} is lost, since their mana cannot pay its share: {mana_spent} mana spent"
+lost_interrupted = "{name}'s craft of {working} is lost to the hit: {mana_spent} mana spent"
+lost_unconscious = "{name}'s craft of {working} is lost as they fall unconscious: {mana_spent} mana spent"
+lost_grappled = "{name}'s craft of {working} is lost as they are held in a grapple: {mana_spent} mana spent"
+lost_countered = "{name}'s craft of {working} is lost, countered by {defenders}: {mana_spent} mana spent"
+# A working's roll when its craft is whole, as {roll} below reads it.
+casting_roll = "{total} on {dice} against {versus} {target}"
+completed = "{name} completes {working}: {roll}, a success ({mana} mana gathered, {mana_left} left; Channel {channel})"
+# A failure that keeps the mana hands every share back; {line} below is
+# failed_handed_back, where part of it comes off a debt.
+failed_handed_back = "{name}'s {working} fails: {roll}; the {mana_returned} mana gathered is handed back ({mana_left} left; Channel {channel})"
+debt_handed_back = "{line}, and {debt_returned} comes off the debt, leaving a debt of {debt}"
+failed_spent = "{name}'s {working} fails: {roll}; the {mana} mana gathered is spent ({mana_left} left; Channel {channel})"
+# A working whose effect the rules leave to the Game Master; {magnitude} is
+# magnitude_clause where the effect rolls dice, empty otherwise.
+narrated = "{name}'s {working} goes off: tier {tier}{magnitude}, for the Game Master to describe"
+narrated_naming = "{name}'s {working} goes off, naming {target}: tier {tier}{magnitude}, for the Game Master to describe"
+magnitude_clause = ", magnitude {magnitude}"
+# A healing working that restores another figure; {left} is what their pool
+# then holds.
+healed_teammate = "{name}'s working restores {healed} {pool} to {target}, who now has {left}"
+# What a True cast or a working drains from its caster, and a caster the
+# drain fells.
+drain = "{name} is drained of {cost} {pool} by the casting ({left} left)"
+drain_collapse = "{name} collapses unconscious, felled by the drain"
+# A cast made as a True cast; {line} is the cast's own line.
+true_cast = "{line} — a True cast"
+
 # The cast stage's rows (issue #145): what the turn panel lists for each spell
 # a seated caster knows. {spell} and {target} name a spell and a figure; a
 # {chance} is a whole percent ("62%"). Tarmar first, then classic Melee.

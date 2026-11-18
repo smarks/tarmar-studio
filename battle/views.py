@@ -1212,7 +1212,9 @@ def pending_payload(battle, actor: Actor) -> dict | None:
     awaited (and the DM, who may hand the choice to the AI) — other viewers
     see who is up, not their options and not a caster's hand. ``magic`` is
     the cast stage's data (pool, known spells, why an unavailable one is
-    unavailable) and is ``None`` for a combatant who knows no spells.
+    unavailable, and for a True mage the True casts and crafts the menu
+    offers, tarmar-studio #208) and is ``None`` for a combatant who neither
+    knows a spell that can be cast nor is a True mage.
     """
     pending = battle.pending_input_json or {}
     if not pending:
@@ -1247,7 +1249,7 @@ def pending_payload(battle, actor: Actor) -> dict | None:
     if decides_for(actor, battle, seat):
         payload["candidates"] = pending.get("candidates", [])
         payload["magic"] = profile.caster_magic(
-            profile.load(battle.state_json), seat.pk
+            profile.load(battle.state_json), seat.pk, payload["candidates"]
         )
     return payload
 
@@ -2393,9 +2395,11 @@ def battle_act(request, pk):
     offered (#960), ``borrow`` (optional, false when absent) a borrowing
     cast (tarmar-engine #28), ``anchor_target`` (optional, null when
     absent) the combatant whose Runaway an anchor takes back (tarmar-engine
-    #30), and ``counter_mana`` (optional, null when absent) the mana a
+    #30), ``counter_mana`` (optional, null when absent) the mana a
     counter commits against the caster ``target_id`` names (tarmar-engine
-    #31).
+    #31), and ``true_cast`` (optional, false when absent) a True cast
+    (tarmar-engine #77). A craft is the craft letter with the working's key
+    as ``spell_key``, and takes no field of its own.
     """
     actor, battle = _actor_and_readable_battle(request, pk)
     # Who may answer the pause is decided before the body is read (#182): a
@@ -2433,6 +2437,9 @@ def battle_act(request, pk):
     borrow = data.get("borrow", False)
     if not isinstance(borrow, bool):
         return _json_error(refusal_words().views.borrow_true_or_false)
+    true_cast = data.get("true_cast", False)
+    if not isinstance(true_cast, bool):
+        return _json_error(refusal_words().views.true_cast_true_or_false)
     anchor_target_raw = data.get("anchor_target")
     anchor_target = None
     if anchor_target_raw is not None:
@@ -2473,6 +2480,7 @@ def battle_act(request, pk):
             borrow=borrow,
             anchor_target=anchor_target,
             counter_mana=counter_mana,
+            true_cast=true_cast,
             destination=destination,
             as_ai=as_ai,
         )

@@ -7,6 +7,10 @@ studio reader of a spell key from state or a candidate asks
 :func:`battle.magic_rules.loaded_spell` instead: the roster card's Runaway and
 contest lines, and the menu's anchor line, cast line and borrowed mana.
 
+Since the battle screen's own slice (tarmar-studio #208) a craft that stands
+is a key read from state too: by the roster card, the turn menu's craft line
+and the cast stage, each through :mod:`battle.workings`.
+
 The True Magic rules here are invented (``magic_fixtures.TRUE_MAGIC_RULES``).
 """
 
@@ -16,11 +20,13 @@ from django.test import SimpleTestCase
 from tarmar_engine.actions import CRAFT_OPTION
 from tarmar_engine.policy import ANCHOR_OPTION, Candidate
 from tarmar_engine.spells import get_spell
-from tarmar_engine.state import ContestState, RunawayState
+from tarmar_engine.state import ContestState, CraftState, RunawayState
 
 from battle import turn_menu
 from battle.engine.state import BattleState
 from battle.magic_rules import loaded_spell
+from battle.persistence import TARMAR_PROFILE
+from battle.services import caster_magic
 from battle.viewmodel import tarmar_view
 from battle.wording import words
 
@@ -31,6 +37,7 @@ from .magic_fixtures import (
     RUNAWAY_RULES,
     TRUE_MAGIC,
     TRUE_MAGIC_RULES,
+    TRUE_SKILL,
     seated_rules,
 )
 from .rulings_words import with_fixed_words
@@ -174,3 +181,52 @@ class MenuLineTest(SimpleTestCase):
         with seated_rules(TRUE_MAGIC_RULES):
             self.assertEqual(turn_menu.borrowed_mana(state.by_id(1), craft), 3)
             self.assertEqual(self.described(state, craft).borrowed, 3)
+
+
+class EveryReaderOfAKeyFromStateTest(SimpleTestCase):
+    """A working's key in every place a figure's state holds a spell's, read
+    by every reader of one in a single pass: none of them asks the catalog."""
+
+    def test_a_working_everywhere_at_once_crashes_no_reader(self) -> None:
+        # One working runs away from the caster, another stands countered,
+        # and a third is being crafted.
+        state = board(
+            skill_levels={TRUE_SKILL: 1},
+            runaway=RunawayState(WORKING_KEY, TIER, 1),
+            contest=ContestState(
+                spell_key=WORKING_KEY, target_id=2, defender_ids=[2], turns=1
+            ),
+            crafting=CraftState(WORKING_KEY, 0, False, 1, 0, 2),
+        )
+        with seated_rules(TRUE_MAGIC_WITH_RUNAWAY), with_fixed_words:
+            card = tarmar_view(state, next_sequence=1)["combatants"][0]
+            menu = [
+                turn_menu.menu_payload(option)
+                for option in turn_menu.player_menu(
+                    TARMAR_PROFILE, state, state.by_id(1)
+                )
+            ]
+            stage = caster_magic(state, 1, menu)
+        self.assertEqual(
+            [card[key]["spell"] for key in ("runaway", "contest", "crafting")],
+            [WORKING_NAME] * 3,
+        )
+        # The menu names it on the anchor of its Runaway and on the craft's
+        # continuation, and the stage on the craft that stands.
+        named = [option["plain"] for option in menu if WORKING_NAME in option["plain"]]
+        self.assertEqual(
+            sorted({line.split()[0] for line in named}),
+            ["tarmar_menu.self_anchor", "true_magic.craft_aimed"],
+        )
+        assert stage is not None
+        self.assertEqual(stage["craft"]["standing"]["name"], WORKING_NAME)
+
+    def test_a_key_nothing_builds_is_refused_by_name_not_guessed_at(self) -> None:
+        # A craft of a working the loaded canon does not build is a broken
+        # state, which the engine refuses too: the card says which key.
+        state = board(
+            crafting=CraftState("working:no_such_effect:1", 0, False, 1, 0, 2)
+        )
+        with seated_rules(TRUE_MAGIC_RULES), self.assertRaises(KeyError) as refused:
+            tarmar_view(state, next_sequence=1)
+        self.assertIn("no_such_effect", str(refused.exception))

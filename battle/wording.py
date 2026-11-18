@@ -3,9 +3,10 @@ tarmar-studio #208).
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
 headings and buttons, the battle-log lines, the refusals and the turn menu's
-lines (#90), and the battle log's other lines, the roster's notes and who
-decides for a figure (#136) live in ``config/battle-rulings.toml``, which
-Spencer edits with no
+lines (#90), the battle log's other lines, the roster's notes and who
+decides for a figure (#136), and True Magic's lines on the menu, the cast
+stage, the roster card and the battle log (tarmar-studio #208) live in
+``config/battle-rulings.toml``, which Spencer edits with no
 Python, read once at startup into ``settings.BATTLE_RULINGS_WORDING`` by
 :func:`load_rulings_wording`. A missing or unknown key, a value that is not
 text, and a ``{name}`` a sentence may not use all stop the server then, not in
@@ -288,6 +289,128 @@ class WorkingGrantsWords:
 
 
 @dataclass(frozen=True)
+class TrueMagicWords:
+    """True Magic on the turn menu, the cast stage and the roster card
+    (tarmar-studio #208): a True cast of a spell, and a working crafted over
+    several turns."""
+
+    as_true_cast: str = sentence("line", required=("line",))
+    craft_begin: str = sentence("working", required=("working",))
+    craft_continue: str = sentence("working", "turn", "turns", required=("working",))
+    craft_aimed: str = sentence("line", "aimed", required=("line",))
+    craft_healing: str = sentence("line", "aimed", required=("line",))
+    craft_named: str = sentence("line", "aimed", required=("line",))
+    craft_cost: str = sentence("mana", "turns")
+    craft_push_cost: str = sentence("total", "level", "pushed", "turns")
+    craft_borrowing_cost: str = sentence("cost", "owed", required=("cost",))
+    craft_share: str = sentence("share", "gathered", "mana")
+    craft_no_share: str = sentence("gathered", "mana")
+    craft_share_borrowed: str = sentence("cost", "owed", required=("cost",))
+    craft_share_unpaid: str = sentence("cost", "mana_left", required=("cost",))
+    drains: str = sentence("cost", "drain", "pool", "left", required=("cost",))
+    stage_craft: str = sentence("turns")
+    granted_waits: str = sentence("working", "name", required=("working",))
+    card: str = sentence("working", "done", "turns", required=("working",))
+    card_naming: str = sentence(
+        "working", "target", "done", "turns", required=("working",)
+    )
+
+
+@dataclass(frozen=True)
+class TrueMagicLogWords:
+    """The battle log's lines for True Magic (tarmar-studio #208): a craft's
+    turns and how it ends, a working going off, the drain, and a True cast."""
+
+    craft_begun: str = sentence(
+        "name",
+        "working",
+        "turn",
+        "turns",
+        "share",
+        "gathered",
+        "mana_total",
+        "channel",
+        required=("working", "share"),
+    )
+    craft_continued: str = sentence(
+        "name",
+        "working",
+        "turn",
+        "turns",
+        "share",
+        "gathered",
+        "mana_total",
+        "channel",
+        required=("working", "share"),
+    )
+    share_none: str = sentence("mana_left")
+    share_paid: str = sentence("share", "mana_left")
+    share_borrowed: str = sentence("share", "borrowed", "mana_left", "debt")
+    spell_let_go: str = sentence("name", "spell")
+    craft_kept: str = sentence("name", "working", "natural", "target")
+    craft_broken: str = sentence(
+        "name", "working", "natural", "target", "margin", "band", required=("band",)
+    )
+    craft_broken_runaway: str = sentence(
+        "name", "working", "natural", "target", "margin", "band", required=("band",)
+    )
+    lost_abandoned: str = sentence("name", "working", "mana_spent")
+    lost_blocked: str = sentence("name", "working", "mana_spent")
+    lost_unpaid: str = sentence("name", "working", "mana_spent")
+    lost_interrupted: str = sentence("name", "working", "mana_spent")
+    lost_unconscious: str = sentence("name", "working", "mana_spent")
+    lost_grappled: str = sentence("name", "working", "mana_spent")
+    lost_countered: str = sentence("name", "working", "mana_spent", "defenders")
+    casting_roll: str = sentence("total", "dice", "versus", "target")
+    completed: str = sentence(
+        "name",
+        "working",
+        "roll",
+        "mana",
+        "mana_left",
+        "channel",
+        required=("working", "roll"),
+    )
+    failed_handed_back: str = sentence(
+        "name",
+        "working",
+        "roll",
+        "mana_returned",
+        "mana_left",
+        "channel",
+        required=("working", "roll"),
+    )
+    debt_handed_back: str = sentence(
+        "line", "debt_returned", "debt", required=("line",)
+    )
+    failed_spent: str = sentence(
+        "name",
+        "working",
+        "roll",
+        "mana",
+        "mana_left",
+        "channel",
+        required=("working", "roll"),
+    )
+    narrated: str = sentence(
+        "name", "working", "tier", "magnitude", required=("working", "magnitude")
+    )
+    narrated_naming: str = sentence(
+        "name",
+        "working",
+        "target",
+        "tier",
+        "magnitude",
+        required=("working", "magnitude"),
+    )
+    magnitude_clause: str = sentence("magnitude")
+    healed_teammate: str = sentence("name", "target", "healed", "pool", "left")
+    drain: str = sentence("name", "cost", "pool", "left")
+    drain_collapse: str = sentence("name")
+    true_cast: str = sentence("line", required=("line",))
+
+
+@dataclass(frozen=True)
 class CastStageWords:
     """The cast stage's rows, both profiles (#145): each spell's name, its
     cost, its chance, and why it cannot be cast when it cannot."""
@@ -394,6 +517,8 @@ class RulingsWording:
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
     working_grants: WorkingGrantsWords
+    true_magic: TrueMagicWords
+    true_magic_log: TrueMagicLogWords
     cast_stage: CastStageWords
     services: ServicesWords
     control: ControlWords

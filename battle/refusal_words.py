@@ -119,6 +119,7 @@ class ViewsWords:
     numeric_target_id: str = sentence()
     numeric_push_mana: str = sentence()
     borrow_true_or_false: str = sentence()
+    true_cast_true_or_false: str = sentence()
     numeric_anchor_target: str = sentence()
     numeric_counter_mana: str = sentence()
     destination_is_hex: str = sentence()

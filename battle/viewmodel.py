@@ -62,11 +62,13 @@ shows nobody's numbers rather than everybody's.
 
 from __future__ import annotations
 
+from . import workings
 from .classic_adaptation import classic_team
 from .engine import hexes
 from .engine.state import BattleState, CombatantState
 from .magic_rules import loaded_spell, magic_rules
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE
+from .wording import words
 
 #: Pointy-top hexes — vertices up and down, rows offset. The Tarmar arena.
 POINTY = "pointy"
@@ -354,6 +356,51 @@ def _tarmar_contest(state: BattleState, combatant: CombatantState) -> dict | Non
     }
 
 
+def _tarmar_craft(state: BattleState, combatant: CombatantState) -> dict | None:
+    """The working this combatant is crafting, for its roster card
+    (tarmar-engine #77), or ``None`` when no craft stands.
+
+    Read from the engine's ``CraftState`` (:mod:`battle.workings`): the
+    working, the craft turns taken of those it takes, and the figure its
+    latest craft action named, when that figure is still on the board. The
+    board names a working, its tier and its turn to every viewer, as the log
+    does (the note's ``board_names_what_is_cast`` reading). ``line`` is the
+    sentence the card prints, in the configured words.
+
+    Unlike a Runaway's line and a contest's, this one does not ask whether
+    the figure is alive, because no craft stands on a figure that is down:
+    the engine loses a craft as its caster falls unconscious
+    (``TurnRunner._fall_unconscious``), no figure dies in a turn without
+    falling first, and a restart lays its dead on the first turn's board,
+    where nothing is being crafted.
+    """
+    standing = combatant.crafting
+    if standing is None:
+        return None
+    craft = workings.reading(standing)
+    target = (
+        None if standing.target_id is None else _figure_name(state, standing.target_id)
+    )
+    said = words().true_magic
+    figures = {
+        "working": craft.working.name,
+        "done": craft.turns_done,
+        "turns": craft.turns,
+    }
+    return {
+        "spell": craft.working.name,
+        "spell_key": standing.spell_key,
+        "turns_done": craft.turns_done,
+        "turns": craft.turns,
+        "target": target,
+        "line": (
+            said.card.format(**figures)
+            if target is None
+            else said.card_naming.format(**figures, target=target)
+        ),
+    }
+
+
 def _tarmar_combatant(
     state: BattleState, combatant: CombatantState, detail_ids: frozenset[int]
 ) -> dict:
@@ -392,6 +439,10 @@ def _tarmar_combatant(
         # none does. A counter held is not shown: the engine sets and clears
         # it within the Actions phase, so no saved state carries one.
         "contest": _tarmar_contest(state, combatant),
+        # A working it is crafting (tarmar-engine #77), shown to every viewer
+        # as the log already narrates each of its turns; None when no craft
+        # stands.
+        "crafting": _tarmar_craft(state, combatant),
         # The attribute panel, for a viewer allowed this combatant's
         # numbers; ``None`` — not an empty panel — for everyone else, so
         # the page draws no disclosure at all rather than an empty one.
