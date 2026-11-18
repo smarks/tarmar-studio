@@ -18,7 +18,10 @@ source of truth, as a list of liftings in this shape::
 ``combatant_id`` is a ``BattleCombatant`` pk, which is the Tarmar engine's
 combatant id; ``bound`` is one of :data:`LIFTABLE_BOUNDS`; ``by`` and ``by_id`` are the
 Game Master's username and user pk when the bound was lifted, and ``at`` is
-when, as an ISO 8601 timestamp. Who may change it is the HTH-by-agreement
+when, as an ISO 8601 timestamp. The record itself is the one every ruling for
+single figures keeps (:class:`battle.figure_rulings.FigureRulings`), which a
+granted working shares (``battle.working_grants``, tarmar-studio #208). Who
+may change it is the HTH-by-agreement
 ruling's answer (``battle.agreement``, #867): the fight's runner, while that
 account is a Game Master (``battle.services.runs_the_seats``), through the
 battle's GM controls (``battle.services.set_magic_bounds_lifted``). Every
@@ -38,7 +41,6 @@ engine's, imported here, never spelled in the studio.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 from tarmar_engine.magic import (
     CHANNEL,
@@ -50,6 +52,7 @@ from tarmar_engine.magic import (
 )
 from tarmar_engine.state import BattleState
 
+from .figure_rulings import FigureRulings
 from .magic_rules import magic_rules
 from .wording import listed, words
 
@@ -65,68 +68,22 @@ COMBATANT_FIELD = "combatant"
 BOUNDS_FIELD = "bounds"
 LIFTED_FIELD = "lifted"
 
-#: The stored record's field names.
-COMBATANT_ID = "combatant_id"
+#: The stored name of what a lifting lifts: one of :data:`LIFTABLE_BOUNDS`.
 BOUND = "bound"
-BY = "by"
-BY_ID = "by_id"
-AT = "at"
 
 
-@dataclass(frozen=True)
-class Lifting:
-    """One bound lifted for one figure, with who lifted it and when."""
+class LiftedBounds(FigureRulings):
+    """The ruling as stored: every lifting on the battle, each one bound
+    lifted for one figure with who lifted it and when."""
 
-    combatant_id: int
-    bound: str
-    by: str
-    by_id: int
-    at: str
-
-    def to_json(self) -> dict:
-        """The stored shape of this one lifting."""
-        return {
-            COMBATANT_ID: self.combatant_id,
-            BOUND: self.bound,
-            BY: self.by,
-            BY_ID: self.by_id,
-            AT: self.at,
-        }
-
-
-@dataclass(frozen=True)
-class LiftedBounds:
-    """The ruling as stored: every lifting on the battle."""
-
-    liftings: tuple[Lifting, ...] = ()
+    battle_field = "magic_bounds_lifted_json"
+    subject_field = BOUND
 
     @classmethod
-    def of(cls, battle) -> LiftedBounds:
-        """The battle's recorded ruling (empty for a battle with none)."""
-        return cls(
-            tuple(
-                Lifting(
-                    combatant_id=int(entry[COMBATANT_ID]),
-                    bound=str(entry[BOUND]),
-                    by=str(entry[BY]),
-                    by_id=int(entry[BY_ID]),
-                    at=str(entry[AT]),
-                )
-                for entry in battle.magic_bounds_lifted_json or []
-            )
-        )
-
-    def to_json(self) -> list[dict]:
-        """The stored shape, figure by figure and in :data:`LIFTABLE_BOUNDS` order."""
-        return [lifting.to_json() for lifting in sorted(self.liftings, key=order)]
-
-    def for_figure(self, combatant_id: int) -> frozenset[str]:
-        """The bounds lifted for one figure."""
-        return frozenset(
-            lifting.bound
-            for lifting in self.liftings
-            if lifting.combatant_id == combatant_id
-        )
+    def subject_rank(cls, subject: str) -> int:
+        """A bound's place in :data:`LIFTABLE_BOUNDS`, the order the page and
+        the log name a figure's bounds in."""
+        return LIFTABLE_BOUNDS.index(subject)
 
     def lifted(
         self, combatant_id: int, bounds: Iterable[str], *, by: str, by_id: int, at: str
@@ -135,29 +92,11 @@ class LiftedBounds:
 
         A bound already lifted keeps its first record of who and when.
         """
-        already = self.for_figure(combatant_id)
-        added = tuple(
-            Lifting(combatant_id, bound, by, by_id, at)
-            for bound in bounds
-            if bound not in already
-        )
-        return LiftedBounds(self.liftings + added)
+        return self.with_ruled(combatant_id, bounds, by=by, by_id=by_id, at=at)
 
     def restored(self, combatant_id: int, bounds: Iterable[str]) -> LiftedBounds:
         """This ruling with ``bounds`` held again for the figure."""
-        held = frozenset(bounds)
-        return LiftedBounds(
-            tuple(
-                lifting
-                for lifting in self.liftings
-                if lifting.combatant_id != combatant_id or lifting.bound not in held
-            )
-        )
-
-
-def order(lifting: Lifting) -> tuple[int, int]:
-    """Sort key: figure by figure, then in :data:`LIFTABLE_BOUNDS` order."""
-    return (lifting.combatant_id, LIFTABLE_BOUNDS.index(lifting.bound))
+        return self.without(combatant_id, bounds)
 
 
 def bounds_imposed_by(rules: MagicRules) -> tuple[str, ...]:

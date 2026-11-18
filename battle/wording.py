@@ -1,4 +1,5 @@
-"""The words a Game Master's rulings on a battle are shown in (issues #867, #37).
+"""The words a Game Master's rulings on a battle are shown in (issues #867, #37;
+tarmar-studio #208).
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
 headings and buttons, the battle-log lines, the refusals and the turn menu's
@@ -31,7 +32,7 @@ from common.wording import load_wording, sentence
 
 @dataclass(frozen=True)
 class CommonWords:
-    """Words both rulings use."""
+    """Words the rulings share."""
 
     game_master: str = sentence("name")
     and_word: str = sentence()
@@ -270,6 +271,23 @@ class MagicBoundsWords:
 
 
 @dataclass(frozen=True)
+class WorkingGrantsWords:
+    """The words for a working a Game Master grants a figure (tarmar-studio
+    #208): the refusals and the battle-log lines."""
+
+    game_master_only: str = sentence()
+    refuse_classic: str = sentence()
+    refuse_no_true_magic: str = sentence()
+    refuse_working: str = sentence()
+    refuse_needs_no_grant: str = sentence("working")
+    refuse_combatant: str = sentence()
+    refuse_no_true_level: str = sentence("name", "skill")
+    log_granted: str = sentence("by", "name", "working", required=("working",))
+    log_withdrawn: str = sentence("by", "name", "working", required=("working",))
+    unbuilt_working: str = sentence("key", required=("key",))
+
+
+@dataclass(frozen=True)
 class CastStageWords:
     """The cast stage's rows, both profiles (#145): each spell's name, its
     cost, its chance, and why it cannot be cast when it cannot."""
@@ -375,6 +393,7 @@ class RulingsWording:
     turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
+    working_grants: WorkingGrantsWords
     cast_stage: CastStageWords
     services: ServicesWords
     control: ControlWords

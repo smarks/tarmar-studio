@@ -1627,7 +1627,7 @@ def magic_bounds_panel(battle, actor: Actor) -> dict | None:
         return None
     record = magic_bounds.LiftedBounds.of(battle)
     offered = magic_bounds.offered_bounds()
-    if not offered and not record.liftings:
+    if not offered and not record.entries:
         return None
     rows = list(battle.combatants.order_by("pk"))
     names = {row.pk: row.display_name for row in rows}
@@ -1640,15 +1640,15 @@ def magic_bounds_panel(battle, actor: Actor) -> dict | None:
         "liftings": [
             {
                 "combatant_id": lifting.combatant_id,
-                "bound": lifting.bound,
+                "bound": lifting.subject,
                 "line": bounds_words.lifting_line.format(
-                    bound=capfirst(magic_bounds.bound_label(lifting.bound)),
+                    bound=capfirst(magic_bounds.bound_label(lifting.subject)),
                     name=name_of(names, lifting.combatant_id),
                     by=game_master_name(lifting.by),
                 ),
                 "at": datetime.fromisoformat(lifting.at),
             }
-            for lifting in sorted(record.liftings, key=magic_bounds.order)
+            for lifting in record.in_order()
         ],
         "can_rule": bool(offered) and runs_the_seats(battle, actor.user),
         "combatants": [{"id": row.pk, "name": row.display_name} for row in rows],

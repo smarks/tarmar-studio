@@ -138,6 +138,13 @@ class Battle(models.Model):
     # The one source of truth; ``battle.magic_bounds`` reads it, and only a
     # Game Master changes it (``battle.services.set_magic_bounds_lifted``).
     magic_bounds_lifted_json = models.JSONField(default=list, blank=True, db_default=[])
+    # A Game Master's grant of a working to a figure (tarmar-studio #208): a
+    # working whose effect needs a grant is crafted only by a figure named
+    # for it. A list of ``{"combatant_id", "working", "by", "by_id", "at"}``,
+    # ``[]`` for none. The one source of truth; ``battle.working_grants``
+    # reads it, and only a Game Master changes it
+    # (``battle.services.set_working_granted``).
+    workings_granted_json = models.JSONField(default=list, blank=True, db_default=[])
     # While ``status`` is ``awaiting``: which combatant the turn is paused
     # on, plus the legal candidates (policy scores included, as advice) that
     # were computed when the engine paused — so the player's page can render

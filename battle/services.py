@@ -45,7 +45,15 @@ from characters.services import FightReport, record_entry_into_play
 from characters.skills import glossary_skill_level
 from characters.weapon_skill import resolve_weapon_skill
 
-from . import agreement, control, magic_bounds, policy, profiles, turn_menu
+from . import (
+    agreement,
+    control,
+    magic_bounds,
+    policy,
+    profiles,
+    turn_menu,
+    working_grants,
+)
 from .access import (
     Actor,
     claimed_seat_q,
@@ -1470,7 +1478,9 @@ def release_seat(
     """Give an occupied seat back to the lobby (its holder, or any DM).
 
     The character row the player brought or generated survives — only the
-    seat's claim, snapshot, and ready flag clear.
+    seat's claim, snapshot, and ready flag clear. The workings a Game Master
+    granted the figure in the seat go with it (tarmar-studio #208): a grant
+    names a figure, and whoever claims the seat next is another.
 
     Raises:
         ValueError: battle not in its lobby, seat unknown, or not yours.
@@ -1501,6 +1511,11 @@ def release_seat(
             battle, words().services.open_seat.format(number=rank + 1)
         )
         seat.save()
+        grants = working_grants.WorkingGrants.of(battle)
+        kept = grants.without(seat.pk, grants.for_figure(seat.pk))
+        if kept != grants:
+            setattr(battle, kept.battle_field, kept.to_json())
+            battle.save(update_fields=[kept.battle_field])
     return seat
 
 
@@ -2435,20 +2450,18 @@ def set_hth_agreement(
     hth_words = words().hth_agreement
     if whole_battle == (pair is not None):
         raise BattleRefusal(hth_words.refuse_scope)
-    with transaction.atomic():
-        battle = Battle.objects.select_for_update().get(pk=battle_id)
-        game_master = _ruling_game_master(battle, actor, hth_words.game_master_only)
-        if battle.rules_profile != TARMAR_PROFILE:
-            raise BattleRefusal(hth_words.refuse_classic)
-        rows = {row.pk: row for row in battle.combatants.all()}
-        names = {pk: row.display_name for pk, row in rows.items()}
+
+    def change(
+        battle: Battle, game_master: User, figures: dict[int, BattleCombatant]
+    ) -> _RulingChange | None:
+        names = {pk: row.display_name for pk, row in figures.items()}
         current = agreement.Agreement.of(battle)
         key = None
         if pair is not None:
             first, second = pair
-            if first == second or first not in rows or second not in rows:
+            if first == second:
                 raise BattleRefusal(hth_words.refuse_pair)
-            if rows[first].team and rows[first].team == rows[second].team:
+            if figures[first].team and figures[first].team == figures[second].team:
                 raise BattleRefusal(
                     hth_words.refuse_same_side.format(
                         first=names[first], second=names[second]
@@ -2464,27 +2477,34 @@ def set_hth_agreement(
         else:
             updated = agreement.Agreement(agreed, current.pairs)
         if updated == current:
-            return battle, None
-        battle.hth_agreement_json = updated.to_json()
-        _reopen_awaited_menu(battle)
-        event = _control_event(
-            battle,
-            agreement.change_message(
+            return None
+        return _RulingChange(
+            battle_field=updated.battle_field,
+            stored=updated.to_json(),
+            message=agreement.change_message(
                 whole_battle=agreed if whole_battle else None,
                 pair=key,
                 agreed=agreed,
                 names=names,
                 by=game_master_name(game_master.username),
             ),
-            {
+            payload={
                 "hth_agreement": updated.to_json(),
                 "scope": "battle" if whole_battle else "pair",
                 "pair": list(key) if key is not None else None,
                 "agreed": agreed,
             },
         )
-        battle.save()
-    return battle, event
+
+    return _record_ruling(
+        battle_id,
+        actor,
+        game_master_only=hth_words.game_master_only,
+        refuse_classic=hth_words.refuse_classic,
+        combatant_ids=pair or (),
+        refuse_combatant=hth_words.refuse_pair,
+        change=change,
+    )
 
 
 def _reopen_awaited_menu(battle: Battle) -> None:
@@ -2513,6 +2533,86 @@ def _ruling_game_master(battle: Battle, actor: Actor, refusal: str) -> User:
     if not isinstance(game_master, User) or not runs_the_seats(battle, game_master):
         raise BattleRefusal(refusal)
     return game_master
+
+
+@dataclass(frozen=True)
+class _RulingChange:
+    """What one ruling changes on a battle.
+
+    Attributes:
+        battle_field: The ``Battle`` field that holds the ruling's record.
+        stored: The record as it now stands, in its stored shape.
+        message: The battle-log line for the change.
+        payload: The log line's payload.
+    """
+
+    battle_field: str
+    stored: dict | list
+    message: str
+    payload: dict
+
+
+def _record_ruling(
+    battle_id: int,
+    actor: Actor,
+    *,
+    game_master_only: str,
+    refuse_classic: str,
+    combatant_ids: Collection[int],
+    refuse_combatant: str,
+    change: Callable[[Battle, User, dict[int, BattleCombatant]], _RulingChange | None],
+) -> tuple[Battle, BattleEvent | None]:
+    """Record a Game Master's ruling on a battle: the steps every one takes.
+
+    Written once for the HTH-by-agreement ruling (:func:`set_hth_agreement`),
+    the lifted magic bounds (:func:`set_magic_bounds_lifted`) and the granted
+    workings (:func:`set_working_granted`, tarmar-studio #208): lock the
+    battle, hold the ruling to the fight's Game Master
+    (:func:`_ruling_game_master`), refuse a classic battle, find the figures
+    it names, let the ruling say what it changes, write the record, clear a
+    pause on a person's move (:func:`_reopen_awaited_menu`), file the log
+    line (:func:`_control_event`) and save. Each ruling keeps only its own
+    refusals and its own record, in ``change``.
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        game_master_only: The ruling's refusal for anyone else.
+        refuse_classic: The ruling's refusal for a classic battle.
+        combatant_ids: The ``BattleCombatant`` pks the ruling names; none for
+            a ruling on the whole battle.
+        refuse_combatant: The ruling's refusal for a pk not in this battle.
+        change: Given the locked battle, the Game Master and the named
+            figures by pk, the change to make, or ``None`` when the ruling
+            already stands as asked. Raises ``BattleRefusal`` for the
+            ruling's own refusals.
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        BattleRefusal: not the fight's Game Master, a classic battle, a
+            figure not in this battle, or a refusal ``change`` raises.
+    """
+    with transaction.atomic():
+        battle = Battle.objects.select_for_update().get(pk=battle_id)
+        game_master = _ruling_game_master(battle, actor, game_master_only)
+        if battle.rules_profile != TARMAR_PROFILE:
+            raise BattleRefusal(refuse_classic)
+        figures = {
+            row.pk: row for row in battle.combatants.filter(pk__in=combatant_ids)
+        }
+        if any(combatant_id not in figures for combatant_id in combatant_ids):
+            raise BattleRefusal(refuse_combatant)
+        ruled = change(battle, game_master, figures)
+        if ruled is None:
+            return battle, None
+        setattr(battle, ruled.battle_field, ruled.stored)
+        _reopen_awaited_menu(battle)
+        event = _control_event(battle, ruled.message, ruled.payload)
+        battle.save()
+    return battle, event
 
 
 def set_magic_bounds_lifted(
@@ -2563,14 +2663,11 @@ def set_magic_bounds_lifted(
         raise BattleRefusal(
             bounds_words.refuse_bounds.format(bounds=magic_bounds.bound_words(offered))
         )
-    with transaction.atomic():
-        battle = Battle.objects.select_for_update().get(pk=battle_id)
-        game_master = _ruling_game_master(battle, actor, bounds_words.game_master_only)
-        if battle.rules_profile != TARMAR_PROFILE:
-            raise BattleRefusal(bounds_words.refuse_classic)
-        figure = battle.combatants.filter(pk=combatant_id).first()
-        if figure is None:
-            raise BattleRefusal(bounds_words.refuse_combatant)
+
+    def change(
+        battle: Battle, game_master: User, figures: dict[int, BattleCombatant]
+    ) -> _RulingChange | None:
+        figure = figures[combatant_id]
         current = magic_bounds.LiftedBounds.of(battle)
         already = current.for_figure(figure.pk)
         requested = frozenset(bounds)
@@ -2579,6 +2676,8 @@ def set_magic_bounds_lifted(
             for bound in magic_bounds.LIFTABLE_BOUNDS
             if bound in requested and (bound in already) != lifted
         ]
+        if not changing:
+            return None
         if lifted:
             updated = current.lifted(
                 figure.pk,
@@ -2589,27 +2688,137 @@ def set_magic_bounds_lifted(
             )
         else:
             updated = current.restored(figure.pk, changing)
-        if not changing:
-            return battle, None
-        battle.magic_bounds_lifted_json = updated.to_json()
-        _reopen_awaited_menu(battle)
-        event = _control_event(
-            battle,
-            magic_bounds.change_message(
+        return _RulingChange(
+            battle_field=updated.battle_field,
+            stored=updated.to_json(),
+            message=magic_bounds.change_message(
                 bounds=changing,
                 lifted=lifted,
                 name=figure.display_name,
                 by=game_master_name(game_master.username),
             ),
-            {
+            payload={
                 "magic_bounds_lifted": updated.to_json(),
                 "combatant_id": figure.pk,
                 "bounds": changing,
                 "lifted": lifted,
             },
         )
-        battle.save()
-    return battle, event
+
+    return _record_ruling(
+        battle_id,
+        actor,
+        game_master_only=bounds_words.game_master_only,
+        refuse_classic=bounds_words.refuse_classic,
+        combatant_ids=(combatant_id,),
+        refuse_combatant=bounds_words.refuse_combatant,
+        change=change,
+    )
+
+
+def set_working_granted(
+    battle_id: int,
+    actor: Actor,
+    *,
+    combatant_id: int,
+    working_key: str,
+    granted: bool,
+) -> tuple[Battle, BattleEvent | None]:
+    """Grant a figure a working, or withdraw the grant (tarmar-studio #208).
+
+    A canon's True Magic may give a working an effect that needs a grant:
+    only a figure a Game Master has named the working for may craft it. The
+    grant is a ruling on the battle, recorded as a lifted bound is
+    (:func:`set_magic_bounds_lifted`) and by the same account: the fight's
+    runner, while a Game Master (:func:`runs_the_seats`). No player records
+    one. This path is the only one that changes the record (the admin shows
+    the field read-only); the record keeps who granted each working and
+    when, and each change files one line in the log. A working already
+    granted keeps its first record. A change made while a move is awaited
+    clears the pause (:func:`_reopen_awaited_menu`).
+
+    A grant is of one working, an effect at a tier. One past the figure's
+    tier cap is recorded all the same, and the log line's payload says so
+    (:func:`battle.working_grants.change_payload`): it waits on Channel
+    being lifted for the figure, by the engine's own answer
+    (:func:`battle.working_grants.waits_on_channel`).
+    A grant is not spent by a craft; it stands until it is withdrawn.
+
+    A grant on the record may always be withdrawn, whatever the canon has
+    become since; only a new grant is held to the loaded canon.
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        combatant_id: The ``BattleCombatant`` pk of the figure.
+        working_key: The working's key, as the engine writes it
+            (``TrueMagicRules.working_key``).
+        granted: Grant (True) or withdraw (False).
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        BattleRefusal: not the fight's Game Master, a classic battle, or a
+            figure not in this battle; and, for a grant, a canon with no
+            True Magic, a key its rules do not build, an effect that needs
+            no grant, or a figure with no level in the True skill
+            (:func:`battle.working_grants.grant_refusal`).
+    """
+    grant_words = words().working_grants
+
+    def change(
+        battle: Battle, game_master: User, figures: dict[int, BattleCombatant]
+    ) -> _RulingChange | None:
+        figure = figures[combatant_id]
+        current = working_grants.WorkingGrants.of(battle)
+        engine_figure = None
+        if granted:
+            engine_figure = working_grants.engine_figures(battle).get(figure.pk)
+            refusal = working_grants.grant_refusal(
+                working_key, engine_figure, figure.display_name
+            )
+            if refusal is not None:
+                raise BattleRefusal(refusal)
+            updated = current.with_ruled(
+                figure.pk,
+                [working_key],
+                by=game_master.username,
+                by_id=game_master.pk,
+                at=timezone.now().isoformat(),
+            )
+        else:
+            updated = current.without(figure.pk, [working_key])
+        if updated == current:
+            return None
+        return _RulingChange(
+            battle_field=updated.battle_field,
+            stored=updated.to_json(),
+            message=working_grants.change_message(
+                working_key=working_key,
+                granted=granted,
+                name=figure.display_name,
+                by=game_master_name(game_master.username),
+            ),
+            payload=working_grants.change_payload(
+                updated,
+                combatant_id=figure.pk,
+                working_key=working_key,
+                granted=granted,
+                figure=engine_figure,
+            ),
+        )
+
+    return _record_ruling(
+        battle_id,
+        actor,
+        game_master_only=grant_words.game_master_only,
+        refuse_classic=grant_words.refuse_classic,
+        combatant_ids=(combatant_id,),
+        refuse_combatant=grant_words.refuse_combatant,
+        change=change,
+    )
 
 
 def set_combatant_control_mode(

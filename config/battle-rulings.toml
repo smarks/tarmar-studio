@@ -1,5 +1,6 @@
 # The words a Game Master's rulings on a battle are shown in: the battle
-# page's panels, the battle log's lines, and the refusals (issues #867, #37).
+# page's panels, the battle log's lines, and the refusals (issues #867, #37;
+# tarmar-studio #208).
 #
 # Read once at startup (battle.wording.load_rulings_wording); a missing key, an
 # unknown key or a {name} a sentence may not use stops the server there rather
@@ -286,6 +287,25 @@ refuse_bounds = "Name one or more of the bounds this canon imposes, which a Game
 refuse_bounds_list = "Name the bounds as a list"
 refuse_combatant = "Name a combatant in this battle"
 refuse_classic = "Lifting a figure's magic bounds is a Tarmar ruling; a classic battle has no Channel, push or counter"
+
+# A working a Game Master grants a figure (tarmar-studio #208): a working
+# whose effect needs a grant is crafted only by a figure named for it. {by} is
+# the Game Master as common.game_master names him, {name} the figure and
+# {working} the working as the board names it, its effect and its tier.
+[working_grants]
+game_master_only = "Only the Game Master running this fight grants a figure a working; players craft what the rules and the Game Master's grants allow"
+refuse_classic = "Granting a working is a Tarmar ruling; a classic battle has no True Magic"
+refuse_no_true_magic = "This canon has no True Magic, so there is no working to grant"
+refuse_working = "Name a working this canon's True Magic builds"
+refuse_needs_no_grant = "{working} needs no grant: any figure who crafts workings may craft it"
+refuse_combatant = "Name the figure in this battle the working is for"
+# {skill}: the True skill, as the canon labels it.
+refuse_no_true_level = "{name} has no level in {skill}, so crafts no working"
+log_granted = "{by} grants {name} the working {working}"
+log_withdrawn = "{by} withdraws the working {working} from {name}"
+# What a granted working is called once the canon no longer builds it; {key}
+# is the working's key as the record holds it.
+unbuilt_working = "{key} (a working this canon no longer builds)"
 
 # The cast stage's rows (issue #145): what the turn panel lists for each spell
 # a seated caster knows. {spell} and {target} name a spell and a figure; a

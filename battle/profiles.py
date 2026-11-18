@@ -48,7 +48,7 @@ from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 
 from common.rolling import Roller
 
-from . import agreement, magic_bounds, policy, viewmodel
+from . import agreement, magic_bounds, policy, viewmodel, working_grants
 from .engine.engine import run_turn as run_tarmar_turn
 from .engine.state import BattleState
 from .magic_rules import magic_rules
@@ -220,14 +220,21 @@ class TarmarProfile(BattleProfile):
         # A Game Master's "HTH by agreement" ruling, read from the battle
         # every turn so a change takes effect on the next one (#867).
         agreement.fill(state, agreement.Agreement.of(self.battle))
-        # The bounds a Game Master has lifted for each figure, read from the
-        # battle likewise (#37): the menu, the cast and the counter read them.
-        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
+        self._fill_magic_rulings(state)
         events: list[dict] = []
         run_tarmar_turn(
             state, roller, events.append, decide, profile=tarmar_engine_profile()
         )
         return events
+
+    def _fill_magic_rulings(self, state: BattleState) -> None:
+        """Write a Game Master's rulings on magic onto the board, read from
+        the battle so a change takes effect on the next turn: the bounds
+        lifted for each figure (#37), which the menu, the cast and the
+        counter read, and the workings granted to each (tarmar-studio #208),
+        which the menu and the craft read."""
+        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
+        working_grants.fill(state, working_grants.WorkingGrants.of(self.battle))
 
     def mint_event(self, state: BattleState, **fields) -> dict:
         sequence = state.next_sequence
@@ -294,8 +301,8 @@ class TarmarProfile(BattleProfile):
         # builder can only be reached from inside the call.
         from .services import caster_magic
 
-        # The ruling as it stands now, not as the last turn left it (#37).
-        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
+        # The rulings as they stand now, not as the last turn left them (#37).
+        self._fill_magic_rulings(state)
         return caster_magic(state, combatant_id)
 
     def pool_label(self) -> str:

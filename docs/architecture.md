@@ -941,21 +941,43 @@ is a Game Master (`runs_the_seats`, #853).
 
 ### A Game Master's rulings on a battle
 
-Two rulings let a Game Master lift what players are held to, each stored on
-the battle and changed only through the battle's GM controls by the fight's
-runner while a Game Master (`battle/services.py::runs_the_seats`):
-hand-to-hand by agreement (`Battle.hth_agreement_json`, `battle/agreement.py`,
-#867) and a figure's lifted magic bounds (`Battle.magic_bounds_lifted_json`,
-`battle/magic_bounds.py`, #37). The second offers only the bounds the loaded
-canon imposes (Channel, the push cap, the counter's commitment bounds) and
-records who lifted each and when; the Tarmar profile writes it onto each
-figure's `lifted_magic_bounds` every turn (tarmar-engine v0.9.17), so the
-engine's menu offers that figure the wider amounts and a cast or counter past
-a lifted bound is narrated as such. Every change writes a log line; the battle
-payload carries both records and their panels (`rulings`, `rulings_html`),
-which `battle.js` repaints. Their words (headings, buttons, log lines,
-refusals) are configuration: `config/battle-rulings.toml`, read and checked at
-startup by `battle/wording.py::load_rulings_wording` into
+Three rulings let a Game Master lift what players are held to, each stored on
+the battle and changed only by the fight's runner while a Game Master
+(`battle/services.py::runs_the_seats`): hand-to-hand by agreement
+(`Battle.hth_agreement_json`, `battle/agreement.py`, #867), a figure's lifted
+magic bounds (`Battle.magic_bounds_lifted_json`, `battle/magic_bounds.py`, #37)
+and a working granted to a figure (`Battle.workings_granted_json`,
+`battle/working_grants.py`, tarmar-studio #208). The second offers only the
+bounds the loaded canon imposes (Channel, the push cap, the counter's
+commitment bounds) and records who lifted each and when; the Tarmar profile
+writes it onto each figure's `lifted_magic_bounds` every turn (tarmar-engine
+v0.9.17), so the engine's menu offers that figure the wider amounts and a cast
+or counter past a lifted bound is narrated as such. The third names one
+working, an effect at a tier, that only a granted figure may craft (the
+canon's `true_magic.effects[].needs_grant`), for a figure with a level in the
+True skill; the profile writes it onto each figure's `granted_workings`
+likewise (tarmar-engine v0.9.22), leaving off any grant the loaded canon no
+longer builds, and the engine's menu offers that figure the craft. A grant
+past the figure's tier cap is recorded and waits on Channel being lifted for
+it: `working_grants.past_tier_cap` and `waits_on_channel` put the question to
+the engine (`MagicRules.past_tier_cap`, `tier_cap`) for the figure as the
+engine reads it, the battle's lifted bounds on it
+(`working_grants.engine_figures`), and restate no rule of the engine's. A
+grant names a figure, so a seat released in the lobby loses its grants
+(`release_seat`), and the next character to claim it starts with none.
+
+The last two keep one record, written once
+(`battle/figure_rulings.py::FigureRulings`): one thing ruled for one figure,
+with who and when. The steps every ruling takes are written once too
+(`battle/services.py::_record_ruling`): lock the battle, hold the ruling to
+the fight's Game Master, refuse a classic battle and a figure not in the
+battle, write the record, clear a pause on a person's move, file one log line
+and save; `set_hth_agreement`, `set_magic_bounds_lifted` and
+`set_working_granted` each keep only their own refusals and record. The
+battle payload carries the first two records and their panels (`rulings`,
+`rulings_html`), which `battle.js` repaints. The rulings' words (headings,
+buttons, log lines, refusals) are configuration: `config/battle-rulings.toml`,
+read and checked at startup by `battle/wording.py::load_rulings_wording` into
 `settings.BATTLE_RULINGS_WORDING` (`BATTLE_RULINGS_WORDING_FILE` names another
 file).
 
