@@ -20,7 +20,9 @@ battle board in hand-written sentences, and
   (the ``push`` block);
 - ``channel.md``: one kind of magic for every spell, its Channel per level held
   in the spell and the amount added, and the Channel of a caster who holds no
-  level (the ``channel`` block).
+  level; and the second kind a True cast or a working reads (tarmar-studio
+  #208), its skill, its Channel per level and the amount added (the
+  ``channel`` block).
 
 They have no shared source: the rules-as-data prose of issue #68 builds the
 sheet's and the Games Master prompt's sentences from the loaded canon, but
@@ -130,6 +132,13 @@ CHANNEL_DERIVATION = (
 #: How ``channel.md`` names the level a Channel reads when it is the spell's own.
 CHANNEL_SPELL_LEVEL = "that spell"
 CHANNEL_WITH_NO_LEVEL = r"holds no level in the spell still has a Channel of (\d+)"
+#: The kind of magic a True cast or a working reads: its Channel per level,
+#: the general skill the level is held in, and the amount added.
+CHANNEL_SKILL_KIND = (
+    r"a second kind of magic instead, read from the caster's (\w+):"
+    r" a Channel of (\d+) for each level they hold in the (\w+) skill,"
+    r" (?:with nothing added|plus (\d+)),"
+)
 
 
 class Page(NamedTuple):
@@ -366,31 +375,46 @@ def push_claims_of_rules(rules: PushRules) -> dict[str, object]:
 def channel_claims_of_page(page: Page, rules: ChannelRules) -> dict[str, object]:
     """What a ``channel.md`` page says about how Channel derives.
 
-    The page words a single kind of magic, so a block that adds a kind or
-    sorts a spell into one needs the page and this parser rewritten with it.
+    The page words one kind of magic for every spell and a second, read from
+    a general skill, for a True cast or a working (tarmar-studio #208), so a
+    block that adds a further kind or sorts a spell into one needs the page
+    and this parser rewritten with it.
     """
     derivation = search(CHANNEL_DERIVATION, page)
+    skill_kind = search(CHANNEL_SKILL_KIND, page)
     return {
         "one_kind_for_every_spell": states(CHANNEL_ONE_KIND, page, expected=True),
         "reads_the_spell_level": derivation.group(2) == CHANNEL_SPELL_LEVEL,
         "multiplier": int(derivation.group(1)),
         "offset": int(derivation.group(3)),
         "channel_with_no_level": int(search(CHANNEL_WITH_NO_LEVEL, page).group(1)),
+        "skill_kind_skills": [
+            skill_kind.group(1).casefold(),
+            skill_kind.group(3).casefold(),
+        ],
+        "skill_kind_multiplier": int(skill_kind.group(2)),
+        "skill_kind_offset": int(skill_kind.group(4) or 0),
     }
 
 
 def channel_claims_of_rules(rules: ChannelRules) -> dict[str, object]:
-    """The same claims, from the loaded ``channel`` block."""
-    (kind,) = rules.derivations
-    derivation = rules.derivations[kind]
+    """The same claims, from the loaded ``channel`` block: the default kind is
+    every spell's, and the one other kind is the one read from a skill."""
+    spell_kind = rules.default_kind
+    (skill_kind,) = (kind for kind in rules.derivations if kind != spell_kind)
+    assert spell_kind is not None, "the default canon gives every spell one kind"
+    derivation = rules.derivations[spell_kind]
+    skill_derivation = rules.derivations[skill_kind]
     return {
-        "one_kind_for_every_spell": (
-            rules.default_kind == kind and not rules.kind_by_spell
-        ),
+        "one_kind_for_every_spell": not rules.kind_by_spell,
         "reads_the_spell_level": derivation.source_skill is None,
         "multiplier": derivation.multiplier,
         "offset": derivation.offset,
         "channel_with_no_level": derivation.channel_at(UNRECORDED_SKILL_LEVEL),
+        # The page names the skill twice, and both must be the block's.
+        "skill_kind_skills": [skill_derivation.source_skill] * 2,
+        "skill_kind_multiplier": skill_derivation.multiplier,
+        "skill_kind_offset": skill_derivation.offset,
     }
 
 
@@ -591,6 +615,10 @@ class MagicPageDriftIsCaughtTest(SimpleTestCase):
                 ("they hold in that spell,", "they hold in Sword,"),
                 ("in that spell, plus 6.", "in that spell, plus 5."),
                 ("still has a Channel of 6,", "still has a Channel of 5,"),
+                ("a Channel of 3 for each level", "a Channel of 4 for each level"),
+                ("read from the caster's Arcane:", "read from the caster's Sword:"),
+                ("they hold in the Arcane skill,", "they hold in the Sword skill,"),
+                ("Arcane skill, with nothing added,", "Arcane skill, plus 1,"),
             ),
         )
 

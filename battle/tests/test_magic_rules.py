@@ -9,6 +9,7 @@ import copy
 import json
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from django.test import SimpleTestCase
 from tarmar_engine.magic import (
     UNRECORDED_SKILL_LEVEL,
     BorrowingRules,
+    CastingEnding,
     CastingFailureRules,
     CastingSuccessTier,
     ChannelDerivation,
@@ -24,11 +26,16 @@ from tarmar_engine.magic import (
     ControlBand,
     CounterspellRules,
     DebtBand,
+    InterruptionRules,
     MagicRules,
+    MarginBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
     SpellEffectKind,
+    TrueMagicRules,
+    WorkingEffect,
+    spell_for,
 )
 from tarmar_engine.spells import SPELLS
 
@@ -59,7 +66,8 @@ from .magic_fixtures import DEFAULT_MAGIC_RULES
 
 # A complete file with invented numbers: every field present, both kinds of
 # Channel derivation, a per-spell push bonus, Borrowing, Runaway, Counterspell,
-# casting failure totals and a ruling.
+# casting failure totals, True Magic read off the "deep" kind (a rolled effect
+# of each kind and a narrated one) and a ruling.
 INVENTED_RULES: dict[str, Any] = {
     "casting_success_tiers": [
         {
@@ -179,11 +187,79 @@ INVENTED_RULES: dict[str, Any] = {
         "ties_go_to_caster": False,
         "defender_min_mana": 2,
         "defender_max_mana": 7,
+        "familiarity_per_level": 3,
     },
     "casting_failure": {
         "fumble_floor": 14,
         "mana_lost_totals": [14, 15],
         "runaway_total": 15,
+    },
+    "true_magic": {
+        "channel_kind": "deep",
+        "skill_label": "Lore",
+        "school": "Deepcraft",
+        "effects": [
+            {
+                "key": "scorch",
+                "label": "Scorch",
+                "kind": "damage",
+                "dice_per_tier": "1d6+1",
+                "pool": "body",
+                "targeted": True,
+                "ignores_armour": True,
+                "needs_grant": False,
+            },
+            {
+                "key": "soothe",
+                "label": "Soothe",
+                "kind": "healing",
+                "dice_per_tier": "1d4",
+                "pool": "fatigue",
+                "targeted": False,
+                "ignores_armour": False,
+                "needs_grant": False,
+            },
+            {
+                "key": "marvel",
+                "label": "Marvel",
+                "kind": None,
+                "dice_per_tier": None,
+                "pool": "fatigue",
+                "targeted": False,
+                "ignores_armour": False,
+                "needs_grant": True,
+            },
+        ],
+        # Every number here differs from every other, and from the Tarmar
+        # canon's, so a loader that crossed two fields fails the round trip.
+        "tiers_per_level": 3,
+        "turns_per_tier": 2,
+        "roll_attribute": "WIS",
+        "roll_bonus_per_level": 4,
+        "interruption": {
+            "roll": {"dice": "2d8", "attribute": "INT"},
+            "penalty_per_mana": 5,
+            "failure_bands": [
+                {
+                    "key": "falter",
+                    "label": "Falter",
+                    "is_runaway": False,
+                    "lowest_margin": 1,
+                    "highest_margin": 9,
+                },
+                {
+                    "key": "burst",
+                    "label": "Burst",
+                    "is_runaway": True,
+                    "lowest_margin": 10,
+                    "highest_margin": None,
+                },
+            ],
+            "automatic_runaway_totals": [16],
+        },
+        "drain_pool": "body",
+        "drain_per_mana": 6,
+        "lost_drain_per_mana": {"interrupted": 7, "stopped": 8},
     },
     # Every school the engine files a spell under, and one with none.
     "schools": [
@@ -315,9 +391,75 @@ INVENTED_MAGIC_RULES = MagicRules(
         ties_go_to_caster=False,
         defender_min_mana=2,
         defender_max_mana=7,
+        familiarity_per_level=3,
     ),
     casting_failure=CastingFailureRules(
         fumble_floor=14, mana_lost_totals=frozenset({14, 15}), runaway_total=15
+    ),
+    true_magic=TrueMagicRules(
+        channel_kind="deep",
+        skill_label="Lore",
+        school="Deepcraft",
+        effects=(
+            WorkingEffect(
+                key="scorch",
+                label="Scorch",
+                kind=SpellEffectKind.DAMAGE,
+                dice_per_tier="1d6+1",
+                pool="body",
+                targeted=True,
+                ignores_armour=True,
+                needs_grant=False,
+            ),
+            WorkingEffect(
+                key="soothe",
+                label="Soothe",
+                kind=SpellEffectKind.HEALING,
+                dice_per_tier="1d4",
+                pool="fatigue",
+                targeted=False,
+                ignores_armour=False,
+                needs_grant=False,
+            ),
+            WorkingEffect(
+                key="marvel",
+                label="Marvel",
+                kind=None,
+                dice_per_tier=None,
+                pool="fatigue",
+                targeted=False,
+                ignores_armour=False,
+                needs_grant=True,
+            ),
+        ),
+        tiers_per_level=3,
+        turns_per_tier=2,
+        roll_attribute="WIS",
+        roll_bonus_per_level=4,
+        interruption=InterruptionRules(
+            roll=RollUnderRule(dice="2d8", attribute="INT"),
+            penalty_per_mana=5,
+            failure_bands=(
+                MarginBand(
+                    key="falter",
+                    label="Falter",
+                    is_runaway=False,
+                    lowest_margin=1,
+                    highest_margin=9,
+                ),
+                MarginBand(
+                    key="burst",
+                    label="Burst",
+                    is_runaway=True,
+                    lowest_margin=10,
+                    highest_margin=None,
+                ),
+            ),
+            automatic_runaway_totals=frozenset({16}),
+        ),
+        drain_pool="body",
+        drain_per_mana=6,
+        lost_drain_per_mana={CastingEnding.INTERRUPTED: 7, CastingEnding.STOPPED: 8},
     ),
 )
 
@@ -364,6 +506,7 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             "runaway": None,
             "counterspell": None,
             "casting_failure": None,
+            "true_magic": None,
             "schools": None,
         }
         self.assertEqual(load_magic_rules(self.write_rules(rules)), MagicRules())
@@ -440,6 +583,32 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
         loaded = load_magic_rules(self.write_rules(rules))
         assert loaded.counterspell is not None
         self.assertIsNone(loaded.counterspell.defender_max_mana)
+
+    def test_null_true_magic_loads_as_none_and_the_rest_stands(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"] = None
+        self.assertEqual(
+            load_magic_rules(self.write_rules(rules)),
+            replace(INVENTED_MAGIC_RULES, true_magic=None),
+        )
+
+    def test_a_lost_drain_is_keyed_by_the_engines_ending_not_its_word(self) -> None:
+        # A CastingEnding equals its word, so the round trip alone would pass
+        # a loader that left the canon's strings as they were.
+        loaded = load_magic_rules(self.write_rules(INVENTED_RULES))
+        assert loaded.true_magic is not None
+        self.assertEqual(
+            [type(ending) for ending in loaded.true_magic.lost_drain_per_mana],
+            [CastingEnding, CastingEnding],
+        )
+
+    def test_no_lost_drain_loads_as_nothing_drained(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["lost_drain_per_mana"] = {}
+        loaded = load_magic_rules(self.write_rules(rules))
+        assert loaded.true_magic is not None
+        self.assertEqual(loaded.true_magic.lost_drain_per_mana, {})
+        self.assertEqual(loaded.true_magic.drain(4, CastingEnding.INTERRUPTED), 0)
 
     def test_rulings_are_optional(self) -> None:
         rules = invented_rules()
@@ -752,6 +921,143 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         lambda rules: rules["counterspell"].update(defender_max_mana="7"),
     ),
     ("counterspell.step", lambda rules: rules["counterspell"].update(step=3)),
+    (
+        "counterspell.familiarity_per_level",
+        lambda rules: rules["counterspell"].pop("familiarity_per_level"),
+    ),
+    (
+        "counterspell.familiarity_per_level",
+        lambda rules: rules["counterspell"].update(familiarity_per_level=None),
+    ),
+    # True Magic (tarmar-studio #208).
+    ("true_magic", lambda rules: rules.pop("true_magic")),
+    ("true_magic", lambda rules: rules.update(true_magic=[])),
+    ("true_magic.tier_cap", lambda rules: rules["true_magic"].update(tier_cap=3)),
+    (
+        "true_magic.channel_kind",
+        lambda rules: rules["true_magic"].update(channel_kind=""),
+    ),
+    (
+        "true_magic.skill_label",
+        lambda rules: rules["true_magic"].pop("skill_label"),
+    ),
+    ("true_magic.school", lambda rules: rules["true_magic"].update(school=None)),
+    ("true_magic.effects", lambda rules: rules["true_magic"].update(effects={})),
+    (
+        "true_magic.effects[1].label",
+        lambda rules: rules["true_magic"]["effects"][1].update(label=""),
+    ),
+    (
+        "true_magic.effects[0].kind",
+        lambda rules: rules["true_magic"]["effects"][0].update(kind=""),
+    ),
+    (
+        "true_magic.effects[0].kind",
+        lambda rules: rules["true_magic"]["effects"][0].pop("kind"),
+    ),
+    (
+        "true_magic.effects[0].dice_per_tier",
+        lambda rules: rules["true_magic"]["effects"][0].update(dice_per_tier=6),
+    ),
+    (
+        "true_magic.effects[2].pool",
+        lambda rules: rules["true_magic"]["effects"][2].pop("pool"),
+    ),
+    (
+        "true_magic.effects[0].targeted",
+        lambda rules: rules["true_magic"]["effects"][0].update(targeted=1),
+    ),
+    (
+        "true_magic.effects[0].ignores_armour",
+        lambda rules: rules["true_magic"]["effects"][0].update(ignores_armour="yes"),
+    ),
+    (
+        "true_magic.effects[2].needs_grant",
+        lambda rules: rules["true_magic"]["effects"][2].update(needs_grant=None),
+    ),
+    (
+        "true_magic.effects[1].magnitude",
+        lambda rules: rules["true_magic"]["effects"][1].update(magnitude="3d10"),
+    ),
+    (
+        "true_magic.tiers_per_level",
+        lambda rules: rules["true_magic"].update(tiers_per_level=True),
+    ),
+    (
+        "true_magic.turns_per_tier",
+        lambda rules: rules["true_magic"].update(turns_per_tier=1.5),
+    ),
+    (
+        "true_magic.roll_attribute",
+        lambda rules: rules["true_magic"].update(roll_attribute=3),
+    ),
+    (
+        "true_magic.roll_bonus_per_level",
+        lambda rules: rules["true_magic"].pop("roll_bonus_per_level"),
+    ),
+    (
+        "true_magic.interruption",
+        lambda rules: rules["true_magic"].update(interruption=None),
+    ),
+    (
+        "true_magic.interruption.roll",
+        lambda rules: rules["true_magic"]["interruption"].update(roll="2d8"),
+    ),
+    (
+        "true_magic.interruption.roll.dice",
+        lambda rules: rules["true_magic"]["interruption"]["roll"].update(dice=8),
+    ),
+    (
+        "true_magic.interruption.penalty_per_mana",
+        lambda rules: rules["true_magic"]["interruption"].update(penalty_per_mana="3"),
+    ),
+    (
+        "true_magic.interruption.failure_bands",
+        lambda rules: rules["true_magic"]["interruption"].pop("failure_bands"),
+    ),
+    (
+        "true_magic.interruption.failure_bands[0].is_runaway",
+        lambda rules: rules["true_magic"]["interruption"]["failure_bands"][0].update(
+            is_runaway=0
+        ),
+    ),
+    (
+        # A plain band: what a Control band adds is no field of it.
+        "true_magic.interruption.failure_bands[1].spell_takes_effect",
+        lambda rules: rules["true_magic"]["interruption"]["failure_bands"][1].update(
+            spell_takes_effect=False
+        ),
+    ),
+    (
+        "true_magic.interruption.failure_bands repeats the key ['falter']",
+        lambda rules: rules["true_magic"]["interruption"]["failure_bands"][1].update(
+            key="falter"
+        ),
+    ),
+    (
+        "true_magic.interruption.automatic_runaway_totals",
+        lambda rules: rules["true_magic"]["interruption"].update(
+            automatic_runaway_totals=[16, 16]
+        ),
+    ),
+    (
+        "true_magic.drain_pool",
+        lambda rules: rules["true_magic"].update(drain_pool=""),
+    ),
+    (
+        "true_magic.drain_per_mana",
+        lambda rules: rules["true_magic"].update(drain_per_mana=None),
+    ),
+    (
+        "true_magic.lost_drain_per_mana",
+        lambda rules: rules["true_magic"].update(lost_drain_per_mana=[]),
+    ),
+    (
+        "true_magic.lost_drain_per_mana.interrupted",
+        lambda rules: rules["true_magic"]["lost_drain_per_mana"].update(
+            interrupted=True
+        ),
+    ),
     ("casting_failure", lambda rules: rules.pop("casting_failure")),
     ("casting_failure", lambda rules: rules.update(casting_failure=[14])),
     (
@@ -915,6 +1221,13 @@ UNPLAYABLE_TOTALS: list[tuple[str, str, Callable[[dict[str, Any]], None]]] = [
         "must be at least 1 or null; 0 leaves nothing to borrow",
         lambda rules: rules["borrowing"].update(max_debt=0),
     ),
+    (
+        "true_magic.interruption.automatic_runaway_totals",
+        "has [17], which 2d8 cannot roll (it rolls 2 to 16)",
+        lambda rules: rules["true_magic"]["interruption"].update(
+            automatic_runaway_totals=[16, 17]
+        ),
+    ),
 ]
 
 
@@ -928,6 +1241,60 @@ class UnplayableTotalsTest(MagicRulesFileTestCase):
                 make_unplayable(rules)
                 refusal = self.assert_refused(rules, field_path)
                 self.assertIn(f"{field_path} {words}", str(refusal))
+
+
+class TrueMagicRefusalsTest(MagicRulesFileTestCase):
+    """What the loader refuses in ``true_magic`` beyond the engine
+    (tarmar-studio #208), each naming the field at fault."""
+
+    def assert_refused_in_words(self, rules: Any, field_path: str, words: str) -> None:
+        refusal = self.assert_refused(rules, field_path)
+        self.assertIn(f"{field_path} {words}", str(refusal))
+
+    def test_an_effect_kind_outside_damage_healing_and_null(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["effects"][0]["kind"] = "warding"
+        self.assert_refused_in_words(
+            rules,
+            "true_magic.effects[0].kind",
+            "is not a kind of working effect, or null for a narrated one "
+            "(known: ['damage', 'healing'])",
+        )
+
+    def test_a_null_effect_kind_is_a_narrated_effect(self) -> None:
+        loaded = load_magic_rules(self.write_rules(INVENTED_RULES))
+        assert loaded.true_magic is not None
+        self.assertEqual(
+            [effect.kind for effect in loaded.true_magic.effects],
+            [SpellEffectKind.DAMAGE, SpellEffectKind.HEALING, None],
+        )
+
+    def test_a_lost_drain_key_that_is_no_casting_ending(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["lost_drain_per_mana"]["fizzled"] = 1
+        self.assert_refused_in_words(
+            rules,
+            "true_magic.lost_drain_per_mana.fizzled",
+            "is not a way a casting ends (known: ['abandoned', 'blocked', "
+            "'countered', 'failed', 'grappled', 'interrupted', 'stopped', "
+            "'unconscious', 'unpaid'])",
+        )
+
+    def test_every_casting_ending_may_key_a_lost_drain(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["lost_drain_per_mana"] = {
+            ending.value: 1 for ending in CastingEnding
+        }
+        loaded = load_magic_rules(self.write_rules(rules))
+        assert loaded.true_magic is not None
+        self.assertEqual(set(loaded.true_magic.lost_drain_per_mana), set(CastingEnding))
+
+    def test_a_repeated_effect_key(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["effects"][2]["key"] = "scorch"
+        self.assert_refused_in_words(
+            rules, "true_magic.effects", "repeats the key ['scorch']"
+        )
 
 
 class EngineValidationTest(MagicRulesFileTestCase):
@@ -1064,6 +1431,105 @@ class EngineValidationTest(MagicRulesFileTestCase):
         rules["casting_failure"]["mana_lost_totals"] = [14]
         self.assert_engine_refused(rules, "casting_failure", "not a mana-lost total")
 
+    def test_a_negative_familiarity_bonus(self) -> None:
+        rules = invented_rules()
+        rules["counterspell"]["familiarity_per_level"] = -1
+        self.assert_engine_refused(rules, "counterspell", "familiarity bonus")
+
+    def test_true_magic_with_no_channel_names_true_magic(self) -> None:
+        # Attached once Channel stands, as Borrowing is, so the engine's
+        # refusal names this block and not the tiers it was built beside.
+        rules = invented_rules()
+        rules["channel"] = None
+        error = self.assert_refused(rules, "true_magic: ")
+        self.assertIsInstance(error.__cause__, ValueError)
+        self.assertIn("True Magic rules need Channel rules", str(error))
+        self.assertNotIn("casting_success_tiers", str(error))
+
+    def test_a_true_kind_with_no_channel_derivation(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["channel_kind"] = "wild"
+        self.assert_engine_refused(
+            rules, "true_magic: ", "channel_kind 'wild' has no Channel derivation"
+        )
+
+    def test_a_true_kind_that_reads_no_skill(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["channel_kind"] = "hedge"
+        self.assert_engine_refused(
+            rules, "true_magic: ", "channel_kind 'hedge' derives Channel per spell"
+        )
+
+    def test_true_magic_with_no_effects(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["effects"] = []
+        self.assert_engine_refused(rules, "true_magic", "at least one working effect")
+
+    def test_true_magic_numbers_the_engine_refuses(self) -> None:
+        for field_name, value, engine_words in (
+            ("tiers_per_level", 0, "tiers per level must be at least 1"),
+            ("turns_per_tier", 0, "craft turns per tier must be at least 1"),
+            ("roll_attribute", "STR", "roll_attribute must be one of"),
+            ("roll_bonus_per_level", -1, "roll bonus per level"),
+            ("drain_pool", "mana", "drain_pool"),
+            ("drain_per_mana", -1, "a drain per mana must not be negative"),
+            (
+                "lost_drain_per_mana",
+                {"countered": -1},
+                "a drain per mana must not be negative",
+            ),
+        ):
+            with self.subTest(field_name=field_name):
+                rules = invented_rules()
+                rules["true_magic"][field_name] = value
+                self.assert_engine_refused(rules, "true_magic: ", engine_words)
+
+    def test_working_effects_the_engine_refuses(self) -> None:
+        for index, change, engine_words in (
+            (0, {"dice_per_tier": None}, "names no dice per tier"),
+            (0, {"dice_per_tier": "two dice"}, "two dice"),
+            (1, {"pool": "mana"}, "pool"),
+            (1, {"key": "soothe:2"}, "must not be empty or hold ':'"),
+            (2, {"targeted": True}, "is narrated"),
+            (2, {"ignores_armour": True}, "is narrated"),
+        ):
+            with self.subTest(index=index, change=change):
+                rules = invented_rules()
+                rules["true_magic"]["effects"][index].update(change)
+                error = self.assert_refused(rules, f"true_magic.effects[{index}]: ")
+                self.assertIn(engine_words, str(error))
+
+    def test_interruption_rules_the_engine_refuses(self) -> None:
+        def no_runaway_band(interruption: dict[str, Any]) -> None:
+            interruption["failure_bands"][1]["is_runaway"] = False
+
+        def a_gap_in_the_bands(interruption: dict[str, Any]) -> None:
+            interruption["failure_bands"][1]["lowest_margin"] = 11
+
+        def a_closed_last_band(interruption: dict[str, Any]) -> None:
+            interruption["failure_bands"][1]["highest_margin"] = 12
+
+        def a_negative_penalty(interruption: dict[str, Any]) -> None:
+            interruption["penalty_per_mana"] = -1
+
+        for change, engine_words in (
+            (no_runaway_band, "need a Runaway band"),
+            (a_gap_in_the_bands, "contiguous"),
+            (a_closed_last_band, "open-ended"),
+            (a_negative_penalty, "interruption penalty must not be negative"),
+        ):
+            with self.subTest(change=change.__name__):
+                rules = invented_rules()
+                change(rules["true_magic"]["interruption"])
+                self.assert_engine_refused(
+                    rules, "true_magic.interruption: ", engine_words
+                )
+
+    def test_an_unknown_interruption_attribute(self) -> None:
+        rules = invented_rules()
+        rules["true_magic"]["interruption"]["roll"]["attribute"] = "STR"
+        self.assert_engine_refused(rules, "true_magic.interruption.roll", "attribute")
+
 
 class CanonMagicRulesTest(SimpleTestCase):
     def tearDown(self) -> None:
@@ -1084,18 +1550,105 @@ class CanonMagicRulesTest(SimpleTestCase):
         # Its mana-pool.md says how a casting roll's high results fail.
         self.assertIsNotNone(rules.casting_failure)
 
+    def test_the_default_canons_true_magic_loads_into_the_engines_types(
+        self,
+    ) -> None:
+        """tarmar-studio #208: the block is read into the engine's own
+        dataclasses, every part of it, and the engine builds a working of each
+        effect from it."""
+        rules = DEFAULT_MAGIC_RULES
+        true_magic = rules.true_magic
+        assert isinstance(true_magic, TrueMagicRules)
+        self.assertTrue(true_magic.effects)
+        for effect in true_magic.effects:
+            with self.subTest(effect=effect.key):
+                self.assertIsInstance(effect, WorkingEffect)
+                self.assertIn(effect.kind, (*SpellEffectKind, None))
+                working = true_magic.working(effect.key, 1)
+                self.assertEqual(
+                    spell_for(working.key, rules), working, "the lookup rebuilds it"
+                )
+        interruption = true_magic.interruption
+        self.assertIsInstance(interruption, InterruptionRules)
+        self.assertIsInstance(interruption.roll, RollUnderRule)
+        for band in interruption.failure_bands:
+            self.assertIs(type(band), MarginBand)
+        for ending in true_magic.lost_drain_per_mana:
+            self.assertIsInstance(ending, CastingEnding)
+        assert rules.counterspell is not None
+        self.assertGreater(rules.counterspell.familiarity_per_level, 0)
+
+    def test_the_default_canons_true_magic_reaches_what_it_was_invented_for(
+        self,
+    ) -> None:
+        """The block's invented values are chosen so the board can be tested
+        where they bind: a tier cap that binds before Channel does, room to
+        push at the top tier, a craft longer than its tier, a lost drain
+        above 0, a rolled effect of each kind, and a narrated effect with no
+        dice that a Game Master must grant. Its numbers all differ, the
+        interruption bands' margins and the automatic totals among them, so a
+        page, a prompt or a screen that printed one for another is caught."""
+        rules = DEFAULT_MAGIC_RULES
+        true_magic = rules.true_magic
+        assert true_magic is not None and rules.channel is not None
+        derivation = rules.channel.derivations[true_magic.channel_kind]
+        self.assertIsNotNone(derivation.source_skill)
+        for true_level in (1, 2, 3):
+            with self.subTest(true_level=true_level):
+                self.assertLess(
+                    true_magic.tier_cap(true_level), derivation.channel_at(true_level)
+                )
+        self.assertGreater(true_magic.turns_for(1), 1)
+        self.assertGreater(true_magic.drain_per_mana, 0)
+        self.assertTrue(true_magic.lost_drain_per_mana)
+        self.assertTrue(all(true_magic.lost_drain_per_mana.values()))
+        numbers = [
+            true_magic.tiers_per_level,
+            true_magic.turns_per_tier,
+            true_magic.roll_bonus_per_level,
+            true_magic.interruption.penalty_per_mana,
+            true_magic.drain_per_mana,
+            *true_magic.lost_drain_per_mana.values(),
+            *(
+                margin
+                for band in true_magic.interruption.failure_bands
+                for margin in (band.lowest_margin, band.highest_margin)
+                if margin is not None
+            ),
+            *true_magic.interruption.automatic_runaway_totals,
+        ]
+        self.assertEqual(len(set(numbers)), len(numbers), numbers)
+        # Lost on the lower band, a Runaway on the higher.
+        self.assertEqual(
+            [band.is_runaway for band in true_magic.interruption.failure_bands],
+            [False, True],
+        )
+        rolled_kinds = {effect.kind for effect in true_magic.effects}
+        self.assertEqual(rolled_kinds, {*SpellEffectKind, None})
+        narrated = [effect for effect in true_magic.effects if effect.kind is None]
+        for effect in narrated:
+            self.assertIsNone(effect.dice_per_tier)
+            self.assertTrue(effect.needs_grant)
+        self.assertEqual(
+            [effect for effect in true_magic.effects if effect.needs_grant], narrated
+        )
+
     def test_the_default_canons_channel_covers_every_cast_within_the_push_cap(
         self,
     ) -> None:
         """channel.md: a caster who holds no level in a spell still has the
         Channel for it pushed to Push's cap, so Channel withholds no cast,
-        push or borrowing the other bounds allow. A spell above the catalog's
-        highest level, or a smaller offset, fails here."""
+        push or borrowing the other bounds allow. A cast spell above the
+        catalog's highest level, or a smaller offset, fails here. A generic
+        counter (tarmar-engine 0.9.22) is learned and never cast, so its
+        level is no casting's cost and no Channel has to cover it."""
         rules = DEFAULT_MAGIC_RULES
         assert rules.channel is not None and rules.push is not None
         max_push_mana = rules.push.max_push_mana
         assert max_push_mana is not None, "the default canon caps Push"
-        for spell in SPELLS.values():
+        cast_spells = [spell for spell in SPELLS.values() if not spell.generic_counter]
+        self.assertLess(len(cast_spells), len(SPELLS))
+        for spell in cast_spells:
             derivation = rules.channel.derivations[rules.channel.kind_for(spell)]
             with self.subTest(spell=spell.key):
                 self.assertGreaterEqual(

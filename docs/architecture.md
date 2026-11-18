@@ -266,8 +266,11 @@ Notes on the edges, each checkable:
   reason.
 - `battle/magic_rules.py` reads the canon's `magic-rules.json`
   (`reference.paths.MAGIC_RULES_FILE`) into the engine's `MagicRules`: the
-  casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell and
-  casting failure numbers. It is the only path that sets them. It also reads
+  casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell,
+  casting failure and True Magic numbers. It is the only path that sets them.
+  `loaded_spell()` is the one lookup for a spell key read from a battle's
+  state or a menu candidate, since a True Magic working is built from those
+  rules and is in no catalog. It also reads
   the file's `schools` block, which the engine takes nothing from, into a
   `SchoolTable` (`magic_schools()`): the percentile table a caster's school of
   magic is rolled on, which `characters.services.apply_school_roll`,

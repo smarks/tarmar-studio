@@ -65,9 +65,8 @@ from __future__ import annotations
 from .classic_adaptation import classic_team
 from .engine import hexes
 from .engine.state import BattleState, CombatantState
-from .magic_rules import magic_rules
+from .magic_rules import loaded_spell, magic_rules
 from .persistence import CLASSIC_PROFILE, TARMAR_PROFILE
-from .spells import get_spell
 
 #: Pointy-top hexes — vertices up and down, rows offset. The Tarmar arena.
 POINTY = "pointy"
@@ -281,7 +280,7 @@ def _tarmar_runaway(state: BattleState, combatant: CombatantState) -> dict | Non
     running = combatant.runaway
     if running is None or not combatant.alive:
         return None
-    spell = get_spell(running.spell_key)
+    spell = loaded_spell(running.spell_key)
     rules = magic_rules().runaway
     caught_from = (
         None
@@ -331,7 +330,7 @@ def _tarmar_contest(state: BattleState, combatant: CombatantState) -> dict | Non
     contest = combatant.contest
     if contest is None or not combatant.alive:
         return None
-    spell = get_spell(contest.spell_key)
+    spell = loaded_spell(contest.spell_key)
     target = _figure_name(state, contest.target_id)
     defenders = [
         name

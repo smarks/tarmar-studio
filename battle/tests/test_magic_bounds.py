@@ -65,8 +65,10 @@ def rules_imposing(*bounds: str) -> MagicRules:
         channel=channel if CHANNEL in bounds else None,
         push=replace(rules.push, max_push_mana=3 if PUSH_CAP in bounds else None),
         counterspell=rules.counterspell if COUNTER_BOUNDS in bounds else None,
-        # The engine refuses uncapped Borrowing with no Channel to bound it.
+        # The engine refuses uncapped Borrowing with no Channel to bound it,
+        # and True Magic with no Channel to read its skill from.
         borrowing=rules.borrowing if CHANNEL in bounds else None,
+        true_magic=rules.true_magic if CHANNEL in bounds else None,
     )
     assert magic_bounds.bounds_imposed_by(changed) == bounds
     return changed
@@ -106,11 +108,18 @@ class BoundsTheCanonImposesTest(BaseTestCase):
             ),
             (CHANNEL,),
         )
-        # Its Borrowing carries a debt cap, so it stands without Channel, and
-        # then nothing is left to lift.
+        # Its Borrowing carries a debt cap, so it stands without Channel
+        # (its True Magic does not: the engine reads the True skill from
+        # Channel), and then nothing is left to lift.
         self.assertEqual(
             magic_bounds.bounds_imposed_by(
-                replace(uncapped, channel=None, push=None, counterspell=None)
+                replace(
+                    uncapped,
+                    channel=None,
+                    push=None,
+                    counterspell=None,
+                    true_magic=None,
+                )
             ),
             (),
         )

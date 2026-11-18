@@ -114,7 +114,8 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "always Surge, a Runaway.",
             "Hard cap on mana per casting, the spell's cost and any pushed mana "
             "together. Rote Magic: equals 2 × skill level in that specific spell + "
-            "6. Channel cannot be exceeded even by Borrowing.",
+            "6. Deep Magic: equals 3 × Arcane skill level (costs 2× the skill "
+            "points to advance). Channel cannot be exceeded even by Borrowing.",
             "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
             "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). Fail by 1-2: "
             "Flicker. Fail by 3-5: Fray (lose 2 × the Debt in Fatigue). Fail by 6-8: "

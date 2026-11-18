@@ -64,11 +64,10 @@ from tarmar_engine.policy import (
     weapons_in_reach,
 )
 from tarmar_engine.resolution import DIE_FACES
-from tarmar_engine.spells import get_spell
 from tarmar_engine.state import BattleState, CombatantState
 
 from . import magic_bounds, profiles
-from .magic_rules import magic_rules, totals_in_words
+from .magic_rules import loaded_spell, magic_rules, totals_in_words
 from .persistence import TARMAR_PROFILE
 from .wording import ClassicMenuWords, TarmarMenuWords, TurnMenuWords, words
 
@@ -309,7 +308,7 @@ def _anchor_line(
     rules = magic_rules().runaway
     if target is None or target.runaway is None or rules is None:
         return tarmar.anchor, ""
-    spell = get_spell(target.runaway.spell_key)
+    spell = loaded_spell(target.runaway.spell_key)
     if target.combatant_id == actor.combatant_id:
         roll = rules.self_anchor
         return (
@@ -477,7 +476,7 @@ def _plain_line(
     elif option in ("g", "p"):
         plain = shared.stand_up
     elif option in ("h", "r") and candidate.spell_key:
-        spell = get_spell(candidate.spell_key)
+        spell = loaded_spell(candidate.spell_key)
         if not candidate.escalate:
             plain = _cast_line(spell.name, aimed)
         elif aimed:
@@ -687,7 +686,9 @@ def borrowed_mana(actor: CombatantState, candidate: Candidate) -> int:
     """
     if not candidate.borrow or not candidate.spell_key:
         return 0
-    return mana_short(actor, get_spell(candidate.spell_key).level + candidate.push_mana)
+    return mana_short(
+        actor, loaded_spell(candidate.spell_key).level + candidate.push_mana
+    )
 
 
 def _base_fields(candidate: Candidate) -> dict:

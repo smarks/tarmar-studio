@@ -580,8 +580,14 @@ runs.
             <tr class="known-spell" data-spell="{{ spell.key }}">
                 <td>{{ spell.name }}</td>
                 <td>{{ spell.school }}</td>
+                {% comment %}A spell learned and never cast (a Counter, #208) has
+                no mana cost and no roll to print.{% endcomment %}
+                {% if spell.never_cast %}
+                <td class="known-spell-never-cast" colspan="2">{{ spell.never_cast }}</td>
+                {% else %}
                 <td>{{ spell.spell_level }}</td>
                 <td>{{ casting_dice }} ≤ {{ spell.attribute }}</td>
+                {% endif %}
                 <td>{{ spell.mastery_display }} ({{ spell.points }} pts)</td>
             </tr>
             {% endfor %}

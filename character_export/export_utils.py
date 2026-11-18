@@ -365,9 +365,16 @@ def generate_character_markdown(character) -> str:
         lines.append("| Spell | School | Level (mana) | Roll | Mastery |")
         lines.append("|-------|--------|--------------|------|---------|")
         for spell in spells:
+            # A spell learned and never cast (a Counter, #208) has no mana
+            # cost and no roll: its row says so across both columns.
+            cost_and_roll = (
+                f"{spell.never_cast} | "
+                if spell.never_cast
+                else f"{spell.spell_level} | {CASTING_DICE} ≤ {spell.attribute}"
+            )
             lines.append(
-                f"| {spell.name} | {spell.school} | {spell.spell_level} | "
-                f"{CASTING_DICE} ≤ {spell.attribute} | {spell.mastery_display} |"
+                f"| {spell.name} | {spell.school} | {cost_and_roll} | "
+                f"{spell.mastery_display} |"
             )
         lines.append("")
 

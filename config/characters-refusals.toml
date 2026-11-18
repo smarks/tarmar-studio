@@ -106,11 +106,12 @@ not_found = "Character not found"
 # characters.magic's words for learning a spell. The school (issue #18, the
 # canon's school_gates_a_new_spell ruling): a player learns a new spell only
 # from their own school, rolled and chosen first. The ladder (tarmar-studio
-# #191, the canon's elemental_tracks_climb_tier_by_tier ruling): an Elemental
-# spell is learned tier by tier in its element. {spell}: the spell asked for;
-# {spell_school}: its school; {school}: the character's school ("unchosen"
-# when none is); {rung_below}: the same element's spell one tier down, which
-# the character does not hold.
+# #191, the canon's elemental_tracks_climb_tier_by_tier ruling, and #208, its
+# counter_n_is_five_spells ruling): an Elemental spell is learned tier by
+# tier in its element, and a Counter rung by rung on the Counter ladder.
+# {spell}: the spell asked for; {spell_school}: its school; {school}: the
+# character's school ("unchosen" when none is); {rung_below}: the spell one
+# rung down the same ladder, which the character does not hold.
 [magic]
 # What a player with no school yet is told.
 school_first = "Roll and choose a school of magic first; a player learns only the spells of their school"
@@ -120,7 +121,13 @@ outside_school = "{spell} is of the {spell_school} school and this character's i
 # inside the line's parentheses.
 game_master_outside_school = "Game Master, outside the caster's school: {school}"
 # What a player putting a point into a spell above an unknown rung is told.
-lower_rung_first = "Learn {rung_below} first: each element is its own track, climbed tier by tier, and {spell} is the rung above it. Only a Game Master can teach a spell past its rung."
+lower_rung_first = "Learn {rung_below} first: a ladder of spells is climbed rung by rung, and {spell} is the rung above it. Only a Game Master can teach a spell past its rung."
 # Ends the history line when a Game Master teaches such a spell, inside the
 # line's parentheses: "Fire Bolt: 0 → 1 points, mastery I (Game Master, ...)".
 game_master_past_the_rung = "Game Master, past the ladder: {rung_below} not held"
+# What anyone asking to cast a Counter off the board is told (tarmar-studio
+# #208): it is learned and never cast, so a Game Master has no cast to make.
+never_cast = "{spell} is learned and never cast"
+# What a list of known spells prints for such a spell in place of a mana cost
+# and a casting roll, on the sheet and in the export; the row names the spell.
+never_cast_cell = "learned, never cast"

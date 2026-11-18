@@ -40,7 +40,8 @@
   },
   "channel": {
     "derivations": {
-      "rote": { "source_skill": null, "multiplier": 2, "offset": 6 }
+      "rote": { "source_skill": null, "multiplier": 2, "offset": 6 },
+      "deep": { "source_skill": "arcane", "multiplier": 3, "offset": 0 }
     },
     "kind_by_spell": {},
     "default_kind": "rote"
@@ -108,12 +109,78 @@
     "mana_per_bonus": 2,
     "ties_go_to_caster": false,
     "defender_min_mana": 1,
-    "defender_max_mana": 5
+    "defender_max_mana": 5,
+    "familiarity_per_level": 2
   },
   "casting_failure": {
     "fumble_floor": 13,
     "mana_lost_totals": [13, 14],
     "runaway_total": 14
+  },
+  "true_magic": {
+    "channel_kind": "deep",
+    "skill_label": "Arcane",
+    "school": "Arcane/True Magic",
+    "effects": [
+      {
+        "key": "sear",
+        "label": "Sear",
+        "kind": "damage",
+        "dice_per_tier": "1d8",
+        "pool": "fatigue",
+        "targeted": false,
+        "ignores_armour": true,
+        "needs_grant": false
+      },
+      {
+        "key": "knit",
+        "label": "Knit",
+        "kind": "healing",
+        "dice_per_tier": "1d4+1",
+        "pool": "body",
+        "targeted": false,
+        "ignores_armour": false,
+        "needs_grant": false
+      },
+      {
+        "key": "shaping",
+        "label": "Shaping",
+        "kind": null,
+        "dice_per_tier": null,
+        "pool": "fatigue",
+        "targeted": false,
+        "ignores_armour": false,
+        "needs_grant": true
+      }
+    ],
+    "tiers_per_level": 2,
+    "turns_per_tier": 3,
+    "roll_attribute": "WIS",
+    "roll_bonus_per_level": 5,
+    "interruption": {
+      "roll": { "dice": "2d10", "attribute": "WIS" },
+      "penalty_per_mana": 4,
+      "failure_bands": [
+        {
+          "key": "scatter",
+          "label": "Scatter",
+          "is_runaway": false,
+          "lowest_margin": 1,
+          "highest_margin": 10
+        },
+        {
+          "key": "breakaway",
+          "label": "Breakaway",
+          "is_runaway": true,
+          "lowest_margin": 11,
+          "highest_margin": null
+        }
+      ],
+      "automatic_runaway_totals": [20]
+    },
+    "drain_pool": "fatigue",
+    "drain_per_mana": 8,
+    "lost_drain_per_mana": { "interrupted": 6, "countered": 7 }
   },
   "schools": [
     {

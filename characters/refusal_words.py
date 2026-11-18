@@ -113,9 +113,11 @@ class ViewsAccessWords:
 @dataclass(frozen=True)
 class MagicWords:
     """``characters.magic``'s words for learning a spell: why a player may not
-    learn one outside their school (issue #18) or above an Elemental rung they
-    do not hold (tarmar-studio#191), and how a Game Master teaching one past
-    either is recorded."""
+    learn one outside their school (issue #18) or above a rung they do not
+    hold, an element's (tarmar-studio#191) or the Counter ladder's (#208), and
+    how a Game Master teaching one past either is recorded; and why nobody
+    casts a spell that is learned and never cast (#208), with what a list of
+    known spells prints for one in place of a cost and a roll."""
 
     school_first: str = sentence()
     outside_school: str = sentence(
@@ -124,6 +126,8 @@ class MagicWords:
     game_master_outside_school: str = sentence("school", required=("school",))
     lower_rung_first: str = sentence("spell", "rung_below", required=("rung_below",))
     game_master_past_the_rung: str = sentence("rung_below", required=("rung_below",))
+    never_cast: str = sentence("spell", required=("spell",))
+    never_cast_cell: str = sentence()
 
 
 @dataclass(frozen=True)

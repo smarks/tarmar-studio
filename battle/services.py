@@ -3346,11 +3346,13 @@ def _channel_reading(
 def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     """One Tarmar caster's magical situation, in the cast stage's own shape.
 
-    ``None`` for a combatant who knows no spells (or is not in the state at
-    all) — there is no cast stage to draw. Otherwise the named pool plus a
-    row per offered cast: what it costs, what it needs to land, whether it
-    can be cast right now, and, when it cannot, why not in the player's
-    words.
+    ``None`` for a combatant who knows no spell that can be cast (or is not
+    in the state at all) — there is no cast stage to draw. Otherwise the
+    named pool plus a row per offered cast: what it costs, what it needs to
+    land, whether it can be cast right now, and, when it cannot, why not in
+    the player's words. A spell that is learned and never cast (a generic
+    counter, tarmar-engine #77) has no row, as the engine's menu offers no
+    cast of it, so a figure who knows only such spells has no stage.
 
     The shape is profile-neutral (#263): the pool carries its own label and
     every row carries its cost and note already worded, because a classic
@@ -3387,7 +3389,10 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         actor = state.by_id(combatant_id)
     except KeyError:
         return None
-    if not actor.spells:
+    cast_spells = [
+        spell for spell in map(get_spell, actor.spells) if not spell.generic_counter
+    ]
+    if not cast_spells:
         return None
     # The enemies a damage spell is offered at, in the order the engine's
     # every-target menu offers them (``policy.enemies_by_distance``, nearest
@@ -3397,8 +3402,8 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     rules = magic_rules()
     stage = words().cast_stage
     rows = []
-    for key in actor.spells:
-        spell = get_spell(key)
+    for spell in cast_spells:
+        key = spell.key
         aimed = spell.damage is not None and not spell.heals
         spell_channel, channel_refusal = _channel_reading(rules, actor, spell)
         other_reason = ""

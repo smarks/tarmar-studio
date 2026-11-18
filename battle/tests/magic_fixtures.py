@@ -13,17 +13,22 @@ from unittest.mock import patch
 
 from tarmar_engine.magic import (
     BorrowingRules,
+    CastingEnding,
     CastingFailureRules,
     ChannelDerivation,
     ChannelRules,
     ControlBand,
     CounterspellRules,
     DebtBand,
+    InterruptionRules,
     MagicRules,
+    MarginBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
     SpellEffectKind,
+    TrueMagicRules,
+    WorkingEffect,
 )
 
 from battle.magic_rules import (
@@ -161,6 +166,94 @@ COUNTER_RULES = replace(
         defender_min_mana=1,
         defender_max_mana=3,
     ),
+)
+
+
+#: The general skill the invented True Magic reads, and the kind of magic a
+#: True cast or a working derives its Channel by.
+TRUE_SKILL = "lorecraft"
+TRUE_KIND = "fathomed"
+
+#: The invented workings' effects: damage that must be aimed, healing to
+#: Body, and a narrated effect with no dice that a Game Master must grant.
+REND_EFFECT = WorkingEffect(
+    key="rend",
+    label="Rending",
+    kind=SpellEffectKind.DAMAGE,
+    dice_per_tier="1d4",
+    targeted=True,
+)
+SALVE_EFFECT = WorkingEffect(
+    key="salve",
+    label="Salving",
+    kind=SpellEffectKind.HEALING,
+    dice_per_tier="1d6+1",
+    pool="body",
+)
+WONDER_EFFECT = WorkingEffect(
+    key="wonder", label="Wonder", kind=None, dice_per_tier=None, needs_grant=True
+)
+
+#: Invented True Magic (tarmar-engine #77): three tiers a level in the True
+#: skill and two craft turns a tier; a working's roll under WIS plus four a
+#: level; an interruption roll of 2d8 under WIS less five per mana gathered,
+#: lost on a miss by 1 to 8 and a Runaway on 9 or more or a natural 16; and a
+#: drain of six Body per mana for a casting that goes off, seven for one
+#: interrupted and nothing for any other ending. Every number differs from
+#: every other, so a test reading one where it meant another fails.
+TRUE_MAGIC = TrueMagicRules(
+    channel_kind=TRUE_KIND,
+    skill_label="Lorecraft",
+    school="Lorecraft",
+    effects=(REND_EFFECT, SALVE_EFFECT, WONDER_EFFECT),
+    tiers_per_level=3,
+    turns_per_tier=2,
+    roll_attribute="WIS",
+    roll_bonus_per_level=4,
+    interruption=InterruptionRules(
+        roll=RollUnderRule(dice="2d8", attribute="WIS"),
+        penalty_per_mana=5,
+        failure_bands=(
+            MarginBand(
+                key="lapse",
+                label="Lapse",
+                is_runaway=False,
+                lowest_margin=1,
+                highest_margin=8,
+            ),
+            MarginBand(
+                key="rupture",
+                label="Rupture",
+                is_runaway=True,
+                lowest_margin=9,
+                highest_margin=None,
+            ),
+        ),
+        automatic_runaway_totals=frozenset({16}),
+    ),
+    drain_pool="body",
+    drain_per_mana=6,
+    lost_drain_per_mana={CastingEnding.INTERRUPTED: 7},
+)
+
+#: The Channel of :data:`INVENTED_RULES`, with the second kind of magic True
+#: Magic needs: ten times the level in :data:`TRUE_SKILL`.
+_INVENTED_CHANNEL = INVENTED_RULES.channel
+assert _INVENTED_CHANNEL is not None, "the invented rules bound a casting by Channel"
+
+#: :data:`INVENTED_RULES` with :data:`TRUE_MAGIC` and that Channel.
+TRUE_MAGIC_RULES = replace(
+    INVENTED_RULES,
+    channel=replace(
+        _INVENTED_CHANNEL,
+        derivations={
+            **_INVENTED_CHANNEL.derivations,
+            TRUE_KIND: ChannelDerivation(
+                source_skill=TRUE_SKILL, multiplier=10, offset=0
+            ),
+        },
+    ),
+    true_magic=TRUE_MAGIC,
 )
 
 

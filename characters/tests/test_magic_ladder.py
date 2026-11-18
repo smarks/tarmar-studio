@@ -7,6 +7,10 @@ Fire Ball and Fire Ball needs Fire Missile; a mage who switches element starts
 the new one at tier 1. Spells already on the record stay usable and may be
 raised. Players are held to the rule; a Game Master may teach any spell.
 
+tarmar-studio#208 (the canon's ``counter_n_is_five_spells``): Protection's
+Counter 1 to Counter 5 are five spells on a ladder of their own, climbed the
+same way, so Counter N needs Counter N-1.
+
 The rung below a spell is the engine's (``tarmar_engine.spells.lower_tier``),
 so no test here types a ladder. The refusal's words are configuration, so the
 tests run under the fixed words (``characters.tests.fixed_refusals``).
@@ -19,7 +23,14 @@ from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase
 from django.urls import reverse
-from tarmar_engine.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS, Spell, lower_tier
+from tarmar_engine.spells import (
+    ELEMENTAL_SCHOOL,
+    ELEMENTS,
+    PROTECTION_SCHOOL,
+    SPELLS,
+    Spell,
+    lower_tier,
+)
 
 from battle.tests.magic_fixtures import seated_schools
 from character_export.export_utils import generate_character_json
@@ -53,6 +64,14 @@ def ladder(element: str) -> list[Spell]:
     """``element``'s spells from its first tier up, as the catalog holds them."""
     return sorted(
         (spell for spell in SPELLS.values() if spell.element == element),
+        key=lambda spell: spell.level,
+    )
+
+
+def counter_ladder() -> list[Spell]:
+    """The Counter ladder from its first rung up, as the catalog holds it."""
+    return sorted(
+        (spell for spell in SPELLS.values() if spell.generic_counter),
         key=lambda spell: spell.level,
     )
 
@@ -154,17 +173,102 @@ class PlayerClimbsTheLadderTest(LadderTestCase):
             f"{top_rung.name}: 1 → 2 points, mastery {format_skill_level(2)}",
         )
 
-    def test_a_spell_of_no_element_has_no_ladder(self):
-        for spell in SPELLS.values():
-            if spell.element is None:
-                with self.subTest(spell=spell.key):
-                    self.assertIsNone(ladder_refusal(self.character, spell))
+    def test_a_spell_on_no_ladder_has_no_ladder_refusal(self):
+        on_no_ladder = [
+            spell
+            for spell in SPELLS.values()
+            if spell.element is None and not spell.generic_counter
+        ]
+        self.assertTrue(on_no_ladder)
+        for spell in on_no_ladder:
+            with self.subTest(spell=spell.key):
+                self.assertIsNone(ladder_refusal(self.character, spell))
+
+    def test_a_counter_is_refused_without_the_counter_below_it(self):
+        # tarmar-studio#208: no element, and a ladder all the same.
+        first_rung, *higher_rungs = counter_ladder()
+        self.assertIsNone(ladder_refusal(self.character, first_rung))
+        self.assertTrue(higher_rungs)
+        for rung_below, spell in zip(counter_ladder(), higher_rungs):
+            with self.subTest(spell=spell.key):
+                self.assertIsNone(spell.element)
+                self.assertEqual(
+                    ladder_refusal(self.character, spell),
+                    refused_for_lacking(spell, rung_below),
+                )
 
     def test_a_canon_with_no_school_table_still_holds_the_ladder(self):
         spell = first_rung_above_one(FIRST_ELEMENT)
         with seated_schools(None):
             with self.assertRaises(CharacterChangeError):
                 learn_spell(self.character, spell.key, is_game_master=False)
+
+
+class PlayerClimbsTheCounterLadderTest(LadderTestCase):
+    """tarmar-studio#208: a Protection caster learns Counter 1, then 2, and so
+    on up, a skill point a rung; both gates hold a player."""
+
+    def setUp(self):
+        super().setUp()
+        self.character.magic_school = PROTECTION_SCHOOL
+
+    def test_counter_two_is_refused_without_counter_one_and_spends_nothing(self):
+        first_rung, second_rung = counter_ladder()[:2]
+        with self.assertRaises(CharacterChangeError) as refused:
+            learn_spell(self.character, second_rung.key, is_game_master=False)
+        self.assertEqual(
+            str(refused.exception), refused_for_lacking(second_rung, first_rung)
+        )
+        self.assertEqual(self.character.spells, {})
+        self.assertEqual(self.character.free_skill_points, 10)
+
+    def test_each_counter_opens_once_the_one_below_is_held(self):
+        rungs = counter_ladder()
+        for spell in rungs:
+            with self.subTest(spell=spell.key):
+                learn_spell(self.character, spell.key, is_game_master=False)
+                self.assertEqual(spell_points(self.character, spell.key), 1)
+        # One skill point a rung: the whole ladder costs its length.
+        self.assertEqual(self.character.free_skill_points, 10 - len(rungs))
+
+    def test_the_sheet_offers_the_next_counter_and_no_higher(self):
+        first_rung, second_rung = counter_ladder()[:2]
+        counters = {spell.key for spell in counter_ladder()}
+
+        def offered_counters() -> set[str]:
+            open_to_the_player = spells_open_to(self.character, is_game_master=False)
+            return {spell.key for spell in open_to_the_player} & counters
+
+        self.assertEqual(offered_counters(), {first_rung.key})
+        learn_spell(self.character, first_rung.key, is_game_master=False)
+        self.assertEqual(offered_counters(), {first_rung.key, second_rung.key})
+
+    def test_a_caster_of_another_school_is_refused_the_first_counter(self):
+        first_rung = counter_ladder()[0]
+        self.character.magic_school = ELEMENTAL_SCHOOL
+        with self.assertRaises(CharacterChangeError) as refused:
+            learn_spell(self.character, first_rung.key, is_game_master=False)
+        self.assertEqual(
+            str(refused.exception),
+            refusal_words().magic.outside_school.format(
+                spell=first_rung.name,
+                spell_school=PROTECTION_SCHOOL,
+                school=ELEMENTAL_SCHOOL,
+            ),
+        )
+        self.assertEqual(self.character.spells, {})
+
+    def test_a_game_master_teaches_a_counter_past_the_ladder_and_it_is_recorded(
+        self,
+    ):
+        top_rung = counter_ladder()[-1]
+        rung_below = lower_tier(top_rung)
+        assert rung_below is not None
+        line = learn_spell(self.character, top_rung.key, is_game_master=True)
+        self.assertEqual(self.character.spells, {top_rung.key: 1})
+        self.assertEqual(self.character.free_skill_points, 10)
+        past_the_rung = refusal_words().magic.game_master_past_the_rung
+        self.assertIn(f"({past_the_rung.format(rung_below=rung_below.name)})", line)
 
 
 class GameMasterTeachesPastTheLadderTest(LadderTestCase):
@@ -248,6 +352,14 @@ class LadderOrderTest(SimpleTestCase):
                 self.assertEqual(order[start : start + len(keys)], keys)
         schools = [spell.school for spell in learnable_spells()]
         self.assertEqual(schools, sorted(schools))
+
+    def test_the_counter_ladder_reads_in_order_and_is_learnable(self):
+        # tarmar-studio#208: every spell of the catalog is learnable, the
+        # ones never cast included.
+        learnable = learnable_spells()
+        self.assertEqual({spell.key for spell in learnable}, set(SPELLS))
+        counters = [spell for spell in learnable if spell.generic_counter]
+        self.assertEqual(counters, counter_ladder())
 
     def test_the_elements_follow_the_page_not_the_alphabet(self):
         """Each element first appears in ``ELEMENTS``' order, the order

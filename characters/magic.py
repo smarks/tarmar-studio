@@ -27,6 +27,13 @@ The rules, from ``reference/content``:
   climbed tier by tier, so a player learns an Elemental spell only with the
   same element's tier below it on the record (:func:`ladder_refusal`); a
   Game Master may teach any.
+* The canon's ``counter_n_is_five_spells`` ruling (tarmar-studio#208):
+  Protection's Counter 1 to Counter 5 are five spells on one ladder of their
+  own, climbed rung by rung as an element's is, so the same gate holds a
+  player to Counter N-1 before Counter N. A Counter is learned and never
+  cast (the engine's ``Spell.generic_counter``): it is seated with the
+  caster's other spells and left off every list of spells to cast
+  (:func:`castable_spells`, :func:`cast_in_story`).
 """
 
 from dataclasses import dataclass
@@ -83,6 +90,11 @@ class KnownSpell:
         points: Skill points invested in it.
         mastery: The mastery level those points buy.
         mastery_display: The mastery level as the sheet prints it.
+        never_cast: For a spell that is learned and never cast (a Counter,
+            tarmar-studio#208), the configured phrase saying so, which every
+            listing prints in place of a mana cost and a casting roll
+            (``never_cast_cell`` in ``config/characters-refusals.toml``);
+            ``""`` for a spell that is cast.
     """
 
     key: str
@@ -93,6 +105,7 @@ class KnownSpell:
     points: int
     mastery: int
     mastery_display: str
+    never_cast: str = ""
 
 
 @dataclass(frozen=True)
@@ -104,12 +117,12 @@ class SpellLoadout:
 
 
 def learnable_spells() -> list[Spell]:
-    """Every spell the battle can cast, by school, element and level.
+    """Every spell of the catalog, cast or not, by school, element and level.
 
     Each element's ladder reads in order, Missile to Bolt, and the elements
     in the order schools-of-magic.md lists them (``ELEMENTS``,
     tarmar-studio#191); a spell of no element comes first in its school, by
-    level.
+    level, so the Counter ladder (tarmar-studio#208) reads in order too.
     """
     return sorted(SPELLS.values(), key=_catalog_order)
 
@@ -119,6 +132,30 @@ def _catalog_order(spell: Spell) -> tuple[str, int, int]:
     spell of no element before any), then its level."""
     element_place = -1 if spell.element is None else ELEMENTS.index(spell.element)
     return (spell.school, element_place, spell.level)
+
+
+def never_cast_words(spell: Spell, *, in_a_list: bool = False) -> str:
+    """What is said of a spell that is learned and never cast, in the words of
+    ``config/characters-refusals.toml``; ``""`` for a spell that is cast.
+
+    tarmar-studio#208: a Counter (the engine's ``Spell.generic_counter``) has
+    no casting, so it has no mana cost and no casting roll to print. The one
+    answer to "is this spell never cast" for every place a known spell is
+    listed (the sheet's and the export's tables, through :class:`KnownSpell`)
+    and for the cast off the board, which refuses one (:func:`cast_in_story`).
+
+    Args:
+        spell: A spell of the catalog.
+        in_a_list: Whether the words fill a row that already names the spell
+            (``never_cast_cell``); otherwise they are the whole sentence a
+            refused cast is told (``never_cast``).
+    """
+    if not spell.generic_counter:
+        return ""
+    words = refusal_words().magic
+    if in_a_list:
+        return words.never_cast_cell
+    return words.never_cast.format(spell=spell.name)
 
 
 def spell_points(character: Character, spell_key: str) -> int:
@@ -163,21 +200,25 @@ def school_refusal(character: Character, spell: Spell) -> str | None:
 
 
 def rung_not_held(character: Character, spell: Spell) -> Spell | None:
-    """The rung below ``spell`` that a new learning of it lacks (#191).
+    """The rung below ``spell`` that a new learning of it lacks (#191, #208).
 
     The canon's ``elemental_tracks_climb_tier_by_tier`` ruling: tier N of an
     element needs tier N-1 of the same element on the record, so a mage who
-    takes up another element starts it at tier 1. A spell already on the
-    record lacks nothing, whatever is below it, and may be raised.
+    takes up another element starts it at tier 1. Its
+    ``counter_n_is_five_spells`` ruling climbs the Counter ladder the same
+    way: Counter N needs Counter N-1 on the record. A spell already on the
+    record lacks nothing, whatever is below it, and may be raised. Which
+    spell stands below which is the engine's
+    (``tarmar_engine.spells.lower_tier``).
 
     Args:
         character: The character.
         spell: A spell of the catalog.
 
     Returns:
-        The same element's spell one tier down, when the character holds no
+        The spell one rung down the same ladder, when the character holds no
         points in it and none in ``spell``; otherwise ``None``, as for a
-        tier-1 spell or one of no element.
+        ladder's first rung or a spell on no ladder.
     """
     if spell_points(character, spell.key) > 0:
         return None
@@ -188,9 +229,12 @@ def rung_not_held(character: Character, spell: Spell) -> Spell | None:
 
 
 def ladder_refusal(character: Character, spell: Spell) -> str | None:
-    """Why a player may not put points into ``spell``, by its element's ladder.
+    """Why a player may not put points into ``spell``, by its ladder: its
+    element's, or the Counter ladder.
 
-    tarmar-studio#191: :func:`rung_not_held`'s rung, in the words of
+    tarmar-studio#191 and #208 (the canon's
+    ``elemental_tracks_climb_tier_by_tier`` and ``counter_n_is_five_spells``
+    rulings): :func:`rung_not_held`'s rung, in the words of
     ``config/characters-refusals.toml``. A Game Master is never asked this.
 
     Args:
@@ -210,7 +254,7 @@ def ladder_refusal(character: Character, spell: Spell) -> str | None:
 
 def learning_refusal(character: Character, spell: Spell) -> str | None:
     """Why a player may not put points into ``spell``: its school, then its
-    element's ladder (issues #18, #191); ``None`` when both allow it."""
+    ladder (issues #18, #191, #208); ``None`` when both allow it."""
     return school_refusal(character, spell) or ladder_refusal(character, spell)
 
 
@@ -332,6 +376,7 @@ def known_spells(character: Character) -> list[KnownSpell]:
                 points=points,
                 mastery=get_skill_level(points),
                 mastery_display=format_skill_level(points),
+                never_cast=never_cast_words(spell, in_a_list=True),
             )
         )
     return rows
@@ -403,9 +448,11 @@ def learn_spell(
     do. A Game Master teaching a spell spends none of them (coordinator's
     ruling on the #774 review, marked for Spencer). A player learns a new
     spell only from their school of magic (:func:`school_refusal`, issue
-    #18), and an element's tier above the first only with the tier below it
-    on the record (:func:`ladder_refusal`, #191); a Game Master teaching one
-    past either is recorded as such.
+    #18), and a rung above a ladder's first only with the rung below it on
+    the record (:func:`ladder_refusal`: an element's tier, #191, the canon's
+    ``elemental_tracks_climb_tier_by_tier`` ruling, or a Counter, #208, its
+    ``counter_n_is_five_spells`` ruling); a Game Master teaching one past
+    either is recorded as such.
 
     Args:
         character: The character, changed in memory and not saved.
@@ -600,13 +647,16 @@ def castable_spells(character: Character, *, is_game_master: bool) -> list[Spell
 
     A player: the record's spells at mastery 1 or more (spell-mastery.md,
     "Can cast the spell"), which :func:`cast_in_story` holds a player to. A
-    Game Master: every spell of the catalog, a spell off the record being one
-    of his overrides.
+    Game Master: every spell of the catalog that can be cast, a spell off the
+    record being one of his overrides. A Counter is on neither list
+    (tarmar-studio#208): it is learned and never cast, which
+    :func:`cast_in_story` holds everyone to.
     """
     return [
         spell
         for spell in learnable_spells()
-        if is_game_master or get_skill_level(spell_points(character, spell.key))
+        if not spell.generic_counter
+        and (is_game_master or get_skill_level(spell_points(character, spell.key)))
     ]
 
 
@@ -645,8 +695,11 @@ def cast_in_story(
     there), for an unconscious caster, or with a total rolled at his table,
     each named on the line. Nobody casts here for a dead character, an
     attribute nobody has recorded (DEX too, for a spell that must hit), or a
-    character fighting on a live board, whose own turns cast. Every refusal
-    is made before any die is rolled or any mana moves.
+    character fighting on a live board, whose own turns cast; and nobody, a
+    Game Master included, casts a Counter, which is learned and never cast
+    (tarmar-studio#208, the engine's ``Spell.generic_counter``: the board
+    refuses it the same way, and there is no casting for an override to
+    make). Every refusal is made before any die is rolled or any mana moves.
 
     Args:
         character: The character, changed in memory and not saved.
@@ -664,6 +717,8 @@ def cast_in_story(
     spell = SPELLS.get(spell_key)
     if spell is None:
         raise CharacterChangeError(f"Unknown spell: {spell_key}")
+    if never_cast := never_cast_words(spell):
+        raise CharacterChangeError(never_cast)
     overridden: list[str] = []
     unconscious = unconscious_refusal(character)
     if unconscious is not None:

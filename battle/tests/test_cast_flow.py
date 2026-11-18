@@ -123,6 +123,21 @@ class CasterMagicTest(SimpleTestCase):
         self.assertTrue(missile["castable"])
         self.assertEqual(missile["reason"], "")
 
+    def test_a_known_counter_is_no_row_of_the_stage(self):
+        # tarmar-studio#208: learned and never cast, so the engine's menu
+        # offers no cast of it and the stage has no row to pair with one.
+        state = wizard_state(
+            spells=[*WIZARD_SPELLS, "counter_1"],
+            spell_skill_levels={**WIZARD_SPELL_LEVELS, "counter_1": 1},
+        )
+        magic = caster_magic(state, 1)
+        assert magic is not None
+        self.assertEqual([spell["key"] for spell in magic["spells"]], WIZARD_SPELLS)
+
+    def test_a_figure_who_knows_only_a_counter_has_no_stage(self):
+        state = wizard_state(spells=["counter_1"], spell_skill_levels={"counter_1": 1})
+        self.assertIsNone(caster_magic(state, 1))
+
     def test_a_spell_with_nobody_to_aim_at_says_so(self):
         # The engine offers no candidate for a damage spell with no enemy
         # in the state, so the row cannot claim to be castable.
@@ -449,6 +464,17 @@ class CastableSetAgreesWithPolicyTest(SimpleTestCase):
 
     def test_agreement_when_mana_runs_short(self):
         self.assert_sets_agree(wizard_state(mana=1))
+
+    def test_agreement_for_a_caster_who_holds_a_counter(self):
+        # tarmar-studio#208: a Counter is on neither side, with a full pool
+        # (it would otherwise be a castable row) or an empty one (a
+        # borrowable row).
+        holds_a_counter = {
+            "spells": [*WIZARD_SPELLS, "counter_1"],
+            "spell_skill_levels": {**WIZARD_SPELL_LEVELS, "counter_1": 1},
+        }
+        self.assert_sets_agree(wizard_state(**holds_a_counter))
+        self.assert_sets_agree(wizard_state(mana=0, **holds_a_counter))
 
     def test_agreement_when_a_continuing_spell_is_up(self):
         self.assert_sets_agree(wizard_state(active_spells=["shield"]))
