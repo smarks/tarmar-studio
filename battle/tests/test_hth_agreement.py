@@ -327,10 +327,22 @@ class AgreementEndpointTest(BaseTestCase):
         self.assertEqual(bad.status_code, 400)
         no_pair = self.post_json(self.url, {"scope": "pair", "first": "x"})
         self.assertEqual(no_pair.status_code, 400)
+        self.assertEqual(
+            no_pair.json()["error"], words().hth_agreement.refuse_pair_missing
+        )
+        no_second = self.post_json(
+            self.url, {"scope": "pair", "first": self.ids[0], "second": "x"}
+        )
+        self.assertEqual(no_second.status_code, 400)
+        self.assertEqual(
+            no_second.json()["error"], words().hth_agreement.refuse_pair_missing
+        )
         not_an_object = self.client.post(
             self.url, "[]", content_type="application/json"
         )
         self.assertEqual(not_an_object.status_code, 400)
+        # The body is refused before any field of it is read.
+        self.assertEqual(not_an_object.json(), {"error": "Invalid JSON"})
         # The service's own refusal comes back in the caller's shape.
         same_figure = self.post_json(
             self.url,

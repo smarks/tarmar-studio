@@ -460,6 +460,8 @@ class ContinuationTest(DefaultCanonTestCase):
                 "mana": 3,
                 "push_mana": 2,
                 "borrow": False,
+                # The figure the craft's latest action named.
+                "target_id": play.FOE,
                 # turn, turns, working.
                 "line": "true_magic.craft_continue 2 3 Sear (tier 1)",
                 "offered": True,

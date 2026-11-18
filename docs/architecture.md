@@ -974,8 +974,22 @@ the fight's Game Master, refuse a classic battle and a figure not in the
 battle, write the record, clear a pause on a person's move, file one log line
 and save; `set_hth_agreement`, `set_magic_bounds_lifted` and
 `set_working_granted` each keep only their own refusals and record. The
-battle payload carries the first two records and their panels (`rulings`,
-`rulings_html`), which `battle.js` repaints. The rulings' words (headings,
+battle payload carries the three records and their panels (`rulings`,
+`rulings_html`), which `battle.js` repaints when a panel's `data-record`
+changes. Each panel is a partial the battle page and the GM chat's Battle tab
+both include, with the forms for the fight's Game Master alone, and each has
+one endpoint (`battle:hth-agreement`, `battle:magic-bounds`,
+`battle:working-grants`) that refuses anyone else. The three endpoints take
+the same steps, written once (`battle/views.py::_game_masters_ruling`): each
+hands it only how its own fields are read and which service is called. The two
+panels for single figures draw a recorded entry with one partial
+(`battle/_recorded_ruling.html`): the line, when it was ruled, and the form
+that undoes it, whose button a screen reader hears by the entry's own line
+(`common.undo_named`), so two buttons with the same word are told apart. The
+grant form names a working by its effect and its tier, and the key is the
+engine's for them (`working_grants.working_asked_for`); a withdrawal names the
+key the record holds, and the form offers only the figures the service would
+not refuse (`working_grants.crafts_workings`). The rulings' words (headings,
 buttons, log lines, refusals) are configuration: `config/battle-rulings.toml`,
 read and checked at startup by `battle/wording.py::load_rulings_wording` into
 `settings.BATTLE_RULINGS_WORDING` (`BATTLE_RULINGS_WORDING_FILE` names another
@@ -1013,6 +1027,35 @@ loader,
 `common/wording.py::load_wording`, which refuses a missing or unknown key, a
 blank value or a `{name}` a sentence may not use at startup. Tests run under
 `common.wording.fixed_wording`, never the shipped sentences.
+
+### True Magic on the battle board
+
+A figure with a level in the True skill may True cast a catalog spell and
+craft a working over several turns (tarmar-engine v0.9.22, tarmar-studio
+#208). The engine's menu offers both, and a seated player records only what it
+offered: `true_cast` is one of the things that set an option apart
+(`battle/services.py::option_variant`), and a craft is the engine's craft
+option with the working's key, its push, its borrowing and the figure it names.
+The cast stage's payload (`caster_magic`, `pending.magic`) restates none of the
+engine's filters for them: `true_casts` and `craft.workings` are rows read off
+the pending menu's own options, `craft.standing` is the craft that stands, and
+`craft.granted` the workings a Game Master granted this figure, with whether
+each waits on Channel. Every number they print is the engine's count
+(`battle/workings.py`).
+
+`static/js/battle.js` pairs those rows with the menu's options and keeps the
+three kinds of casting apart (`splitCastCandidates`): a True cast has a row of
+its own beside the same spell's recipe cast and is sent with `true_cast`; the
+workings to begin sit in the stage's craft control, a card per tier under each
+effect, with the figure, the push and the borrowing the menu gives the tier
+picked; and a craft that stands is one option of the menu, naming first the
+figure its latest craft action named, or a line saying why where the menu
+withholds it. An option is known for a craft by its key being one of the
+payload's workings, so the page spells no letter of the engine's. The roster
+card carries the standing craft's line (`battle/viewmodel.py::_tarmar_craft`).
+True Magic's events are reworded from `[true_magic_log]` when the turn is
+stored (`battle/true_magic_narration.py`), so the board log, the battle JSON
+and the GM battle report print one line.
 
 ### A battle's life
 

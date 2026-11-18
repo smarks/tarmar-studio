@@ -3850,15 +3850,17 @@ def _craft_rows(
 
 
 def _standing_craft(actor: CombatantState, candidates: Collection[dict]) -> dict | None:
-    """The craft that stands on the caster, for the stage's one continuation
-    option, or ``None`` when none stands.
+    """The craft that stands on the caster, for the turn panel's one
+    continuation option, or ``None`` when none stands.
 
     Read off the engine's ``CraftState`` (:mod:`battle.workings`): the
     working, which of its turns the next craft action is, and the mana
     gathered so far. ``line`` is the option's name, the working and "turn k
-    of n". ``offered`` is whether the menu holds the continuation: the engine
-    withholds it where no cast may be made, and any other choice then loses
-    the working.
+    of n". ``target_id`` is the figure the craft's latest action named,
+    ``None`` when it named none: each craft action names the working's
+    target anew, and the page offers the same figure first. ``offered`` is
+    whether the menu holds the continuation: the engine withholds it where
+    no cast may be made, and any other choice then loses the working.
 
     Args:
         actor: The caster.
@@ -3877,6 +3879,7 @@ def _standing_craft(actor: CombatantState, candidates: Collection[dict]) -> dict
         "mana": craft.mana,
         "push_mana": standing.push_mana,
         "borrow": standing.borrow,
+        "target_id": standing.target_id,
         "line": turn_menu.craft_continuation_line(craft),
         "offered": any(_is_craft(option) for option in candidates),
     }
@@ -3901,20 +3904,13 @@ def _granted_workings(actor: CombatantState) -> list[dict]:
     for key in actor.granted_workings:
         if not working_grants.builds(key, rules):
             continue
-        name = working_grants.working_label(key)
         waits = working_grants.waits_on_channel(actor, key)
         granted.append(
             {
                 "key": key,
-                "name": name,
+                "name": working_grants.working_label(key),
                 "waits_on_channel": waits,
-                "note": (
-                    words().true_magic.granted_waits.format(
-                        working=name, name=actor.name
-                    )
-                    if waits
-                    else ""
-                ),
+                "note": (working_grants.waiting_note(key, actor.name) if waits else ""),
             }
         )
     return granted

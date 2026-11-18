@@ -303,6 +303,17 @@ def inner_markup_of(page: str, element_id: str) -> str:
     return "".join(collector.parts)
 
 
+def forms_of_class(page: str, form_class: str) -> list[str]:
+    """Each of a page's forms of one class, from its opening tag to its
+    closing one.
+
+    Args:
+        page: The page's HTML.
+        form_class: The forms' class.
+    """
+    return re.findall(rf'<form [^>]*class="{form_class}">.*?</form>', page, re.DOTALL)
+
+
 def mark_gate_passed(client: Client) -> None:
     """Mark a test client's session as past the passphrase gate.
 

@@ -39,6 +39,7 @@ class CommonWords:
     and_word: str = sentence()
     or_word: str = sentence()
     unknown_figure: str = sentence()
+    undo_named: str = sentence("button", "line", required=("button", "line"))
 
 
 @dataclass(frozen=True)
@@ -177,7 +178,8 @@ class ClassicMenuWords:
 class TurnPanelWords:
     """The turn panel's own words, around the server's lines (#94): the
     prompt, each option's cost and the AI's pick, the push, borrow and counter
-    controls, the cast stage, the hex picker and the buttons."""
+    controls, the cast stage, a True mage's True casts and craft control
+    (tarmar-studio #208), the hex picker and the buttons."""
 
     waiting: str = sentence("name", required=("name",))
     waiting_played: str = sentence("name", "player", required=("name",))
@@ -215,6 +217,18 @@ class TurnPanelWords:
     counter_amount: str = sentence("mana")
     counter_group: str = sentence("caster")
     presses_again: str = sentence()
+    true_cast_tag: str = sentence()
+    ready_crafting: str = sentence("ready", required=("ready",))
+    ready_crafting_only: str = sentence()
+    craft_group: str = sentence()
+    craft_label: str = sentence("skill", "tier_cap")
+    craft_label_uncapped: str = sentence("skill")
+    craft_tier: str = sentence("tier", required=("tier",))
+    craft_granted: str = sentence()
+    craft_target_label: str = sentence()
+    craft_target_group: str = sentence()
+    craft_no_figure: str = sentence()
+    craft_withheld: str = sentence("line", required=("line",))
     moving_to: str = sentence("hex")
     pick_hex: str = sentence("count")
     leave_hex: str = sentence()
@@ -274,8 +288,18 @@ class MagicBoundsWords:
 @dataclass(frozen=True)
 class WorkingGrantsWords:
     """The words for a working a Game Master grants a figure (tarmar-studio
-    #208): the refusals and the battle-log lines."""
+    #208): the panel's heading, lines and buttons, the refusals and the
+    battle-log lines."""
 
+    heading: str = sentence()
+    none_granted: str = sentence()
+    grant_line: str = sentence("working", "name", "by", required=("working",))
+    figure_label: str = sentence()
+    effect_label: str = sentence()
+    tier_label: str = sentence()
+    grant_button: str = sentence()
+    withdraw_button: str = sentence()
+    withdraw_note: str = sentence()
     game_master_only: str = sentence()
     refuse_classic: str = sentence()
     refuse_no_true_magic: str = sentence()

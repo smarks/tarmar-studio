@@ -17,7 +17,9 @@ one tier of one effect. The rest is the record every ruling for single
 figures keeps (:class:`battle.figure_rulings.FigureRulings`). Who may change
 it is the lifted bounds' answer: the fight's runner, while that account is a
 Game Master (``battle.services.runs_the_seats``), through
-``battle.services.set_working_granted``. Every change writes one line to the
+``battle.services.set_working_granted``, which the battle's GM control posts
+to (``battle.views.battle_working_grants``; the panel is
+``battle.views.working_grants_panel``). Every change writes one line to the
 battle log.
 
 The engine does the rest (tarmar-engine v0.9.22): before every turn, and
@@ -34,21 +36,26 @@ A grant past the figure's tier cap is recorded all the same
 holds the figure to that cap (:func:`waits_on_channel`). Both are the
 engine's own answers, asked of the figure as the engine reads it
 (:func:`engine_figures`); no rule of the engine's is written here a second
-time. The refusal of a figure with no level in the True skill asks the engine
-likewise (:func:`grant_refusal`).
+time. Which figures craft workings, so may be granted one, asks the engine
+likewise (:func:`crafts_workings`), for the grant form and for the refusal of
+every other figure (:func:`grant_refusal`).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
-from tarmar_engine.magic import MagicRules
+from tarmar_engine.magic import MagicRules, WorkingEffect
 from tarmar_engine.state import BattleState, CombatantState
+
+from common.helpers import whole_number
 
 from . import magic_bounds
 from .figure_rulings import COMBATANT_ID, FigureRulings
 from .magic_rules import loaded_spell, magic_rules
 from .persistence import tarmar_state
+from .refusals import BattleRefusal
 from .wording import words
 
 if TYPE_CHECKING:
@@ -58,9 +65,22 @@ if TYPE_CHECKING:
 WORKING = "working"
 
 #: The keys of a change's log-line payload (:func:`change_payload`).
+#: ``RECORD`` is the battle payload's name for the record too
+#: (``battle.views.battle_payload``'s ``rulings``).
 RECORD = "workings_granted"
 GRANTED = "granted"
 PAST_TIER_CAP = "past_tier_cap"
+
+#: The GM control's form fields, named once for the endpoint, the tests and
+#: the template (which reads them from the panel). The figure's is the
+#: lifted bounds' own. A working is named by its key (``WORKING_FIELD``), or,
+#: by a form that cannot write a key, by its effect and its tier
+#: (:func:`working_asked_for`).
+COMBATANT_FIELD = magic_bounds.COMBATANT_FIELD
+WORKING_FIELD = WORKING
+EFFECT_FIELD = "effect"
+TIER_FIELD = "tier"
+GRANTED_FIELD = GRANTED
 
 
 class WorkingGrants(FigureRulings):
@@ -91,6 +111,56 @@ def builds(working_key: str, rules: MagicRules) -> bool:
         # The engine's answer for a key these rules do not build.
         return False
     return True
+
+
+def grantable_effects() -> tuple[WorkingEffect, ...]:
+    """The effects of the loaded canon's workings that need a grant, in the
+    canon's order; none under a canon with no True Magic."""
+    true_magic = magic_rules().true_magic
+    if true_magic is None:
+        return ()
+    return tuple(effect for effect in true_magic.effects if effect.needs_grant)
+
+
+def working_asked_for(fields: Mapping[str, Any]) -> str:
+    """The key of the working a post to the GM control names.
+
+    A caller that holds a key sends it (``WORKING_FIELD``): the withdrawal
+    of a recorded grant does, whatever the canon has since become, and so
+    may a script. The control's grant form holds an effect and a tier
+    instead (``EFFECT_FIELD``, ``TIER_FIELD``), and the key is the engine's
+    for them (``TrueMagicRules.working_key``), never spelled here.
+
+    Args:
+        fields: The post's fields.
+
+    Returns:
+        The key sent, as it was sent; or the engine's key for the effect and
+        tier sent. A key sent is not checked here:
+        ``battle.services.set_working_granted`` holds a grant to the loaded
+        canon.
+
+    Raises:
+        BattleRefusal: With no key sent, a canon with no True Magic, an
+            effect its rules do not carry, or a tier that is no whole number
+            or that the effect cannot be built at.
+    """
+    key = fields.get(WORKING_FIELD)
+    if key:
+        return str(key)
+    grant_words = words().working_grants
+    true_magic = magic_rules().true_magic
+    if true_magic is None:
+        raise BattleRefusal(grant_words.refuse_no_true_magic)
+    try:
+        return true_magic.working_key(
+            str(fields.get(EFFECT_FIELD) or ""), whole_number(fields.get(TIER_FIELD))
+        )
+    except (KeyError, ValueError) as unbuilt:
+        # The engine's answers for an effect the rules do not carry and a
+        # tier the effect is not built at; ``whole_number``'s for a tier
+        # that is no number.
+        raise BattleRefusal(grant_words.refuse_working) from unbuilt
 
 
 def engine_figures(battle: Battle) -> dict[int, CombatantState]:
@@ -127,6 +197,22 @@ def engine_figures(battle: Battle) -> dict[int, CombatantState]:
     return {figure.combatant_id: figure for figure in state.combatants}
 
 
+def crafts_workings(figure: CombatantState | None) -> bool:
+    """Whether a figure crafts workings, so may be granted one.
+
+    The engine's own test, asked no other way (``MagicRules.true_level``): a
+    level in the True skill. The GM control's grant form offers these figures
+    (``battle.views.working_grants_panel``) and :func:`grant_refusal` refuses
+    every other, so the form offers nobody the service would refuse.
+
+    Args:
+        figure: The figure as the engine reads it (:func:`engine_figures`),
+            or ``None`` for a seat nobody has claimed and a figure taken off
+            the board.
+    """
+    return figure is not None and magic_rules().true_level(figure) > 0
+
+
 def grant_refusal(
     working_key: str, figure: CombatantState | None, name: str
 ) -> str | None:
@@ -143,8 +229,8 @@ def grant_refusal(
 
     Returns:
         The refusal, or ``None`` when the loaded canon has True Magic and
-        builds the working, its effect needs a grant, and the figure has a
-        level in the True skill (the engine's ``MagicRules.true_level``).
+        builds the working, its effect needs a grant, and the figure crafts
+        workings (:func:`crafts_workings`).
     """
     grant_words = words().working_grants
     rules = magic_rules()
@@ -158,7 +244,7 @@ def grant_refusal(
         return grant_words.refuse_needs_no_grant.format(
             working=working_label(working_key)
         )
-    if figure is None or rules.true_level(figure) <= 0:
+    if not crafts_workings(figure):
         return grant_words.refuse_no_true_level.format(
             name=name, skill=true_magic.skill_label
         )
@@ -205,6 +291,20 @@ def waits_on_channel(figure: CombatantState, working_key: str) -> bool:
     return (
         past_tier_cap(figure, working_key)
         and magic_rules().tier_cap(figure) is not None
+    )
+
+
+def waiting_note(working_key: str, name: str) -> str:
+    """What the board says of a grant that waits on Channel
+    (:func:`waits_on_channel`), to the figure's player on the cast stage and
+    to the Game Master beside the grant.
+
+    Args:
+        working_key: The key of the working granted.
+        name: The figure's name.
+    """
+    return words().true_magic.granted_waits.format(
+        working=working_label(working_key), name=name
     )
 
 

@@ -682,6 +682,42 @@ describe('initBattlePage', () => {
         expect(document.getElementById('battle-magic-bounds')).toBeNull();
     });
 
+    test('an advance repaints the working-grants panel when what it draws changes (tarmar-studio #208)', async () => {
+        mountDetailPage();
+        // The record the server keys the panel by: the grants, and each
+        // one's line and whether it waits on Channel.
+        const waiting = '{"lines": [["Figment granted to Mage", "waits on Channel"]]}';
+        const lifted = '{"lines": [["Figment granted to Mage", ""]]}';
+        document.body.insertAdjacentHTML(
+            'beforeend', rulingPanel('battle-working-grants', waiting, 'It waits on Channel.')
+        );
+        battle.initBattlePage();
+        require('../api.js');
+        // The same grant, Channel since lifted for the figure: no grant
+        // changed, and the panel is drawn again all the same.
+        global.fetch = jest.fn().mockResolvedValue(respondWithRulings({
+            'battle-working-grants': rulingPanel(
+                'battle-working-grants', lifted, 'Figment granted to Mage.'
+            ),
+        }));
+
+        document.getElementById('advance-turn').click();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        const repainted = document.getElementById('battle-working-grants');
+        expect(repainted.querySelector('.ruling-line').textContent)
+            .toBe('Figment granted to Mage.');
+        // The grant and withdraw forms come back to this page.
+        expect(repainted.querySelector('input[name="next"]').value)
+            .toBe(`${window.location.pathname}${window.location.search}`);
+        // Drawn the same again, the element on the page stays.
+        expect(battle.rulingPanelChanges({
+            'battle-working-grants': rulingPanel('battle-working-grants', lifted, 'Other.'),
+        })).toHaveLength(0);
+        // A battle that no longer shows the panel loses it.
+        expect(battle.repaintRulings({ 'battle-working-grants': '' }, '/here')).toBe(1);
+        expect(document.getElementById('battle-working-grants')).toBeNull();
+    });
+
     test('the chip takes its label from the page, not from battle.js', async () => {
         // #338 item 20: battle.js used to restate Battle.STATUS_CHOICES.
         mountDetailPage();
@@ -3175,6 +3211,850 @@ describe('counterspell on the board (tarmar-engine #31)', () => {
     });
 });
 
+describe('True Magic on the board (tarmar-engine #77, tarmar-studio #208)', () => {
+    // A True mage's menu and stage, in the shapes the server sends
+    // (battle.services.caster_magic): Fire Missile by its recipe and as a
+    // True cast, Water Missile as a True cast alone (the mage does not know
+    // it), and the workings the menu offers to begin, each with the pushed
+    // and borrowing copies the engine lists last. Every word a row carries
+    // is the server's; the panel's own are the fixed test words.
+    const SEAR_ONE = 'working:sear:1';
+    const SEAR_TWO = 'working:sear:2';
+    const KNIT_ONE = 'working:knit:1';
+    const FIGMENT_ONE = 'working:figment:1';
+    const FIGMENT_FIVE = 'working:figment:5';
+    const WAITS = 'Figment (tier 5) is granted, and waits on Channel for Mage';
+    const FOE = [2, 'Foe'];
+    const MAGE = [1, 'Mage'];
+    const FRIEND = [3, 'Friend'];
+
+    const option = (fields) => ({ score: 0, rationale: 'weighed', ai_choice: false, ...fields });
+    const cast = (spell, extra = {}) => option({
+        letter: 'h', name: `CAST SPELL ${spell}`, target_id: 2, target_name: 'Foe',
+        spell_key: spell, plain: `Cast ${spell} at Foe`, cost: `cost of ${spell}`, ...extra,
+    });
+    const craft = (working, figure, extra = {}) => option({
+        letter: 'craft', name: `CRAFT WORKING ${working}`,
+        target_id: figure ? figure[0] : null, target_name: figure ? figure[1] : '',
+        spell_key: working, plain: `Begin crafting ${working}`,
+        cost: `cost of ${working}`, ...extra,
+    });
+    const spellRow = (spell, extra = {}) => ({
+        key: spell, target_id: 2, name: spell, cost: `price of ${spell}`,
+        note: `chance of ${spell}`, castable: true, reason: '', borrowable: false,
+        shortfall: 0, channel: 6, ...extra,
+    });
+    const craftRow = (working, effect, tier, figure, extra = {}) => ({
+        key: working, target_id: figure ? figure[0] : null, name: `${effect} (tier ${tier})`,
+        cost: `price of ${working}`, note: `turns and drain of ${working}`,
+        castable: true, reason: '', borrowable: false, shortfall: 0, channel: 6,
+        effect: effect.toLowerCase(), effect_label: effect, tier, turns: 3 * tier,
+        mana: tier, drain: 8 * tier, drain_pool: 'fatigue', ...extra,
+    });
+
+    function magePending(overrides = {}) {
+        return {
+            combatant_id: 1, turn: 2, display_name: 'Mage', player: 'sam', is_you: true,
+            candidates: [
+                option({ letter: 'c', name: 'DODGE', target_id: null, spell_key: '',
+                         plain: 'Dodge', cost: '' }),
+                cast('fire_missile', { ai_choice: true }),               // 1
+                cast('fire_missile', { true_cast: true }),               // 2
+                cast('water_missile', { true_cast: true }),              // 3
+                craft(SEAR_ONE, FOE),                                    // 4
+                craft(SEAR_TWO, FOE),                                    // 5
+                craft(KNIT_ONE, MAGE),                                   // 6
+                craft(KNIT_ONE, FRIEND),                                 // 7
+                craft(FIGMENT_ONE, null),                                // 8
+                cast('fire_missile', { push_mana: 1, cost: 'recipe pushed' }),               // 9
+                cast('fire_missile', { push_mana: 1, true_cast: true,
+                                       cost: 'true pushed, with its drain' }),               // 10
+                craft(SEAR_ONE, FOE, { push_mana: 1, cost: 'sear pushed' }),                 // 11
+                craft(SEAR_ONE, FOE, { push_mana: 2, borrow: true, borrowed: 1,
+                                       cost: 'sear pushed and borrowing' }),                 // 12
+            ],
+            magic: {
+                pool_label: 'Mana', pool: 4, max_pool: 10, owed: 0,
+                spells: [spellRow('fire_missile')],
+                true_casts: [
+                    spellRow('fire_missile', { true_cast: true }),
+                    spellRow('water_missile', { true_cast: true }),
+                ],
+                craft: {
+                    skill: 'Arcane', tier_cap: 2, standing: null,
+                    workings: [
+                        craftRow(SEAR_ONE, 'Sear', 1, FOE),
+                        craftRow(SEAR_TWO, 'Sear', 2, FOE),
+                        craftRow(KNIT_ONE, 'Knit', 1, MAGE, { name: 'Knit (tier 1) → Mage' }),
+                        craftRow(KNIT_ONE, 'Knit', 1, FRIEND, { name: 'Knit (tier 1) → Friend' }),
+                        craftRow(FIGMENT_ONE, 'Figment', 1, null),
+                    ],
+                    granted: [
+                        { key: FIGMENT_ONE, name: 'Figment (tier 1)',
+                          waits_on_channel: false, note: '' },
+                        { key: FIGMENT_FIVE, name: 'Figment (tier 5)',
+                          waits_on_channel: true, note: WAITS },
+                    ],
+                },
+            },
+            ...overrides,
+        };
+    }
+
+    // The same mage a turn into Sear with two mana pushed, its latest craft
+    // action having named the Orc: the menu holds the continuation once per
+    // figure it may name, and no working to begin.
+    const SEAR_GOES_ON = 'Go on crafting Sear (tier 1): turn 2 of 3';
+    function craftingPending({ figures = [FOE, [5, 'Orc']], named = 5, offered = true } = {}) {
+        return {
+            combatant_id: 1, turn: 3, display_name: 'Mage', player: 'sam', is_you: true,
+            candidates: [
+                option({ letter: 'c', name: 'DODGE', target_id: null, spell_key: '',
+                         plain: 'Dodge', cost: '' }),
+                cast('shield', { target_id: null, target_name: '' }),
+                ...figures.map((figure) => craft(SEAR_ONE, figure, {
+                    name: 'CRAFT WORKING Sear (tier 1) (PUSH 2 MANA)', push_mana: 2,
+                    plain: `${SEAR_GOES_ON}, aimed at ${figure[1]}`,
+                    cost: '1 mana this turn, 1 of 3 gathered so far',
+                })),
+            ],
+            magic: {
+                pool_label: 'Mana', pool: 9, max_pool: 10, owed: 0,
+                spells: [spellRow('shield', { target_id: null })],
+                true_casts: [],
+                craft: {
+                    skill: 'Arcane', tier_cap: 2, workings: [], granted: [],
+                    standing: {
+                        key: SEAR_ONE, name: 'Sear (tier 1)', turn: 2, turns: 3,
+                        gathered: 1, mana: 3, push_mana: 2, borrow: false,
+                        target_id: named, line: SEAR_GOES_ON, offered,
+                    },
+                },
+            },
+        };
+    }
+
+    function panelNode() {
+        document.body.innerHTML = '<div id="turn-panel" hidden></div>';
+        return document.getElementById('turn-panel');
+    }
+
+    function drawn(pending, options = {}) {
+        const panel = panelNode();
+        battle.renderTurnPanel(panel, pending, {
+            words: PANEL_WORDS, selectedIndex: null, castOpen: true, ...options,
+        });
+        return panel;
+    }
+
+    /** The same panel drawn again, as the page redraws it over a new answer. */
+    function redrawn(panel, pending, options = {}) {
+        battle.renderTurnPanel(panel, pending, {
+            words: PANEL_WORDS, selectedIndex: null, castOpen: true, ...options,
+        });
+        return panel;
+    }
+
+    // A True cast only borrowing pays for: no cast of it from the pool is on
+    // the menu, and its row says what it lacks.
+    const BORROWED_TRUE_CAST = cast('water_missile', {
+        true_cast: true, borrow: true, borrowed: 1, cost: 'true cast, borrowing',
+    });
+    const BORROWED_TRUE_ROW = spellRow('water_missile', {
+        true_cast: true, castable: false, borrowable: true, shortfall: 1,
+        reason: 'needs 2 mana, 1 left',
+    });
+
+    /** What the cast option says of the pool and of what is ready. */
+    const castAdvice = (panel) => panel
+        .querySelector('.turn-option-cast .turn-option-advice').textContent;
+    const POOL = 'turn_panel.cast_advice turn_panel.pool 10 4 Mana ';
+
+    const tierOf = (panel, working) => panel.querySelector(
+        `.turn-craft-tier[data-working="${working}"]`
+    );
+    const figures = (panel) => Array.from(panel.querySelectorAll('.turn-craft-target-figure'));
+    const pressed = (nodes) => nodes
+        .filter((node) => node.getAttribute('aria-pressed') === 'true')
+        .map((node) => node.textContent);
+    const focusKeys = (scope, selector) => Array.from(scope.querySelectorAll(selector))
+        .map((node) => node.dataset.focusKey);
+
+    async function sentBody() {
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        return JSON.parse(global.fetch.mock.calls[0][1].body);
+    }
+
+    describe('a True cast', () => {
+        test('has a row of its own beside the same spell\'s recipe cast', () => {
+            const panel = drawn(magePending());
+            const rows = Array.from(panel.querySelectorAll('.turn-spell'));
+            expect(rows.map((row) => row.querySelector('.turn-spell-name').textContent))
+                .toEqual(['fire_missile', 'fire_missile', 'water_missile']);
+            expect(rows.map((row) => row.classList.contains('turn-true-cast')))
+                .toEqual([false, true, true]);
+            expect(rows[0].querySelector('.turn-spell-true')).toBeNull();
+            expect(rows[1].querySelector('.turn-spell-true').textContent)
+                .toBe('turn_panel.true_cast_tag');
+            // Each row stands for its own option of the menu, and the AI's
+            // pick, the recipe cast, is tagged on that row alone.
+            expect(rows.map((row) => row.dataset.focusKey))
+                .toEqual(['spell-1', 'spell-2', 'spell-3']);
+            expect(rows.map((row) => Boolean(row.querySelector('.turn-option-ai-pick'))))
+                .toEqual([true, false, false]);
+        });
+
+        test('keeps its own pushed copies, and the recipe cast its own', () => {
+            const panel = drawn(magePending(), { selectedIndex: 10 });
+            const groups = Array.from(panel.querySelectorAll('.turn-spell-group'));
+            expect(groups.map((group) => focusKeys(group, '.turn-push-amount'))).toEqual([
+                ['push-1', 'push-9'],
+                ['push-2', 'push-10'],
+            ]);
+            // The pushed True cast selected is the True row selected, with
+            // the server's cost for it, drain and all; the recipe row is not.
+            expect(pressed(Array.from(panel.querySelectorAll('.turn-spell')))).toHaveLength(1);
+            expect(groups[1].querySelector('.turn-spell').getAttribute('aria-pressed'))
+                .toBe('true');
+            expect(groups[1].querySelector('.turn-push-cost').textContent)
+                .toBe('turn_panel.costs true pushed, with its drain');
+            expect(groups[0].querySelector('.turn-push-cost')).toBeNull();
+        });
+
+        test('of a known spell is sent as a True cast', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            panel.querySelectorAll('.turn-spell')[1].click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'h', target_id: 2,
+                spell_key: 'fire_missile', true_cast: true,
+            });
+        });
+
+        test('of a spell the mage does not know is sent as a True cast', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            panel.querySelectorAll('.turn-spell')[2].click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'h', target_id: 2,
+                spell_key: 'water_missile', true_cast: true,
+            });
+        });
+
+        test('pushed is sent with its push and its mark', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            panel.querySelectorAll('.turn-spell')[1].click();
+            panel.querySelectorAll('.turn-spell-group')[1]
+                .querySelectorAll('.turn-push-amount')[1].click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'h', target_id: 2,
+                spell_key: 'fire_missile', push_mana: 1, true_cast: true,
+            });
+        });
+
+        test('is not sent for the recipe cast of the same spell', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            panel.querySelectorAll('.turn-spell')[0].click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'h', target_id: 2,
+                spell_key: 'fire_missile',
+            });
+        });
+
+        test('counts as a cast ready, and workings to craft are named apart', () => {
+            const panel = drawn(magePending(), { castOpen: false });
+            // casts_ready 3: the recipe cast and the two True casts.
+            expect(castAdvice(panel))
+                .toBe(`${POOL}turn_panel.ready_crafting turn_panel.casts_ready 3`);
+            expect(panel.querySelector('.turn-option-cast .turn-option-letter').textContent)
+                .toBe('h');
+        });
+
+        test('only borrowing pays for is counted with the casts by borrowing', () => {
+            const pending = magePending();
+            pending.candidates[3] = BORROWED_TRUE_CAST;
+            pending.magic.true_casts[1] = BORROWED_TRUE_ROW;
+            // count, ready: one by borrowing, beside the recipe cast and the
+            // True cast of the same spell.
+            expect(castAdvice(drawn(pending, { castOpen: false }))).toBe(
+                `${POOL}turn_panel.ready_crafting `
+                + 'turn_panel.ready_borrowing 1 turn_panel.casts_ready 2'
+            );
+        });
+
+        test('only borrowing pays for opens the stage with nothing else to cast', async () => {
+            const pending = magePending({
+                candidates: [magePending().candidates[0], BORROWED_TRUE_CAST],
+            });
+            pending.magic.spells = [];
+            pending.magic.true_casts = [BORROWED_TRUE_ROW];
+            pending.magic.craft.workings = [];
+            pending.magic.craft.granted = [];
+            const panel = mountPage(pending);
+            expect(castAdvice(panel))
+                .toBe(`${POOL}turn_panel.ready_borrowing 1 turn_panel.casts_ready 0`);
+            panel.querySelector('.turn-option-cast').click();
+            const row = panel.querySelector('.turn-spell');
+            expect(row.classList.contains('turn-true-cast')).toBe(true);
+            expect(row.disabled).toBe(true);
+            expect(row.querySelector('.turn-spell-note').textContent)
+                .toBe('needs 2 mana, 1 left');
+            expect(focusKeys(panel, '.turn-borrow-amount')).toEqual(['borrow-1']);
+            panel.querySelector('.turn-borrow-amount').click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'h', target_id: 2,
+                spell_key: 'water_missile', borrow: true, true_cast: true,
+            });
+        });
+
+        test('pushed and picked by the AI tags the option that opens the stage', () => {
+            const pending = magePending();
+            pending.candidates[1].ai_choice = false;
+            pending.candidates[10].ai_choice = true;
+            const panel = drawn(pending, { castOpen: false });
+            expect(Boolean(panel.querySelector('.turn-option-cast .turn-option-ai-pick')))
+                .toBe(true);
+        });
+    });
+
+    describe('the craft control', () => {
+        test('lists each effect with a card per tier, in the server\'s words', () => {
+            const panel = drawn(magePending());
+            const control = panel.querySelector('.turn-craft');
+            expect(control.getAttribute('aria-label')).toBe('turn_panel.craft_group');
+            expect(control.querySelector('.turn-craft-label').textContent)
+                .toBe('turn_panel.craft_label Arcane 2');
+            const effects = Array.from(control.querySelectorAll('.turn-craft-effect'));
+            expect(effects.map((effect) => [
+                effect.querySelector('.turn-craft-effect-name').textContent,
+                effect.getAttribute('aria-label'),
+                Array.from(effect.querySelectorAll('.turn-craft-tier'))
+                    .map((tier) => tier.dataset.working),
+            ])).toEqual([
+                ['Sear', 'Sear', [SEAR_ONE, SEAR_TWO]],
+                // One card for Knit's tier, though the menu offers it at two figures.
+                ['Knit', 'Knit', [KNIT_ONE]],
+                ['Figment', 'Figment', [FIGMENT_ONE]],
+            ]);
+            const tier = tierOf(panel, SEAR_TWO);
+            expect(tier.querySelector('.turn-spell-name').textContent)
+                .toBe('turn_panel.craft_tier 2');
+            expect(tier.querySelector('.turn-spell-cost').textContent)
+                .toBe(`price of ${SEAR_TWO}`);
+            expect(tier.querySelector('.turn-spell-note').textContent)
+                .toBe(`turns and drain of ${SEAR_TWO}`);
+            // Nothing is open, and nothing chosen, until the reader picks.
+            expect(pressed(Array.from(control.querySelectorAll('.turn-craft-tier')))).toEqual([]);
+            expect(control.querySelector('.turn-craft-target')).toBeNull();
+            expect(control.querySelector('.turn-push')).toBeNull();
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(true);
+            // A working is no spell row.
+            expect(panel.querySelectorAll('.turn-spell')).toHaveLength(3);
+        });
+
+        test('alone on the menu is what the cast option says is there', () => {
+            // No cast is ready and none is to be had by borrowing: the mage
+            // may only begin a working, and the option says so in a sentence
+            // of its own, not "0 casts ready, and workings to craft".
+            const pending = magePending();
+            pending.candidates = pending.candidates
+                .filter((candidate) => candidate.letter !== 'h');
+            pending.magic.spells = [];
+            pending.magic.true_casts = [];
+            const panel = drawn(pending, { castOpen: false });
+            expect(castAdvice(panel)).toBe(`${POOL}turn_panel.ready_crafting_only`);
+            expect(panel.querySelector('.turn-option-cast .turn-option-letter').textContent)
+                .toBe('craft');
+            // A cast to be had by borrowing is a cast to make: it is counted,
+            // and the workings are named beside it.
+            pending.candidates.push(BORROWED_TRUE_CAST);
+            pending.magic.true_casts = [BORROWED_TRUE_ROW];
+            expect(castAdvice(drawn(pending, { castOpen: false }))).toBe(
+                `${POOL}turn_panel.ready_crafting `
+                + 'turn_panel.ready_borrowing 1 turn_panel.casts_ready 0'
+            );
+        });
+
+        test('says a lifted tier cap is lifted', () => {
+            const pending = magePending();
+            pending.magic.craft.tier_cap = null;
+            expect(drawn(pending).querySelector('.turn-craft-label').textContent)
+                .toBe('turn_panel.craft_label_uncapped Arcane');
+        });
+
+        test('marks a granted working, and says which grant waits on Channel', () => {
+            const panel = drawn(magePending());
+            expect(tierOf(panel, FIGMENT_ONE).querySelector('.turn-craft-granted').textContent)
+                .toBe('turn_panel.craft_granted');
+            expect(tierOf(panel, SEAR_ONE).querySelector('.turn-craft-granted')).toBeNull();
+            // The grant past the cap has no card: the menu offers no craft
+            // of it. The server's sentence says what it waits on.
+            expect(tierOf(panel, FIGMENT_FIVE)).toBeNull();
+            const waits = panel.querySelectorAll('.turn-craft-waits');
+            expect(waits).toHaveLength(1);
+            expect(waits[0].textContent).toBe(WAITS);
+            expect(waits[0].dataset.working).toBe(FIGMENT_FIVE);
+        });
+
+        test('with no working to begin is the waiting grant\'s note, under no label', () => {
+            // A craft stands, so the menu offers no working to begin; Shield
+            // is ready, so the stage opens, and a grant waits on Channel.
+            const pending = craftingPending();
+            pending.magic.craft.granted = [
+                { key: FIGMENT_FIVE, name: 'Figment (tier 5)',
+                  waits_on_channel: true, note: WAITS },
+            ];
+            const control = drawn(pending).querySelector('.turn-craft');
+            expect(control.getAttribute('aria-label')).toBe('turn_panel.craft_group');
+            expect(Array.from(control.children).map((child) => child.className))
+                .toEqual(['turn-craft-waits']);
+            expect(control.textContent).toBe(WAITS);
+            // With no grant waiting either, there is no control to draw.
+            expect(drawn(craftingPending()).querySelector('.turn-craft')).toBeNull();
+        });
+
+        test('shows a figure nothing it was not granted', () => {
+            const pending = magePending();
+            pending.magic.craft.granted = [];
+            const panel = drawn(pending);
+            expect(panel.querySelector('.turn-craft-granted')).toBeNull();
+            expect(panel.querySelector('.turn-craft-waits')).toBeNull();
+        });
+
+        test('is not drawn for a caster who is no True mage', () => {
+            const pending = magePending();
+            pending.magic.craft = null;
+            pending.magic.true_casts = [];
+            pending.candidates = pending.candidates.slice(0, 2);
+            const panel = drawn(pending);
+            expect(panel.querySelector('.turn-craft')).toBeNull();
+            expect(panel.querySelectorAll('.turn-spell')).toHaveLength(1);
+        });
+
+        test('a tier naming one figure selects its craft and opens its controls', () => {
+            const onCraftPick = jest.fn();
+            tierOf(drawn(magePending(), { onCraftPick }), SEAR_ONE).click();
+            expect(onCraftPick).toHaveBeenCalledWith(
+                { working: SEAR_ONE, row: `${SEAR_ONE}\u00002` }, 4
+            );
+
+            const panel = drawn(magePending(), { selectedIndex: 4 });
+            expect(tierOf(panel, SEAR_ONE).getAttribute('aria-pressed')).toBe('true');
+            expect(tierOf(panel, SEAR_TWO).getAttribute('aria-pressed')).toBe('false');
+            expect(pressed(figures(panel))).toEqual(['Foe']);
+            // What the tier opens sits with its own effect's tiers.
+            expect(Array.from(panel.querySelectorAll('.turn-craft-picked'))
+                .map((opened) => opened.parentElement.dataset.effect)).toEqual(['sear']);
+            expect(panel.querySelector('.turn-craft-target').getAttribute('aria-label'))
+                .toBe('turn_panel.craft_target_group');
+            expect(panel.querySelector('.turn-craft-target-label').textContent)
+                .toBe('turn_panel.craft_target_label');
+            // What the craft costs, as the server wrote it for the option.
+            expect(panel.querySelector('.turn-craft-cost').textContent)
+                .toBe(`turn_panel.costs cost of ${SEAR_ONE}`);
+            const control = panel.querySelector('.turn-craft');
+            // The push control: the plain craft, and the copy the menu holds.
+            expect(focusKeys(control, '.turn-push-amount')).toEqual(['push-4', 'push-11']);
+            expect(control.querySelector('.turn-push-label').textContent)
+                .toBe('turn_panel.push_label_channel 6');
+            // The borrowing control: the menu's one borrowing copy.
+            expect(Array.from(control.querySelectorAll('.turn-borrow-amount'))
+                .map((button) => [button.dataset.focusKey, button.textContent]))
+                .toEqual([['borrow-12', 'turn_panel.borrow_pushed 1 2']]);
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
+        });
+
+        test('a pushed or borrowing craft keeps its tier open and prints its own cost', () => {
+            const panel = drawn(magePending(), { selectedIndex: 12 });
+            expect(tierOf(panel, SEAR_ONE).getAttribute('aria-pressed')).toBe('true');
+            expect(pressed(figures(panel))).toEqual(['Foe']);
+            expect(panel.querySelector('.turn-borrow-cost').textContent)
+                .toBe('turn_panel.costs sear pushed and borrowing');
+            // The plain craft's cost is printed only while it is the one selected.
+            expect(panel.querySelector('.turn-craft-cost')).toBeNull();
+        });
+
+        test('shows no tier open while an option that is no craft is selected', () => {
+            // The reader's pick of a tier is for a menu with nothing selected.
+            const panel = drawn(magePending(), {
+                selectedIndex: 1, craftPick: { working: KNIT_ONE, row: null },
+            });
+            expect(pressed(Array.from(panel.querySelectorAll('.turn-craft-tier')))).toEqual([]);
+            expect(figures(panel)).toHaveLength(0);
+        });
+
+        test('picking the open tier again closes it', () => {
+            const onCraftPick = jest.fn();
+            tierOf(drawn(magePending(), { selectedIndex: 4, onCraftPick }), SEAR_ONE).click();
+            expect(onCraftPick).toHaveBeenCalledWith(null, null);
+        });
+
+        test('a tier that may name several figures waits for one to be named', () => {
+            const onCraftPick = jest.fn();
+            tierOf(drawn(magePending(), { onCraftPick }), KNIT_ONE).click();
+            expect(onCraftPick).toHaveBeenCalledWith({ working: KNIT_ONE, row: null }, null);
+
+            const picked = { working: KNIT_ONE, row: null };
+            const panel = drawn(magePending(), { craftPick: picked, onCraftPick });
+            expect(tierOf(panel, KNIT_ONE).getAttribute('aria-pressed')).toBe('true');
+            expect(figures(panel).map((figure) => [figure.textContent, figure.dataset.target]))
+                .toEqual([['Mage', '1'], ['Friend', '3']]);
+            expect(pressed(figures(panel))).toEqual([]);
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(true);
+
+            figures(panel)[1].click();
+            expect(onCraftPick).toHaveBeenLastCalledWith(
+                { working: KNIT_ONE, row: `${KNIT_ONE}\u00003` }, 7
+            );
+            expect(pressed(figures(drawn(magePending(), { selectedIndex: 7 }))))
+                .toEqual(['Friend']);
+        });
+
+        test('a working that names nobody offers no figure', () => {
+            const onCraftPick = jest.fn();
+            tierOf(drawn(magePending(), { onCraftPick }), FIGMENT_ONE).click();
+            expect(onCraftPick).toHaveBeenCalledWith(
+                { working: FIGMENT_ONE, row: `${FIGMENT_ONE}\u0000` }, 8
+            );
+            const panel = drawn(magePending(), { selectedIndex: 8 });
+            expect(panel.querySelector('.turn-craft-target')).toBeNull();
+            expect(panel.querySelector('.turn-craft-cost').textContent)
+                .toBe(`turn_panel.costs cost of ${FIGMENT_ONE}`);
+        });
+
+        test('a working named for a figure or for none says which', () => {
+            const pending = magePending();
+            pending.candidates.push(craft(FIGMENT_ONE, FOE));
+            pending.magic.craft.workings.push(craftRow(FIGMENT_ONE, 'Figment', 1, FOE));
+            const panel = drawn(pending, { craftPick: { working: FIGMENT_ONE, row: null } });
+            expect(figures(panel).map((figure) => [figure.textContent, figure.dataset.target]))
+                .toEqual([['turn_panel.craft_no_figure', ''], ['Foe', '2']]);
+        });
+
+        test('a working only borrowing pays for says what it lacks and offers the borrowing', () => {
+            const pending = magePending();
+            pending.candidates[5] = craft(SEAR_TWO, FOE, {
+                borrow: true, borrowed: 1, cost: 'sear two, borrowing',
+            });
+            pending.magic.craft.workings[1] = craftRow(SEAR_TWO, 'Sear', 2, FOE, {
+                castable: false, borrowable: true, shortfall: 1, reason: 'needs 2 mana, 1 left',
+            });
+            const onCraftPick = jest.fn();
+            const note = tierOf(drawn(pending, { onCraftPick }), SEAR_TWO)
+                .querySelector('.turn-spell-note');
+            expect(note.textContent).toBe('needs 2 mana, 1 left');
+            expect(note.classList.contains('is-blocked')).toBe(true);
+            // No craft of it is paid from the pool: the tier opens, and
+            // selects nothing until the borrowing is picked.
+            tierOf(document, SEAR_TWO).click();
+            expect(onCraftPick).toHaveBeenCalledWith(
+                { working: SEAR_TWO, row: `${SEAR_TWO}\u00002` }, null
+            );
+            const panel = drawn(pending, {
+                craftPick: { working: SEAR_TWO, row: `${SEAR_TWO}\u00002` },
+            });
+            expect(panel.querySelector('.turn-craft .turn-push')).toBeNull();
+            expect(focusKeys(panel, '.turn-craft .turn-borrow-amount')).toEqual(['borrow-5']);
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(true);
+        });
+
+        test('the AI\'s pick of a working is tagged on its tier and its figure', () => {
+            const pending = magePending();
+            pending.candidates[1].ai_choice = false;
+            pending.candidates[7].ai_choice = true;
+            const panel = drawn(pending, { craftPick: { working: KNIT_ONE, row: null } });
+            expect(Boolean(tierOf(panel, KNIT_ONE).querySelector('.turn-option-ai-pick')))
+                .toBe(true);
+            expect(Boolean(tierOf(panel, SEAR_ONE).querySelector('.turn-option-ai-pick')))
+                .toBe(false);
+            expect(figures(panel).map((figure) => Boolean(
+                figure.querySelector('.turn-option-ai-pick')
+            ))).toEqual([false, true]);
+            expect(Boolean(panel.querySelector('.turn-option-cast .turn-option-ai-pick')))
+                .toBe(true);
+        });
+
+        test('the page sends a craft of the tier picked, at the figure it names', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            tierOf(panel, SEAR_TWO).click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'craft', target_id: 2, spell_key: SEAR_TWO,
+            });
+        });
+
+        test('the page sends the push picked, and the borrowing', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            tierOf(panel, SEAR_ONE).click();
+            panel.querySelectorAll('.turn-craft .turn-push-amount')[1].click();
+            expect(tierOf(panel, SEAR_ONE).getAttribute('aria-pressed')).toBe('true');
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'craft', target_id: 2,
+                spell_key: SEAR_ONE, push_mana: 1,
+            });
+
+            const again = mountPage(magePending());
+            again.querySelector('.turn-option-cast').click();
+            tierOf(again, SEAR_ONE).click();
+            again.querySelector('.turn-craft .turn-borrow-amount').click();
+            again.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'craft', target_id: 2,
+                spell_key: SEAR_ONE, push_mana: 2, borrow: true,
+            });
+        });
+
+        test('the page holds the confirm until a working of several figures names one', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            tierOf(panel, KNIT_ONE).click();
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(true);
+            expect(pressed(figures(panel))).toEqual([]);
+            figures(panel)[1].click();
+            expect(pressed(figures(panel))).toEqual(['Friend']);
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'craft', target_id: 3, spell_key: KNIT_ONE,
+            });
+        });
+
+        test('the page sends a working that names nobody with no figure', async () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            tierOf(panel, FIGMENT_ONE).click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 2, letter: 'craft', target_id: null,
+                spell_key: FIGMENT_ONE,
+            });
+        });
+
+        test('picking a spell closes the tier, and standing down forgets it', () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            tierOf(panel, KNIT_ONE).click();
+            expect(figures(panel)).toHaveLength(2);
+            // A spell picked instead: the craft control shows nothing open,
+            // and does not open again when the spell is let go.
+            panel.querySelectorAll('.turn-spell')[0].click();
+            expect(figures(panel)).toHaveLength(0);
+            panel.querySelectorAll('.turn-spell')[0].click();
+            expect(figures(panel)).toHaveLength(0);
+
+            tierOf(panel, SEAR_ONE).click();
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
+            panel.querySelector('.turn-cast-standdown').click();
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(true);
+            panel.querySelector('.turn-option-cast').click();
+            expect(pressed(Array.from(panel.querySelectorAll('.turn-craft-tier')))).toEqual([]);
+        });
+
+        test('a tier keeps the keyboard focus through the repaint (#646)', () => {
+            const panel = mountPage(magePending());
+            panel.querySelector('.turn-option-cast').click();
+            tierOf(panel, KNIT_ONE).focus();
+            tierOf(panel, KNIT_ONE).click();
+            expect(document.activeElement).toBe(tierOf(panel, KNIT_ONE));
+            figures(panel)[0].focus();
+            figures(panel)[0].click();
+            expect(document.activeElement).toBe(figures(panel)[0]);
+            // The stage closed under it: the option that opened it takes it.
+            panel.querySelector('.turn-cast-standdown').focus();
+            panel.querySelector('.turn-cast-standdown').click();
+            expect(document.activeElement).toBe(panel.querySelector('.turn-option-cast'));
+        });
+
+        test('a tier or a figure gone from under the focus hands it to the cast option (#646)', () => {
+            const picked = { craftPick: { working: KNIT_ONE, row: null } };
+            const panel = drawn(magePending(), picked);
+            // The stage closed while a tier held the focus.
+            tierOf(panel, KNIT_ONE).focus();
+            redrawn(panel, magePending(), { castOpen: false });
+            expect(document.activeElement).toBe(panel.querySelector('.turn-option-cast'));
+            // The tier closed while one of its figures held the focus.
+            redrawn(panel, magePending(), picked);
+            figures(panel)[1].focus();
+            redrawn(panel, magePending());
+            expect(figures(panel)).toHaveLength(0);
+            expect(document.activeElement).toBe(panel.querySelector('.turn-option-cast'));
+        });
+
+        test('a tier picked for one figure is not carried to the next figure\'s menu', async () => {
+            jest.useFakeTimers();
+            try {
+                const panel = mountPage(magePending());
+                panel.querySelector('.turn-option-cast').click();
+                tierOf(panel, KNIT_ONE).click();
+                expect(pressed(Array.from(panel.querySelectorAll('.turn-craft-tier'))))
+                    .toHaveLength(1);
+                // The pause moves to another True mage of this player's, whose
+                // menu offers the same workings.
+                global.fetch = jest.fn().mockResolvedValue({
+                    ok: true,
+                    json: async () => ({
+                        status: 'awaiting', turn: 2, view: sampleState([sampleCombatant()]),
+                        events: [], turns_html: [], seats: [],
+                        pending: magePending({ combatant_id: 7, display_name: 'Second Mage' }),
+                    }),
+                });
+                await jest.advanceTimersByTimeAsync(2100);
+                expect(panel.querySelector('.turn-prompt').textContent).toContain('Second Mage');
+                panel.querySelector('.turn-option-cast').click();
+                expect(pressed(Array.from(panel.querySelectorAll('.turn-craft-tier'))))
+                    .toEqual([]);
+                expect(figures(panel)).toHaveLength(0);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+    });
+
+    describe('the craft that stands', () => {
+        test('is one option, naming the working and its turn', () => {
+            const panel = drawn(craftingPending(), { castOpen: false });
+            const options = panel.querySelectorAll('.turn-option-craft');
+            expect(options).toHaveLength(1);
+            expect(options[0].dataset.working).toBe(SEAR_ONE);
+            expect(options[0].querySelector('.turn-option-letter').textContent).toBe('craft');
+            expect(options[0].querySelector('.turn-option-name').textContent)
+                .toBe('CRAFT WORKING Sear (tier 1) (PUSH 2 MANA)');
+            // Two figures to name: the craft's own line, and the figures beneath.
+            expect(options[0].querySelector('.turn-option-plain').textContent)
+                .toBe(SEAR_GOES_ON);
+            expect(options[0].querySelector('.turn-option-cost').textContent)
+                .toBe('turn_panel.costs 1 mana this turn, 1 of 3 gathered so far');
+            expect(options[0].getAttribute('aria-pressed')).toBe('false');
+            expect(figures(panel).map((figure) => figure.textContent)).toEqual(['Foe', 'Orc']);
+            expect(pressed(figures(panel))).toEqual([]);
+            // The continuation is no cast: Shield is the one cast ready, and
+            // there is no working to begin.
+            expect(panel.querySelector('.turn-option-cast .turn-option-advice').textContent)
+                .toContain('turn_panel.casts_ready_one');
+            expect(panel.querySelector('.turn-option-cast').textContent)
+                .not.toContain('turn_panel.ready_crafting');
+        });
+
+        test('with one figure to name reads the menu\'s own line, and offers no other', () => {
+            const panel = drawn(craftingPending({ figures: [FOE], named: 2 }));
+            expect(panel.querySelector('.turn-option-craft .turn-option-plain').textContent)
+                .toBe(`${SEAR_GOES_ON}, aimed at Foe`);
+            expect(figures(panel)).toHaveLength(0);
+            expect(panel.querySelector('.turn-craft-continuation')).toBeNull();
+        });
+
+        test('goes on at the figure it last named, or the menu\'s first when that is gone', () => {
+            const onSelect = jest.fn();
+            drawn(craftingPending(), { onSelect }).querySelector('.turn-option-craft').click();
+            expect(onSelect).toHaveBeenLastCalledWith(3);
+            drawn(craftingPending({ named: 9 }), { onSelect })
+                .querySelector('.turn-option-craft').click();
+            expect(onSelect).toHaveBeenLastCalledWith(2);
+            drawn(craftingPending({ named: null }), { onSelect })
+                .querySelector('.turn-option-craft').click();
+            expect(onSelect).toHaveBeenLastCalledWith(2);
+        });
+
+        test('shows which figure is named, and lets another be named', () => {
+            const onSelect = jest.fn();
+            const panel = drawn(craftingPending(), { selectedIndex: 3, onSelect });
+            expect(panel.querySelector('.turn-option-craft').getAttribute('aria-pressed'))
+                .toBe('true');
+            expect(pressed(figures(panel))).toEqual(['Orc']);
+            figures(panel)[0].click();
+            expect(onSelect).toHaveBeenLastCalledWith(2);
+            // Pressing the option again lets the continuation go.
+            panel.querySelector('.turn-option-craft').click();
+            expect(onSelect).toHaveBeenLastCalledWith(3);
+        });
+
+        test('the AI\'s pick is tagged on the option and on its figure', () => {
+            const pending = craftingPending();
+            pending.candidates[2].ai_choice = true;
+            const panel = drawn(pending);
+            expect(Boolean(panel.querySelector('.turn-option-craft .turn-option-ai-pick')))
+                .toBe(true);
+            expect(figures(panel).map((figure) => Boolean(
+                figure.querySelector('.turn-option-ai-pick')
+            ))).toEqual([true, false]);
+            expect(panel.querySelector('.turn-option-cast .turn-option-ai-pick')).toBeNull();
+        });
+
+        test('the page sends the continuation with the craft\'s push', async () => {
+            const panel = mountPage(craftingPending());
+            panel.querySelector('.turn-option-craft').click();
+            panel.querySelector('.turn-confirm').click();
+            expect(await sentBody()).toEqual({
+                combatant_id: 1, turn: 3, letter: 'craft', target_id: 5,
+                spell_key: SEAR_ONE, push_mana: 2,
+            });
+        });
+
+        test('the page sends the figure named instead', async () => {
+            const panel = mountPage(craftingPending());
+            panel.querySelector('.turn-option-craft').click();
+            figures(panel)[0].click();
+            expect(pressed(figures(panel))).toEqual(['Foe']);
+            panel.querySelector('.turn-confirm').click();
+            expect((await sentBody()).target_id).toBe(2);
+        });
+
+        test('stays selected when the cast stage is opened and closed over it', () => {
+            const panel = mountPage(craftingPending());
+            panel.querySelector('.turn-option-craft').click();
+            panel.querySelector('.turn-option-cast').click();
+            panel.querySelector('.turn-cast-standdown').click();
+            expect(panel.querySelector('.turn-option-craft').getAttribute('aria-pressed'))
+                .toBe('true');
+            expect(panel.querySelector('.turn-confirm').disabled).toBe(false);
+        });
+
+        test('its figures keep the keyboard focus through the repaint (#646)', () => {
+            const panel = mountPage(craftingPending());
+            panel.querySelector('.turn-option-craft').focus();
+            panel.querySelector('.turn-option-craft').click();
+            expect(document.activeElement).toBe(panel.querySelector('.turn-option-craft'));
+            figures(panel)[0].focus();
+            figures(panel)[0].click();
+            expect(document.activeElement).toBe(figures(panel)[0]);
+        });
+
+        test('withheld by the menu says why, and offers no option for it', () => {
+            const panel = drawn(craftingPending({ figures: [], offered: false }));
+            expect(panel.querySelector('.turn-option-craft')).toBeNull();
+            const withheld = panel.querySelector('.turn-craft-withheld');
+            expect(withheld.textContent).toBe(`turn_panel.craft_withheld ${SEAR_GOES_ON}`);
+            expect(withheld.dataset.working).toBe(SEAR_ONE);
+            // It stands in the menu itself, where no cast need be declared to read it.
+            expect(withheld.parentElement.classList.contains('turn-options')).toBe(true);
+            expect(drawn(craftingPending()).querySelector('.turn-craft-withheld')).toBeNull();
+        });
+    });
+
+    test('the roster card shows the server\'s line for a craft, and none without', () => {
+        document.body.innerHTML = '<div id="roster"></div>';
+        const roster = document.getElementById('roster');
+        const line = 'Crafting Sear (tier 1), naming Foe: 1 of 3 turns done';
+        battle.renderRoster(roster, sampleState([
+            sampleCombatant({ crafting: { spell_key: SEAR_ONE, line } }),
+            sampleCombatant({ combatant_id: 2, crafting: null }),
+        ]));
+        const cards = roster.querySelectorAll('.combatant-card');
+        expect(cards[0].querySelector('.combatant-crafting').textContent).toBe(line);
+        expect(cards[0].querySelector('.combatant-crafting').dataset.spell).toBe(SEAR_ONE);
+        expect(cards[1].querySelector('.combatant-crafting')).toBeNull();
+    });
+});
+
 describe('teams (#275)', () => {
     test('teamOrderOf lists teams by first appearance, skipping the free pool', () => {
         const view = sampleState([
@@ -4064,6 +4944,17 @@ describe('the turn panel writes only the server\'s words (#94)', () => {
         castable: true, reason: '', channel: null, ...extra,
     });
 
+    const working = (key, extra) => ({
+        letter: 'craft', name: `CRAFT WORKING ${key}`, score: 0, rationale: 'craft',
+        target_id: 2, target_name: '', spell_key: key, plain: '', cost: '1 mana', ...extra,
+    });
+    const workingRow = (key, extra) => ({
+        ...row(key), effect: 'figment', effect_label: 'Figment', tier: 1, ...extra,
+    });
+    const crafting = (extra) => ({
+        skill: 'Arcane', tier_cap: 2, standing: null, workings: [], granted: [], ...extra,
+    });
+
     test('every panel word turns up, and only as the server wrote it', () => {
         const drawn = [
             draw(waitingFor(''), { isDm: true }),
@@ -4093,6 +4984,36 @@ describe('the turn panel writes only the server\'s words (#94)', () => {
                 { letter: 'counter', name: 'COUNTER', score: 0, rationale: 'counter',
                   target_id: 7, counter_mana: 1, spell_key: '', cost: '1 mana' },
             ]), { selectedIndex: 0 }),
+            // A True mage (tarmar-studio #208): a True cast, and a granted
+            // working picked that may be named for a figure or for none.
+            draw(choosing([
+                cast('missile', { true_cast: true }),
+                working('working:figment:1', { target_id: null }),
+                working('working:figment:1', { target_name: 'Foe' }),
+            ], {
+                pool_label: 'Mana', pool: 4, max_pool: 10,
+                spells: [], true_casts: [row('missile', { true_cast: true })],
+                craft: crafting({
+                    tier_cap: 2,
+                    workings: [
+                        workingRow('working:figment:1', { target_id: null }),
+                        workingRow('working:figment:1'),
+                    ],
+                    granted: [{ key: 'working:figment:1', waits_on_channel: false, note: '' }],
+                }),
+            }), { castOpen: true, craftPick: { working: 'working:figment:1', row: null } }),
+            // The same mage with the tier cap lifted, and nothing to cast.
+            draw(choosing([working('working:figment:1')], {
+                pool_label: 'Mana', pool: 4, max_pool: 10, spells: [], true_casts: [],
+                craft: crafting({ tier_cap: null, workings: [workingRow('working:figment:1')] }),
+            }), { castOpen: true }),
+            // A craft standing where the menu offers no craft action.
+            draw(choosing(moves, {
+                pool_label: 'Mana', pool: 4, max_pool: 10, spells: [], true_casts: [],
+                craft: crafting({
+                    standing: { key: 'working:figment:1', line: 'Go on', offered: false },
+                }),
+            }), {}),
         ].join('\n');
         Object.keys(PANEL_WORDS).forEach((key) => {
             // Whole keys: "costs" is not found inside "costs_nothing".

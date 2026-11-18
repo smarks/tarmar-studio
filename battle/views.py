@@ -72,7 +72,7 @@ from common.pickers import NO_SUCH_PICKER, asked_for, picker_body_response
 from common.refusal_words import refusal_words as common_refusal_words
 from common.seeds import InvalidSeed, parse_seed
 
-from . import agreement, control, magic_bounds, profiles
+from . import agreement, control, magic_bounds, profiles, working_grants
 from .access import (
     Actor,
     actor_of,
@@ -90,8 +90,10 @@ from .access import (
     seat_is_held,
 )
 from .adaptation import NO_MODELLED_ATTACK_NOTE, beast_attack
+from .figure_rulings import FigureRuling
 from .generation import ARCHETYPES
 from .limits import charge_guest_creation, guest_creation_blocker
+from .magic_rules import magic_rules
 from .models import SEED_RANGE, Battle, BattleCombatant, BattleDraft, BattleEvent
 from .persistence import (
     CLASSIC_PROFILE,
@@ -133,6 +135,7 @@ from .services import (
     set_hth_agreement,
     set_magic_bounds_lifted,
     set_seat_ready,
+    set_working_granted,
     stale_pools,
     stale_pools_refusal,
     start_battle,
@@ -140,7 +143,14 @@ from .services import (
     take_seat,
     withdrawn_from_session,
 )
-from .wording import game_master_name, name_of, words
+from .wording import (
+    HthAgreementWords,
+    MagicBoundsWords,
+    WorkingGrantsWords,
+    game_master_name,
+    name_of,
+    words,
+)
 
 #: The setup form's seed bound: the battle's own range (``SEED_RANGE``).
 MAX_SEED = SEED_RANGE
@@ -1338,12 +1348,14 @@ def battle_payload(
         # the fight is on, the session's attached characters once it is over,
         # repainted with the board so the line follows either.
         BARE_HANDED_KEY: bare_handed_line(battle),
-        # A Game Master's rulings on the battle (#867, #37): the records, so
-        # a JSON caller reads back what it changed, and each panel rendered
-        # once, keyed by its element id, which battle.js puts in its place.
+        # A Game Master's rulings on the battle (#867, #37, tarmar-studio
+        # #208): the records, so a JSON caller reads back what it changed,
+        # and each panel rendered once, keyed by its element id, which
+        # battle.js puts in its place.
         "rulings": {
             "hth_agreement": battle.hth_agreement_json,
             "magic_bounds_lifted": battle.magic_bounds_lifted_json,
+            working_grants.RECORD: battle.workings_granted_json,
         },
         "rulings_html": ruling_panels_html(battle, actor, request),
     }
@@ -1354,10 +1366,12 @@ def battle_payload(
 #: payload's keys).
 HTH_AGREEMENT_PANEL_ID = "battle-hth-agreement"
 MAGIC_BOUNDS_PANEL_ID = "battle-magic-bounds"
+WORKING_GRANTS_PANEL_ID = "battle-working-grants"
 
 #: The names the ruling partials read their panel by.
 HTH_AGREEMENT_CONTEXT = "hth_agreement"
 MAGIC_BOUNDS_CONTEXT = "magic_bounds"
+WORKING_GRANTS_CONTEXT = "working_grants"
 
 #: The arena context's name for the turn panel's words (#94), which
 #: battle/_arena.html renders as #battle-turn-panel-words.
@@ -1386,6 +1400,12 @@ def ruling_panels_html(
             "battle/_magic_bounds.html",
             MAGIC_BOUNDS_CONTEXT,
             magic_bounds_panel(battle, actor),
+        ),
+        (
+            WORKING_GRANTS_PANEL_ID,
+            "battle/_working_grants.html",
+            WORKING_GRANTS_CONTEXT,
+            working_grants_panel(battle, actor),
         ),
     ):
         rendered[panel_id] = (
@@ -1566,6 +1586,7 @@ def arena_context(battle, actor: Actor, *, show_all_turns: bool = False) -> dict
         "advance": advance_control(battle, actor),
         HTH_AGREEMENT_CONTEXT: hth_agreement_panel(battle, actor),
         MAGIC_BOUNDS_CONTEXT: magic_bounds_panel(battle, actor),
+        WORKING_GRANTS_CONTEXT: working_grants_panel(battle, actor),
     }
 
 
@@ -1609,6 +1630,28 @@ def hth_agreement_panel(battle, actor: Actor) -> dict | None:
     }
 
 
+def recorded_ruling(entry: FigureRuling, *, line: str, undo_button: str) -> dict:
+    """One recorded ruling for a single figure as its panel draws it
+    (battle/_recorded_ruling.html): the figure, the line, when it was made,
+    and what a screen reader calls the button that undoes it.
+
+    The button's own word is the same on every entry of a panel, so its
+    accessible name carries the entry's line too (``common.undo_named``) and
+    no two of a panel's buttons are named alike.
+
+    Args:
+        entry: The ruling as the battle's record holds it.
+        line: The panel's line for it: what was ruled, for whom and by whom.
+        undo_button: The word on the panel's undo button.
+    """
+    return {
+        "combatant_id": entry.combatant_id,
+        "line": line,
+        "at": datetime.fromisoformat(entry.at),
+        "undo_label": words().common.undo_named.format(button=undo_button, line=line),
+    }
+
+
 def magic_bounds_panel(battle, actor: Actor) -> dict | None:
     """What the page shows of the magic-bounds ruling (#37), or None.
 
@@ -1641,14 +1684,16 @@ def magic_bounds_panel(battle, actor: Actor) -> dict | None:
         "none_lifted_line": magic_bounds.none_lifted_line(),
         "liftings": [
             {
-                "combatant_id": lifting.combatant_id,
                 "bound": lifting.subject,
-                "line": bounds_words.lifting_line.format(
-                    bound=capfirst(magic_bounds.bound_label(lifting.subject)),
-                    name=name_of(names, lifting.combatant_id),
-                    by=game_master_name(lifting.by),
+                **recorded_ruling(
+                    lifting,
+                    line=bounds_words.lifting_line.format(
+                        bound=capfirst(magic_bounds.bound_label(lifting.subject)),
+                        name=name_of(names, lifting.combatant_id),
+                        by=game_master_name(lifting.by),
+                    ),
+                    undo_button=bounds_words.hold_again,
                 ),
-                "at": datetime.fromisoformat(lifting.at),
             }
             for lifting in record.in_order()
         ],
@@ -1662,6 +1707,111 @@ def magic_bounds_panel(battle, actor: Actor) -> dict | None:
             "combatant": magic_bounds.COMBATANT_FIELD,
             "bounds": magic_bounds.BOUNDS_FIELD,
             "lifted": magic_bounds.LIFTED_FIELD,
+        },
+    }
+
+
+def working_grants_panel(battle, actor: Actor) -> dict | None:
+    """What the page shows of the workings a Game Master has granted
+    (tarmar-studio #208), or None.
+
+    Rendered from the battle's record, the one source of truth: every grant,
+    with who granted it and when, for every viewer, as the battle log
+    already tells each of them; and, for the fight's Game Master
+    (:func:`battle.services.runs_the_seats`, the only one who may change it),
+    the forms. The grant form offers the figures who craft workings and the
+    effects that need a grant, both the engine's answers
+    (:func:`battle.working_grants.crafts_workings`, asked of
+    :func:`battle.working_grants.engine_figures`;
+    :func:`battle.working_grants.grantable_effects`), and takes any tier the
+    effect is built at: a grant past the figure's tier cap is recorded, and
+    its line says it waits on Channel being lifted
+    (:func:`battle.working_grants.waits_on_channel`). The words are
+    configuration (``battle.wording``).
+
+    A classic battle gets nothing; nor does a Tarmar battle with no grant on
+    its record and nothing to grant: one under a canon none of whose workings
+    needs a grant, or with no figure who crafts workings. Under such a canon
+    a recorded grant is still shown, with its withdrawal, and no form.
+
+    ``record`` is what battle.js compares before it repaints the panel, so
+    it carries everything the panel draws that can change under the page:
+    the grants, each one's line and whether it waits (lifting Channel changes
+    that and leaves the grants alone), and the figures the form offers.
+
+    Args:
+        battle: The battle.
+        actor: The viewer.
+    """
+    if battle.rules_profile != TARMAR_PROFILE:
+        return None
+    record = working_grants.WorkingGrants.of(battle)
+    effects = working_grants.grantable_effects()
+    if not record.entries and not effects:
+        return None
+    rules = magic_rules()
+    figures = working_grants.engine_figures(battle)
+    rows = list(battle.combatants.order_by("pk"))
+    names = {row.pk: row.display_name for row in rows}
+    grantees = (
+        [
+            {"id": row.pk, "name": row.display_name}
+            for row in rows
+            if working_grants.crafts_workings(figures.get(row.pk))
+        ]
+        if effects
+        else []
+    )
+    if not record.entries and not grantees:
+        return None
+    grant_words = words().working_grants
+    grants = []
+    for grant in record.in_order():
+        figure = figures.get(grant.combatant_id)
+        name = name_of(names, grant.combatant_id)
+        waits = (
+            figure is not None
+            and working_grants.builds(grant.subject, rules)
+            and working_grants.waits_on_channel(figure, grant.subject)
+        )
+        grants.append(
+            {
+                "working": grant.subject,
+                **recorded_ruling(
+                    grant,
+                    line=grant_words.grant_line.format(
+                        working=working_grants.working_label(grant.subject),
+                        name=name,
+                        by=game_master_name(grant.by),
+                    ),
+                    undo_button=grant_words.withdraw_button,
+                ),
+                "waits": (
+                    working_grants.waiting_note(grant.subject, name) if waits else ""
+                ),
+            }
+        )
+    return {
+        "panel_id": WORKING_GRANTS_PANEL_ID,
+        "record": json.dumps(
+            {
+                working_grants.RECORD: battle.workings_granted_json,
+                "lines": [[grant["line"], grant["waits"]] for grant in grants],
+                "figures": grantees,
+            },
+            sort_keys=True,
+        ),
+        "words": grant_words,
+        "grants": grants,
+        "can_rule": runs_the_seats(battle, actor.user),
+        "figures": grantees,
+        "effects": [{"key": effect.key, "label": effect.label} for effect in effects],
+        "fields": {
+            "combatant": working_grants.COMBATANT_FIELD,
+            "working": working_grants.WORKING_FIELD,
+            "effect": working_grants.EFFECT_FIELD,
+            "tier": working_grants.TIER_FIELD,
+            "granted": working_grants.GRANTED_FIELD,
         },
     }
 
@@ -1946,47 +2096,101 @@ def battle_control(request, pk):
     return redirect("battle:detail", pk=battle.pk)
 
 
-@require_POST
-@internal_errors_logged()
-def battle_hth_agreement(request, pk):
-    """Mark or unmark the battle, or a pair, "HTH by agreement" (#867).
+#: The words of a ruling whose control posts to :func:`_game_masters_ruling`.
+RulingWords = HthAgreementWords | MagicBoundsWords | WorkingGrantsWords
+
+#: What a ruling's endpoint hands :func:`_game_masters_ruling`: the service
+#: call, given the battle's pk, the actor and the post's fields.
+MakesTheRuling = Callable[
+    [int, Actor, QueryDict | dict], tuple[Battle, BattleEvent | None]
+]
+
+
+def _game_masters_ruling(
+    request: HttpRequest, pk: int, ruling_words: RulingWords, rule: MakesTheRuling
+) -> HttpResponse:
+    """Answer the post of one of a Game Master's rulings on a battle: the
+    steps the rulings' endpoints share (#867, #37, tarmar-studio #208).
 
     The fight's Game Master only (:func:`battle.services.runs_the_seats`),
-    here and in the service it calls. A form post lands back where it came
-    from (the battle page, or the GM chat's Battle tab), whose panel renders
-    from the battle's record; an XHR caller gets the battle payload. ``scope`` is "battle" or
-    "pair"; ``agreed`` marks or unmarks; a pair names ``first`` and
-    ``second``.
+    here and in the service ``rule`` calls. A form post lands back where it
+    came from (the battle page, or the GM chat's Battle tab), whose panel
+    renders from the battle's record; an XHR caller gets the battle payload,
+    which carries the record. A refusal is answered the way the caller asked
+    to be (:func:`_refuse`).
+
+    Args:
+        request: The post.
+        pk: The battle's pk.
+        ruling_words: The ruling's words; ``game_master_only`` refuses
+            everyone else.
+        rule: Reads the ruling off the post's fields and calls its service,
+            raising ``BattleRefusal`` for a post that names it wrongly.
     """
     actor, battle = _actor_and_readable_battle(request, pk)
-    hth_words = words().hth_agreement
     if not runs_the_seats(battle, actor.user):
-        return _refuse(request, battle, hth_words.game_master_only, status=403)
+        return _refuse(request, battle, ruling_words.game_master_only, status=403)
     data, err = _posted_fields(request)
     if err:
         return err
-    scope = str(data.get("scope") or "")
-    pair = None
-    if scope == "pair":
-        try:
-            pair = (whole_number(data.get("first")), whole_number(data.get("second")))
-        except ValueError:
-            return _refuse(request, battle, hth_words.refuse_pair_missing)
-    elif scope != "battle":
-        return _refuse(request, battle, hth_words.refuse_scope)
     try:
-        battle, _event = set_hth_agreement(
-            battle.pk,
-            actor,
-            agreed=_form_flag(data.get("agreed")),
-            whole_battle=scope == "battle",
-            pair=pair,
-        )
+        battle, _event = rule(battle.pk, actor, data)
     except BattleRefusal as ruling_error:
         return _refuse(request, battle, str(ruling_error))
     if wants_json(request):
         return JsonResponse(battle_payload(battle, actor, [], request))
     return _back_or_detail(request, battle)
+
+
+def _figure_asked_for(fields: QueryDict | dict, field: str, refusal: str) -> int:
+    """The figure a ruling's post names, by its ``BattleCombatant`` pk.
+
+    Args:
+        fields: The post's fields.
+        field: The field that names the figure.
+        refusal: The ruling's words for a post that names none.
+
+    Raises:
+        BattleRefusal: With ``refusal``, when the field holds no whole number.
+    """
+    try:
+        return whole_number(fields.get(field))
+    except ValueError as unnamed:
+        raise BattleRefusal(refusal) from unnamed
+
+
+@require_POST
+@internal_errors_logged()
+def battle_hth_agreement(request, pk):
+    """Mark or unmark the battle, or a pair, "HTH by agreement" (#867).
+
+    One of the fight's Game Master's rulings (:func:`_game_masters_ruling`).
+    ``scope`` is "battle" or "pair"; ``agreed`` marks or unmarks; a pair names
+    ``first`` and ``second``.
+    """
+    hth_words = words().hth_agreement
+
+    def mark_or_unmark(
+        battle_pk: int, actor: Actor, data: QueryDict | dict
+    ) -> tuple[Battle, BattleEvent | None]:
+        scope = str(data.get("scope") or "")
+        pair = None
+        if scope == "pair":
+            pair = (
+                _figure_asked_for(data, "first", hth_words.refuse_pair_missing),
+                _figure_asked_for(data, "second", hth_words.refuse_pair_missing),
+            )
+        elif scope != "battle":
+            raise BattleRefusal(hth_words.refuse_scope)
+        return set_hth_agreement(
+            battle_pk,
+            actor,
+            agreed=_form_flag(data.get("agreed")),
+            whole_battle=scope == "battle",
+            pair=pair,
+        )
+
+    return _game_masters_ruling(request, pk, hth_words, mark_or_unmark)
 
 
 @require_POST
@@ -1994,45 +2198,65 @@ def battle_hth_agreement(request, pk):
 def battle_magic_bounds(request, pk):
     """Lift, or hold again, magic bounds for one figure (#37).
 
-    The fight's Game Master only (:func:`battle.services.runs_the_seats`),
-    here and in the service it calls. A form post lands back where it came
-    from (the battle page, or the GM chat's Battle tab), whose panel renders
-    from the battle's record; an XHR caller gets the battle payload, which
-    carries the record. The fields are :data:`battle.magic_bounds.COMBATANT_FIELD`,
+    One of the fight's Game Master's rulings (:func:`_game_masters_ruling`).
+    The fields are :data:`battle.magic_bounds.COMBATANT_FIELD`,
     :data:`~battle.magic_bounds.BOUNDS_FIELD` (repeated in a form, a list in
     JSON) and :data:`~battle.magic_bounds.LIFTED_FIELD`.
     """
-    actor, battle = _actor_and_readable_battle(request, pk)
     bounds_words = words().magic_bounds
-    if not runs_the_seats(battle, actor.user):
-        return _refuse(request, battle, bounds_words.game_master_only, status=403)
-    if _sent_json(request):
-        data, err = _parse_json_body(request)
-        if err:
-            return err
-        bounds = data.get(magic_bounds.BOUNDS_FIELD)
-        if not isinstance(bounds, list):
-            return _refuse(request, battle, bounds_words.refuse_bounds_list)
-    else:
-        data = request.POST
-        bounds = request.POST.getlist(magic_bounds.BOUNDS_FIELD)
-    try:
-        combatant_id = whole_number(data.get(magic_bounds.COMBATANT_FIELD))
-    except ValueError:
-        return _refuse(request, battle, bounds_words.refuse_combatant)
-    try:
-        battle, _event = set_magic_bounds_lifted(
-            battle.pk,
+
+    def lift_or_hold(
+        battle_pk: int, actor: Actor, data: QueryDict | dict
+    ) -> tuple[Battle, BattleEvent | None]:
+        if isinstance(data, QueryDict):
+            bounds = data.getlist(magic_bounds.BOUNDS_FIELD)
+        else:
+            bounds = data.get(magic_bounds.BOUNDS_FIELD)
+            if not isinstance(bounds, list):
+                raise BattleRefusal(bounds_words.refuse_bounds_list)
+        return set_magic_bounds_lifted(
+            battle_pk,
             actor,
-            combatant_id=combatant_id,
+            combatant_id=_figure_asked_for(
+                data, magic_bounds.COMBATANT_FIELD, bounds_words.refuse_combatant
+            ),
             bounds=[str(bound) for bound in bounds],
             lifted=_form_flag(data.get(magic_bounds.LIFTED_FIELD)),
         )
-    except BattleRefusal as ruling_error:
-        return _refuse(request, battle, str(ruling_error))
-    if wants_json(request):
-        return JsonResponse(battle_payload(battle, actor, [], request))
-    return _back_or_detail(request, battle)
+
+    return _game_masters_ruling(request, pk, bounds_words, lift_or_hold)
+
+
+@require_POST
+@internal_errors_logged()
+def battle_working_grants(request, pk):
+    """Grant a figure a working, or withdraw the grant (tarmar-studio #208).
+
+    One of the fight's Game Master's rulings (:func:`_game_masters_ruling`),
+    as a lifted bound is. The fields are
+    :data:`battle.working_grants.COMBATANT_FIELD`,
+    :data:`~battle.working_grants.GRANTED_FIELD`, and the working, by its key
+    (:data:`~battle.working_grants.WORKING_FIELD`) or by its effect and its
+    tier (:data:`~battle.working_grants.EFFECT_FIELD`,
+    :data:`~battle.working_grants.TIER_FIELD`;
+    :func:`battle.working_grants.working_asked_for`).
+    """
+    grant_words = words().working_grants
+
+    def grant_or_withdraw(
+        battle_pk: int, actor: Actor, data: QueryDict | dict
+    ) -> tuple[Battle, BattleEvent | None]:
+        return set_working_granted(
+            battle_pk,
+            actor,
+            combatant_id=_figure_asked_for(
+                data, working_grants.COMBATANT_FIELD, grant_words.refuse_combatant
+            ),
+            working_key=working_grants.working_asked_for(data),
+            granted=_form_flag(data.get(working_grants.GRANTED_FIELD)),
+        )
+
+    return _game_masters_ruling(request, pk, grant_words, grant_or_withdraw)
 
 
 @require_POST

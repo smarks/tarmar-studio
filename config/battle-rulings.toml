@@ -17,6 +17,11 @@ and_word = "and"
 or_word = "or"
 # A figure no longer in the battle.
 unknown_figure = "?"
+# What a screen reader calls the button that undoes one recorded ruling, so
+# two of them on a panel are told apart: {button} is the button's own word
+# (magic_bounds.hold_again, working_grants.withdraw_button) and {line} the
+# ruling it undoes, as the panel prints it.
+undo_named = "{button}: {line}"
 
 # The turn menu: the line a seated player reads for each option, and what it
 # costs (issues #788, #890, #56, #57, #90). [turn_menu] holds the words both
@@ -239,6 +244,33 @@ counter_amount = "{mana} mana"
 counter_group = "Counter {caster}'s spell"
 # A pressed-again cast's note when the menu gave it no line.
 presses_again = "Presses the countered spell again"
+# True Magic on the cast stage (tarmar-studio #208). The mark on a spell cast
+# as a True cast, beside the same spell cast by its recipe.
+true_cast_tag = "True cast"
+# The cast option's working when there are workings to begin; {ready} is the
+# casts ready, as above. The second is for a caster with no cast to make,
+# ready or by borrowing, and only workings to begin.
+ready_crafting = "{ready}, and workings to craft"
+ready_crafting_only = "workings to craft"
+# The craft control: its name to a screen reader, and the words before its
+# workings. {skill} is the True skill as the canon labels it, and {tier_cap}
+# the highest tier the caster may craft; the second is for a caster whose
+# cap a Game Master has lifted.
+craft_group = "Craft a working"
+craft_label = "Craft a working by {skill}, up to tier {tier_cap}:"
+craft_label_uncapped = "Craft a working by {skill}, the tier cap lifted by the Game Master's ruling:"
+# One tier of a working; its mana, its turns and its drain follow in the
+# server's words.
+craft_tier = "Tier {tier}"
+# The mark on a working a Game Master has granted this figure.
+craft_granted = "Granted by the Game Master"
+# The figures a craft action may name, and the choice of naming none.
+craft_target_label = "Naming:"
+craft_target_group = "The figure this craft action names"
+craft_no_figure = "No figure"
+# A craft that stands where the menu offers no craft action; {line} is the
+# continuation as the menu would name it, its working and its turn.
+craft_withheld = "{line} is not offered: no craft action may be taken where you are, so the working is lost whatever you choose."
 # The hex picker: {hex} is "(q, r)", {count} the hexes marked on the board.
 moving_to = "Moving to hex {hex}."
 pick_hex = "Pick one of the {count} marked hexes on the board to move there, or leave it and this action moves as it says."
@@ -293,6 +325,18 @@ refuse_classic = "Lifting a figure's magic bounds is a Tarmar ruling; a classic 
 # the Game Master as common.game_master names him, {name} the figure and
 # {working} the working as the board names it, its effect and its tier.
 [working_grants]
+heading = "Workings granted"
+none_granted = "No working is granted: a working that needs a grant is crafted by nobody."
+# One grant on the panel; when it was made follows it.
+grant_line = "{working} granted to {name} by {by}"
+# The grant form: the figure, the working's effect and its tier.
+figure_label = "Figure"
+effect_label = "Working"
+tier_label = "Tier"
+grant_button = "Grant this working"
+withdraw_button = "Withdraw"
+# Beneath the grants, for the Game Master who may withdraw one.
+withdraw_note = "Withdrawing a grant stops no craft already begun: a working being crafted goes on to its end."
 game_master_only = "Only the Game Master running this fight grants a figure a working; players craft what the rules and the Game Master's grants allow"
 refuse_classic = "Granting a working is a Tarmar ruling; a classic battle has no True Magic"
 refuse_no_true_magic = "This canon has no True Magic, so there is no working to grant"

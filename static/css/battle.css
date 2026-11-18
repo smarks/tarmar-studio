@@ -972,8 +972,10 @@
 }
 
 /* A spell is the same pressable card as an action, one column narrower:
-   name and cost on the first line, the casting note beneath. */
-.turn-spell {
+   name and cost on the first line, the casting note beneath. A tier of a
+   working in the craft control (tarmar-studio #208) is the same card. */
+.turn-spell,
+.turn-craft-tier {
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: baseline;
@@ -988,16 +990,19 @@
     cursor: pointer;
 }
 
-.turn-spell:hover:not(:disabled) {
+.turn-spell:hover:not(:disabled),
+.turn-craft-tier:hover {
     border-color: var(--colour-ink-breadcrumb);
 }
 
-.turn-spell:focus-visible {
+.turn-spell:focus-visible,
+.turn-craft-tier:focus-visible {
     outline: 2px solid var(--colour-accent-gold-strong);
     outline-offset: 2px;
 }
 
-.turn-spell[aria-pressed="true"] {
+.turn-spell[aria-pressed="true"],
+.turn-craft-tier[aria-pressed="true"] {
     border-color: var(--colour-accent-gold);
     box-shadow: inset 0 0 0 1px var(--colour-accent-gold);
     background: var(--colour-surface-gold-pressed);
@@ -1040,6 +1045,18 @@
     color: var(--colour-status-warning-ink);
 }
 
+/* A spell cast as a True cast, beside the same spell's recipe cast, and a
+   working a Game Master granted the figure (tarmar-studio #208). */
+.turn-spell-true,
+.turn-craft-granted {
+    grid-column: 1 / -1;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--colour-status-info-ink);
+}
+
 /* A cast the engine offers pushed copies of (#960): the spell card, then the
    push control beneath it in the same grid cell. "None" is the plain cast.
    The borrowing control (tarmar-engine #28) has the same shape and look. */
@@ -1051,7 +1068,8 @@
 
 .turn-push,
 .turn-borrow,
-.turn-counter {
+.turn-counter,
+.turn-craft-target {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -1062,7 +1080,8 @@
 
 .turn-push-amount,
 .turn-borrow-amount,
-.turn-counter-amount {
+.turn-counter-amount,
+.turn-craft-target-figure {
     padding: 0.2rem 0.55rem;
     border: 1px solid var(--colour-border-breadcrumb-link);
     border-radius: 6px;
@@ -1073,14 +1092,16 @@
 
 .turn-push-amount:focus-visible,
 .turn-borrow-amount:focus-visible,
-.turn-counter-amount:focus-visible {
+.turn-counter-amount:focus-visible,
+.turn-craft-target-figure:focus-visible {
     outline: 2px solid var(--colour-accent-gold-strong);
     outline-offset: 2px;
 }
 
 .turn-push-amount[aria-pressed="true"],
 .turn-borrow-amount[aria-pressed="true"],
-.turn-counter-amount[aria-pressed="true"] {
+.turn-counter-amount[aria-pressed="true"],
+.turn-craft-target-figure[aria-pressed="true"] {
     border-color: var(--colour-accent-gold);
     background: var(--colour-surface-gold-pressed);
 }
@@ -1089,6 +1110,73 @@
 .turn-borrow-cost,
 .turn-counter-cost {
     flex-basis: 100%;
+}
+
+/* The craft control (tarmar-studio #208): a True mage's workings beneath the
+   spells, across the whole stage. Each effect is a row of its tiers; the
+   tier picked opens the figure it names and its push and borrowing controls
+   beneath, which stay until the reader picks another or stands down. */
+.turn-craft {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.turn-craft-label,
+.turn-craft-cost {
+    font-size: 0.8rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.turn-craft-effect {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 0.6rem;
+}
+
+.turn-craft-effect-name {
+    grid-column: 1 / -1;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* What the picked tier opens, beneath its effect's tiers. */
+.turn-craft-picked {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0.35rem;
+}
+
+/* A granted working that waits on Channel, and a craft the menu offers no
+   craft action for: each says so until the state behind it changes. */
+.turn-craft-waits,
+.turn-craft-withheld {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8rem;
+    color: var(--colour-status-warning-ink);
+    background: var(--colour-status-warning-surface);
+    border-radius: 3px;
+}
+
+/* The continuation of a craft that stands, and the figures it may name. */
+.turn-craft-continuation {
+    display: grid;
+    gap: 0.35rem;
+    align-content: start;
+}
+
+/* A working the figure is crafting (tarmar-engine #77): it stays on the card
+   while the state says the craft stands. */
+.combatant-crafting {
+    margin: 0.2rem 0;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.75rem;
+    color: var(--colour-status-info-ink);
+    background: var(--colour-status-info-surface);
+    border-radius: 3px;
 }
 
 /* A spell running away from the figure (tarmar-engine #30): it stays on
@@ -1123,7 +1211,8 @@
 @media (max-width: 640px) {
     .lobby-seats,
     .turn-options,
-    .turn-cast-stage {
+    .turn-cast-stage,
+    .turn-craft-effect {
         grid-template-columns: minmax(0, 1fr);
     }
     .battle-start-form,
@@ -1884,7 +1973,8 @@
 /* A Game Master's "HTH by agreement" ruling (#867): the marked pairs, each
    with its Lift, and the row a new pair is chosen in. */
 .battle-agreement-panel .agreement-pairs,
-.battle-magic-bounds-panel .magic-bounds-liftings {
+.battle-magic-bounds-panel .magic-bounds-liftings,
+.battle-working-grants-panel .working-grants-granted {
     list-style: none;
     padding: 0;
     margin: 0.5rem 0;
@@ -1892,16 +1982,37 @@
 
 /* A Game Master's ruling lifting a figure's magic bounds (#37) lays out the
    same way: each lifting with its Hold again, and the row a lifting is made
-   in. */
+   in. So does a working granted to a figure (tarmar-studio #208): each grant
+   with its Withdraw, and the row a grant is made in. */
 .battle-agreement-panel .agreement-pair,
 .battle-agreement-panel .agreement-add-form,
 .battle-magic-bounds-panel .magic-bounds-lifting,
-.battle-magic-bounds-panel .magic-bounds-lift-form {
+.battle-magic-bounds-panel .magic-bounds-lift-form,
+.battle-working-grants-panel .working-grant,
+.battle-working-grants-panel .working-grant-form {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
     margin: 0.3rem 0;
+}
+
+/* A grant past the figure's tier cap says what it waits on, on a line of its
+   own beneath the grant; the note on withdrawing sits beneath them all. */
+.battle-working-grants-panel .working-grant-waits {
+    flex-basis: 100%;
+    font-size: 0.85rem;
+    color: var(--colour-status-warning-ink);
+}
+
+.battle-working-grants-panel .working-grants-note {
+    margin: 0.3rem 0;
+    font-size: 0.85rem;
+    color: var(--colour-ink-breadcrumb);
+}
+
+.battle-working-grants-panel .working-grant-tier input {
+    width: 4.5rem;
 }
 
 .control-lede {

@@ -34,7 +34,7 @@ from battle.services import (
 from battle.views import MAGIC_BOUNDS_PANEL_ID
 from battle.wording import game_master_name, words
 from common.helpers import SCRIPT_CALLER_HEADERS
-from common.test_helpers import BaseTestCase
+from common.test_helpers import BaseTestCase, forms_of_class
 from reference.paths import DEFAULT_CANON_DIR
 
 from .magic_fixtures import seated_rules
@@ -476,14 +476,31 @@ class MagicBoundsEndpointTest(CanonImposesTestCase):
         name = self.battle.combatants.get(pk=self.ids[0]).display_name
         by = game_master_name(self.dm.username)
         page = self.client.get(self.detail)
+        hold_again = words().magic_bounds.hold_again
         for bound in (CHANNEL, PUSH_CAP):
+            line = words().magic_bounds.lifting_line.format(
+                bound=capfirst(magic_bounds.bound_label(bound)), by=by, name=name
+            )
+            self.assertContains(page, f"{line}, ")
+            # Both buttons read the one word; a screen reader is told each by
+            # the lifting it undoes.
             self.assertContains(
                 page,
-                words().magic_bounds.lifting_line.format(
-                    bound=capfirst(magic_bounds.bound_label(bound)), by=by, name=name
-                ),
+                f'data-focus-key="magic-hold-{self.ids[0]}-{bound}" '
+                f'aria-label="{words().common.undo_named.format(button=hold_again, line=line)}"'
+                f">{hold_again}</button>",
+                count=1,
             )
-        self.assertContains(page, words().magic_bounds.hold_again, count=2)
+        self.assertContains(page, f">{hold_again}</button>", count=2)
+        restores = forms_of_class(page.content.decode(), "magic-bounds-restore-form")
+        self.assertEqual(len(restores), 2)
+        for form, bound in zip(restores, (CHANNEL, PUSH_CAP)):
+            self.assertIn(f'action="{self.url}"', form)
+            self.assertIn('name="csrfmiddlewaretoken"', form)
+            self.assertIn(f'name="next" value="{self.detail}"', form)
+            self.assertIn(f'name="{COMBATANT_FIELD}" value="{self.ids[0]}"', form)
+            self.assertIn(f'name="{BOUNDS_FIELD}" value="{bound}"', form)
+            self.assertIn(f'name="{LIFTED_FIELD}" value=""', form)
         self.assertEqual(
             BattleEvent.objects.filter(
                 battle=self.battle, payload__lifted=True
@@ -548,21 +565,41 @@ class MagicBoundsEndpointTest(CanonImposesTestCase):
         self.assertIn(
             "magic_bounds.lifting_line", body["rulings_html"][MAGIC_BOUNDS_PANEL_ID]
         )
-        for label, sent in (
+        for label, sent, refusal in (
             (
                 "bounds not a list",
                 {COMBATANT_FIELD: self.ids[1], BOUNDS_FIELD: CHANNEL},
+                "magic_bounds.refuse_bounds_list",
             ),
-            ("no combatant", {COMBATANT_FIELD: "x", BOUNDS_FIELD: [CHANNEL]}),
-            ("unknown bound", {COMBATANT_FIELD: self.ids[1], BOUNDS_FIELD: ["mana"]}),
+            (
+                # The list is read before the figure is.
+                "bounds not a list and no combatant",
+                {COMBATANT_FIELD: "x", BOUNDS_FIELD: CHANNEL},
+                "magic_bounds.refuse_bounds_list",
+            ),
+            (
+                "no combatant",
+                {COMBATANT_FIELD: "x", BOUNDS_FIELD: [CHANNEL]},
+                "magic_bounds.refuse_combatant",
+            ),
+            (
+                "unknown bound",
+                {COMBATANT_FIELD: self.ids[1], BOUNDS_FIELD: ["mana"]},
+                None,
+            ),
         ):
             with self.subTest(label):
-                self.assertEqual(self.post_json(self.url, sent).status_code, 400)
+                refused = self.post_json(self.url, sent)
+                self.assertEqual(refused.status_code, 400)
+                if refusal is not None:
+                    self.assertEqual(refused.json()["error"], refusal)
         with self.subTest("a body that is not an object"):
             not_an_object = self.client.post(
                 self.url, "[]", content_type="application/json"
             )
             self.assertEqual(not_an_object.status_code, 400)
+            # The body is refused before any field of it is read.
+            self.assertEqual(not_an_object.json(), {"error": "Invalid JSON"})
 
     def test_a_player_is_refused_and_reads_only_the_record(self):
         player = self.create_player()

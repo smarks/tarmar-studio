@@ -72,6 +72,15 @@ function renderedTab({ live = true } = {}) {
                     <input type="hidden" name="scope" value="battle">
                     <button type="submit" name="agreed" value="1" id="agree" data-focus-key="hth-whole-battle">Agree</button>
                 </form>
+                <form method="post" action="/tarmar/battles/4/working-grants/" class="working-grant-form">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="form-token">
+                    <input type="hidden" name="next" value="/tarmar/gm/sessions/12/battle/">
+                    <input type="hidden" name="granted" value="true">
+                    <select name="combatant"><option value="7" selected>Mage</option></select>
+                    <select name="effect"><option value="figment" selected>Figment</option></select>
+                    <input type="number" name="tier" value="3">
+                    <button type="submit" id="grant" data-focus-key="working-grant">Grant</button>
+                </form>
             </div>
         </section>`;
 }
@@ -741,6 +750,32 @@ describe('the tab drawn again in place (#89)', () => {
         expect(global.fetch.mock.calls[1][0]).toBe('/tarmar/gm/sessions/12/battle/');
         expect(pageNavigation.go).not.toHaveBeenCalled();
         expect(pageNavigation.reload).not.toHaveBeenCalled();
+    });
+
+    test('the grant of a working posts its figure, effect and tier as a script caller (tarmar-studio #208)', async () => {
+        setUpSession({ withBoard: true });
+        global.fetch.mockReturnValueOnce(jsonResponse({ status: 'paused', turn: 1 }));
+        global.fetch.mockReturnValueOnce(htmlResponse(renderedTab()));
+
+        section.querySelector('.working-grant-form').requestSubmit(document.getElementById('grant'));
+        await flushPromises();
+        await flushPromises();
+
+        const [url, options] = global.fetch.mock.calls[0];
+        expect(url).toBe('http://localhost/tarmar/battles/4/working-grants/');
+        expect(options.method).toBe('POST');
+        expect(options.headers['X-Requested-With']).toBe('XMLHttpRequest');
+        expect(Object.fromEntries(options.body.entries())).toEqual({
+            csrfmiddlewaretoken: 'form-token',
+            next: '/tarmar/gm/sessions/12/battle/',
+            granted: 'true',
+            combatant: '7',
+            effect: 'figment',
+            tier: '3',
+        });
+        // Answered in JSON, the tab is drawn again from the record.
+        expect(global.fetch.mock.calls[1][0]).toBe('/tarmar/gm/sessions/12/battle/');
+        expect(pageNavigation.go).not.toHaveBeenCalled();
     });
 
     test('the ruling\'s button waits for the redraw, and the focus comes back to it', async () => {

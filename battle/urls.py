@@ -28,6 +28,7 @@ from .views import (
     battle_setup_update,
     battle_start,
     battle_state,
+    battle_working_grants,
     combatant_control,
     seat_claim,
     seat_ready,
@@ -93,6 +94,8 @@ urlpatterns = [
     path("<int:pk>/hth-agreement/", battle_hth_agreement, name="hth-agreement"),
     # A Game Master's ruling lifting a figure's magic bounds (#37).
     path("<int:pk>/magic-bounds/", battle_magic_bounds, name="magic-bounds"),
+    # A Game Master's grant of a working to a figure (tarmar-studio #208).
+    path("<int:pk>/working-grants/", battle_working_grants, name="working-grants"),
     path(
         "<int:pk>/combatants/<int:combatant_id>/control/",
         combatant_control,

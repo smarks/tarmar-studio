@@ -856,6 +856,14 @@ if (typeof module !== 'undefined' && module.exports) {
         return panel;
     }
 
+    /**
+     * The kinds of magic that may stand on a figure, in the order its roster
+     * card draws their lines: each is the view's key for the figure's
+     * (``battle.viewmodel``) and the end of its line's class
+     * (``combatant-runaway`` and so on, static/css/battle.css).
+     */
+    const STANDING_MAGIC = ['runaway', 'contest', 'crafting'];
+
     /** One roster card (see renderRoster, which owns the grouping). */
     function combatantCard(combatant, renameOptions, seatMap, openDetail) {
         const card = document.createElement('div');
@@ -957,29 +965,21 @@ if (typeof module !== 'undefined' && module.exports) {
             card.appendChild(bar);
         });
 
-        // A spell running away from this figure (tarmar-engine #30): the
-        // server's sentence, from the engine's state and the canon's rules
-        // (battle.viewmodel._tarmar_runaway). It stays until the state says
-        // the Runaway is over.
-        if (combatant.runaway) {
-            const runaway = document.createElement('div');
-            runaway.className = 'combatant-runaway';
-            runaway.dataset.spell = combatant.runaway.spell_key;
-            runaway.textContent = combatant.runaway.line;
-            card.appendChild(runaway);
-        }
-
-        // A spell of this figure's that stands countered (tarmar-engine
-        // #31): the server's sentence, from the engine's state
-        // (battle.viewmodel._tarmar_contest). It stays until the state says
-        // the contest is over.
-        if (combatant.contest) {
-            const contest = document.createElement('div');
-            contest.className = 'combatant-contest';
-            contest.dataset.spell = combatant.contest.spell_key;
-            contest.textContent = combatant.contest.line;
-            card.appendChild(contest);
-        }
+        // The magic that stands on this figure, each the server's sentence
+        // from the engine's state, drawn until the state says it is over: a
+        // spell running away from it (tarmar-engine #30, by the canon's
+        // rules; battle.viewmodel._tarmar_runaway), a spell of its own that
+        // stands countered (tarmar-engine #31, _tarmar_contest), and a
+        // working it is crafting (tarmar-engine #77, _tarmar_craft).
+        STANDING_MAGIC.forEach((kind) => {
+            const standing = combatant[kind];
+            if (!standing) { return; }
+            const line = document.createElement('div');
+            line.className = `combatant-${kind}`;
+            line.dataset.spell = standing.spell_key;
+            line.textContent = standing.line;
+            card.appendChild(line);
+        });
 
         if (!combatant.alive && combatant.fatal_chain
                 && combatant.fatal_chain.length) {
@@ -1023,6 +1023,46 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
+     * The castings of one kind on a menu, before any is filed: the casts
+     * paid from the pool with nothing pushed, and their pushed and borrowing
+     * copies under their cast's key (:func:`castKey`).
+     * @returns {{casts: Array, pushes: Map, borrows: Map}}
+     */
+    function emptyCastings() {
+        return { casts: [], pushes: new Map(), borrows: new Map() };
+    }
+
+    /**
+     * Every menu entry of one kind of casting: its casts and every pushed
+     * and borrowing copy of them.
+     * @param {{casts: Array, pushes: Map, borrows: Map}} castings
+     * @returns {Array<{candidate: object, index: number}>}
+     */
+    function everyCasting(castings) {
+        return castings.casts.concat(
+            Array.from(castings.pushes.values()).flat(),
+            Array.from(castings.borrows.values()).flat()
+        );
+    }
+
+    /**
+     * The keys of the workings a True mage's stage names (tarmar-studio
+     * #208): the craft that stands, and each working the menu offers to
+     * begin. A menu option is a craft action when its ``spell_key`` is one of
+     * these, which are the server's (``pending.magic.craft``, read off the
+     * menu itself), so this file spells no letter of the engine's.
+     * @param {object|null} magic - the pending payload's ``magic``
+     * @returns {{standing: string|null, begun: Set<string>}}
+     */
+    function craftKeysOf(magic) {
+        const craft = (magic && magic.craft) || {};
+        return {
+            standing: craft.standing ? craft.standing.key : null,
+            begun: new Set((craft.workings || []).map((row) => row.key)),
+        };
+    }
+
+    /**
      * The cast candidates on a menu (one per castable spell), their pushed
      * copies, and the rest. Casting collapses into a single CAST SPELL
      * option so a wizard's spells do not flood the action list — the spells
@@ -1044,38 +1084,70 @@ if (typeof module !== 'undefined' && module.exports) {
      * commitment the engine allows against each enemy caster. ``counters``
      * holds them under the caster's id (``target_id``), least first, for
      * that caster's counter control; the amounts are the menu's.
+     *
+     * A True mage's menu holds three kinds of casting (tarmar-engine #77,
+     * tarmar-studio #208), each kept apart with its own pushed and borrowing
+     * copies, so none is mistaken for another of the same spell: the recipe
+     * casts (``casts``, ``pushes``, ``borrows``, as for any caster), the True
+     * casts (``trueCasts``, the options marked ``true_cast``), and the
+     * workings it may begin to craft (``crafts``, :func:`craftKeysOf`).
+     * While a craft stands the menu holds its continuation instead, once per
+     * figure it may name: ``continuation``, in the menu's order.
+     *
+     * @param {Array<object>} candidates - the pending menu's options
+     * @param {object|null} [magic] - the pending payload's ``magic``
      */
-    function splitCastCandidates(candidates) {
+    function splitCastCandidates(candidates, magic) {
         const plain = [];
-        const casts = [];
-        const pushes = new Map();
-        const borrows = new Map();
+        const recipe = emptyCastings();
+        const trueCasts = emptyCastings();
+        const crafts = emptyCastings();
+        const continuation = [];
         const counters = new Map();
+        const craftKeys = craftKeysOf(magic);
         (candidates || []).forEach((candidate, index) => {
             if (candidate.counter_mana != null) {
                 const caster = String(candidate.target_id);
                 if (!counters.has(caster)) { counters.set(caster, []); }
                 counters.get(caster).push({ candidate, index });
-            } else if (!candidate.spell_key) {
+                return;
+            }
+            if (!candidate.spell_key) {
                 plain.push({ candidate, index });
-            } else if (candidate.borrow || candidate.push_mana) {
-                const copies = candidate.borrow ? borrows : pushes;
+                return;
+            }
+            if (!candidate.true_cast && candidate.spell_key === craftKeys.standing) {
+                continuation.push({ candidate, index });
+                return;
+            }
+            let castings = recipe;
+            if (candidate.true_cast) {
+                castings = trueCasts;
+            } else if (craftKeys.begun.has(candidate.spell_key)) {
+                castings = crafts;
+            }
+            if (candidate.borrow || candidate.push_mana) {
+                const copies = candidate.borrow ? castings.borrows : castings.pushes;
                 const key = castKey(candidate.spell_key, candidate.target_id);
                 if (!copies.has(key)) { copies.set(key, []); }
                 copies.get(key).push({ candidate, index });
             } else {
-                casts.push({ candidate, index });
+                castings.casts.push({ candidate, index });
             }
         });
-        [pushes, borrows].forEach((byCast) => byCast.forEach((copies) => {
-            copies.sort((first, second) => (first.candidate.push_mana || 0)
-                - (second.candidate.push_mana || 0));
-        }));
+        [recipe, trueCasts, crafts].forEach((castings) => {
+            [castings.pushes, castings.borrows].forEach((byCast) => byCast.forEach((copies) => {
+                copies.sort((first, second) => (first.candidate.push_mana || 0)
+                    - (second.candidate.push_mana || 0));
+            }));
+        });
         counters.forEach((copies) => {
             copies.sort((first, second) => first.candidate.counter_mana
                 - second.candidate.counter_mana);
         });
-        return { plain, casts, pushes, borrows, counters };
+        return {
+            plain, counters, ...recipe, trueCasts, crafts, continuation,
+        };
     }
 
     /**
@@ -1097,9 +1169,17 @@ if (typeof module !== 'undefined' && module.exports) {
      * confirm ungates, or an explicit stand-down back to the plain menu.
      * The AI's favourite is tagged as advice, never as a selection.
      *
-     * ``options``: { isDm, selectedIndex, castOpen, showScoring, busy,
-     * onSelect(index), onCastOpen(), onCastClose(), onToggleScoring(),
-     * onConfirm(candidate), onAiChoose() }.
+     * A True mage's menu adds three things (tarmar-engine #77, tarmar-studio
+     * #208). Its True casts are rows of the stage beside the recipe casts,
+     * each marked. The workings it may begin sit in the stage's craft
+     * control (:func:`buildCraftControl`), whose open tier is the selected
+     * craft's or, with nothing selected, ``craftPick``. And a craft that
+     * stands is one option of the menu itself (:func:`buildContinuation`),
+     * or, where the menu withholds it, a line saying why.
+     *
+     * ``options``: { isDm, selectedIndex, castOpen, craftPick, showScoring,
+     * busy, onSelect(index), onCraftPick(pick, index), onCastOpen(),
+     * onCastClose(), onToggleScoring(), onConfirm(candidate), onAiChoose() }.
      */
     /**
      * The empty pool a stage falls back to when the server published no
@@ -1119,9 +1199,17 @@ if (typeof module !== 'undefined' && module.exports) {
      * whichever came last and cast at the wrong figure.
      */
     function castKey(spellKey, targetId) {
-        const target = (targetId === null || targetId === undefined)
-            ? '' : String(targetId);
-        return `${spellKey}\u0000${target}`;
+        return `${spellKey}\u0000${figureKey(targetId)}`;
+    }
+
+    /**
+     * The figure an option or a stage row names, as text: its id, or ''
+     * for one that names nobody.
+     * @param {number|string|null|undefined} targetId
+     * @returns {string}
+     */
+    function figureKey(targetId) {
+        return (targetId === null || targetId === undefined) ? '' : String(targetId);
     }
 
     /**
@@ -1155,6 +1243,24 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
+     * The focus-key prefixes of the cast stage's rows and of its craft
+     * control's tiers and figures (tarmar-studio #208), each followed by
+     * what the control stands for.
+     */
+    const SPELL_FOCUS = 'spell-';
+    const CRAFT_TIER_FOCUS = 'craft-tier-';
+    const CRAFT_FIGURE_FOCUS = 'craft-target-';
+
+    /**
+     * The focus keys of the controls that live in the cast stage, by their
+     * prefixes: a spell row, a push or borrowing amount (a copy control's
+     * kind, :func:`buildCopyControl`), and the craft control's.
+     */
+    const STAGE_FOCUS_PREFIXES = [
+        SPELL_FOCUS, 'push-', 'borrow-', CRAFT_TIER_FOCUS, CRAFT_FIGURE_FOCUS,
+    ];
+
+    /**
      * Focus the rebuilt control that ``key`` names, or the nearest thing
      * that still makes sense. A spell row and the stand-down button both
      * disappear when the cast stage closes; their reader belongs on the
@@ -1169,8 +1275,8 @@ if (typeof module !== 'undefined' && module.exports) {
         const byKey = (wanted) => elementByFocusKey(panel, wanted);
         let target = byKey(key);
         if ((!target || target.disabled)
-                && (key.startsWith('spell-') || key.startsWith('push-')
-                    || key.startsWith('borrow-') || key === 'cast-standdown')) {
+                && (STAGE_FOCUS_PREFIXES.some((prefix) => key.startsWith(prefix))
+                    || key === 'cast-standdown')) {
             target = byKey('cast');
         }
         if (target && !target.disabled) { target.focus(); }
@@ -1228,10 +1334,7 @@ if (typeof module !== 'undefined' && module.exports) {
             );
             button.textContent = choice.text;
             if (choice.entry.index === aiPick) {
-                const tag = document.createElement('span');
-                tag.className = 'turn-option-ai-pick';
-                tag.textContent = filledWords(words.ai_pick);
-                button.appendChild(tag);
+                button.appendChild(aiPickTag(words));
             }
             button.addEventListener('click', () => {
                 if (opts.onSelect && choice.entry.index !== opts.selectedIndex) {
@@ -1359,6 +1462,488 @@ if (typeof module !== 'undefined' && module.exports) {
     }
 
     /**
+     * The 'AI pick' tag for a control that stands for the AI's own choice.
+     * @param {Object<string, string>} words - the panel's words (#94)
+     * @returns {HTMLSpanElement}
+     */
+    function aiPickTag(words) {
+        const tag = document.createElement('span');
+        tag.className = 'turn-option-ai-pick';
+        tag.textContent = filledWords(words.ai_pick);
+        return tag;
+    }
+
+    /**
+     * What a cast stage's row opens with, a spell's and a working's tier
+     * alike: its name, then its cost in the server's words (#263).
+     * @param {HTMLElement} button - the row
+     * @param {string} name - the row's name
+     * @param {string} cost - the server's cost line
+     */
+    function appendNameAndCost(button, name, cost) {
+        [['turn-spell-name', name], ['turn-spell-cost', cost]].forEach(([className, text]) => {
+            const part = document.createElement('span');
+            part.className = className;
+            part.textContent = text;
+            button.appendChild(part);
+        });
+    }
+
+    /**
+     * What a cast stage's row closes with: the server's note for a row that
+     * may be taken, and, for one that may not, the server's reason or the
+     * panel's words for none given, marked as blocked.
+     * @param {Object<string, string>} words - the panel's words (#94)
+     * @param {object} row - the stage row (``note``, ``reason``)
+     * @param {boolean} blocked - whether the row may not be taken as it stands
+     * @returns {HTMLSpanElement}
+     */
+    function stageRowNote(words, row, blocked) {
+        const note = document.createElement('span');
+        note.className = 'turn-spell-note';
+        if (blocked) {
+            note.textContent = row.reason || filledWords(words.not_castable);
+            note.classList.add('is-blocked');
+        } else {
+            note.textContent = row.note;
+        }
+        return note;
+    }
+
+    /**
+     * One casting on the cast stage: a spell cast by its recipe, or as a
+     * True cast (tarmar-studio #208), with the push and borrowing controls
+     * the menu gives it. Every word of the row is the server's (#263); a
+     * True cast's row wears the panel's mark for one, so it is told from the
+     * same spell's recipe cast beside it.
+     *
+     * @param {Object<string, string>} words - the panel's words (#94)
+     * @param {object} spell - the stage row
+     * @param {{casts: Map, pushes: Map, borrows: Map}} offered - the menu's
+     *     castings of this row's kind: the casts by their key
+     *     (:func:`castKey`), and their pushed and borrowing copies
+     * @param {number} aiPick - the AI's pick on the menu
+     * @param {object} opts - the panel's options (``selectedIndex``,
+     *     ``onSelect``)
+     * @returns {HTMLElement} the row's button, or the group holding it and
+     *     its controls
+     */
+    function buildCastRow(words, spell, offered, aiPick, opts) {
+        const key = castKey(spell.key, spell.target_id);
+        const entry = offered.casts.get(key);
+        const copies = (entry && offered.pushes.get(key)) || [];
+        // A spell the caster cannot afford has no plain cast, only
+        // borrowing copies (tarmar-engine #28).
+        const borrowing = offered.borrows.get(key) || [];
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'turn-spell';
+        // Keyed by the candidate it stands for, so the key survives a
+        // rebuild. A row with no candidate is disabled and can never
+        // hold focus, so it needs none.
+        if (entry) { button.dataset.focusKey = `${SPELL_FOCUS}${entry.index}`; }
+        button.disabled = !spell.castable || !entry;
+        // A pushed or borrowing copy selected is this spell selected too.
+        const selected = (Boolean(entry) && entry.index === opts.selectedIndex)
+            || copies.concat(borrowing)
+                .some((copy) => copy.index === opts.selectedIndex);
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        appendNameAndCost(button, spell.name, spell.cost);
+
+        if (spell.true_cast) {
+            button.classList.add('turn-true-cast');
+            const mark = document.createElement('span');
+            mark.className = 'turn-spell-true';
+            mark.textContent = filledWords(words.true_cast_tag);
+            button.appendChild(mark);
+        }
+
+        if (entry && entry.index === aiPick) {
+            button.appendChild(aiPickTag(words));
+        }
+
+        // A cast pressing a countered spell again (tarmar-engine #31):
+        // the engine marks every copy of it, plain, pushed or borrowing,
+        // and the server's line says so. Read from whichever the menu
+        // holds, the plain cast first, so a spell only borrowing pays
+        // for is marked too.
+        const pressing = [entry].concat(copies, borrowing)
+            .find((copy) => copy && copy.candidate.escalate);
+        if (pressing) {
+            button.classList.add('is-escalation');
+            const escalation = document.createElement('span');
+            escalation.className = 'turn-spell-escalate';
+            escalation.textContent = pressing.candidate.plain
+                || filledWords(words.presses_again);
+            button.appendChild(escalation);
+        }
+        button.appendChild(stageRowNote(words, spell, button.disabled));
+
+        if (entry) {
+            button.addEventListener('click', () => {
+                if (opts.onSelect) { opts.onSelect(entry.index); }
+            });
+        }
+        const pushable = copies.length && !button.disabled;
+        if (!pushable && !borrowing.length) { return button; }
+        // The cast and its controls travel together in the grid.
+        const group = document.createElement('div');
+        group.className = 'turn-spell-group';
+        group.appendChild(button);
+        if (pushable) {
+            group.appendChild(buildPushControl(
+                words, spell, entry, copies, aiPick, opts
+            ));
+        }
+        if (borrowing.length) {
+            group.appendChild(buildBorrowControl(
+                words, spell, borrowing, aiPick, opts
+            ));
+        }
+        return group;
+    }
+
+    /**
+     * The figures a craft action may name (tarmar-engine #77), one pressable
+     * button each: for a working about to be begun, and for the craft that
+     * stands. A craft action that names nobody says so in the panel's words.
+     *
+     * @param {Object<string, string>} words - the panel's words (#94)
+     * @param {Array<{focusKey: string, candidate: object, pressed: boolean,
+     *     aiPicked: boolean, onPick: function}>} choices - each figure's
+     *     button: the menu option (or stage row) whose ``target_id`` and
+     *     ``target_name`` it reads, whether it is the one named now, whether
+     *     the AI would name it, and what pressing it does
+     * @returns {HTMLDivElement}
+     */
+    function buildFigureChoices(words, choices) {
+        const targets = document.createElement('div');
+        targets.className = 'turn-craft-target';
+        targets.setAttribute('role', 'group');
+        targets.setAttribute('aria-label', filledWords(words.craft_target_group));
+        const label = document.createElement('span');
+        label.className = 'turn-craft-target-label';
+        label.textContent = filledWords(words.craft_target_label);
+        targets.appendChild(label);
+        choices.forEach((choice) => {
+            const figure = document.createElement('button');
+            figure.type = 'button';
+            figure.className = 'turn-craft-target-figure';
+            figure.dataset.target = figureKey(choice.candidate.target_id);
+            figure.dataset.focusKey = choice.focusKey;
+            figure.setAttribute('aria-pressed', choice.pressed ? 'true' : 'false');
+            figure.textContent = choice.candidate.target_name
+                || filledWords(words.craft_no_figure);
+            if (choice.aiPicked) { figure.appendChild(aiPickTag(words)); }
+            figure.addEventListener('click', () => {
+                if (!choice.pressed) { choice.onPick(); }
+            });
+            targets.appendChild(figure);
+        });
+        return targets;
+    }
+
+    /**
+     * The continuation of the craft that stands on the figure choosing
+     * (tarmar-engine #77, tarmar-studio #208): one option of the menu,
+     * naming the working and which of its turns this is, in the server's
+     * words (``magic.craft.standing``).
+     *
+     * Each craft action names the working's figure anew, so the menu holds
+     * the continuation once per figure it may name. Pressing the option
+     * takes the one naming the figure the craft's latest action named, or
+     * the menu's first when that figure is no longer offered; with several
+     * to name, each has a button beneath, the one named pressed.
+     *
+     * @param {object} standing - the pending payload's
+     *     ``magic.craft.standing``
+     * @param {Array<{candidate: object, index: number}>} continuation - the
+     *     menu's continuations, one per figure (:func:`splitCastCandidates`)
+     * @param {number} aiPick - the AI's pick on the menu
+     * @param {object} opts - the panel's options (``words``,
+     *     ``selectedIndex``, ``onSelect``)
+     * @param {{buildOption: function, tagAiPick: function}} rows - the turn
+     *     panel's own row builders
+     * @returns {HTMLElement} the option, or the group holding it and its
+     *     figures
+     */
+    function buildContinuation(standing, continuation, aiPick, opts, rows) {
+        const words = opts.words;
+        const selected = continuation.find((entry) => entry.index === opts.selectedIndex);
+        const shown = selected
+            || continuation.find(({ candidate }) => figureKey(candidate.target_id)
+                === figureKey(standing.target_id))
+            || continuation[0];
+        const several = continuation.length > 1;
+        const option = rows.buildOption(
+            shown.candidate.letter,
+            shown.candidate.name,
+            filledWords(words.advice, {
+                score: scoreText(shown.candidate), rationale: shown.candidate.rationale,
+            }),
+            Boolean(selected),
+            'craft-continue',
+            // With one figure to name the menu's own line names it; with
+            // several the craft's line stands, and the figures are beneath.
+            {
+                plain: several ? standing.line : (shown.candidate.plain || standing.line),
+                cost: shown.candidate.cost,
+            }
+        );
+        option.classList.add('turn-option-craft');
+        option.dataset.working = standing.key;
+        if (continuation.some(({ index }) => index === aiPick)) { rows.tagAiPick(option); }
+        option.addEventListener('click', () => {
+            if (opts.onSelect) { opts.onSelect(shown.index); }
+        });
+        if (!several) { return option; }
+        const group = document.createElement('div');
+        group.className = 'turn-craft-continuation';
+        group.appendChild(option);
+        group.appendChild(buildFigureChoices(words, continuation.map((entry) => ({
+            focusKey: `continue-target-${entry.index}`,
+            candidate: entry.candidate,
+            pressed: entry.index === opts.selectedIndex,
+            aiPicked: entry.index === aiPick,
+            onPick: () => { if (opts.onSelect) { opts.onSelect(entry.index); } },
+        }))));
+        return group;
+    }
+
+    /**
+     * The menu's castings of one kind with the casts keyed as the stage's
+     * rows are (:func:`castKey`), for :func:`buildCastRow`.
+     * @param {{casts: Array, pushes: Map, borrows: Map}} castings
+     * @returns {{casts: Map, pushes: Map, borrows: Map}}
+     */
+    function castingsByKey(castings) {
+        return {
+            casts: new Map(castings.casts.map((entry) => [
+                castKey(entry.candidate.spell_key, entry.candidate.target_id),
+                entry,
+            ])),
+            pushes: castings.pushes,
+            borrows: castings.borrows,
+        };
+    }
+
+    /**
+     * Which working the craft control has open, and which of its rows (the
+     * working at one figure): the selected option's, while that is a craft
+     * the menu offers to begin; the reader's own pick of a tier whose figure
+     * is still to be named (``opts.craftPick``), while nothing is selected;
+     * and none while anything else is.
+     *
+     * @param {Array<{candidate: object, index: number}>} craftEntries - every
+     *     craft the menu offers to begin, its copies included
+     * @param {object} opts - the panel's options (``selectedIndex``,
+     *     ``craftPick``)
+     * @returns {{working: string|null, row: string|null}}
+     */
+    function craftPickOf(craftEntries, opts) {
+        if (opts.selectedIndex == null) {
+            return opts.craftPick || { working: null, row: null };
+        }
+        const selected = craftEntries.find((entry) => entry.index === opts.selectedIndex);
+        if (!selected) { return { working: null, row: null }; }
+        return {
+            working: selected.candidate.spell_key,
+            row: castKey(selected.candidate.spell_key, selected.candidate.target_id),
+        };
+    }
+
+    /**
+     * The craft control on a True mage's cast stage (tarmar-engine #77,
+     * tarmar-studio #208): each effect the menu offers a working of, a card
+     * per tier with the mana, the turns and the drain the server wrote for
+     * it, and, for the tier picked, the figure it names and the push and
+     * borrowing controls the menu gives it. Every working here is one the
+     * menu offers this figure, a working a Game Master granted it included
+     * and marked; a grant that waits on Channel has no card, and says so in
+     * the server's sentence, which is all the control draws when the menu
+     * offers no working to begin.
+     *
+     * A tier of a working that names one figure, or none, is one option of
+     * the menu, so picking it selects that option. A tier that may name
+     * several is picked first and its figure after: nothing is selected, and
+     * the confirm stays gated, until the reader names one.
+     *
+     * @param {Object<string, string>} words - the panel's words (#94)
+     * @param {object} craft - the pending payload's ``magic.craft``
+     * @param {{casts: Array, pushes: Map, borrows: Map}} crafts - the crafts
+     *     the menu offers to begin
+     * @param {number} aiPick - the AI's pick on the menu
+     * @param {object} opts - the panel's options (``selectedIndex``,
+     *     ``craftPick``, ``onSelect``, ``onCraftPick``)
+     * @returns {HTMLElement|null} the control, or null with nothing to draw
+     */
+    function buildCraftControl(words, craft, crafts, aiPick, opts) {
+        const rows = craft.workings || [];
+        const waiting = (craft.granted || []).filter((grant) => grant.waits_on_channel);
+        if (!rows.length && !waiting.length) { return null; }
+        const offered = castingsByKey(crafts);
+        const craftEntries = everyCasting(crafts);
+        const pick = craftPickOf(craftEntries, opts);
+        const granted = new Set((craft.granted || []).map((grant) => grant.key));
+
+        const control = document.createElement('div');
+        control.className = 'turn-craft';
+        control.setAttribute('role', 'group');
+        control.setAttribute('aria-label', filledWords(words.craft_group));
+        // The label stands over the tiers. With none to begin (a craft
+        // stands, or the caster can pay for none) and a grant waiting, the
+        // control is the waiting note alone.
+        if (rows.length) {
+            const label = document.createElement('span');
+            label.className = 'turn-craft-label';
+            label.textContent = (craft.tier_cap === null || craft.tier_cap === undefined)
+                ? filledWords(words.craft_label_uncapped, { skill: craft.skill })
+                : filledWords(
+                    words.craft_label, { skill: craft.skill, tier_cap: craft.tier_cap }
+                );
+            control.appendChild(label);
+        }
+
+        // The rows by effect and then by working, each in the menu's order.
+        const effects = new Map();
+        rows.forEach((row) => {
+            if (!effects.has(row.effect)) {
+                effects.set(row.effect, { label: row.effect_label, workings: new Map() });
+            }
+            const workings = effects.get(row.effect).workings;
+            if (!workings.has(row.key)) { workings.set(row.key, []); }
+            workings.get(row.key).push(row);
+        });
+        /** The row's craft paid from the pool, nothing pushed, if the menu holds one. */
+        const plainOf = (row) => offered.casts.get(castKey(row.key, row.target_id));
+
+        /**
+         * What the tier picked opens, beneath its effect's tiers: the figure
+         * it names, wherever it names any; what the craft costs as the server
+         * wrote it for the option selected, its mana, its turns and its
+         * drain; and the push and the borrowing the menu gives it.
+         */
+        function buildPicked(pickedRows) {
+            const opened = document.createElement('div');
+            opened.className = 'turn-craft-picked';
+            if (pickedRows.some((row) => figureKey(row.target_id) !== '')) {
+                opened.appendChild(buildFigureChoices(words, pickedRows.map((row) => {
+                    const rowKey = castKey(row.key, row.target_id);
+                    const plain = plainOf(row);
+                    // Whichever of the row's options the menu holds names its figure.
+                    const offer = [plain].concat(
+                        crafts.pushes.get(rowKey) || [], crafts.borrows.get(rowKey) || []
+                    ).find(Boolean);
+                    return {
+                        focusKey: `${CRAFT_FIGURE_FOCUS}${rowKey}`,
+                        candidate: offer ? offer.candidate : row,
+                        pressed: pick.row === rowKey,
+                        aiPicked: craftEntries.some(({ candidate, index }) => index === aiPick
+                            && castKey(candidate.spell_key, candidate.target_id) === rowKey),
+                        onPick: () => {
+                            if (opts.onCraftPick) {
+                                opts.onCraftPick(
+                                    { working: row.key, row: rowKey }, plain ? plain.index : null
+                                );
+                            }
+                        },
+                    };
+                })));
+            }
+            const pickedRow = pickedRows.find(
+                (row) => castKey(row.key, row.target_id) === pick.row
+            );
+            if (pickedRow) {
+                const plain = plainOf(pickedRow);
+                const copies = (plain && crafts.pushes.get(pick.row)) || [];
+                const borrowing = crafts.borrows.get(pick.row) || [];
+                if (plain && plain.index === opts.selectedIndex && plain.candidate.cost) {
+                    const cost = document.createElement('span');
+                    cost.className = 'turn-craft-cost';
+                    cost.textContent = filledWords(words.costs, { cost: plain.candidate.cost });
+                    opened.appendChild(cost);
+                }
+                if (copies.length) {
+                    opened.appendChild(buildPushControl(
+                        words, pickedRow, plain, copies, aiPick, opts
+                    ));
+                }
+                if (borrowing.length) {
+                    opened.appendChild(buildBorrowControl(
+                        words, pickedRow, borrowing, aiPick, opts
+                    ));
+                }
+            }
+            return opened;
+        }
+
+        effects.forEach((effect, effectKey) => {
+            const line = document.createElement('div');
+            line.className = 'turn-craft-effect';
+            line.dataset.effect = effectKey;
+            line.setAttribute('role', 'group');
+            line.setAttribute('aria-label', effect.label);
+            const effectName = document.createElement('span');
+            effectName.className = 'turn-craft-effect-name';
+            effectName.textContent = effect.label;
+            line.appendChild(effectName);
+            effect.workings.forEach((workingRows, workingKey) => {
+                // What a tier costs is its caster's to pay, whoever it names.
+                const row = workingRows[0];
+                const picked = pick.working === workingKey;
+                const tier = document.createElement('button');
+                tier.type = 'button';
+                tier.className = 'turn-craft-tier';
+                tier.dataset.working = workingKey;
+                tier.dataset.focusKey = `${CRAFT_TIER_FOCUS}${workingKey}`;
+                tier.setAttribute('aria-pressed', picked ? 'true' : 'false');
+                appendNameAndCost(
+                    tier, filledWords(words.craft_tier, { tier: row.tier }), row.cost
+                );
+                if (granted.has(workingKey)) {
+                    const mark = document.createElement('span');
+                    mark.className = 'turn-craft-granted';
+                    mark.textContent = filledWords(words.craft_granted);
+                    tier.appendChild(mark);
+                }
+                if (craftEntries.some(({ candidate, index }) => index === aiPick
+                        && candidate.spell_key === workingKey)) {
+                    tier.appendChild(aiPickTag(words));
+                }
+                // A tier only borrowing pays for says what it lacks.
+                tier.appendChild(stageRowNote(words, row, !row.castable));
+                tier.addEventListener('click', () => {
+                    if (!opts.onCraftPick) { return; }
+                    if (picked) {
+                        opts.onCraftPick(null, null);
+                    } else if (workingRows.length === 1) {
+                        const only = plainOf(row);
+                        opts.onCraftPick(
+                            { working: workingKey, row: castKey(row.key, row.target_id) },
+                            only ? only.index : null
+                        );
+                    } else {
+                        opts.onCraftPick({ working: workingKey, row: null }, null);
+                    }
+                });
+                line.appendChild(tier);
+            });
+            const pickedRows = effect.workings.get(pick.working);
+            if (pickedRows) { line.appendChild(buildPicked(pickedRows)); }
+            control.appendChild(line);
+        });
+
+        waiting.forEach((grant) => {
+            const waits = document.createElement('p');
+            waits.className = 'turn-craft-waits';
+            waits.dataset.working = grant.key;
+            waits.textContent = grant.note;
+            control.appendChild(waits);
+        });
+        return control;
+    }
+
+    /**
      * The spell stage a declared cast opens: the caster's pool, then their
      * whole known hand. A spell the server marked uncastable renders
      * disabled with its reason, so a wizard sees why Lightning Bolt is out
@@ -1370,8 +1955,17 @@ if (typeof module !== 'undefined' && module.exports) {
      * caster has a named pool and some rows — which is what lets one stage
      * serve Tarmar's mana and classic's ST without printing either
      * profile's numbers under the other's label.
+     *
+     * A True mage's stage goes on (tarmar-studio #208): a row for each True
+     * cast the menu offers (``magic.true_casts``), built as a recipe row is,
+     * and the craft control (:func:`buildCraftControl`).
+     *
+     * @param {object} pending - the pending payload
+     * @param {object} split - the menu's castings (:func:`splitCastCandidates`)
+     * @param {number} aiPick - the AI's pick on the menu
+     * @param {object} opts - the panel's options
      */
-    function buildCastStage(pending, casts, pushes, borrows, aiPick, opts) {
+    function buildCastStage(pending, split, aiPick, opts) {
         const words = opts.words;
         const stage = document.createElement('div');
         stage.className = 'turn-cast-stage';
@@ -1387,100 +1981,17 @@ if (typeof module !== 'undefined' && module.exports) {
         });
         stage.appendChild(pool);
 
-        const castByKey = new Map(casts.map((entry) => [
-            castKey(entry.candidate.spell_key, entry.candidate.target_id),
-            entry,
-        ]));
+        const recipe = castingsByKey(split);
         (magic.spells || []).forEach((spell) => {
-            const key = castKey(spell.key, spell.target_id);
-            const entry = castByKey.get(key);
-            const copies = (entry && pushes.get(key)) || [];
-            // A spell the caster cannot afford has no plain cast, only
-            // borrowing copies (tarmar-engine #28).
-            const borrowing = borrows.get(key) || [];
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'turn-spell';
-            // Keyed by the candidate it stands for, so the key survives a
-            // rebuild. A row with no candidate is disabled and can never
-            // hold focus, so it needs none.
-            if (entry) { button.dataset.focusKey = `spell-${entry.index}`; }
-            button.disabled = !spell.castable || !entry;
-            // A pushed or borrowing copy selected is this spell selected too.
-            const selected = (Boolean(entry) && entry.index === opts.selectedIndex)
-                || copies.concat(borrowing)
-                    .some((copy) => copy.index === opts.selectedIndex);
-            button.setAttribute('aria-pressed', selected ? 'true' : 'false');
-
-            const name = document.createElement('span');
-            name.className = 'turn-spell-name';
-            name.textContent = spell.name;
-            button.appendChild(name);
-
-            const cost = document.createElement('span');
-            cost.className = 'turn-spell-cost';
-            cost.textContent = spell.cost;
-            button.appendChild(cost);
-
-            if (entry && entry.index === aiPick) {
-                const tag = document.createElement('span');
-                tag.className = 'turn-option-ai-pick';
-                tag.textContent = filledWords(words.ai_pick);
-                button.appendChild(tag);
-            }
-
-            // A cast pressing a countered spell again (tarmar-engine #31):
-            // the engine marks every copy of it, plain, pushed or borrowing,
-            // and the server's line says so. Read from whichever the menu
-            // holds, the plain cast first, so a spell only borrowing pays
-            // for is marked too.
-            const pressing = [entry].concat(copies, borrowing)
-                .find((copy) => copy && copy.candidate.escalate);
-            if (pressing) {
-                button.classList.add('is-escalation');
-                const escalation = document.createElement('span');
-                escalation.className = 'turn-spell-escalate';
-                escalation.textContent = pressing.candidate.plain
-                    || filledWords(words.presses_again);
-                button.appendChild(escalation);
-            }
-
-            const note = document.createElement('span');
-            note.className = 'turn-spell-note';
-            if (button.disabled) {
-                note.textContent = spell.reason || filledWords(words.not_castable);
-                note.classList.add('is-blocked');
-            } else {
-                note.textContent = spell.note;
-            }
-            button.appendChild(note);
-
-            if (entry) {
-                button.addEventListener('click', () => {
-                    if (opts.onSelect) { opts.onSelect(entry.index); }
-                });
-            }
-            const pushable = copies.length && !button.disabled;
-            if (!pushable && !borrowing.length) {
-                stage.appendChild(button);
-                return;
-            }
-            // The cast and its controls travel together in the grid.
-            const group = document.createElement('div');
-            group.className = 'turn-spell-group';
-            group.appendChild(button);
-            if (pushable) {
-                group.appendChild(buildPushControl(
-                    words, spell, entry, copies, aiPick, opts
-                ));
-            }
-            if (borrowing.length) {
-                group.appendChild(buildBorrowControl(
-                    words, spell, borrowing, aiPick, opts
-                ));
-            }
-            stage.appendChild(group);
+            stage.appendChild(buildCastRow(words, spell, recipe, aiPick, opts));
         });
+        const trueCasts = castingsByKey(split.trueCasts);
+        (magic.true_casts || []).forEach((spell) => {
+            stage.appendChild(buildCastRow(words, spell, trueCasts, aiPick, opts));
+        });
+        const craftControl = magic.craft
+            ? buildCraftControl(words, magic.craft, split.crafts, aiPick, opts) : null;
+        if (craftControl) { stage.appendChild(craftControl); }
 
         const standDown = document.createElement('button');
         standDown.type = 'button';
@@ -1603,12 +2114,19 @@ if (typeof module !== 'undefined' && module.exports) {
         menu.setAttribute('role', 'group');
         menu.setAttribute('aria-label', filledWords(words.options_group));
         const aiPick = topCandidateIndex(pending.candidates);
+        const split = splitCastCandidates(pending.candidates, pending.magic);
         const {
-            plain, casts, pushes, borrows, counters,
-        } = splitCastCandidates(pending.candidates);
-        // Every cast on the menu that only borrowing pays for.
-        const borrowingCopies = Array.from(borrows.values()).flat();
-        const castable = casts.length || borrowingCopies.length;
+            plain, casts, pushes, borrows, counters, trueCasts, crafts, continuation,
+        } = split;
+        // Every cast on the menu that only borrowing pays for, a True cast
+        // included (tarmar-studio #208).
+        const borrowingCopies = Array.from(borrows.values()).flat()
+            .concat(Array.from(trueCasts.borrows.values()).flat());
+        // The casts paid from the pool, by their recipe and as True casts,
+        // and the workings the menu offers to begin.
+        const readyCasts = casts.concat(trueCasts.casts);
+        const craftEntries = everyCasting(crafts);
+        const castable = readyCasts.length || borrowingCopies.length || craftEntries.length;
 
         /**
          * One menu row: letter, rules name, an optional AI-pick tag, then
@@ -1655,10 +2173,9 @@ if (typeof module !== 'undefined' && module.exports) {
 
         /** The 'AI pick' tag, placed right after the option's name. */
         function tagAiPick(option) {
-            const tag = document.createElement('span');
-            tag.className = 'turn-option-ai-pick';
-            tag.textContent = filledWords(words.ai_pick);
-            option.insertBefore(tag, option.querySelector('.turn-option-name').nextSibling);
+            option.insertBefore(
+                aiPickTag(words), option.querySelector('.turn-option-name').nextSibling
+            );
         }
 
         plain.forEach(({ candidate, index }) => {
@@ -1698,6 +2215,23 @@ if (typeof module !== 'undefined' && module.exports) {
             menu.appendChild(buildCounterControl(words, copies, aiPick, opts));
         });
 
+        // The craft that stands (tarmar-engine #77): its continuation is
+        // one option, whichever figure it names, and a continuation the menu
+        // withholds says why.
+        const standing = pending.magic && pending.magic.craft
+            && pending.magic.craft.standing;
+        if (standing && continuation.length) {
+            menu.appendChild(buildContinuation(standing, continuation, aiPick, opts, {
+                buildOption, tagAiPick,
+            }));
+        } else if (standing && !standing.offered) {
+            const withheld = document.createElement('p');
+            withheld.className = 'turn-craft-withheld';
+            withheld.dataset.working = standing.key;
+            withheld.textContent = filledWords(words.craft_withheld, { line: standing.line });
+            menu.appendChild(withheld);
+        }
+
         if (castable) {
             const magic = pending.magic || emptyMagic(pending);
             // Casts, not spells: the classic profile offers the same spell
@@ -1705,20 +2239,34 @@ if (typeof module !== 'undefined' && module.exports) {
             // row per offer, so counting spells would undercount the stage.
             // A cast only borrowing pays for, one with no plain cast on the
             // menu, is counted apart (#28); an affordable cast whose pushed
-            // copies borrow is already one of the casts ready.
-            const castKeys = new Set(casts.map(({ candidate }) => castKey(
-                candidate.spell_key, candidate.target_id
-            )));
-            const borrowingOnly = Array.from(borrows.keys())
-                .filter((key) => !castKeys.has(key)).length;
-            const casting = casts.length === 1
+            // copies borrow is already one of the casts ready. A True cast
+            // is a cast, counted with them (tarmar-studio #208); a working
+            // is crafted over turns, and is named apart, or alone.
+            const borrowingOnly = [[casts, borrows], [trueCasts.casts, trueCasts.borrows]]
+                .map(([paid, borrowed]) => {
+                    const castKeys = new Set(paid.map(({ candidate }) => castKey(
+                        candidate.spell_key, candidate.target_id
+                    )));
+                    return Array.from(borrowed.keys())
+                        .filter((key) => !castKeys.has(key)).length;
+                })
+                .reduce((sum, count) => sum + count, 0);
+            const casting = readyCasts.length === 1
                 ? filledWords(words.casts_ready_one)
-                : filledWords(words.casts_ready, { count: casts.length });
-            const ready = borrowingOnly
+                : filledWords(words.casts_ready, { count: readyCasts.length });
+            const paidOrBorrowed = borrowingOnly
                 ? filledWords(words.ready_borrowing, { ready: casting, count: borrowingOnly })
                 : casting;
+            // A caster with no cast to make, ready or by borrowing, and
+            // workings to begin reads of the workings alone.
+            let ready = paidOrBorrowed;
+            if (craftEntries.length) {
+                ready = (readyCasts.length || borrowingOnly)
+                    ? filledWords(words.ready_crafting, { ready: paidOrBorrowed })
+                    : filledWords(words.ready_crafting_only);
+            }
             const castOption = buildOption(
-                (casts[0] || borrowingCopies[0]).candidate.letter,
+                (readyCasts[0] || borrowingCopies[0] || craftEntries[0]).candidate.letter,
                 filledWords(words.cast_option),
                 filledWords(words.cast_advice, {
                     pool: poolWords(words, magic, { owing: false }), ready,
@@ -1727,8 +2275,9 @@ if (typeof module !== 'undefined' && module.exports) {
                 'cast'
             );
             castOption.classList.add('turn-option-cast');
-            const pushedCopies = Array.from(pushes.values()).flat();
-            if (casts.concat(pushedCopies, borrowingCopies)
+            const pushedCopies = Array.from(pushes.values()).flat()
+                .concat(Array.from(trueCasts.pushes.values()).flat());
+            if (readyCasts.concat(pushedCopies, borrowingCopies, craftEntries)
                 .some(({ index }) => index === aiPick)) {
                 tagAiPick(castOption);
             }
@@ -1759,9 +2308,7 @@ if (typeof module !== 'undefined' && module.exports) {
         }
 
         if (castable && opts.castOpen) {
-            panel.appendChild(
-                buildCastStage(pending, casts, pushes, borrows, aiPick, opts)
-            );
+            panel.appendChild(buildCastStage(pending, split, aiPick, opts));
         }
 
         const selected = opts.selectedIndex == null
@@ -2127,6 +2674,10 @@ if (typeof module !== 'undefined' && module.exports) {
         // The cast stage is open when the player has declared a cast and
         // not yet picked a spell or stood down (#250's cast gate).
         let castOpen = false;
+        // The tier the reader has picked in the craft control while the
+        // figure it names is still to be chosen (tarmar-studio #208), or
+        // null: {working, row}, as craftPickOf reads it.
+        let craftPick = null;
         // The hex picked for the selected option (#819, #866), or null.
         let destination = null;
         let showScoring = scoringPreference();
@@ -2198,12 +2749,22 @@ if (typeof module !== 'undefined' && module.exports) {
             if (again) { again.focus(); }
         }
 
-        /** A cast selection is dropped whenever the stage closes. */
+        /**
+         * A cast selection is dropped whenever the stage closes, and a tier
+         * picked in its craft control with it. The continuation of a craft
+         * that stands is an option of the menu, not of the stage
+         * (tarmar-studio #208), and stays selected.
+         */
         function closeCastStage() {
             castOpen = false;
-            const candidates = (pending && pending.candidates) || [];
-            const selected = selectedIndex == null ? null : candidates[selectedIndex];
-            if (selected && selected.spell_key) { selectedIndex = null; }
+            craftPick = null;
+            if (!pending || selectedIndex == null) { return; }
+            const { continuation } = splitCastCandidates(pending.candidates, pending.magic);
+            const selected = (pending.candidates || [])[selectedIndex];
+            if (selected && selected.spell_key
+                    && !continuation.some(({ index }) => index === selectedIndex)) {
+                selectedIndex = null;
+            }
         }
 
         function renderPanel() {
@@ -2219,6 +2780,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 isDm,
                 selectedIndex,
                 castOpen,
+                craftPick,
                 showScoring,
                 busy: actionBusy,
                 destination,
@@ -2234,6 +2796,25 @@ if (typeof module !== 'undefined' && module.exports) {
                 },
                 onSelect: (index) => {
                     selectedIndex = index === selectedIndex ? null : index;
+                    if (selectedIndex != null) {
+                        // The craft control stays open on the craft selected,
+                        // and closes for any other option (tarmar-studio #208).
+                        const { crafts } = splitCastCandidates(
+                            answering.candidates, answering.magic
+                        );
+                        const pick = craftPickOf(everyCasting(crafts), { selectedIndex });
+                        craftPick = pick.working ? pick : null;
+                    }
+                    destination = null;
+                    drawArena();
+                    renderPanel();
+                },
+                // The craft control's tier and figure (tarmar-studio #208):
+                // what it has open, and the option that names, when the menu
+                // holds one for it; picking an open tier again closes it.
+                onCraftPick: (pick, index) => {
+                    craftPick = pick;
+                    selectedIndex = index;
                     destination = null;
                     drawArena();
                     renderPanel();
@@ -2258,10 +2839,14 @@ if (typeof module !== 'undefined' && module.exports) {
                 // anchor takes back (tarmar-engine #30), only for an anchor.
                 // The mana a counter commits against the caster its target
                 // names (tarmar-engine #31), only for a counter.
+                // That a cast is a True cast (tarmar-engine #77), only for
+                // one: the menu holds the same spell's recipe cast beside it,
+                // and the server takes a choice without the mark as that.
                 // The hex only when one was picked (#819, #866): with none
                 // the option makes its own move, as it always has.
                 }, candidate.push_mana ? { push_mana: candidate.push_mana } : {},
                 candidate.borrow ? { borrow: true } : {},
+                candidate.true_cast ? { true_cast: true } : {},
                 candidate.anchor_target != null
                     ? { anchor_target: candidate.anchor_target } : {},
                 candidate.counter_mana != null
@@ -2297,6 +2882,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if (!pending || pending.combatant_id !== wasPendingFor) {
                 selectedIndex = null;
                 castOpen = false;
+                craftPick = null;
                 destination = null;
             }
             drawArena();
