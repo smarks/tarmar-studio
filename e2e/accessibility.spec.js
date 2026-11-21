@@ -28,9 +28,7 @@ const {
 } = require('./fixtures');
 const { uniqueName } = require('./unique-name');
 const { readDjangoShell } = require('./django');
-
-//: The rule sets the review used, and the ones WCAG 2.1 AA is made of.
-const WCAG_AA = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
+const { violations, describe } = require('./axe');
 
 //: The three widths the review walked, and the three this must hold at.
 const VIEWPORTS = [
@@ -38,33 +36,6 @@ const VIEWPORTS = [
     { name: 'laptop', width: 1024, height: 768 },
     { name: 'phone', width: 390, height: 844 },
 ];
-
-/**
- * Every wcag2a/aa + wcag21a/aa violation on the page as it stands.
- * @param {import('@playwright/test').Page} page
- * @returns {Promise<Array>} axe's violations, worst first as axe orders them.
- */
-async function violations(page) {
-    const results = await new AxeBuilder({ page }).withTags(WCAG_AA).analyze();
-    return results.violations;
-}
-
-/**
- * A failure message that names what broke rather than only a count.
- * @param {Array} found - axe violations.
- * @returns {string}
- */
-function describe(found) {
-    return found
-        .map((violation) => {
-            const where = violation.nodes
-                .map((node) => node.target.join(' '))
-                .slice(0, 4)
-                .join(', ');
-            return `${violation.id} [${violation.impact}] x${violation.nodes.length}: ${where}`;
-        })
-        .join('\n');
-}
 
 test.describe('the character sheet is readable by assistive technology', () => {
     test('the editor has no axe violations at any of the three widths', async ({ page }) => {
@@ -387,11 +358,8 @@ test.describe('the way from signing in to the journal (issues #786, #827, #828, 
             await page.setViewportSize({ width: viewport.width, height: viewport.height });
             await page.goto(sheetUrl);
             await expect(page.locator('form.play-with-gm')).toBeVisible();
-            const found = await new AxeBuilder({ page })
-                .withTags(WCAG_AA)
-                .include('form.play-with-gm')
-                .analyze();
-            expect(found.violations, `${viewport.name}:\n${describe(found.violations)}`).toEqual([]);
+            const found = await violations(page, { include: 'form.play-with-gm' });
+            expect(found, `${viewport.name}:\n${describe(found)}`).toEqual([]);
         }
     });
 });
