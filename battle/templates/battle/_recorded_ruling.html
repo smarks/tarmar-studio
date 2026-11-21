@@ -1,0 +1,35 @@
+{% load local_time %}
+{% comment %}
+One recorded ruling for a single figure, on its panel: a magic bound lifted
+(battle/_magic_bounds.html, issue #37) or a working granted
+(battle/_working_grants.html, tarmar-studio #208). Every viewer reads the
+line and when it was ruled; the fight's Game Master (``ruling.can_rule``) gets
+the form that undoes it, which posts the figure, what was ruled for it and an
+empty flag back to the ruling's endpoint.
+
+Every entry's undo button carries the same word, so each is named to a screen
+reader by its own line too (``entry.undo_label``,
+``battle.views.recorded_ruling``).
+
+Given by the panel that includes it: ``ruling`` (the panel, for ``can_rule``
+and ``fields.combatant``), ``entry`` (``battle.views.recorded_ruling``),
+``subject`` and ``subject_field`` (what was ruled and the field that names
+it), ``flag_field``, ``undo_url``, ``undo_button``, ``entry_class`` (the
+row's class, and the stem of its line's), ``form_class``, ``focus_prefix``,
+and, for a row with something to add beneath its line, ``note`` and
+``note_class``.
+{% endcomment %}
+<li class="{{ entry_class }}">
+    <span class="{{ entry_class }}-line">{{ entry.line }}, {% local_time entry.at "j M Y, H:i" %}</span>
+    {% if ruling.can_rule %}
+    <form method="post" action="{{ undo_url }}" class="{{ form_class }}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <input type="hidden" name="{{ ruling.fields.combatant }}" value="{{ entry.combatant_id }}">
+        <input type="hidden" name="{{ subject_field }}" value="{{ subject }}">
+        <input type="hidden" name="{{ flag_field }}" value="">
+        <button type="submit" class="battle-button battle-button-quiet" data-focus-key="{{ focus_prefix }}-{{ entry.combatant_id }}-{{ subject }}" aria-label="{{ entry.undo_label }}">{{ undo_button }}</button>
+    </form>
+    {% endif %}
+    {% if note %}<span class="{{ note_class }}">{{ note }}</span>{% endif %}
+</li>

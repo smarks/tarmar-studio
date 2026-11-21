@@ -33,6 +33,8 @@ on. Reaching level N therefore costs **N(N+1)/2** points in total:
 **Exception:** the **Arcane** skill (True Magic) costs **double** — level 1
 costs 2 points, level N costs 2×N more, so reaching level N costs **N(N+1)**
 points in total.
+The Arcane skill is learned only by invitation (see
+[True Magic](../../../magic/true-magic)).
 
 (See [Prior Experience](../../prior-experience) for where the points come
 from.) A level V skill (+5) is worth as much as a peak attribute, and climbing

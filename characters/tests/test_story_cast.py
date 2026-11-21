@@ -24,10 +24,11 @@ from battle.tests.magic_fixtures import (
     seated_rules,
 )
 from characters.equipment import get_item
-from characters.magic import cast_in_story
-from characters.refusal_words import game_master_call_note
+from characters.magic import cast_in_story, castable_spells
+from characters.refusal_words import game_master_call_note, refusal_words
 from characters.services import CharacterChangeError
 from characters.skill_checks import injury_penalty
+from characters.tests.fixed_refusals import with_fixed_refusals
 from characters.views.mechanics import CAST_HISTORY_FIELD
 from common.rolling import dice_total_range
 from common.test_helpers import BaseTestCase, FacesRoller, create_character
@@ -51,6 +52,10 @@ RULES = replace(
 #: A level-3 INT spell that must hit, and a WIS spell that need not.
 BOLT = SPELLS["lightning_bolt"]
 HEAL = SPELLS["heal"]
+#: A spell that is learned and never cast (tarmar-studio#208).
+COUNTER = SPELLS["counter_1"]
+#: Every catalog spell that can be cast: all but the generic counters.
+CAST_KEYS = sorted(key for key, spell in SPELLS.items() if not spell.generic_counter)
 
 #: Where the board's seat answers whether the character is fighting.
 LIVE_FIGHT = "characters.magic.seated_in_a_live_fight"
@@ -221,6 +226,22 @@ class PlayerHeldToTheRulesTest(StoryCastTestCase):
             cast_in_story(self.caster, "wish", is_game_master=True)
         self.caster.intelligence = None
         self.assert_refused("Intelligence is not recorded yet", is_game_master=True)
+
+    @with_fixed_refusals
+    def test_nobody_casts_a_counter_even_one_on_the_record(self):
+        # tarmar-studio#208: learned, never cast. A Game Master's override is
+        # a cast past a rule, and there is no cast here to make.
+        self.assertTrue(COUNTER.generic_counter)
+        self.caster.spells = {**self.caster.spells, COUNTER.key: 1}
+        never_cast = refusal_words().magic.never_cast.format(spell=COUNTER.name)
+        self.assertIn(COUNTER.name, never_cast)
+        for is_game_master in (False, True):
+            with self.subTest(is_game_master=is_game_master):
+                with self.assertRaises(CharacterChangeError) as refused:
+                    self.cast(COUNTER, is_game_master=is_game_master)
+                self.assertEqual(str(refused.exception), never_cast)
+                self.assertEqual(self.caster.mana_spent, 0)
+                self.assertEqual(self.caster.dice_log, "")
 
 
 class GameMasterOverridesTest(StoryCastTestCase):
@@ -414,8 +435,11 @@ class CastControlOnTheSheetTest(BaseTestCase):
 
     def test_the_control_lists_the_castable_spells(self):
         owner = self.create_user("control_caster")
+        # A Counter on the record is listed for nobody (tarmar-studio#208).
         caster = create_character(
-            owner, name="Control Caster", spells={HEAL.key: 1, BOLT.key: 0}
+            owner,
+            name="Control Caster",
+            spells={HEAL.key: 1, BOLT.key: 0, COUNTER.key: 1},
         )
         url = reverse("characters:edit", args=[caster.pk])
         self.login_as(owner)
@@ -427,8 +451,18 @@ class CastControlOnTheSheetTest(BaseTestCase):
         self.login_as(self.create_dm())
         page = self.client.get(url).content.decode()
         options = re.findall(r'<option value="(\w+)">[^<]*mana, ', page)
-        self.assertEqual(sorted(options), sorted(SPELLS))
+        self.assertEqual(sorted(options), CAST_KEYS)
+        self.assertNotIn(COUNTER.key, options)
+        self.assertLess(len(CAST_KEYS), len(SPELLS))
         self.assertIn("rolled at the table for the cast", page)
+
+    def test_a_player_who_knows_only_a_counter_has_no_control(self):
+        owner = self.create_user("counter_only_caster")
+        caster = create_character(owner, name="Counter Only", spells={COUNTER.key: 1})
+        self.assertEqual(castable_spells(caster, is_game_master=False), [])
+        self.login_as(owner)
+        page = self.client.get(reverse("characters:edit", args=[caster.pk]))
+        self.assertNotContains(page, 'id="cast-spell"')
 
     def test_a_character_with_no_spell_has_no_control(self):
         owner = self.create_user("no_spell_caster")

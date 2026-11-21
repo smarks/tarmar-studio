@@ -1,0 +1,61 @@
+{% comment %}
+A Game Master's grant of a working to a figure (tarmar-studio #208). A
+canon's True Magic may give a working an effect that needs a grant: only a
+figure a Game Master has named the working for may craft it.
+
+Rendered from the battle's record (``Battle.workings_granted_json``), the one
+source of truth, so the reload a post causes is the whole update and nothing
+here appears or vanishes on a timer. Every viewer reads each grant with who
+granted it and when, as the battle log tells them
+(battle/_recorded_ruling.html, the row a lifted bound shares); only a Game
+Master running this fight (``runs_the_seats``) gets the forms, and the
+endpoint refuses anyone else. The grant form offers the figures who craft
+workings and the effects that need a grant, and takes any tier: a grant past
+the figure's tier cap is recorded, and its line says it waits on Channel
+being lifted. Included
+by the battle page and by the GM chat's Battle tab; each form names the page
+it came from (``next``). The battle payload carries this partial too
+(``rulings_html``), and battle.js puts it in place when ``data-record``
+changes. The words are configuration (``battle.wording``,
+config/battle-rulings.toml).
+{% endcomment %}
+{% url 'battle:working-grants' battle.pk as working_grants_url %}
+<div class="battle-panel battle-working-grants-panel" id="{{ working_grants.panel_id }}" data-record="{{ working_grants.record }}">
+    <h2>{{ working_grants.words.heading }}</h2>
+    {% if working_grants.grants %}
+    <ul class="working-grants-granted">
+        {% for grant in working_grants.grants %}
+        {% include "battle/_recorded_ruling.html" with ruling=working_grants entry=grant subject=grant.working subject_field=working_grants.fields.working flag_field=working_grants.fields.granted undo_url=working_grants_url undo_button=working_grants.words.withdraw_button entry_class="working-grant" form_class="working-grant-withdraw-form" focus_prefix="working-withdraw" note=grant.waits note_class="working-grant-waits" %}
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="working-grants-line">{{ working_grants.words.none_granted }}</p>
+    {% endif %}
+    {% if working_grants.can_rule %}
+    {% if working_grants.grants %}<p class="working-grants-note">{{ working_grants.words.withdraw_note }}</p>{% endif %}
+    {% if working_grants.figures %}
+    <form method="post" action="{{ working_grants_url }}" class="working-grant-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <input type="hidden" name="{{ working_grants.fields.granted }}" value="true">
+        <label>
+            <span class="sr-only">{{ working_grants.words.figure_label }}</span>
+            <select name="{{ working_grants.fields.combatant }}">
+                {% for figure in working_grants.figures %}<option value="{{ figure.id }}">{{ figure.name }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>
+            <span class="sr-only">{{ working_grants.words.effect_label }}</span>
+            <select name="{{ working_grants.fields.effect }}">
+                {% for effect in working_grants.effects %}<option value="{{ effect.key }}">{{ effect.label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label class="working-grant-tier">
+            {{ working_grants.words.tier_label }}
+            <input type="number" name="{{ working_grants.fields.tier }}" value="1" step="1" required>
+        </label>
+        <button type="submit" class="battle-button battle-button-outline" data-focus-key="working-grant">{{ working_grants.words.grant_button }}</button>
+    </form>
+    {% endif %}
+    {% endif %}
+</div>

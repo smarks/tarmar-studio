@@ -64,7 +64,10 @@ DEFAULT_HELP = {
         "Unspent points from earned experience. Allocate via the + button on "
         "any skill. There is no maximum level: each level costs one point more "
         "than the last (1, 3, 6, 10, 15, 21, ... points in total), and Arcane "
-        "costs double all the way up."
+        "costs double all the way up. "
+        # The configured sentence for the skills only a Game Master starts
+        # (tarmar-studio #208), under the fixed words, with the canon's skill.
+        "help_text.game_master_started_skills Arcane"
     ),
     "skill_check": (
         "Roll 2d6 + the governing attribute's modifier + your skill level against "
@@ -123,6 +126,7 @@ class DefaultCanonTextTest(SimpleTestCase):
         self.enterContext(seated_skill_rules())
         self.enterContext(seated_equipment_rules())
 
+    @with_fixed_refusals
     def test_each_built_help_entry_is_the_pinned_text(self) -> None:
         for key, expected in DEFAULT_HELP.items():
             with self.subTest(key=key):
@@ -130,6 +134,17 @@ class DefaultCanonTextTest(SimpleTestCase):
         for clause in DEFAULT_LOCATION_CLAUSES:
             with self.subTest(clause=clause):
                 self.assertIn(clause, help_text()["location"])
+
+    def test_help_built_with_other_words_is_not_served_for_these(self) -> None:
+        # The help is cached with the rules it was built from; the configured
+        # sentence is a setting, so help built with one wording must not
+        # answer for another while the same rules stay seated.
+        configured = help_text()["free_skill_points"]
+        with with_fixed_refusals:
+            fixed = help_text()["free_skill_points"]
+        self.assertEqual(fixed, DEFAULT_HELP["free_skill_points"])
+        self.assertNotEqual(configured, fixed)
+        self.assertEqual(help_text()["free_skill_points"], configured)
 
     @with_fixed_refusals
     def test_each_reason_is_the_pinned_text(self) -> None:
@@ -230,9 +245,26 @@ class InventedRulesTest(SimpleTestCase):
             help_text()["movement"],
         )
         # The invented skill rules charge Sorcery, not Arcane, a multiple.
+        self.assertIn("... points in total).", help_text()["free_skill_points"])
+        self.assertNotIn("Arcane", help_text()["free_skill_points"])
+
+    @with_fixed_refusals
+    def test_the_help_names_the_skills_only_a_game_master_starts(self) -> None:
+        # tarmar-studio #208: the canon's list, in the configured sentence.
         self.assertTrue(
-            help_text()["free_skill_points"].endswith("... points in total).")
+            help_text()["free_skill_points"].endswith(
+                "... points in total). "
+                "help_text.game_master_started_skills Sorcery, Fate"
+            ),
+            help_text()["free_skill_points"],
         )
+
+    def test_a_canon_that_leaves_no_skill_to_a_game_master_says_nothing(self) -> None:
+        nobody_invited = replace(INVENTED_SKILL_RULES, game_master_started=())
+        with seated_skill_rules(nobody_invited):
+            self.assertTrue(
+                help_text()["free_skill_points"].endswith("... points in total).")
+            )
 
     def test_an_arcane_multiple_is_named(self) -> None:
         # The default rules, the ones that govern Arcane, at other multiples.

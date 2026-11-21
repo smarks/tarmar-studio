@@ -7,6 +7,8 @@
  *     more than 15 points in a skill imports cleanly.
  *   - issue #154: the Arcane skill costs double, so its points buy half as
  *     much level as any other skill's.
+ *   - tarmar-studio #208: Arcane comes by invitation. A player cannot start
+ *     it; a Game Master can, and the player then raises it.
  *
  * The page no longer computes levels in JavaScript — characters/skills.py owns
  * the ladder and every response carries the rendered level string — so this
@@ -21,8 +23,10 @@
  */
 
 const {
-    test, expect, loginAs, seedCharacterFromExport, TEST_USER,
+    test, expect, loginAs, seedCharacterFromExport, submitPassphrase, TEST_USER, TEST_ADMIN,
 } = require('./fixtures');
+const { startCoverage } = require('./coverage');
+const { refusal } = require('./refusals');
 const { loadedSkillRules } = require('./skill-rules');
 
 const ROMAN = [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
@@ -170,5 +174,63 @@ test.describe('Skill level ladder', () => {
         await expect(row.locator('.skill-level')).toHaveText(levelText(points + 1, arcane.multiplier));
         await expect(row.locator('.skill-level')).toHaveText('Level II');
         await expect(row.locator('.skill-points')).toHaveText(`(${points + 1} pts)`);
+    });
+
+    test('a player cannot start a skill only a Game Master starts, and a Game Master can (#208)', async ({ page, browser }) => {
+        // The skill is the loaded canon's: Arcane, on the public pages.
+        const rules = loadedSkillRules();
+        const [invited] = rules.game_master_started;
+        test.skip(invited === undefined, 'the loaded canon leaves no skill to a Game Master to start');
+        await loginAs(page, TEST_USER);
+        const characterId = await seedCharacterFromExport(page, TEST_USER, {
+            ...LADDER_CHARACTER,
+            data: { ...LADDER_CHARACTER.data, skills: { sword: 3 }, free_skill_points: 2 },
+        });
+        const row = page.locator(`.skill-row[data-skill="${invited}"]`);
+        // The type-ahead writes a skill's name in title case; matched without
+        // regard to case, so the spec types no spelling of it.
+        const suggested = page.locator(`#skill-name-suggestions option[value="${invited}" i]`);
+
+        // The type-ahead suggests the skills a track can grant and not this
+        // one, and typing it is refused in the configured words: nothing is
+        // spent and no row appears.
+        await expect(page.locator('#skill-name-suggestions option').first()).toBeAttached();
+        await expect(suggested).toHaveCount(0);
+        await page.locator('#new-skill-name').fill(invited);
+        await page.locator('#add-skill-btn').click();
+        await expect(page.locator('.notice .notice-text').first()).toHaveText(
+            refusal('characters', 'services', 'game_master_started_skill', { skill: invited })
+        );
+        await expect(page.locator('#free-points')).toHaveText('2');
+        await expect(row).toHaveCount(0);
+
+        // A Game Master starts it with the same control, and the history
+        // names it as his.
+        const context = await browser.newContext();
+        try {
+            const gameMaster = await context.newPage();
+            await startCoverage(gameMaster);
+            await submitPassphrase(gameMaster);
+            await loginAs(gameMaster, TEST_ADMIN);
+            await gameMaster.goto(`/tarmar/characters/${characterId}/`);
+            await gameMaster.locator('#new-skill-name').fill(invited);
+            await gameMaster.locator('#add-skill-btn').click();
+            const started = gameMaster.locator(`.skill-row[data-skill="${invited}"]`);
+            await expect(started.locator('.skill-points')).toHaveText('(1 pts)');
+            await expect(gameMaster.locator('#recent-changes-rows')).toContainText(
+                `${invited} ${rules.game_master_started_note}`
+            );
+        } finally {
+            await context.close();
+        }
+
+        // The player now holds it, so the next point is theirs to spend.
+        await page.reload();
+        await expect(row.locator('.skill-points')).toHaveText('(1 pts)');
+        await expect(page.locator('#free-points')).toHaveText('1');
+        await row.locator('.allocate-btn').click();
+        await expect(row.locator('.skill-points')).toHaveText('(2 pts)');
+        await expect(page.locator('#free-points')).toHaveText('0');
+        await expect(suggested).toHaveCount(1);
     });
 });

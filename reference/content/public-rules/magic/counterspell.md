@@ -5,3 +5,5 @@ Mages can attempt to counter enemy spells by investing their own mana and engagi
 If the caster wins, the spell goes through. If the defender wins, the spell is countered—but the caster may attempt again next turn, escalating the duel. Only the caster can escalate; the defender gets one chance to stop each casting.
 
 These duels can drain both parties quickly, and a failed Control Roll during escalation can trigger Runaway.
+
+You counter best what you know: the better you know the spell being cast, the stronger your counter. Against a spell you have not studied, the general answer is the [Counter](../spell-descriptions) spell.

@@ -6,4 +6,6 @@ Every character has a Mana Pool, built from the **Spell Points** earned through 
 
 Spells themselves are learned with skill points: see [Spell Mastery](spell-mastery). Level I in a spell lets you cast it, paying mana equal to the spell's level.
 
+A few mages are invited past recipes into [True Magic](true-magic).
+
 Mana is completely separate from other attributes. A clever weakling may have vast magical reserves; a brilliant scholar may have almost none.

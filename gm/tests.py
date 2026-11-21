@@ -344,7 +344,8 @@ class GMServiceTest(TestCase):
             "magic_rules",
             "planning_rules",
             "_check_words",
-            "help_text",
+            # The sheet's help: the cache behind characters.help_text.help_text.
+            "_help_by_wording",
         ):
             self.assertIn(name, misses)
         self.assertEqual(

@@ -138,6 +138,13 @@ class Battle(models.Model):
     # The one source of truth; ``battle.magic_bounds`` reads it, and only a
     # Game Master changes it (``battle.services.set_magic_bounds_lifted``).
     magic_bounds_lifted_json = models.JSONField(default=list, blank=True, db_default=[])
+    # A Game Master's grant of a working to a figure (tarmar-studio #208): a
+    # working whose effect needs a grant is crafted only by a figure named
+    # for it. A list of ``{"combatant_id", "working", "by", "by_id", "at"}``,
+    # ``[]`` for none. The one source of truth; ``battle.working_grants``
+    # reads it, and only a Game Master changes it
+    # (``battle.services.set_working_granted``).
+    workings_granted_json = models.JSONField(default=list, blank=True, db_default=[])
     # While ``status`` is ``awaiting``: which combatant the turn is paused
     # on, plus the legal candidates (policy scores included, as advice) that
     # were computed when the engine paused — so the player's page can render
@@ -149,9 +156,10 @@ class Battle(models.Model):
     # Player choices recorded for the in-progress turn, keyed by combatant id
     # (as a string — JSON object keys): ``{"7": {"letter": "j",
     # "target_id": 3, "spell_key": "", "push_mana": 0, "borrow": false,
-    # "anchor_target": null, "counter_mana": null}}`` (``push_mana`` since
-    # #960, ``borrow`` since tarmar-engine #28, ``anchor_target`` since
-    # tarmar-engine #30, ``counter_mana`` since tarmar-engine #31; a choice
+    # "anchor_target": null, "counter_mana": null, "true_cast": false}}``
+    # (``push_mana`` since #960, ``borrow`` since tarmar-engine #28,
+    # ``anchor_target`` since tarmar-engine #30, ``counter_mana`` since
+    # tarmar-engine #31, ``true_cast`` since tarmar-engine #77; a choice
     # without them is the plain option). Consumed by the
     # deterministic turn replay and cleared when the turn commits.
     turn_inputs_json = models.JSONField(default=dict, blank=True)

@@ -55,6 +55,7 @@ from tarmar_engine.classic.options import Option as ClassicOption
 from tarmar_engine.classic.options import spec as classic_spec
 from tarmar_engine.classic.state import GameState
 from tarmar_engine.classic.state import IllegalAction as ClassicIllegalAction
+from tarmar_engine.magic import SpellEffectKind
 from tarmar_engine.movement import RUN_FATIGUE_COST, SPRINT_FATIGUE_COST
 from tarmar_engine.policy import (
     ANCHOR_OPTION,
@@ -64,13 +65,19 @@ from tarmar_engine.policy import (
     weapons_in_reach,
 )
 from tarmar_engine.resolution import DIE_FACES
-from tarmar_engine.spells import get_spell
+from tarmar_engine.spells import Spell
 from tarmar_engine.state import BattleState, CombatantState
 
-from . import magic_bounds, profiles
-from .magic_rules import magic_rules, totals_in_words
+from . import magic_bounds, profiles, workings
+from .magic_rules import loaded_spell, magic_rules, totals_in_words
 from .persistence import TARMAR_PROFILE
-from .wording import ClassicMenuWords, TarmarMenuWords, TurnMenuWords, words
+from .wording import (
+    ClassicMenuWords,
+    TarmarMenuWords,
+    TrueMagicWords,
+    TurnMenuWords,
+    words,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,11 @@ def _tarmar() -> TarmarMenuWords:
 def _classic() -> ClassicMenuWords:
     """A classic figure's own menu words (issue #90)."""
     return words().classic_menu
+
+
+def _true_magic() -> TrueMagicWords:
+    """The menu's words for a True cast and a craft (tarmar-studio #208)."""
+    return words().true_magic
 
 
 #: The options that walk the engine's own route toward their target and say
@@ -309,7 +321,7 @@ def _anchor_line(
     rules = magic_rules().runaway
     if target is None or target.runaway is None or rules is None:
         return tarmar.anchor, ""
-    spell = get_spell(target.runaway.spell_key)
+    spell = loaded_spell(target.runaway.spell_key)
     if target.combatant_id == actor.combatant_id:
         roll = rules.self_anchor
         return (
@@ -378,6 +390,135 @@ def _counter_line(mana: int, caster: CombatantState | None) -> tuple[str, str]:
         tarmar.counter.format(name=name, mana=mana),
         tarmar.counter_cost.format(mana=mana, name=name),
     )
+
+
+def with_drain(cost: str, actor: CombatantState, spell: Spell, push_mana: int) -> str:
+    """A True cast's or a craft's cost, and what the casting drains from its
+    caster when it goes off (tarmar-engine #77).
+
+    The drain is the engine's count (:func:`battle.workings.casting_drain`);
+    a casting that drains nothing, an unpushed True cast, keeps its cost as
+    it is.
+
+    Args:
+        cost: The cost in words so far.
+        actor: The caster.
+        spell: The spell True cast, or the working crafted.
+        push_mana: The mana pushed past the spell's cost.
+    """
+    drain = workings.casting_drain(actor, spell, push_mana)
+    if not drain.amount:
+        return cost
+    return _true_magic().drains.format(
+        cost=cost, drain=drain.amount, pool=drain.pool, left=drain.left
+    )
+
+
+def craft_continuation_line(craft: workings.CraftReading) -> str:
+    """ "Go on crafting Sear (tier 2): turn 3 of 6": the continuation of a
+    craft that stands, naming its working and which of its turns the next
+    craft action is, for the menu's option and the cast stage alike.
+
+    Args:
+        craft: The standing craft, as :func:`battle.workings.reading` reads it.
+    """
+    return _true_magic().craft_continue.format(
+        working=craft.working.name, turn=craft.next_turn, turns=craft.turns
+    )
+
+
+def _craft_naming(line: str, kind: SpellEffectKind | None, aimed: str) -> str:
+    """A craft action's line with the figure it names, said by what the
+    working does when it goes off: aimed at the one it damages, restoring the
+    one it heals, or named for an effect the Game Master describes.
+
+    Args:
+        line: The craft action's line.
+        kind: The working's effect, ``None`` for a narrated one.
+        aimed: The figure's name.
+    """
+    said = _true_magic()
+    if kind is SpellEffectKind.DAMAGE:
+        sentence = said.craft_aimed
+    elif kind is SpellEffectKind.HEALING:
+        sentence = said.craft_healing
+    else:
+        sentence = said.craft_named
+    return sentence.format(line=line, aimed=aimed)
+
+
+def _craft_line(
+    actor: CombatantState, candidate: Candidate, aimed: str
+) -> tuple[str, str]:
+    """A craft option's sentence and cost (tarmar-engine #77).
+
+    With no craft standing the option begins one: the working, the figure it
+    names, the mana it gathers over its turns and any pushed into it, and
+    what borrowing would borrow as things stand. With a craft standing it is
+    that craft's continuation: which of its turns this is, and the share of
+    mana this turn gathers, borrowed where the craft borrows and the pool
+    falls short, and lost where it does not. Either says what the working
+    drains when it goes off. Every number is the engine's
+    (:mod:`battle.workings`).
+
+    Args:
+        actor: The figure choosing.
+        candidate: The craft option, whose ``spell_key`` is the working's.
+        aimed: The name of the figure the option names, or "".
+
+    Returns:
+        ``(plain, cost)``, as :func:`_plain_line` gives them.
+    """
+    said, tarmar = _true_magic(), _tarmar()
+    standing = actor.crafting
+    craft = workings.reading(
+        standing
+        if standing is not None
+        else workings.not_yet_begun(
+            candidate.spell_key,
+            push_mana=candidate.push_mana,
+            borrow=candidate.borrow,
+        )
+    )
+    working = craft.working
+    if standing is None:
+        plain = said.craft_begin.format(working=working.name)
+    else:
+        plain = craft_continuation_line(craft)
+    if aimed:
+        plain = _craft_naming(plain, craft.kind, aimed)
+    if standing is not None:
+        share = workings.share_due(standing)
+        cost = (
+            said.craft_share.format(
+                share=share, gathered=craft.gathered, mana=craft.mana
+            )
+            if share
+            else said.craft_no_share.format(gathered=craft.gathered, mana=craft.mana)
+        )
+        # How the engine will pay the share, which it has no public call for
+        # (:func:`mana_short`).
+        short = mana_short(actor, share)
+        if short and standing.borrow:
+            cost = said.craft_share_borrowed.format(cost=cost, owed=short)
+        elif short:
+            cost = said.craft_share_unpaid.format(cost=cost, mana_left=actor.mana)
+        return plain, with_drain(cost, actor, working, standing.push_mana)
+    if candidate.push_mana:
+        plain = tarmar.pushing.format(line=plain, pushed=candidate.push_mana)
+        cost = said.craft_push_cost.format(
+            total=craft.mana,
+            level=working.level,
+            pushed=candidate.push_mana,
+            turns=craft.turns,
+        )
+    else:
+        cost = said.craft_cost.format(mana=craft.mana, turns=craft.turns)
+    if candidate.borrow:
+        owed = borrowed_mana(actor, candidate)
+        plain = tarmar.borrowing.format(line=plain, owed=owed)
+        cost = said.craft_borrowing_cost.format(cost=cost, owed=owed)
+    return plain, with_drain(cost, actor, working, candidate.push_mana)
 
 
 def _plain_line(
@@ -477,7 +618,7 @@ def _plain_line(
     elif option in ("g", "p"):
         plain = shared.stand_up
     elif option in ("h", "r") and candidate.spell_key:
-        spell = get_spell(candidate.spell_key)
+        spell = loaded_spell(candidate.spell_key)
         if not candidate.escalate:
             plain = _cast_line(spell.name, aimed)
         elif aimed:
@@ -509,6 +650,14 @@ def _plain_line(
             # the engine marks it, for a player; the opposed roll comes again
             # if a counter meets it.
             cost = tarmar.pressing_cost.format(cost=cost)
+        if candidate.true_cast:
+            # The same spell cast as a True cast (tarmar-engine #77): the
+            # engine offers it under the cast's own letter, its Channel by
+            # the True skill, and it drains its caster for what it pushes.
+            plain = _true_magic().as_true_cast.format(line=plain)
+            cost = with_drain(cost, actor, spell, candidate.push_mana)
+    elif option == actions.CRAFT_OPTION and candidate.spell_key:
+        plain, cost = _craft_line(actor, candidate, aimed)
     elif option == ANCHOR_OPTION:
         plain, cost = _anchor_line(actor, target)
     elif option == actions.COUNTER_OPTION and candidate.counter_mana is not None:
@@ -617,6 +766,12 @@ class DescribedCandidate(Candidate):
         borrowed: The mana a borrowing cast borrows (tarmar-engine #28,
             :func:`borrowed_mana`), for the battle screen's borrow control
             to name; 0 for every other option, and then not in the payload.
+            For a borrowing craft (tarmar-engine #77) it is what the craft
+            would borrow over the turns it has still to take, as things
+            stand: for one not yet begun its whole mana less the pool, and
+            for the continuation of one that stands the mana still to
+            gather less the pool. That is not the ``owed`` a continuation's
+            cost names, which is what this turn's share alone borrows.
         refused: An option the engine's menu offers and its own verbs refuse
             to carry out here (review of #146): drawn but not selectable, and
             refused when chosen; in the payload under :data:`REFUSED` only
@@ -676,6 +831,16 @@ def mana_short(actor: CombatantState, cost: int) -> int:
     borrows exactly this when the cast pays (``TurnRunner.cast_spell``,
     whose action payload's ``borrowed`` ``battle.tests.test_magic_seating``
     compares it to). 0 when the pool covers the cost.
+
+    A craft pays share by share (tarmar-engine #77), so for the continuation
+    of a craft ``cost`` is the share its next turn gathers
+    (:func:`_craft_line`), and for all the craft has still to gather it is
+    that mana (:func:`borrowed_mana`). The engine has no public call for
+    either: its craft action borrows exactly this of a share where the craft
+    borrows, and where it does not, and this is above 0, takes nothing and
+    loses the working unpaid (``TurnRunner.craft_working``).
+    ``battle.tests.test_true_magic_menu`` plays the turns and compares both
+    readings with the craft actions' ``borrowed`` and the working lost.
     """
     return max(0, cost - actor.mana)
 
@@ -683,11 +848,22 @@ def mana_short(actor: CombatantState, cost: int) -> int:
 def borrowed_mana(actor: CombatantState, candidate: Candidate) -> int:
     """The mana a borrowing cast borrows: its whole cost less the pool.
 
-    0 for a cast that does not borrow.
+    A craft borrows share by share (tarmar-engine #77), so for a craft this
+    is what the craft would borrow as things stand: for one not yet begun its
+    whole mana less the pool, and for the continuation of one that stands
+    the mana it has still to gather less the pool.
+
+    0 for a cast or a craft that does not borrow.
     """
     if not candidate.borrow or not candidate.spell_key:
         return 0
-    return mana_short(actor, get_spell(candidate.spell_key).level + candidate.push_mana)
+    standing = actor.crafting
+    if candidate.letter == actions.CRAFT_OPTION and standing is not None:
+        craft = workings.reading(standing)
+        return mana_short(actor, craft.mana - craft.gathered)
+    return mana_short(
+        actor, loaded_spell(candidate.spell_key).level + candidate.push_mana
+    )
 
 
 def _base_fields(candidate: Candidate) -> dict:

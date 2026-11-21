@@ -625,12 +625,18 @@ class LocationRow(TableRow):
 
 
 #: The word between alternatives the model reads: natural totals ("17 or
-#: 18", :func:`battle.magic_rules.totals_in_words`) and the origins left to
-#: the Game Master. The prompt's own (``gm.engine`` re-exports it), not the
+#: 18", :func:`battle.magic_rules.totals_in_words`), the origins left to the
+#: Game Master, and the gaits a load or armour leaves
+#: (:func:`characters.equipment.list_gaits`, which the sheet shares). The
+#: prompt's own (``gm.engine`` re-exports it), not the
 #: battle page's configured ``common.or_word``: the offline CLI imports the
 #: prompt with no Django, and so no settings to read that word from
 #: (``GMServiceTest.test_engine_imports_without_django``).
 PROMPT_OR_WORD = "or"
+
+#: The word before the last of a list the model reads (the defender's levels
+#: of familiarity in a counter, #208), the prompt's own for the same reason.
+PROMPT_AND_WORD = "and"
 
 
 @dataclass(frozen=True)

@@ -441,7 +441,23 @@ class SpellAffinityDocTest(SimpleTestCase):
     the doc says WIS) was the mismatch that motivated this guard; it is
     fixed as of tarmar-engine v0.9.2, and every catalog spell — Shield
     included — now goes through the plain equality assertion below.
+
+    The Counter rungs (tarmar-engine v0.9.22) are one row of the page,
+    "Counter" at levels "1–5": a rung is looked up by its name less its
+    number, at a level inside the row's range. Its attribute is recorded and
+    never rolled, and is held to the page all the same.
     """
+
+    @staticmethod
+    def _documented_levels(level_cell: str) -> range | None:
+        """The levels a Lvl cell covers: "2" is level 2, "1–5" levels 1 to 5;
+        ``None`` for a cell that names no level."""
+        levels = re.fullmatch(r"(\d+)(?:–(\d+))?", level_cell)
+        if levels is None:
+            return None
+        lowest = int(levels.group(1))
+        highest = int(levels.group(2) or lowest)
+        return range(lowest, highest + 1)
 
     @staticmethod
     def _documented_affinity(school: str, base_name: str, level: int) -> str:
@@ -458,8 +474,8 @@ class SpellAffinityDocTest(SimpleTestCase):
             name = re.sub(r"\s*\(.*\)$", "", cells[0])
             if name != base_name:
                 continue
-            level_match = re.match(r"\d+", cells[1])
-            if level_match is None or int(level_match.group()) != level:
+            levels = SpellAffinityDocTest._documented_levels(cells[1])
+            if levels is None or level not in levels:
                 continue
             return cells[2]
         raise AssertionError(
@@ -467,9 +483,23 @@ class SpellAffinityDocTest(SimpleTestCase):
             f"{school} table"
         )
 
+    def test_a_level_cell_covers_one_level_or_a_range(self):
+        self.assertEqual(self._documented_levels("2"), range(2, 3))
+        self.assertEqual(self._documented_levels("1–5"), range(1, 6))
+        self.assertIsNone(self._documented_levels("Lvl"))
+        self.assertIsNone(self._documented_levels("---"))
+
+    def test_a_rung_outside_the_pages_counter_levels_is_not_found(self):
+        self.assertEqual(self._documented_affinity("Protection", "Counter", 5), "WIS")
+        with self.assertRaisesRegex(AssertionError, r"Counter \(level 6\) not found"):
+            self._documented_affinity("Protection", "Counter", 6)
+
     def test_every_catalog_spell_casts_on_the_documented_attribute(self):
         for spell in SPELLS.values():
-            base_name = spell.name.split()[-1]
+            # "Fire Missile" -> "Missile", "Shield" -> "Shield"; a Counter
+            # rung's last word is its number, so its row is its name less it.
+            name_words = spell.name.split()
+            base_name = name_words[0] if spell.generic_counter else name_words[-1]
             documented = self._documented_affinity(spell.school, base_name, spell.level)
             with self.subTest(spell=spell.key):
                 self.assertEqual(

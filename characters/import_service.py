@@ -23,12 +23,21 @@ afterwards, where it is recorded), and every player's import arrives as a
 new character: :data:`PLAYER_KEPT_FIELDS` kept,
 everything rolled, awarded or ruled at a fresh character's value, and a
 notice naming each value dropped and why.
+
+A skill only a Game Master starts (the canon's ``game_master_started``,
+tarmar-studio #208: Arcane) follows the same rule. A player's import keeps no
+skill but the Origin's, so it drops one and the notice names it with the
+rest; a Game Master's import keeps it, and the history says a Game Master's
+import did (:func:`game_master_kept_skills`). The Games Master chat's
+character extraction writes a file this importer reads
+(``gm.character_schema.extraction_to_import_payload``), so it is held here
+too.
 """
 
 import copy
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from django.core.exceptions import ValidationError
 
@@ -59,7 +68,14 @@ from .models import (
     DIE_ROLL_FIELDS,
     Character,
 )
-from .skills import MAX_SKILL_POINTS, normalize_skill_name, skill_name_refusal
+from .refusal_words import refusal_words
+from .skill_rules import skill_rules
+from .skills import (
+    MAX_SKILL_POINTS,
+    is_game_master_started,
+    normalize_skill_name,
+    skill_name_refusal,
+)
 
 #: The numbers an item stores as whole numbers and its readers add up with no
 #: type check: the Game Master's modifiers and a custom armour's or shield's
@@ -181,6 +197,9 @@ class ImportedCharacter:
     #: What a player's import left out and why, for the history and the
     #: import's answer (issue #757).
     left_out: list[str] = field(default_factory=list)
+    #: A line for the history for each skill only a Game Master starts that a
+    #: Game Master's import kept (:func:`game_master_kept_skills`).
+    game_master_kept: list[str] = field(default_factory=list)
 
 
 def _is_whole_number(value: object) -> bool:
@@ -862,6 +881,31 @@ def _unchosen_faces(
     return changes, site_rolls_kept
 
 
+def game_master_kept_skills(skills: Mapping[str, int]) -> list[str]:
+    """What the history says of each skill only a Game Master starts that a
+    Game Master's import keeps (tarmar-studio #208).
+
+    A player never starts such a skill and a player's import drops it, so a
+    record that holds one by import says who brought it in: the override is
+    named, as a Game Master's start on the sheet is
+    (``services.GAME_MASTER_STARTED_SKILL_NOTE``).
+
+    Args:
+        skills: The file's skills, as stored.
+
+    Returns:
+        One line a skill, in the words of ``config/characters-refusals.toml``;
+        empty when the file holds none.
+    """
+    rules = skill_rules()
+    words = refusal_words().import_service.game_master_kept_skill
+    return [
+        words.format(skill=skill_name, points=points)
+        for skill_name, points in skills.items()
+        if is_game_master_started(skill_name, rules)
+    ]
+
+
 def held_to_player(
     imported: ImportedCharacter,
     *,
@@ -871,7 +915,9 @@ def held_to_player(
     """Hold a player's import to the rules (issues #744, #757): the one place.
 
     A Game Master's import comes in as written, to be held to the sheet's
-    bounds when saved (:func:`save_imported_character`). Every player's import is a new
+    bounds when saved (:func:`save_imported_character`), with a line for the
+    history for each skill only a Game Master starts
+    (:func:`game_master_kept_skills`). Every player's import is a new
     character held to what a player may set, whatever file it came from --
     one this site wrote is still someone's character as it once stood, not
     the importer's as it stands (the coordinator's ruling on the #744
@@ -902,7 +948,8 @@ def held_to_player(
         CharacterImportError: The file as written breaks the model's rules.
     """
     if is_game_master:
-        return imported
+        kept = game_master_kept_skills(imported.fields.get("skills") or {})
+        return replace(imported, game_master_kept=kept) if kept else imported
     _saving(lambda: _clean(Character(**imported.fields), owned=False))
     fields = {
         name: value

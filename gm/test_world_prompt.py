@@ -9,6 +9,7 @@ has, and that the file is prompt text, never a reference page.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from unittest import skipUnless
 
 from django.test import SimpleTestCase
 
+from battle.tests.magic_fixtures import DEFAULT_MAGIC_RULES
 from common.test_helpers import (
     CANON_EXPECTATIONS,
     BaseTestCase,
@@ -38,6 +40,7 @@ from reference.paths import (
     DEFAULT_CANON_NAME,
     DEFAULT_MAGIC_PROMPT_FILE,
     DM_RULES_DIR,
+    PUBLIC_RULES_DIR,
     REPO_ROOT,
     TARMAR_CANON_NAME,
     WORLD_PROMPT_FILE,
@@ -47,6 +50,8 @@ from reference.paths import (
 from .engine import (
     FALLBACK_WORLD_SECTION,
     SECTION_WORLD,
+    assemble_magic_section,
+    load_magic_section,
     load_world_section,
 )
 from .retrieval import iter_corpus_files
@@ -276,6 +281,70 @@ class DefaultCanonWorldDigestTest(SimpleTestCase):
         for name in CANON_EXPECTATIONS["proper_nouns"]:
             with self.subTest(name=name):
                 self.assertNotIn(name.lower(), self.digest.lower())
+
+
+#: The text files the public may read: every page and data file under the
+#: studio's own content tree and the default canon (#208).
+PUBLIC_TEXT_SUFFIXES = (".md", ".json")
+
+
+def public_text_files() -> list[Path]:
+    """Every public page and data file: the content tree and the default canon."""
+    return sorted(
+        path
+        for root in (CONTENT_DIR, DEFAULT_CANON_DIR)
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix in PUBLIC_TEXT_SUFFIXES
+    )
+
+
+def names_a(name: str, text: str) -> bool:
+    """Whether ``text`` names ``name`` as a word of its own, in any case.
+
+    A whole word, so an ordinary word that merely begins with a name's letters
+    (a mine's pithead) is not taken for it; a name's other forms are listed in
+    the canon's ``proper_nouns`` beside it.
+    """
+    return re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) is not None
+
+
+class UnpublishedNamesStayOffPublicTextTest(SimpleTestCase):
+    """No public page, default canon page or default prompt section names one
+    of the Tarmar canon's unpublished names (#208), as
+    :class:`DefaultCanonWorldDigestTest` holds the default digest."""
+
+    def test_the_public_text_files_are_found(self) -> None:
+        files = public_text_files()
+        self.assertIn(PUBLIC_RULES_DIR / "magic" / "true-magic.md", files)
+        self.assertIn(DEFAULT_CANON_DIR / "magic-mechanics" / "true-magic.md", files)
+        self.assertIn(DEFAULT_CANON_DIR / "nav.json", files)
+
+    def test_a_name_is_found_as_a_word_and_not_inside_one(self) -> None:
+        self.assertTrue(names_a("Corran", "the corran reach"))
+        self.assertTrue(names_a("Corran", "Corran's shore"))
+        self.assertFalse(names_a("Corran", "Corrans"))
+        self.assertFalse(names_a("Corran", "the Corranreach"))
+
+    @skip_unless_canon_expects("proper_nouns")
+    def test_no_public_page_or_default_canon_file_names_one(self) -> None:
+        for path in public_text_files():
+            text = path.read_text(encoding="utf-8")
+            for name in CANON_EXPECTATIONS["proper_nouns"]:
+                with self.subTest(path=path.relative_to(REPO_ROOT), name=name):
+                    self.assertFalse(names_a(name, text))
+
+    @skip_unless_canon_expects("proper_nouns")
+    def test_the_default_canons_prompt_names_none(self) -> None:
+        sections = {
+            "magic": assemble_magic_section(
+                load_magic_section(DEFAULT_MAGIC_PROMPT_FILE), DEFAULT_MAGIC_RULES
+            ),
+            "world": load_world_section(DEFAULT_WORLD_PROMPT_FILE),
+        }
+        for section_name, text in sections.items():
+            for name in CANON_EXPECTATIONS["proper_nouns"]:
+                with self.subTest(section=section_name, name=name):
+                    self.assertFalse(names_a(name, text))
 
 
 class PromptTextIsNotAPageTest(BaseTestCase):

@@ -504,6 +504,29 @@ def glossary_skill(skill_name: str) -> str:
     return split_specialised_skill(skill_name)[0]
 
 
+def is_game_master_started(skill_name: str, rules: SkillRules) -> bool:
+    """Whether a stored skill name falls under a skill only a Game Master
+    starts (tarmar-studio #208).
+
+    The canon lists such skills by their glossary names
+    (``game_master_started``), so the question is asked of the glossary skill
+    the name falls under (:func:`glossary_skill`): were Weapon on the list,
+    "broadsword" would be held, and "maker skill (smith)" under Maker Skill.
+    The one place the two are put together, for a free point, an import and
+    the ``characters.E006`` check alike.
+
+    Args:
+        skill_name: A stored (normalised) skill name.
+        rules: The skill rules whose list is asked: the loaded canon's, or
+            the rules a check was handed.
+
+    Raises:
+        EquipmentCatalogError: The catalog, which says whether a name is a
+            Weapon skill, is refused.
+    """
+    return rules.only_a_game_master_starts(glossary_skill(skill_name))
+
+
 def validate_skill_names(rules: SkillRules, path: Path) -> None:
     """Refuse a canon skill name that is not a glossary skill in its own right.
 

@@ -151,12 +151,14 @@ class SkillPointArithmeticTests(TestCase):
         )
 
     def test_arcane_is_priced_at_double_like_everywhere_else(self):
+        # Arcane is by invitation (tarmar-studio #208): the draft holds the
+        # point a Game Master started it with, and the player raises it.
         draft, _ = changed(
-            built_draft(free_skill_points=6),
-            lambda character: services.apply_skill_points(character, "arcane", 6),
+            built_draft(free_skill_points=5, skills={"arcane": 1}),
+            lambda character: services.apply_skill_points(character, "arcane", 5),
         )
         (skill,) = DraftLedger.from_draft(draft).skills
-        self.assertEqual(skill.level_display, "II")
+        self.assertEqual((skill.points, skill.level_display), (6, "II"))
 
     def test_a_year_of_experience_goes_through_the_simulator(self):
         survival, skill_roll = survives_every_year()

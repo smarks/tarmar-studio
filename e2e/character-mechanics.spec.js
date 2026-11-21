@@ -20,6 +20,10 @@
  * - #18: a spell is cast in the story from the sheet, by the player (a
  *   spell they know, from their Pool) and by a Game Master (any spell, with
  *   a total rolled at his table); the page shows the server's line and Mana.
+ * - #208: a Protection player learns Counter 1 and then Counter 2, each
+ *   listed as learned and never cast and neither offered to cast; Counter 2
+ *   is refused before Counter 1, and a player of another school is refused
+ *   Counter 1.
  *
  * Characters are written from an export file for the player, so a retry gets
  * its own: a player's import of a hand-made file keeps only what a player
@@ -41,7 +45,7 @@ const { refusal, refusalFixedParts, gameMasterCallNote } = require('./refusals')
 const { loadedSkillRules } = require('./skill-rules');
 const { item, sheetValues } = require('./equipment-rules');
 const {
-    catalogSpells, elementalLadder, lastStoryCast, schoolRowForPercentile,
+    catalogSpells, counterLadder, elementalLadder, lastStoryCast, schoolRowForPercentile,
 } = require('./magic-rules');
 
 /** The school roll's dice pinned (issue #959) to a known face. */
@@ -147,6 +151,34 @@ function mechanicsCharacter(name) {
 
 async function importCharacter(page, name) {
     await seedCharacterFromExport(page, TEST_USER, mechanicsCharacter(name));
+}
+
+/**
+ * Ask the server to put a point into a spell as the signed-in player, with a
+ * hand-built POST, so a spell the sheet does not offer still meets the
+ * server's own refusal.
+ * @returns {Promise<{status: number, body: Object}>}
+ */
+async function learnSpellByHand(page, characterId, spell) {
+    return page.evaluate(async ({ id, key }) => {
+        const token = document.querySelector('meta[name="csrf-token"]').content;
+        const response = await fetch(`/tarmar/characters/${id}/learn-spell/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+            body: JSON.stringify({ spell: key }),
+        });
+        return { status: response.status, body: await response.json() };
+    }, { id: characterId, key: spell });
+}
+
+/** Have a Game Master set a character's school of magic, then reload the sheet. */
+async function setSchoolAsGameMaster(page, browser, characterId, school) {
+    const chosen = await postAsGameMaster(
+        browser, `/tarmar/characters/${characterId}/choose-school/`, { school }
+    );
+    expect(chosen.status).toBe(200);
+    await page.reload();
+    await expect(page.locator('#magic-school')).toHaveText(school);
 }
 
 /** An amount of coin in whole cents, so sums compare exactly. */
@@ -385,7 +417,11 @@ test.describe('Sheet mechanics', () => {
         await loginAs(page, TEST_USER);
         await importCharacter(page, name);
         const characterId = characterIdFromUrl(page);
-        const spells = catalogSpells();
+        // The spells that can be cast: a Counter is learned and never cast
+        // (tarmar-studio#208), so the sheet lists it for nobody.
+        const catalog = catalogSpells();
+        const spells = catalog.filter((spell) => !spell.neverCast);
+        expect(spells.length).toBeLessThan(catalog.length);
         // A spell that need not hit for the player, one off the record for the
         // Game Master; the server's catalog names both.
         const known = spells.find((spell) => !spell.targeted).key;
@@ -425,6 +461,8 @@ test.describe('Sheet mechanics', () => {
             await loginAs(gameMaster, TEST_ADMIN);
             await gameMaster.goto(`/tarmar/characters/${characterId}/`);
             await expect(gameMaster.locator('#cast-spell-select option')).toHaveCount(spells.length);
+            const neverCast = catalog.find((spell) => spell.neverCast).key;
+            await expect(gameMaster.locator(`#cast-spell-select option[value="${neverCast}"]`)).toHaveCount(0);
             await gameMaster.locator('#cast-spell-select').selectOption(offRecord);
             await gameMaster.locator('#cast-spell-total').fill('10');
             await gameMaster.locator('#cast-spell-btn').click();
@@ -454,11 +492,7 @@ test.describe('Sheet mechanics', () => {
         if (ladder.schoolTable) {
             // A Game Master sets the school, as the roll-and-choose test walks
             // a player through it; the ladder is what this test is about.
-            const chosen = await postAsGameMaster(
-                browser, `/tarmar/characters/${characterId}/choose-school/`, { school: ladder.school }
-            );
-            expect(chosen.status).toBe(200);
-            await page.reload();
+            await setSchoolAsGameMaster(page, browser, characterId, ladder.school);
         }
         const [tierOne, tierTwo] = ladder.rungs;
 
@@ -470,15 +504,7 @@ test.describe('Sheet mechanics', () => {
 
         // The refusal is the server's: a hand-built POST for the rung above is
         // refused in the configured words, and spends nothing.
-        const refused = await page.evaluate(async ({ id, spell }) => {
-            const token = document.querySelector('meta[name="csrf-token"]').content;
-            const response = await fetch(`/tarmar/characters/${id}/learn-spell/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-                body: JSON.stringify({ spell }),
-            });
-            return { status: response.status, body: await response.json() };
-        }, { id: characterId, spell: tierTwo.key });
+        const refused = await learnSpellByHand(page, characterId, tierTwo.key);
         expect(refused.status).toBe(400);
         expect(refused.body.error).toBe(
             refusal('characters', 'magic', 'lower_rung_first', { spell: tierTwo.name, rung_below: tierTwo.below })
@@ -511,5 +537,68 @@ test.describe('Sheet mechanics', () => {
         const note = refusal('characters', 'magic', 'game_master_past_the_rung', { rung_below: pastTheRung.below });
         await expect(page.locator('#recent-changes-rows')).toContainText(`${pastTheRung.name}: 0 → 1 points`);
         await expect(page.locator('#recent-changes-rows')).toContainText(`(${note})`);
+    });
+
+    test('#208: a Protection player learns Counter 1, then Counter 2, and a player of another school cannot', async ({ page, browser }) => {
+        const ladder = counterLadder();
+        test.skip(
+            !ladder.tableNamesSchool || ladder.otherSchool === null,
+            "the loaded canon's school table does not gate the Counters by school, so no player is refused one for their school"
+        );
+        const [counterOne, counterTwo] = ladder.rungs;
+        await loginAs(page, TEST_USER);
+        await importCharacter(page, uniqueName('Counter Climber'));
+        const characterId = characterIdFromUrl(page);
+        await setSchoolAsGameMaster(page, browser, characterId, ladder.school);
+
+        // The first Counter is offered and the second is not; a hand-built
+        // POST for the second is refused in the configured words and spends
+        // nothing.
+        await expect(page.locator(`#learn-spell-select option[value="${counterOne.key}"]`)).toHaveCount(1);
+        await expect(page.locator(`#learn-spell-select option[value="${counterTwo.key}"]`)).toHaveCount(0);
+        const skipped = await learnSpellByHand(page, characterId, counterTwo.key);
+        expect(skipped.status).toBe(400);
+        expect(skipped.body.error).toBe(
+            refusal('characters', 'magic', 'lower_rung_first', { spell: counterTwo.name, rung_below: counterTwo.below })
+        );
+        await page.reload();
+        await expect(page.locator('#free-points')).toHaveText('2');
+
+        // Counter 1 learned, Counter 2 is offered and learned in turn, a
+        // point a rung. Each is listed as learned and never cast, with no
+        // mana cost and no roll, and the sheet offers neither to cast.
+        for (const [rung, freeAfter] of [[counterOne, '1'], [counterTwo, '0']]) {
+            await page.locator('#learn-spell-select').selectOption(rung.key);
+            await Promise.all([
+                page.waitForEvent('load'),
+                page.locator('#learn-spell-btn').click(),
+            ]);
+            const row = page.locator(`.known-spell[data-spell="${rung.key}"]`);
+            await expect(row).toBeVisible();
+            await expect(row.locator('.known-spell-never-cast')).toHaveText(
+                refusal('characters', 'magic', 'never_cast_cell')
+            );
+            await expect(row.locator('td')).toHaveCount(4);
+            await expect(page.locator('#free-points')).toHaveText(freeAfter);
+        }
+        await expect(page.locator('#cast-spell')).toHaveCount(0);
+
+        // A player of another school: the first Counter is not offered, and
+        // the server refuses it by school, spending nothing.
+        await importCharacter(page, uniqueName('Counter Outsider'));
+        const outsiderId = characterIdFromUrl(page);
+        expect(outsiderId).not.toBe(characterId);
+        await setSchoolAsGameMaster(page, browser, outsiderId, ladder.otherSchool);
+        await expect(page.locator(`#learn-spell-select option[value="${counterOne.key}"]`)).toHaveCount(0);
+        const outside = await learnSpellByHand(page, outsiderId, counterOne.key);
+        expect(outside.status).toBe(400);
+        expect(outside.body.error).toBe(
+            refusal('characters', 'magic', 'outside_school', {
+                spell: counterOne.name, spell_school: ladder.school, school: ladder.otherSchool,
+            })
+        );
+        await page.reload();
+        await expect(page.locator('#free-points')).toHaveText('2');
+        await expect(page.locator(`.known-spell[data-spell="${counterOne.key}"]`)).toHaveCount(0);
     });
 });

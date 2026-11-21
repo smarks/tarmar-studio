@@ -158,8 +158,17 @@ def event_lines(event: BattleEvent) -> list[str]:
     give them; so are a Runaway's drain, collapse, death and anchor roll
     (tarmar-engine #30), and a Counterspell's declaration, opposed roll,
     result, lapse and contest's end (tarmar-engine #31), in the engine's own
-    words. A cast or counter past a bound a Game Master lifted (#37) carries
-    a line beneath it saying so.
+    words. True Magic's events (tarmar-engine #77) are events of their own
+    too, and their messages are this app's, worded when the turn was stored
+    (:func:`battle.true_magic_narration.narrated`,
+    ``config/battle-rulings.toml``'s ``[true_magic_log]``): a craft's
+    beginning and each share, the spells that end when it begins, the roll
+    to keep it through a hit with its target and its band, a working lost by
+    each ending, the working's roll when its craft is whole, a hand-back, an
+    effect left to the Game Master with its tier and its magnitude, the
+    drain and a collapse from it, and a True cast. So the model reads them
+    here exactly as the battle log prints them. A cast or counter past a
+    bound a Game Master lifted (#37) carries a line beneath it saying so.
 
     Args:
         event: A battle log event.

@@ -134,6 +134,16 @@ ENDPOINTS = (
         body={"scope": "battle", "agreed": True},
     ),
     Endpoint(
+        "magic-bounds",
+        "set_magic_bounds_lifted",
+        body={"combatant": "combatant", "bounds": ["channel"], "lifted": True},
+    ),
+    Endpoint(
+        "working-grants",
+        "set_working_granted",
+        body={"combatant": "combatant", "working": "working:figment:1"},
+    ),
+    Endpoint(
         "combatant-control",
         "set_combatant_control_mode",
         with_combatant=True,

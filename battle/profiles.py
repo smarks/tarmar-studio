@@ -37,7 +37,7 @@ built per battle rather than being a module-level singleton.
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,7 +48,14 @@ from tarmar_engine.profile import TarmarProfile as EngineTarmarProfile
 
 from common.rolling import Roller
 
-from . import agreement, magic_bounds, policy, viewmodel
+from . import (
+    agreement,
+    magic_bounds,
+    policy,
+    true_magic_narration,
+    viewmodel,
+    working_grants,
+)
 from .engine.engine import run_turn as run_tarmar_turn
 from .engine.state import BattleState
 from .magic_rules import magic_rules
@@ -197,8 +204,17 @@ class BattleProfile:
         raise NotImplementedError
 
     # -- the cast stage ------------------------------------------------
-    def caster_magic(self, state, combatant_id: int) -> dict | None:
-        """The cast stage's payload for this combatant, or ``None``."""
+    def caster_magic(
+        self, state, combatant_id: int, candidates: Collection[dict] = ()
+    ) -> dict | None:
+        """The cast stage's payload for this combatant, or ``None``.
+
+        Args:
+            state: The battle's state.
+            combatant_id: The caster.
+            candidates: The pending menu's options, as stored, for a profile
+                whose stage reads castings off the menu (tarmar-studio #208).
+        """
         raise NotImplementedError
 
     def pool_label(self) -> str:
@@ -220,14 +236,22 @@ class TarmarProfile(BattleProfile):
         # A Game Master's "HTH by agreement" ruling, read from the battle
         # every turn so a change takes effect on the next one (#867).
         agreement.fill(state, agreement.Agreement.of(self.battle))
-        # The bounds a Game Master has lifted for each figure, read from the
-        # battle likewise (#37): the menu, the cast and the counter read them.
-        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
+        self._fill_magic_rulings(state)
         events: list[dict] = []
         run_tarmar_turn(
             state, roller, events.append, decide, profile=tarmar_engine_profile()
         )
-        return events
+        # True Magic's events in the configured words (tarmar-studio #208).
+        return true_magic_narration.narrated(state, events)
+
+    def _fill_magic_rulings(self, state: BattleState) -> None:
+        """Write a Game Master's rulings on magic onto the board, read from
+        the battle so a change takes effect on the next turn: the bounds
+        lifted for each figure (#37), which the menu, the cast and the
+        counter read, and the workings granted to each (tarmar-studio #208),
+        which the menu and the craft read."""
+        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
+        working_grants.fill(state, working_grants.WorkingGrants.of(self.battle))
 
     def mint_event(self, state: BattleState, **fields) -> dict:
         sequence = state.next_sequence
@@ -289,14 +313,16 @@ class TarmarProfile(BattleProfile):
         state.by_id(combatant_id).alive = False
         state.by_id(combatant_id).conscious = False
 
-    def caster_magic(self, state: BattleState, combatant_id: int) -> dict | None:
+    def caster_magic(
+        self, state: BattleState, combatant_id: int, candidates: Collection[dict] = ()
+    ) -> dict | None:
         # Deferred: ``services`` imports this module, so the cast-stage
         # builder can only be reached from inside the call.
         from .services import caster_magic
 
-        # The ruling as it stands now, not as the last turn left it (#37).
-        magic_bounds.fill(state, magic_bounds.LiftedBounds.of(self.battle))
-        return caster_magic(state, combatant_id)
+        # The rulings as they stand now, not as the last turn left them (#37).
+        self._fill_magic_rulings(state)
+        return caster_magic(state, combatant_id, candidates)
 
     def pool_label(self) -> str:
         return words().cast_stage.mana_pool
@@ -501,7 +527,9 @@ class ClassicProfile(BattleProfile):
             raise ValueError(f"no combatant {combatant_id} in this battle's state")
         figure.name = new_name
 
-    def caster_magic(self, state, combatant_id: int) -> dict | None:
+    def caster_magic(
+        self, state, combatant_id: int, candidates: Collection[dict] = ()
+    ) -> dict | None:
         """The classic wizard's own hand, in the profile-neutral shape (#263).
 
         Slice 8 gave a classic battle real wizards and slice 9 seated a
@@ -519,7 +547,8 @@ class ClassicProfile(BattleProfile):
         Tarmar aims once. The building is in
         :func:`battle.classic_adaptation.classic_caster_magic`, imported
         inside this call so a Tarmar-only battle never pulls the SJG-derived
-        subpackage in.
+        subpackage in. ``candidates`` is not read: a classic wizard's rows
+        are the classic engine's own offers.
         """
         from .classic_adaptation import classic_caster_magic
 

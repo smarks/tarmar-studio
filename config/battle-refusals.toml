@@ -122,6 +122,7 @@ choice_turn = "A numeric turn is required: name the turn this choice was made on
 numeric_target_id = "A numeric target_id is required"
 numeric_push_mana = "A numeric push_mana is required"
 borrow_true_or_false = "borrow is true or false"
+true_cast_true_or_false = "true_cast is true or false"
 numeric_anchor_target = "A numeric anchor_target is required"
 numeric_counter_mana = "A numeric counter_mana is required"
 destination_is_hex = "A destination is a hex: [q, r]"

@@ -16,6 +16,7 @@ from typing import Concatenate
 
 from django.db import transaction
 from django.utils import timezone
+from tarmar_engine.actions import CRAFT_OPTION
 from tarmar_engine.magic import (
     ChannelUnclassifiedSpell,
     MagicRules,
@@ -45,7 +46,16 @@ from characters.services import FightReport, record_entry_into_play
 from characters.skills import glossary_skill_level
 from characters.weapon_skill import resolve_weapon_skill
 
-from . import agreement, control, magic_bounds, policy, profiles, turn_menu
+from . import (
+    agreement,
+    control,
+    magic_bounds,
+    policy,
+    profiles,
+    turn_menu,
+    working_grants,
+    workings,
+)
 from .access import (
     Actor,
     claimed_seat_q,
@@ -68,7 +78,7 @@ from .generation import (
     generate_character,
     stat_roller_for_slot,
 )
-from .magic_rules import magic_rules
+from .magic_rules import loaded_spell, magic_rules
 from .models import SEED_RANGE, Battle, BattleCombatant, BattleDraft, BattleEvent
 from .persistence import (
     CLASSIC_PROFILE,
@@ -1470,7 +1480,9 @@ def release_seat(
     """Give an occupied seat back to the lobby (its holder, or any DM).
 
     The character row the player brought or generated survives — only the
-    seat's claim, snapshot, and ready flag clear.
+    seat's claim, snapshot, and ready flag clear. The workings a Game Master
+    granted the figure in the seat go with it (tarmar-studio #208): a grant
+    names a figure, and whoever claims the seat next is another.
 
     Raises:
         ValueError: battle not in its lobby, seat unknown, or not yours.
@@ -1501,6 +1513,11 @@ def release_seat(
             battle, words().services.open_seat.format(number=rank + 1)
         )
         seat.save()
+        grants = working_grants.WorkingGrants.of(battle)
+        kept = grants.without(seat.pk, grants.for_figure(seat.pk))
+        if kept != grants:
+            setattr(battle, kept.battle_field, kept.to_json())
+            battle.save(update_fields=[kept.battle_field])
     return seat
 
 
@@ -2196,14 +2213,19 @@ def option_variant(fields: dict) -> dict:
     whose Runaway an anchor takes back (tarmar-engine #30): the combatant id
     the engine's ``anchor_target`` names, the actor's own for its own. And
     the mana a counter commits against the caster its target names
-    (tarmar-engine #31, the engine's ``counter_mana``). A missing
-    ``push_mana`` is 0, a missing ``borrow`` false and a missing
-    ``anchor_target`` or ``counter_mana`` ``None``, the plain option, as a
-    menu or a choice stored before Push, Borrowing, Runaway or Counterspell
-    reads; the engine's payload carries each key only when set. An
-    escalation (the engine's ``escalate``) is not a variant: every cast of a
-    countered spell at its target escalates, so the letter, target and
-    spell already name it.
+    (tarmar-engine #31, the engine's ``counter_mana``). And whether a cast
+    is a True cast (tarmar-engine #77, the engine's ``true_cast``), which the
+    engine offers under the same letter, target and spell as the recipe cast
+    of that spell. A missing ``push_mana`` is 0, a missing ``borrow`` or
+    ``true_cast`` false and a missing ``anchor_target`` or ``counter_mana``
+    ``None``, the plain option, as a menu or a choice stored before Push,
+    Borrowing, Runaway, Counterspell or True Magic reads; the engine's
+    payload carries each key only when set. An escalation (the engine's
+    ``escalate``) is not a variant: every cast of a countered spell at its
+    target escalates, so the letter, target and spell already name it. Nor
+    does a craft (tarmar-engine #77) need one of its own: it is the engine's
+    craft letter with the working's key as its spell, its push, its
+    borrowing and its target.
 
     Args:
         fields: A menu option's payload, a recorded choice, or the act
@@ -2211,7 +2233,7 @@ def option_variant(fields: dict) -> dict:
 
     Returns:
         ``{"push_mana": int, "borrow": bool, "anchor_target": int | None,
-        "counter_mana": int | None}``.
+        "counter_mana": int | None, "true_cast": bool}``.
     """
     anchor_target = fields.get("anchor_target")
     counter_mana = fields.get("counter_mana")
@@ -2220,6 +2242,7 @@ def option_variant(fields: dict) -> dict:
         "borrow": bool(fields.get("borrow")),
         "anchor_target": int(anchor_target) if anchor_target is not None else None,
         "counter_mana": int(counter_mana) if counter_mana is not None else None,
+        "true_cast": bool(fields.get("true_cast")),
     }
 
 
@@ -2231,19 +2254,21 @@ def names_option(option: dict, recorded: dict) -> bool:
     replayed one. An option is its letter, its target, its spell and its
     variant (:func:`option_variant`): the mana it pushes into that spell
     (issue #960), whether it borrows (tarmar-engine #28), whose Runaway it
-    anchors (tarmar-engine #30), and the mana a counter commits
-    (tarmar-engine #31). So a pushed or borrowing cast is a different option
-    from the plain cast of the same spell, an anchor names the one Runaway
-    it takes back, a counter names its caster and its commitment, and a
-    player may record only a push, a borrowing, an anchor or a counter the
+    anchors (tarmar-engine #30), the mana a counter commits (tarmar-engine
+    #31), and whether it is a True cast (tarmar-engine #77). So a pushed or
+    borrowing cast is a different option from the plain cast of the same
+    spell, and so is the True cast of it; an anchor names the one Runaway it
+    takes back, a counter names its caster and its commitment, a craft names
+    its working, its push and its borrowing; and a player may record only a
+    push, a borrowing, an anchor, a counter, a True cast or a craft the
     engine offered.
 
     Args:
         option: A menu option's fields, as :meth:`~tarmar_engine.policy.
             Candidate.to_payload` writes them.
         recorded: The choice: ``letter``, ``target_id``, ``spell_key``,
-            ``push_mana``, ``borrow``, ``anchor_target`` and
-            ``counter_mana``.
+            ``push_mana``, ``borrow``, ``anchor_target``, ``counter_mana``
+            and ``true_cast``.
     """
     return (
         option.get("letter") == recorded.get("letter")
@@ -2435,20 +2460,18 @@ def set_hth_agreement(
     hth_words = words().hth_agreement
     if whole_battle == (pair is not None):
         raise BattleRefusal(hth_words.refuse_scope)
-    with transaction.atomic():
-        battle = Battle.objects.select_for_update().get(pk=battle_id)
-        game_master = _ruling_game_master(battle, actor, hth_words.game_master_only)
-        if battle.rules_profile != TARMAR_PROFILE:
-            raise BattleRefusal(hth_words.refuse_classic)
-        rows = {row.pk: row for row in battle.combatants.all()}
-        names = {pk: row.display_name for pk, row in rows.items()}
+
+    def change(
+        battle: Battle, game_master: User, figures: dict[int, BattleCombatant]
+    ) -> _RulingChange | None:
+        names = {pk: row.display_name for pk, row in figures.items()}
         current = agreement.Agreement.of(battle)
         key = None
         if pair is not None:
             first, second = pair
-            if first == second or first not in rows or second not in rows:
+            if first == second:
                 raise BattleRefusal(hth_words.refuse_pair)
-            if rows[first].team and rows[first].team == rows[second].team:
+            if figures[first].team and figures[first].team == figures[second].team:
                 raise BattleRefusal(
                     hth_words.refuse_same_side.format(
                         first=names[first], second=names[second]
@@ -2464,27 +2487,34 @@ def set_hth_agreement(
         else:
             updated = agreement.Agreement(agreed, current.pairs)
         if updated == current:
-            return battle, None
-        battle.hth_agreement_json = updated.to_json()
-        _reopen_awaited_menu(battle)
-        event = _control_event(
-            battle,
-            agreement.change_message(
+            return None
+        return _RulingChange(
+            battle_field=updated.battle_field,
+            stored=updated.to_json(),
+            message=agreement.change_message(
                 whole_battle=agreed if whole_battle else None,
                 pair=key,
                 agreed=agreed,
                 names=names,
                 by=game_master_name(game_master.username),
             ),
-            {
+            payload={
                 "hth_agreement": updated.to_json(),
                 "scope": "battle" if whole_battle else "pair",
                 "pair": list(key) if key is not None else None,
                 "agreed": agreed,
             },
         )
-        battle.save()
-    return battle, event
+
+    return _record_ruling(
+        battle_id,
+        actor,
+        game_master_only=hth_words.game_master_only,
+        refuse_classic=hth_words.refuse_classic,
+        combatant_ids=pair or (),
+        refuse_combatant=hth_words.refuse_pair,
+        change=change,
+    )
 
 
 def _reopen_awaited_menu(battle: Battle) -> None:
@@ -2513,6 +2543,86 @@ def _ruling_game_master(battle: Battle, actor: Actor, refusal: str) -> User:
     if not isinstance(game_master, User) or not runs_the_seats(battle, game_master):
         raise BattleRefusal(refusal)
     return game_master
+
+
+@dataclass(frozen=True)
+class _RulingChange:
+    """What one ruling changes on a battle.
+
+    Attributes:
+        battle_field: The ``Battle`` field that holds the ruling's record.
+        stored: The record as it now stands, in its stored shape.
+        message: The battle-log line for the change.
+        payload: The log line's payload.
+    """
+
+    battle_field: str
+    stored: dict | list
+    message: str
+    payload: dict
+
+
+def _record_ruling(
+    battle_id: int,
+    actor: Actor,
+    *,
+    game_master_only: str,
+    refuse_classic: str,
+    combatant_ids: Collection[int],
+    refuse_combatant: str,
+    change: Callable[[Battle, User, dict[int, BattleCombatant]], _RulingChange | None],
+) -> tuple[Battle, BattleEvent | None]:
+    """Record a Game Master's ruling on a battle: the steps every one takes.
+
+    Written once for the HTH-by-agreement ruling (:func:`set_hth_agreement`),
+    the lifted magic bounds (:func:`set_magic_bounds_lifted`) and the granted
+    workings (:func:`set_working_granted`, tarmar-studio #208): lock the
+    battle, hold the ruling to the fight's Game Master
+    (:func:`_ruling_game_master`), refuse a classic battle, find the figures
+    it names, let the ruling say what it changes, write the record, clear a
+    pause on a person's move (:func:`_reopen_awaited_menu`), file the log
+    line (:func:`_control_event`) and save. Each ruling keeps only its own
+    refusals and its own record, in ``change``.
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        game_master_only: The ruling's refusal for anyone else.
+        refuse_classic: The ruling's refusal for a classic battle.
+        combatant_ids: The ``BattleCombatant`` pks the ruling names; none for
+            a ruling on the whole battle.
+        refuse_combatant: The ruling's refusal for a pk not in this battle.
+        change: Given the locked battle, the Game Master and the named
+            figures by pk, the change to make, or ``None`` when the ruling
+            already stands as asked. Raises ``BattleRefusal`` for the
+            ruling's own refusals.
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        BattleRefusal: not the fight's Game Master, a classic battle, a
+            figure not in this battle, or a refusal ``change`` raises.
+    """
+    with transaction.atomic():
+        battle = Battle.objects.select_for_update().get(pk=battle_id)
+        game_master = _ruling_game_master(battle, actor, game_master_only)
+        if battle.rules_profile != TARMAR_PROFILE:
+            raise BattleRefusal(refuse_classic)
+        figures = {
+            row.pk: row for row in battle.combatants.filter(pk__in=combatant_ids)
+        }
+        if any(combatant_id not in figures for combatant_id in combatant_ids):
+            raise BattleRefusal(refuse_combatant)
+        ruled = change(battle, game_master, figures)
+        if ruled is None:
+            return battle, None
+        setattr(battle, ruled.battle_field, ruled.stored)
+        _reopen_awaited_menu(battle)
+        event = _control_event(battle, ruled.message, ruled.payload)
+        battle.save()
+    return battle, event
 
 
 def set_magic_bounds_lifted(
@@ -2563,14 +2673,11 @@ def set_magic_bounds_lifted(
         raise BattleRefusal(
             bounds_words.refuse_bounds.format(bounds=magic_bounds.bound_words(offered))
         )
-    with transaction.atomic():
-        battle = Battle.objects.select_for_update().get(pk=battle_id)
-        game_master = _ruling_game_master(battle, actor, bounds_words.game_master_only)
-        if battle.rules_profile != TARMAR_PROFILE:
-            raise BattleRefusal(bounds_words.refuse_classic)
-        figure = battle.combatants.filter(pk=combatant_id).first()
-        if figure is None:
-            raise BattleRefusal(bounds_words.refuse_combatant)
+
+    def change(
+        battle: Battle, game_master: User, figures: dict[int, BattleCombatant]
+    ) -> _RulingChange | None:
+        figure = figures[combatant_id]
         current = magic_bounds.LiftedBounds.of(battle)
         already = current.for_figure(figure.pk)
         requested = frozenset(bounds)
@@ -2579,6 +2686,8 @@ def set_magic_bounds_lifted(
             for bound in magic_bounds.LIFTABLE_BOUNDS
             if bound in requested and (bound in already) != lifted
         ]
+        if not changing:
+            return None
         if lifted:
             updated = current.lifted(
                 figure.pk,
@@ -2589,27 +2698,137 @@ def set_magic_bounds_lifted(
             )
         else:
             updated = current.restored(figure.pk, changing)
-        if not changing:
-            return battle, None
-        battle.magic_bounds_lifted_json = updated.to_json()
-        _reopen_awaited_menu(battle)
-        event = _control_event(
-            battle,
-            magic_bounds.change_message(
+        return _RulingChange(
+            battle_field=updated.battle_field,
+            stored=updated.to_json(),
+            message=magic_bounds.change_message(
                 bounds=changing,
                 lifted=lifted,
                 name=figure.display_name,
                 by=game_master_name(game_master.username),
             ),
-            {
+            payload={
                 "magic_bounds_lifted": updated.to_json(),
                 "combatant_id": figure.pk,
                 "bounds": changing,
                 "lifted": lifted,
             },
         )
-        battle.save()
-    return battle, event
+
+    return _record_ruling(
+        battle_id,
+        actor,
+        game_master_only=bounds_words.game_master_only,
+        refuse_classic=bounds_words.refuse_classic,
+        combatant_ids=(combatant_id,),
+        refuse_combatant=bounds_words.refuse_combatant,
+        change=change,
+    )
+
+
+def set_working_granted(
+    battle_id: int,
+    actor: Actor,
+    *,
+    combatant_id: int,
+    working_key: str,
+    granted: bool,
+) -> tuple[Battle, BattleEvent | None]:
+    """Grant a figure a working, or withdraw the grant (tarmar-studio #208).
+
+    A canon's True Magic may give a working an effect that needs a grant:
+    only a figure a Game Master has named the working for may craft it. The
+    grant is a ruling on the battle, recorded as a lifted bound is
+    (:func:`set_magic_bounds_lifted`) and by the same account: the fight's
+    runner, while a Game Master (:func:`runs_the_seats`). No player records
+    one. This path is the only one that changes the record (the admin shows
+    the field read-only); the record keeps who granted each working and
+    when, and each change files one line in the log. A working already
+    granted keeps its first record. A change made while a move is awaited
+    clears the pause (:func:`_reopen_awaited_menu`).
+
+    A grant is of one working, an effect at a tier. One past the figure's
+    tier cap is recorded all the same, and the log line's payload says so
+    (:func:`battle.working_grants.change_payload`): it waits on Channel
+    being lifted for the figure, by the engine's own answer
+    (:func:`battle.working_grants.waits_on_channel`).
+    A grant is not spent by a craft; it stands until it is withdrawn.
+
+    A grant on the record may always be withdrawn, whatever the canon has
+    become since; only a new grant is held to the loaded canon.
+
+    Args:
+        battle_id: The battle.
+        actor: Who is asking; must be the fight's runner, a Game Master.
+        combatant_id: The ``BattleCombatant`` pk of the figure.
+        working_key: The working's key, as the engine writes it
+            (``TrueMagicRules.working_key``).
+        granted: Grant (True) or withdraw (False).
+
+    Returns:
+        The battle, and the log line (None when nothing changed or the
+        battle has no log yet).
+
+    Raises:
+        BattleRefusal: not the fight's Game Master, a classic battle, or a
+            figure not in this battle; and, for a grant, a canon with no
+            True Magic, a key its rules do not build, an effect that needs
+            no grant, or a figure with no level in the True skill
+            (:func:`battle.working_grants.grant_refusal`).
+    """
+    grant_words = words().working_grants
+
+    def change(
+        battle: Battle, game_master: User, figures: dict[int, BattleCombatant]
+    ) -> _RulingChange | None:
+        figure = figures[combatant_id]
+        current = working_grants.WorkingGrants.of(battle)
+        engine_figure = None
+        if granted:
+            engine_figure = working_grants.engine_figures(battle).get(figure.pk)
+            refusal = working_grants.grant_refusal(
+                working_key, engine_figure, figure.display_name
+            )
+            if refusal is not None:
+                raise BattleRefusal(refusal)
+            updated = current.with_ruled(
+                figure.pk,
+                [working_key],
+                by=game_master.username,
+                by_id=game_master.pk,
+                at=timezone.now().isoformat(),
+            )
+        else:
+            updated = current.without(figure.pk, [working_key])
+        if updated == current:
+            return None
+        return _RulingChange(
+            battle_field=updated.battle_field,
+            stored=updated.to_json(),
+            message=working_grants.change_message(
+                working_key=working_key,
+                granted=granted,
+                name=figure.display_name,
+                by=game_master_name(game_master.username),
+            ),
+            payload=working_grants.change_payload(
+                updated,
+                combatant_id=figure.pk,
+                working_key=working_key,
+                granted=granted,
+                figure=engine_figure,
+            ),
+        )
+
+    return _record_ruling(
+        battle_id,
+        actor,
+        game_master_only=grant_words.game_master_only,
+        refuse_classic=grant_words.refuse_classic,
+        combatant_ids=(combatant_id,),
+        refuse_combatant=grant_words.refuse_combatant,
+        change=change,
+    )
 
 
 def set_combatant_control_mode(
@@ -3343,14 +3562,404 @@ def _channel_reading(
     return limit, words().cast_stage.past_channel.format(level=spell.level, limit=limit)
 
 
-def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
+def _cast_chance_note(rules: MagicRules, actor: CombatantState, spell: Spell) -> str:
+    """The chance a cast of ``spell`` succeeds, in the cast stage's words.
+
+    The casting roll is made under the spell's attribute, less the injury
+    band and any owed off-balance penalty, the engine's one reading of them
+    (``policy.action_roll_penalties``, tarmar-engine #56), as its menu prices
+    the cast and the board rolls it (#153). The chance is the one the engine
+    prices the cast by, the casting fumble floor included (#46,
+    tarmar-engine #47), and the floor is named where it lowers the highest
+    total that succeeds, as the engine's own cast working names it
+    (``tarmar_engine.policy._cast_candidates``), which keeps its phrase
+    inside the candidate's rationale rather than as data (#145). A True cast
+    makes the spell's own casting roll (tarmar-engine #77), so its row reads
+    the same.
+
+    Args:
+        rules: The canon's magic rules.
+        actor: The caster.
+        spell: The catalog spell cast.
+    """
+    stage = words().cast_stage
+    injury, off_balance = policy.action_roll_penalties(actor)
+    attribute = (actor.intelligence if spell.attribute == "INT" else actor.wisdom) - (
+        injury + off_balance
+    )
+    chance = policy.cast_success_chance(attribute, rules.casting_failure)
+    floor = (
+        stage.under_fumble_floor.format(floor=rules.casting_failure.fumble_floor)
+        if rules.casting_failure is not None
+        and casting_success_ceiling(attribute, rules.casting_failure) < attribute
+        else ""
+    )
+    aim = stage.dex_to_land if spell.targeted else ""
+    # The attribute named with what came off it, in the words the engine's
+    # own cast note uses, so a lower chance says why (#153).
+    if injury and off_balance:
+        rolled_under = stage.less_both.format(
+            attribute=spell.attribute, injury=injury, off_balance=off_balance
+        )
+    elif injury:
+        rolled_under = stage.less_injury.format(
+            attribute=spell.attribute, injury=injury
+        )
+    elif off_balance:
+        rolled_under = stage.less_off_balance.format(
+            attribute=spell.attribute, off_balance=off_balance
+        )
+    else:
+        rolled_under = spell.attribute
+    return stage.mana_chance.format(
+        chance=f"{chance:.0%}", attribute=rolled_under, floor=floor, aim=aim
+    )
+
+
+def _stage_row(
+    actor: CombatantState,
+    spell: Spell,
+    *,
+    target_id: int | str | None,
+    target_name: str | None,
+    one_of_several: bool,
+    note: str,
+    castable: bool,
+    withheld: str,
+    borrowed: int,
+    channel: int | None,
+) -> dict:
+    """One row of the cast stage: a casting of ``spell``, by its recipe, as a
+    True cast or as a working's craft, at one figure or at none.
+
+    The stage's one row, so every kind of casting reads alike: the row names
+    its target when the spell has a row for more than one, says what the
+    spell costs, and for a casting only borrowing pays for says what it would
+    borrow. Nothing here decides what may be cast; the caller says.
+
+    Args:
+        actor: The caster.
+        spell: The spell cast, or the working crafted.
+        target_id: The figure the casting names, or ``None``.
+        target_name: That figure's name, or ``None`` with no figure on the
+            board to name.
+        one_of_several: Whether the stage has a row for this spell at more
+            than one figure.
+        note: The row's note, already worded.
+        castable: Whether it may be cast now, paid from the pool.
+        withheld: Why not, in the player's words, for a casting that may
+            not be cast even by borrowing; "" for any other.
+        borrowed: The mana it borrows, for a casting only borrowing pays
+            for; 0 for any other.
+        channel: The most mana one casting of it may take, cost and push
+            together (issue #960); ``None`` when the canon bounds no casting
+            by it, or a Game Master has lifted Channel for the caster (#37).
+    """
+    stage = words().cast_stage
+    borrowable = bool(borrowed)
+    return {
+        "key": spell.key,
+        "target_id": target_id,
+        "name": (
+            cast_row_name(spell.name, target_name)
+            if target_name is not None and one_of_several
+            else spell.name
+        ),
+        "cost": stage.mana_cost.format(school=spell.school, level=spell.level),
+        "note": note,
+        "castable": castable,
+        "reason": (
+            stage.mana_borrowable.format(
+                level=spell.level, mana=actor.mana, shortfall=borrowed
+            )
+            if borrowable
+            else withheld
+        ),
+        # Cast only by borrowing the shortfall (tarmar-engine #28).
+        "borrowable": borrowable,
+        "shortfall": borrowed,
+        "channel": channel,
+    }
+
+
+@dataclass
+class _OfferedCasting:
+    """One casting the pending menu offers, by its spell and its target, and
+    how the menu lets it be paid.
+
+    Attributes:
+        spell_key: The spell cast, or the working crafted.
+        target_id: The figure the option names, or ``None``.
+        plain: Whether the menu holds it paid from the pool with nothing
+            pushed.
+        borrowed: The mana its unpushed borrowing copy borrows, as the menu
+            says (``DescribedCandidate.borrowed``); 0 with no such copy.
+    """
+
+    spell_key: str
+    target_id: int | str | None
+    plain: bool = False
+    borrowed: int = 0
+
+
+def _offered_castings(
+    candidates: Collection[dict], offers: Callable[[dict], bool]
+) -> list[_OfferedCasting]:
+    """The castings among a menu's options, one per spell and target, in the
+    menu's order.
+
+    A pushed copy is the same casting with more mana in it, not another
+    casting, as the stage's rows have always read the menu (issue #960).
+
+    Args:
+        candidates: The pending menu's options, as stored.
+        offers: Whether an option is one of the castings wanted.
+    """
+    castings: dict[tuple[str, str], _OfferedCasting] = {}
+    for option in candidates:
+        if not offers(option):
+            continue
+        casting = castings.setdefault(
+            (option["spell_key"], str(option.get("target_id"))),
+            _OfferedCasting(option["spell_key"], option.get("target_id")),
+        )
+        if option.get("push_mana"):
+            continue
+        if option.get("borrow"):
+            casting.borrowed = option.get("borrowed") or 0
+        else:
+            casting.plain = True
+    return list(castings.values())
+
+
+def _offered_rows(
+    state: BattleState,
+    actor: CombatantState,
+    castings: list[_OfferedCasting],
+    details_of: Callable[[Spell], tuple[str, dict]],
+) -> list[dict]:
+    """The cast stage's rows for castings read off the menu, each the
+    stage's one row (:func:`_stage_row`) and what its kind of casting adds.
+
+    Nothing here decides what may be cast: a row is castable because the
+    menu holds its casting paid from the pool, and borrowable because the
+    menu holds only a borrowing copy of it, whose borrowed mana is the
+    menu's. A casting the menu withholds has no row. Each row's Channel is
+    the engine's bound for a True cast or a working, by the True skill's
+    kind of magic (``MagicRules.cast_kind``).
+
+    Args:
+        state: The board, for the names of the figures the castings name.
+        actor: The caster.
+        castings: The castings, as :func:`_offered_castings` reads them.
+        details_of: For the spell cast or the working crafted, the row's
+            note and the fields its kind of casting adds to the row.
+    """
+    rules = magic_rules()
+    names = {str(figure.combatant_id): figure.name for figure in state.combatants}
+    targets_of: dict[str, int] = {}
+    for casting in castings:
+        targets_of[casting.spell_key] = targets_of.get(casting.spell_key, 0) + 1
+    rows = []
+    for casting in castings:
+        spell = loaded_spell(casting.spell_key)
+        note, added = details_of(spell)
+        row = _stage_row(
+            actor,
+            spell,
+            target_id=casting.target_id,
+            target_name=names.get(str(casting.target_id)),
+            one_of_several=targets_of[casting.spell_key] > 1,
+            note=note,
+            castable=casting.plain,
+            withheld="",
+            borrowed=0 if casting.plain else casting.borrowed,
+            channel=rules.channel_bound(
+                actor, spell, kind=rules.cast_kind(spell, true_cast=True)
+            ),
+        )
+        row.update(added)
+        rows.append(row)
+    return rows
+
+
+def _true_cast_rows(
+    state: BattleState, actor: CombatantState, candidates: Collection[dict]
+) -> list[dict]:
+    """The cast stage's row for each True cast the menu offers
+    (tarmar-engine #77), marked ``true_cast``.
+
+    Args:
+        state: The board.
+        actor: The caster.
+        candidates: The pending menu's options, as stored.
+    """
+    rules = magic_rules()
+    return _offered_rows(
+        state,
+        actor,
+        _offered_castings(candidates, lambda option: bool(option.get("true_cast"))),
+        lambda spell: (_cast_chance_note(rules, actor, spell), {"true_cast": True}),
+    )
+
+
+def _is_craft(option: dict) -> bool:
+    """Is this menu option a craft action (tarmar-engine #77)?"""
+    return option.get("letter") == CRAFT_OPTION
+
+
+def _craft_rows(
+    state: BattleState, actor: CombatantState, candidates: Collection[dict]
+) -> list[dict]:
+    """The cast stage's row for each working the menu offers to begin, at
+    each figure it may name (tarmar-engine #77).
+
+    Beside a recipe row's fields each carries what the craft control prints:
+    the working's effect and tier, the turns its craft takes, its mana, and
+    what it drains from its caster when it goes off, each the engine's count
+    (:mod:`battle.workings`).
+
+    Args:
+        state: The board.
+        actor: The caster, with no craft standing.
+        candidates: The pending menu's options, as stored.
+    """
+    said = words().true_magic
+
+    def details_of(working: Spell) -> tuple[str, dict]:
+        craft = workings.reading(workings.not_yet_begun(working.key))
+        drain = workings.casting_drain(actor, working, 0)
+        return (
+            turn_menu.with_drain(
+                said.stage_craft.format(turns=craft.turns), actor, working, 0
+            ),
+            {
+                "effect": craft.effect.key,
+                "effect_label": craft.effect.label,
+                "tier": working.level,
+                "turns": craft.turns,
+                "mana": craft.mana,
+                "drain": drain.amount,
+                "drain_pool": drain.pool,
+            },
+        )
+
+    return _offered_rows(
+        state, actor, _offered_castings(candidates, _is_craft), details_of
+    )
+
+
+def _standing_craft(actor: CombatantState, candidates: Collection[dict]) -> dict | None:
+    """The craft that stands on the caster, for the turn panel's one
+    continuation option, or ``None`` when none stands.
+
+    Read off the engine's ``CraftState`` (:mod:`battle.workings`): the
+    working, which of its turns the next craft action is, and the mana
+    gathered so far. ``line`` is the option's name, the working and "turn k
+    of n". ``target_id`` is the figure the craft's latest action named,
+    ``None`` when it named none: each craft action names the working's
+    target anew, and the page offers the same figure first. ``offered`` is
+    whether the menu holds the continuation: the engine withholds it where
+    no cast may be made, and any other choice then loses the working.
+
+    Args:
+        actor: The caster.
+        candidates: The pending menu's options, as stored.
+    """
+    standing = actor.crafting
+    if standing is None:
+        return None
+    craft = workings.reading(standing)
+    return {
+        "key": standing.spell_key,
+        "name": craft.working.name,
+        "turn": craft.next_turn,
+        "turns": craft.turns,
+        "gathered": craft.gathered,
+        "mana": craft.mana,
+        "push_mana": standing.push_mana,
+        "borrow": standing.borrow,
+        "target_id": standing.target_id,
+        "line": turn_menu.craft_continuation_line(craft),
+        "offered": any(_is_craft(option) for option in candidates),
+    }
+
+
+def _granted_workings(actor: CombatantState) -> list[dict]:
+    """The workings a Game Master has granted this figure, and no other's.
+
+    Read off the figure's own ``granted_workings``, which the profile fills
+    from the battle's record for that figure alone
+    (:func:`battle.working_grants.fill`). A grant past the figure's tier cap
+    says it waits on Channel being lifted
+    (:func:`battle.working_grants.waits_on_channel`, the engine's answer),
+    since the menu offers no craft of it until then. A key the loaded canon
+    no longer builds is left out, as the engine is never shown one.
+
+    Args:
+        actor: The caster, the battle's lifted bounds and grants on it.
+    """
+    rules = magic_rules()
+    granted = []
+    for key in actor.granted_workings:
+        if not working_grants.builds(key, rules):
+            continue
+        waits = working_grants.waits_on_channel(actor, key)
+        granted.append(
+            {
+                "key": key,
+                "name": working_grants.working_label(key),
+                "waits_on_channel": waits,
+                "note": (working_grants.waiting_note(key, actor.name) if waits else ""),
+            }
+        )
+    return granted
+
+
+def _craft_stage(
+    state: BattleState, actor: CombatantState, candidates: Collection[dict]
+) -> dict:
+    """What the cast stage's craft control draws for a True mage
+    (tarmar-engine #77).
+
+    While a craft stands the menu offers its continuation and no new craft,
+    so ``standing`` carries it and ``workings`` is empty; otherwise
+    ``workings`` holds a row for each craft the menu offers to begin. The
+    tier cap is the engine's for the figure (``MagicRules.tier_cap``),
+    ``None`` when a Game Master has lifted it.
+
+    Args:
+        state: The board.
+        actor: A caster with a level in the True skill.
+        candidates: The pending menu's options, as stored.
+    """
+    standing = _standing_craft(actor, candidates)
+    return {
+        "skill": workings.true_magic().skill_label,
+        "tier_cap": magic_rules().tier_cap(actor),
+        "standing": standing,
+        "workings": []
+        if standing is not None
+        else _craft_rows(state, actor, candidates),
+        "granted": _granted_workings(actor),
+    }
+
+
+def caster_magic(
+    state: BattleState, combatant_id: int, candidates: Collection[dict] = ()
+) -> dict | None:
     """One Tarmar caster's magical situation, in the cast stage's own shape.
 
-    ``None`` for a combatant who knows no spells (or is not in the state at
-    all) — there is no cast stage to draw. Otherwise the named pool plus a
-    row per offered cast: what it costs, what it needs to land, whether it
-    can be cast right now, and, when it cannot, why not in the player's
-    words.
+    ``None`` for a combatant who knows no spell that can be cast and has no
+    level in the True skill (or is not in the state at all): there is no
+    cast stage to draw. Otherwise the named pool plus a row per offered
+    cast: what it costs, what it needs to land, whether it can be cast right
+    now, and, when it cannot, why not in the player's words. A spell that is
+    learned and never cast (a generic counter, tarmar-engine #77) has no row,
+    as the engine's menu offers no cast of it, so a figure who knows only
+    such spells and is no True mage has no stage. A True mage has one
+    whatever it knows (tarmar-studio #208): the engine's one question,
+    ``MagicRules.true_level``, asked no other way.
 
     The shape is profile-neutral (#263): the pool carries its own label and
     every row carries its cost and note already worded, because a classic
@@ -3367,11 +3976,11 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     would collapse them to one. Where a spell has more than one target, each
     row names its own (:func:`battle.classic_adaptation.cast_row_name`).
 
-    The castability rules restate ``policy._cast_candidates``' filters —
-    the engine drops the casts it will not offer, this says out loud why
-    each was dropped — and then the menu's Channel filter (issue #960),
-    through :func:`_channel_reading`, on the same magic rules the menu is
-    built with. ``battle.tests.test_cast_flow`` pins the two sets equal,
+    The recipe rows' castability rules restate ``policy._cast_candidates``'
+    filters — the engine drops the casts it will not offer, this says out
+    loud why each was dropped — and then the menu's Channel filter (issue
+    #960), through :func:`_channel_reading`, on the same magic rules the menu
+    is built with. ``battle.tests.test_cast_flow`` pins the two sets equal,
     against a menu built with those rules, so the explanation can never
     contradict the menu.
 
@@ -3382,23 +3991,46 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
     cap and the Channel. Such a row is not castable (the plain cast is not
     on the menu) and not withheld: the menu offers it as a borrowing copy,
     and the row carries the ``shortfall`` that copy borrows.
+
+    Every row, a recipe cast's, a True cast's and a craft's, is built by
+    :func:`_stage_row`, so the three read alike.
+
+    A True mage's other castings restate nothing (tarmar-studio #208):
+    ``true_casts`` holds a row, marked ``true_cast``, for each True cast
+    among ``candidates``, and ``craft``
+    what the craft control draws (:func:`_craft_stage`), its rows the crafts
+    among ``candidates``. A casting the menu withholds has no row, and the
+    filters that withheld it are written nowhere here. For any other figure
+    ``true_casts`` is empty and ``craft`` is ``None``.
+
+    Args:
+        state: The board, a Game Master's rulings on magic written onto it
+            (``TarmarProfile.caster_magic`` fills them).
+        combatant_id: The caster.
+        candidates: The pending menu's options, as stored
+            (``Battle.pending_input_json``): what the True cast rows and the
+            craft rows are read off. With none there are no such rows.
     """
     try:
         actor = state.by_id(combatant_id)
     except KeyError:
         return None
-    if not actor.spells:
+    rules = magic_rules()
+    cast_spells = [
+        spell for spell in map(get_spell, actor.spells) if not spell.generic_counter
+    ]
+    true_mage = rules.true_level(actor) > 0
+    if not cast_spells and not true_mage:
         return None
     # The enemies a damage spell is offered at, in the order the engine's
     # every-target menu offers them (``policy.enemies_by_distance``, nearest
     # first) — a spell with nobody to aim at is not offered, so the row has
     # to say so rather than claim castable.
     enemies = policy.enemies_by_distance(state, actor)
-    rules = magic_rules()
     stage = words().cast_stage
     rows = []
-    for key in actor.spells:
-        spell = get_spell(key)
+    for spell in cast_spells:
+        key = spell.key
         aimed = spell.damage is not None and not spell.heals
         spell_channel, channel_refusal = _channel_reading(rules, actor, spell)
         other_reason = ""
@@ -3425,81 +4057,28 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
             )
         )
         if borrowable:
-            reason = stage.mana_borrowable.format(
-                level=spell.level, mana=actor.mana, shortfall=shortfall
-            )
+            withheld = ""
         elif shortfall:
-            reason = stage.mana_short.format(level=spell.level, mana=actor.mana)
+            withheld = stage.mana_short.format(level=spell.level, mana=actor.mana)
         else:
-            reason = other_reason
-        castable = not reason
-        # The attribute the casting roll is made under: less the injury band
-        # and any owed off-balance penalty, the engine's one reading of them
-        # (``policy.action_roll_penalties``, tarmar-engine #56), as its menu
-        # prices the cast and the board rolls it (#153).
-        injury, off_balance = policy.action_roll_penalties(actor)
-        attribute = (
-            actor.intelligence if spell.attribute == "INT" else actor.wisdom
-        ) - (injury + off_balance)
-        # The chance the engine prices the cast by, the casting fumble floor
-        # included (#46, tarmar-engine #47).
-        chance = policy.cast_success_chance(attribute, rules.casting_failure)
-        # The floor named where it lowers the highest total that succeeds,
-        # as the engine's own cast working names it
-        # (``tarmar_engine.policy._cast_candidates``), which keeps its phrase
-        # inside the candidate's rationale rather than as data (#145).
-        floor = (
-            stage.under_fumble_floor.format(floor=rules.casting_failure.fumble_floor)
-            if rules.casting_failure is not None
-            and casting_success_ceiling(attribute, rules.casting_failure) < attribute
-            else ""
-        )
-        aim = stage.dex_to_land if spell.targeted else ""
-        # The attribute named with what came off it, in the words the engine's
-        # own cast note uses, so a lower chance says why (#153).
-        if injury and off_balance:
-            rolled_under = stage.less_both.format(
-                attribute=spell.attribute, injury=injury, off_balance=off_balance
-            )
-        elif injury:
-            rolled_under = stage.less_injury.format(
-                attribute=spell.attribute, injury=injury
-            )
-        elif off_balance:
-            rolled_under = stage.less_off_balance.format(
-                attribute=spell.attribute, off_balance=off_balance
-            )
-        else:
-            rolled_under = spell.attribute
+            withheld = other_reason
+        note = _cast_chance_note(rules, actor, spell)
         targets: list[CombatantState | None] = (
             list(enemies) if aimed and enemies else [None]
         )
         rows.extend(
-            {
-                "key": key,
-                "target_id": target.combatant_id if target is not None else None,
-                "name": (
-                    cast_row_name(spell.name, target.name)
-                    if target is not None and len(targets) > 1
-                    else spell.name
-                ),
-                "cost": stage.mana_cost.format(school=spell.school, level=spell.level),
-                "note": stage.mana_chance.format(
-                    chance=f"{chance:.0%}",
-                    attribute=rolled_under,
-                    floor=floor,
-                    aim=aim,
-                ),
-                "castable": castable,
-                "reason": reason,
-                # Cast only by borrowing the shortfall (tarmar-engine #28).
-                "borrowable": borrowable,
-                "shortfall": shortfall if borrowable else 0,
-                # The most mana one casting may take, cost and push together
-                # (issue #960); None when the canon bounds no casting by it, or
-                # a Game Master has lifted Channel for the caster (#37).
-                "channel": spell_channel,
-            }
+            _stage_row(
+                actor,
+                spell,
+                target_id=target.combatant_id if target is not None else None,
+                target_name=target.name if target is not None else None,
+                one_of_several=len(targets) > 1,
+                note=note,
+                castable=not borrowable and not withheld,
+                withheld=withheld,
+                borrowed=shortfall if borrowable else 0,
+                channel=spell_channel,
+            )
             for target in targets
         )
     return {
@@ -3509,6 +4088,9 @@ def caster_magic(state: BattleState, combatant_id: int) -> dict | None:
         # Mana borrowed and not yet paid back (tarmar-engine #28).
         "owed": actor.debt,
         "spells": rows,
+        # What a True mage may also do (tarmar-studio #208), read off the menu.
+        "true_casts": _true_cast_rows(state, actor, candidates) if true_mage else [],
+        "craft": _craft_stage(state, actor, candidates) if true_mage else None,
     }
 
 
@@ -3584,6 +4166,7 @@ def record_player_action(
     borrow: bool = False,
     anchor_target: int | None = None,
     counter_mana: int | None = None,
+    true_cast: bool = False,
     destination: tuple[int, int] | None = None,
     as_ai: bool = False,
 ) -> tuple[Battle, list[BattleEvent]]:
@@ -3604,19 +4187,24 @@ def record_player_action(
     their combatant; a DM may instead pass ``as_ai=True`` to let the AI's
     top-scored candidate stand for an absent player (the ``letter``/
     ``target_id``/``spell_key``/``push_mana``/``borrow``/``anchor_target``/
-    ``counter_mana`` arguments are ignored then, but the binding is not: an AI hand-off is a
-    choice for one named figure too).
+    ``counter_mana``/``true_cast`` arguments are ignored then, but the
+    binding is not: an AI hand-off is a choice for one named figure too).
 
     ``push_mana`` is the extra mana a cast pushes into its spell (issue
     #960), ``borrow`` whether the cast borrows the mana its caster lacks
     (tarmar-engine #28), ``anchor_target`` the combatant whose Runaway an
-    anchor takes back (tarmar-engine #30), and ``counter_mana`` the mana a
+    anchor takes back (tarmar-engine #30), ``counter_mana`` the mana a
     counter commits against the caster ``target_id`` names (tarmar-engine
-    #31). A player, or a Game Master choosing for a foe, may record only a
-    push, a borrowing, an anchor or a counter the engine offered on the
-    menu; any other is not on the menu, and refused as an option that is
-    not. An escalation is the same cast of the countered spell at its
-    target, which the menu marks; it needs no argument of its own.
+    #31), and ``true_cast`` whether the cast is a True cast (tarmar-engine
+    #77). A craft (tarmar-engine #77) takes no argument of its own: it is
+    the engine's craft letter, with the working's key as ``spell_key`` and
+    its ``push_mana``, ``borrow`` and ``target_id``. A player, or a Game
+    Master choosing for a foe or sitting in a seat, may record only a push,
+    a borrowing, an anchor, a counter, a True cast or a craft the engine
+    offered on the menu; any other is not on the menu, and refused as an
+    option that is not. An escalation is the same cast of the countered
+    spell at its target, which the menu marks; it needs no argument of its
+    own.
 
     ``destination`` is the hex the player picked for an option that places
     the figure (#819, #866). It must be one of that option's
@@ -3676,8 +4264,9 @@ def record_player_action(
             letter = top["letter"]
             target_id = top.get("target_id")
             spell_key = top.get("spell_key") or ""
-            # The AI never pushes, borrows, counters or escalates (house
-            # readings), but it anchors its own Runaway: read from the option.
+            # The AI never pushes, borrows, counters, escalates or True casts
+            # (house readings), but it anchors its own Runaway: read from the
+            # option.
             variant = option_variant(top)
             # The AI's own hex, if it named one. On tarmar-engine 0.9.10 the AI
             # names none (house ruling ai_destinations), so this is None and
@@ -3693,6 +4282,7 @@ def record_player_action(
                     "borrow": borrow,
                     "anchor_target": anchor_target,
                     "counter_mana": counter_mana,
+                    "true_cast": true_cast,
                 }
             )
             recorded = {

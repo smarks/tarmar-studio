@@ -859,8 +859,8 @@ wheels = [
 
 [[package]]
 name = "tarmar-engine"
-version = "0.9.21"
-source = { git = "https://github.com/smarks/tarmar-engine.git?rev=v0.9.21#e09b045c8acefc17b2490c69ad4d4dc4a8006c7c" }
+version = "0.9.23"
+source = { git = "https://github.com/smarks/tarmar-engine.git?rev=v0.9.23#52d2c30f5ca025d0b91f0e03f79dd2bf213a9763" }
 dependencies = [
     { name = "hexarena" },
     { name = "tarmar-rules" },
@@ -924,7 +924,7 @@ requires-dist = [
     { name = "origami-common", git = "https://github.com/smarks/origami-common.git" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "speak-friend", git = "https://github.com/smarks/speak-friend.git" },
-    { name = "tarmar-engine", git = "https://github.com/smarks/tarmar-engine.git?rev=v0.9.21" },
+    { name = "tarmar-engine", git = "https://github.com/smarks/tarmar-engine.git?rev=v0.9.23" },
     { name = "tarmar-rules", git = "https://github.com/smarks/tarmar-rules.git?rev=v0.3.0" },
     { name = "weasyprint", specifier = ">=70.0" },
     { name = "whitenoise", specifier = ">=6.11.0" },

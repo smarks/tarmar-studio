@@ -3,6 +3,7 @@ seating a player's own caster into a battle with both.
 """
 
 import json
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -19,11 +20,15 @@ from characters.magic import (
     battle_loadout,
     current_mana,
     grant_mana,
+    known_spells,
     learn_spell,
 )
 from characters.models import Character, validate_spells
+from characters.refusal_words import refusal_words
 from characters.rules import character_rules
 from characters.services import CharacterChangeError
+from characters.skills import format_skill_level
+from characters.tests.fixed_refusals import with_fixed_refusals
 from common.test_helpers import CHARACTER_DEFAULTS, BaseTestCase, create_character
 
 MAGIC_PAGE = Path(settings.BASE_DIR) / "reference/content/public-rules/magic.md"
@@ -209,6 +214,71 @@ class SheetAndExportTest(BaseTestCase):
         markdown = generate_character_markdown(self.character)
         self.assertIn("## Spells", markdown)
         self.assertIn("| Heal | Mending |", markdown)
+
+
+@with_fixed_refusals
+class KnownCounterIsNeverCastTest(BaseTestCase):
+    """tarmar-studio#208: a Counter is learned and never cast, so wherever a
+    known spell is listed it carries the configured words for that in place
+    of a mana cost and a casting roll."""
+
+    def setUp(self):
+        super().setUp()
+        self.owner = self.create_user("counter_reader")
+        self.character = create_character(
+            self.owner,
+            name="Counter Reader",
+            free_spell_points=2,
+            spells={"heal": 1, "counter_2": 1},
+        )
+        self.never_cast = refusal_words().magic.never_cast_cell
+
+    def test_the_words_are_on_the_counter_and_on_no_spell_that_is_cast(self):
+        # The list's own phrase, which names no spell: the row does. The
+        # sentence a refused cast is told is another (magic.never_cast).
+        self.assertEqual(self.never_cast, "magic.never_cast_cell")
+        listed = {spell.key: spell.never_cast for spell in known_spells(self.character)}
+        self.assertEqual(listed, {"heal": "", "counter_2": self.never_cast})
+
+    def sheet_row(self, spell_key: str) -> list[str]:
+        """The cells of one known spell's row on the sheet, tags dropped."""
+        self.login_as(self.owner)
+        page = self.client.get(reverse("characters:edit", args=[self.character.pk]))
+        row = re.search(
+            rf'<tr class="known-spell" data-spell="{spell_key}">(.*?)</tr>',
+            page.content.decode(),
+            re.DOTALL,
+        )
+        assert row is not None, f"the sheet lists no {spell_key}"
+        return [
+            re.sub(r"\s+", " ", cell).strip()
+            for cell in re.findall(r"<td[^>]*>(.*?)</td>", row.group(1), re.DOTALL)
+        ]
+
+    def test_the_sheet_prints_no_cost_and_no_roll_for_it(self):
+        mastery = f"{format_skill_level(1)} (1 pts)"
+        self.assertEqual(
+            self.sheet_row("counter_2"),
+            ["Counter 2", "Protection", self.never_cast, mastery],
+        )
+        # A spell that is cast keeps its cost and its roll.
+        self.assertEqual(
+            self.sheet_row("heal"), ["Heal", "Mending", "1", "3d6 ≤ WIS", mastery]
+        )
+
+    def test_the_export_prints_no_cost_and_no_roll_for_it(self):
+        markdown = generate_character_markdown(self.character)
+        mastery = format_skill_level(1)
+        self.assertIn(
+            f"| Counter 2 | Protection | {self.never_cast} |  | {mastery} |", markdown
+        )
+        self.assertIn(f"| Heal | Mending | 1 | 3d6 ≤ WIS | {mastery} |", markdown)
+        # Five cells a row, as the header has, so the table still parses.
+        table = [line for line in markdown.splitlines() if line.startswith("| ")]
+        spell_rows = [
+            line for line in table if "Protection" in line or "Mending" in line
+        ]
+        self.assertEqual({line.count("|") for line in spell_rows}, {6})
 
 
 class ImportHoldsPlayersTest(BaseTestCase):

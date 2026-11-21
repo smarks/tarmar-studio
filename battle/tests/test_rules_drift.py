@@ -13,13 +13,15 @@ from django.test import SimpleTestCase
 from battle.engine import actions, engine, hexes
 from battle.engine.state import BARE_HANDED_DAMAGE_TABLE
 from battle.magic_rules import CASTING_DICE, load_magic_schools
-from battle.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS
+from battle.spells import ELEMENTAL_SCHOOL, ELEMENTS, PROTECTION_SCHOOL, SPELLS
 from reference.markdown_tables import table_rows_under_heading as _table_rows
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
     DEFAULT_CANON_DIR,
     PUBLIC_RULES_DIR,
 )
+
+from .magic_fixtures import DEFAULT_MAGIC_RULES
 
 RULES = PUBLIC_RULES_DIR
 COMBAT = RULES / "combat"
@@ -324,27 +326,90 @@ class GrappleDriftGuard(SimpleTestCase):
 
 
 class SpellCatalogDriftGuard(SimpleTestCase):
-    def test_spell_names_and_levels_come_from_schools_of_magic_md(self):
+    @staticmethod
+    def school_level_lines(school: str) -> dict[int, str]:
+        """schools-of-magic.md's numbered spell list for a school: each
+        level's line, by level."""
         markdown = (RULES / "magic" / "schools-of-magic.md").read_text()
+        school_section = markdown.split(f"### {school}", 1)[1].split("### ", 1)[0]
+        return {
+            int(match.group(1)): match.group(2)
+            for match in re.finditer(r"^(\d+)\. (.+)$", school_section, re.MULTILINE)
+        }
+
+    def test_spell_names_and_levels_come_from_schools_of_magic_md(self):
         for spell in SPELLS.values():
-            school_section = markdown.split(f"### {spell.school}", 1)[1].split(
-                "### ", 1
-            )[0]
-            level_lines = {
-                int(match.group(1)): match.group(2)
-                for match in re.finditer(
-                    r"^(\d+)\. (.+)$", school_section, re.MULTILINE
-                )
-            }
+            level_lines = self.school_level_lines(spell.school)
             self.assertIn(spell.level, level_lines, spell.key)
+            not_on_the_page = (
+                f"{spell.name} is not a level-{spell.level} {spell.school} spell"
+            )
+            if spell.generic_counter:
+                # A Counter rung's last word is its number, which the line
+                # for its level would hold whatever the rung was called: its
+                # whole name must be one of the line's entries.
+                self.assertIn(
+                    spell.name, level_lines[spell.level].split(", "), not_on_the_page
+                )
+                continue
             # The catalog name (bare, or its Elemental variant like "Fire
             # Missile") must appear in that school's line for that level.
             base_name = spell.name.split()[-1]
-            self.assertIn(
-                base_name,
-                level_lines[spell.level],
-                f"{spell.name} is not a level-{spell.level} {spell.school} spell",
-            )
+            self.assertIn(base_name, level_lines[spell.level], not_on_the_page)
+
+    def test_generic_counters_are_the_protection_lists_counter_rungs(self):
+        # Both ways: every Counter rung the page lists is in the catalog at
+        # the page's level, and the catalog holds no other generic counter.
+        page_rungs = {
+            (level, entry)
+            for level, line in self.school_level_lines(PROTECTION_SCHOOL).items()
+            for entry in line.split(", ")
+            if re.fullmatch(r"Counter \d+", entry)
+        }
+        catalog_rungs = {
+            (spell.level, spell.name)
+            for spell in SPELLS.values()
+            if spell.generic_counter
+        }
+        self.assertTrue(page_rungs)
+        self.assertEqual(catalog_rungs, page_rungs)
+
+    def test_no_default_canon_working_is_named_for_a_spell(self):
+        # tarmar-studio #208: the default canon's True Magic workings are
+        # invented, and one named for a spell the pages list reads as that
+        # spell (the narrated working was "Shaping", which is Mending 4). No
+        # working's key or label shares a word with a spell of the catalog,
+        # of schools-of-magic.md's lists or of spell-descriptions.md's tables.
+        magic_pages = RULES / "magic"
+        spell_names = [
+            *(spell.name for spell in SPELLS.values()),
+            *re.findall(
+                r"^\d+\. (.+)$",
+                (magic_pages / "schools-of-magic.md").read_text(),
+                re.MULTILINE,
+            ),
+            *re.findall(
+                r"^\| ([^|]+) \| \d",
+                (magic_pages / "spell-descriptions.md").read_text(),
+                re.MULTILINE,
+            ),
+        ]
+        spell_words = {
+            word.lower()
+            for spell_name in spell_names
+            for word in re.findall(r"[A-Za-z]+", spell_name)
+        }
+        self.assertLessEqual({"missile", "shaping", "counter", "sleep"}, spell_words)
+        true_magic = DEFAULT_MAGIC_RULES.true_magic
+        assert true_magic is not None, "the default canon has True Magic"
+        self.assertTrue(true_magic.effects)
+        for effect in true_magic.effects:
+            for written in (effect.key, effect.label):
+                with self.subTest(effect=effect.key, written=written):
+                    shared = spell_words.intersection(
+                        word.lower() for word in re.findall(r"[A-Za-z]+", written)
+                    )
+                    self.assertFalse(shared, f"{written!r} names a spell")
 
     def test_the_default_canon_school_table_is_the_page_lists(self):
         # Issue #18: schools-of-magic.md heads its lists "Common Schools
@@ -388,10 +453,11 @@ class SpellCatalogDriftGuard(SimpleTestCase):
             self.assertGreaterEqual(spell.level, 1)
 
     def test_catalog_size_is_the_ladders_plus_three_to_seven_others(self):
-        # The engine's catalog since tarmar-engine #75: every element's ladder,
-        # one spell per element at each Elemental tier, beside a small set of
-        # other schools' spells, the bound the whole catalog held at six to
-        # ten when the Elemental school had three spells.
+        # The engine's catalog since tarmar-engine #75 and #77: every
+        # element's ladder, one spell per element at each Elemental tier, and
+        # the generic counters' ladder, each counted exactly, beside a small
+        # set of other spells, the bound the whole catalog held at six to ten
+        # when the Elemental school had three spells.
         elemental = [
             spell for spell in SPELLS.values() if spell.school == ELEMENTAL_SCHOOL
         ]
@@ -400,7 +466,13 @@ class SpellCatalogDriftGuard(SimpleTestCase):
             sorted((spell.element, spell.level) for spell in elemental),
             sorted((element, tier) for element in ELEMENTS for tier in tiers),
         )
-        others = len(SPELLS) - len(elemental)
+        generic_counters = [spell for spell in SPELLS.values() if spell.generic_counter]
+        # The Counter ladder runs 1, 2, ... n with no gap, a rung a level.
+        self.assertEqual(
+            sorted(spell.level for spell in generic_counters),
+            list(range(1, len(generic_counters) + 1)),
+        )
+        others = len(SPELLS) - len(elemental) - len(generic_counters)
         self.assertGreaterEqual(others, 3)
         self.assertLessEqual(others, 7)
 

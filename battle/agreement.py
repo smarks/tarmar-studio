@@ -31,10 +31,14 @@ and the refusals use are configuration (``battle.wording``,
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar
 
 from tarmar_engine.state import BattleState
 
 from .wording import name_of, words
+
+if TYPE_CHECKING:
+    from .models import Battle
 
 
 @dataclass(frozen=True)
@@ -44,10 +48,14 @@ class Agreement:
     whole_battle: bool = False
     pairs: frozenset[tuple[int, int]] = frozenset()
 
+    #: The ``Battle`` field the record is stored in, named as the rulings
+    #: for single figures name theirs (``battle.figure_rulings``).
+    battle_field: ClassVar[str] = "hth_agreement_json"
+
     @classmethod
-    def of(cls, battle) -> Agreement:
+    def of(cls, battle: Battle) -> Agreement:
         """The battle's recorded ruling (empty for a battle with none)."""
-        raw = battle.hth_agreement_json or {}
+        raw = getattr(battle, cls.battle_field) or {}
         return cls(
             whole_battle=bool(raw.get("whole_battle")),
             pairs=frozenset(

@@ -24,6 +24,7 @@ from characters.equipment_rules import (
     equipment_rules,
 )
 from characters.skill_checks import is_glossary_skill
+from characters.skill_rules import SkillRulesError
 from characters.skills import glossary_skill
 from reference.paths import (
     EQUIPMENT_CATALOG_FILE,
@@ -64,6 +65,10 @@ def unknown_channel_source_skills() -> list[str]:
 
     Raises:
         MagicRulesError: The canon's file is missing or malformed.
+        SkillRulesError: Its ``skill-rules.json`` is, which names the
+            glossary's skills.
+        EquipmentCatalogError: Its ``equipment.json`` is, whose weapons a
+            skill's name is read against.
     """
     channel = magic_rules().channel
     if channel is None:
@@ -92,12 +97,17 @@ def check_magic_rules(
         **kwargs: Django's other check arguments, unused.
 
     Returns:
-        No messages when the rules load and name only glossary skills;
+        No messages when the rules load and name only glossary skills, or
+        when the skills or the catalog a source skill is read against are
+        refused (``characters.E002`` and ``characters.E003`` report those);
         otherwise an :class:`Error` carrying the loader's message (which
         names the file and the field), or one naming the unknown skills.
     """
     try:
         unknown = unknown_channel_source_skills()
+    except (SkillRulesError, EquipmentCatalogError):
+        # The files' own refusals are characters.E002's and E003's to report.
+        return []
     except MagicRulesError as error:
         return [
             Error(

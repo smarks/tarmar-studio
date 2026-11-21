@@ -9,8 +9,10 @@ the default canon by coincidence.
 """
 
 import hashlib
+import re
 from collections.abc import Callable
 from dataclasses import replace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from tarmar_engine.magic import (
@@ -28,11 +30,16 @@ from tarmar_engine.magic import (
     SpellEffectKind,
 )
 
+from battle.magic_rules import SchoolTable, load_magic_schools, magic_schools
 from battle.tests.magic_fixtures import (
+    COUNTER_RULES,
     DEFAULT_MAGIC_RULES,
     INVENTED_RULES,
+    TRUE_MAGIC_RULES,
+    TRUE_SKILL,
     seated_rules,
 )
+from battle.tests.magic_fixtures import TRUE_MAGIC as INVENTED_TRUE_MAGIC
 from characters.equipment_rules import EncumbranceLevel, EncumbranceRules
 from characters.rules import FatigueRollRules, LocationRow, LocationTable
 from characters.skill_rules import SkillRules, SkillTrackRules
@@ -54,9 +61,15 @@ from characters.tests.test_skill_rules import (
     SAILOR_SKILLS,
     SMITH_SKILLS,
 )
+from reference.paths import (
+    CANON_MAGIC_RULES_FILE_NAME,
+    DEFAULT_CANON_DIR,
+    DEFAULT_MAGIC_PROMPT_FILE,
+)
 
 from . import engine
 from .engine import MODE_PLAY
+from .test_magic_prompt import SCHOOLS_OF_MAGIC_HEADING
 from .turn_engine.messages import plan_message, planning_rules
 from .turn_engine.policy import TurnPolicy
 
@@ -96,7 +109,8 @@ DEFAULT_SECTION_HASHES: dict[Callable[[], str], str] = {
 
 
 #: The magic section's built bodies under the default canon's magic rules
-#: (#48, #127), by heading, whichever canon is loaded.
+#: (#48, #127; True Magic and familiarity since #208), by heading, whichever
+#: canon is loaded.
 DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
     zip(
         engine.GENERATED_MAGIC_HEADINGS,
@@ -114,7 +128,8 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "always Surge, a Runaway.",
             "Hard cap on mana per casting, the spell's cost and any pushed mana "
             "together. Rote Magic: equals 2 × skill level in that specific spell + "
-            "6. Channel cannot be exceeded even by Borrowing.",
+            "6. Deep Magic: equals 3 × Arcane skill level (costs 2× the skill "
+            "points to advance). Channel cannot be exceeded even by Borrowing.",
             "Spend all remaining mana, borrow the rest as Debt, up to 4 owed in all. "
             "Debt Roll after the spell: 2d6 ≤ (WIS − 2 × Debt). Fail by 1-2: "
             "Flicker. Fail by 3-5: Fray (lose 2 × the Debt in Fatigue). Fail by 6-8: "
@@ -140,7 +155,38 @@ DEFAULT_MAGIC_BODIES: dict[str, str] = dict(
             "Only the caster can escalate on later turns by paying again; the "
             "defender gets one shot per casting and may oppose again (paying again) "
             "or let it through. A failed Control Roll during escalation can trigger "
-            "Runaway.",
+            "Runaway. Familiarity: each side adds +2 per level of familiarity with "
+            "the spell cast. The caster's is its level in that spell, or its Arcane "
+            "level for a working or for a True cast of a spell it holds no level "
+            "in. The defender's is the highest, not the sum, of its level in that "
+            "spell, its Arcane level against any spell and its highest Counter "
+            "spell's level against a spell of that level or less (a working's "
+            "level is its tier).",
+            "A caster with a level in the Arcane skill may craft a working of the "
+            "Arcane/True Magic school over several turns, and may True cast a spell "
+            "they know. Only a GM starts the Arcane skill. A working's tier is at "
+            "most 2 × the Arcane level, unless the GM lifts the caster's Channel, "
+            "which lifts the cap too; its craft takes 3 turns per tier, and the "
+            "caster does nothing else meanwhile. Its mana is its tier plus any mana "
+            "pushed, gathered in even shares over the craft turns, and Deep Magic's "
+            "Channel caps the whole of it. Workings: Sear, 1d8 damage to Fatigue "
+            "per tier, with no DEX roll to hit, ignoring armour; Knit, 1d4+1 "
+            "healing to Body per tier, for the caster or a teammate; Figment, "
+            "narrated: the GM says what it does; only at a tier the GM has granted "
+            "the figure. Damage that lands on a crafting caster forces an "
+            "interruption roll: 2d10 ≤ WIS − 4 × mana gathered. A failed roll loses "
+            "the working: fail by 1-10, Scatter; fail by 11+, Breakaway, a Runaway. "
+            "Natural 20: always Breakaway, a Runaway. A working that completes "
+            "rolls 3d6 ≤ WIS + 5 × Arcane level, with the casting roll's special "
+            "results. A True cast is an instant cast of a spell the caster knows, "
+            "in any element of its rung, with Channel from the Arcane skill (Deep "
+            "Magic); mana pushed past the spell's cost casts it deeper. A working "
+            "that goes off drains 8 Fatigue for each point of its mana; a True cast "
+            "drains 8 Fatigue for each point pushed past the spell's cost. A "
+            "casting that ends without going off drains, for each point the "
+            "working had gathered or the True cast had pushed, by how it ended: "
+            "interrupted 6 Fatigue, countered 7 Fatigue; any other ending drains "
+            "nothing.",
         ),
         strict=True,
     )
@@ -355,6 +401,7 @@ OTHER_END_MAGIC_RULES = replace(
     BORROWING,
     RUNAWAY,
     COUNTERSPELL,
+    TRUE_MAGIC,
 ) = engine.GENERATED_MAGIC_HEADINGS
 
 
@@ -811,6 +858,8 @@ class InventedRulesTest(SimpleTestCase):
                 "turns, no drain and no anchor roll.",
                 "No mage may commit mana to counter another's casting; there is no "
                 "Counterspell.",
+                "There is no True Magic: no caster crafts a working or makes a True "
+                "cast.",
             ],
         )
 
@@ -927,6 +976,161 @@ class InventedRulesTest(SimpleTestCase):
         )
         self.assertNotIn("Control Roll", counterspell)
         self.assertTrue(counterspell.endswith("or let it through."))
+
+    def test_the_magic_section_states_the_true_magic(self) -> None:
+        """#208: the invented block, every number unlike the default canon's."""
+        with seated_rules(TRUE_MAGIC_RULES):
+            body = magic_body(TRUE_MAGIC)
+        self.assertEqual(
+            body,
+            "A caster with a level in the Lorecraft skill may craft a working of "
+            "the Lorecraft school over several turns, and may True cast a spell "
+            "they know. A working's tier is at most 3 × the Lorecraft level, unless "
+            "the GM lifts the caster's Channel, which lifts the cap too; its craft "
+            "takes 2 turns per tier, and the caster does nothing else meanwhile. "
+            "Its mana is its tier plus any mana pushed, gathered in even shares "
+            "over the craft turns, and Fathomed Magic's Channel caps the whole of "
+            "it. Workings: Rending, 1d4 damage to Fatigue per tier, needing the DEX "
+            "roll to hit, stopped by armour; Salving, 1d6+1 healing to Body per "
+            "tier, for the caster or a teammate; Wonder, narrated: the GM says what "
+            "it does; only at a tier the GM has granted the figure. Damage that "
+            "lands on a crafting caster forces an interruption roll: 2d8 ≤ WIS − 5 "
+            "× mana gathered. A failed roll loses the working: fail by 1-8, Lapse; "
+            "fail by 9+, Rupture, a Runaway. Natural 16: always Rupture, a "
+            "Runaway. A working that completes rolls 3d6 ≤ WIS + 4 × Lorecraft "
+            "level, with the casting roll's special results. A True cast is an "
+            "instant cast of a spell the caster knows, in any element of its rung, "
+            "with Channel from the Lorecraft skill (Fathomed Magic); mana pushed "
+            "past the spell's cost casts it deeper. A working that goes off drains "
+            "6 Body for each point of its mana; a True cast drains 6 Body for each "
+            "point pushed past the spell's cost. A casting that ends without going "
+            "off drains, for each point the working had gathered or the True cast "
+            "had pushed, by how it ended: interrupted 7 Body; any other ending "
+            "drains nothing.",
+        )
+
+    def test_a_working_that_rolls_a_narrated_total_one_per_level_and_no_lost_drain(
+        self,
+    ) -> None:
+        """#208: the other end of each True Magic choice: a narrated effect
+        with dice, one tier and one craft turn a level, no roll bonus, an
+        interruption with no penalty, no automatic total and no Runaway band,
+        and nothing drained by a casting that does not go off."""
+        assert INVENTED_TRUE_MAGIC.interruption.failure_bands
+        lapse = INVENTED_TRUE_MAGIC.interruption.failure_bands[0]
+        true_magic = replace(
+            INVENTED_TRUE_MAGIC,
+            effects=(
+                replace(
+                    INVENTED_TRUE_MAGIC.effects[0], targeted=False, ignores_armour=True
+                ),
+                replace(
+                    INVENTED_TRUE_MAGIC.effects[2],
+                    dice_per_tier="3d4",
+                    needs_grant=False,
+                ),
+            ),
+            tiers_per_level=1,
+            turns_per_tier=1,
+            roll_bonus_per_level=0,
+            interruption=replace(
+                INVENTED_TRUE_MAGIC.interruption,
+                penalty_per_mana=0,
+                failure_bands=(replace(lapse, highest_margin=None),),
+                automatic_runaway_totals=frozenset(),
+            ),
+            lost_drain_per_mana={},
+        )
+        with seated_rules(replace(TRUE_MAGIC_RULES, true_magic=true_magic)):
+            body = magic_body(TRUE_MAGIC)
+        for sentence in (
+            "A working's tier is at most the Lorecraft level, unless",
+            "its craft takes 1 turn per tier, and",
+            "Workings: Rending, 1d4 damage to Fatigue per tier, with no DEX roll to "
+            "hit, ignoring armour; Wonder, narrated: the board rolls 3d4 per tier "
+            "and applies nothing, and the GM says what the total does. ",
+            "forces an interruption roll: 2d8 ≤ WIS. A failed roll loses the "
+            "working: fail by 1+, Lapse. A working that completes rolls 3d6 ≤ WIS, "
+            "with",
+            "A casting that ends without going off drains nothing.",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, body)
+        self.assertNotIn("Natural", body)
+        self.assertNotIn("granted", body)
+
+    def test_a_runaway_band_with_no_automatic_total_states_no_natural(
+        self,
+    ) -> None:
+        true_magic = replace(
+            INVENTED_TRUE_MAGIC,
+            interruption=replace(
+                INVENTED_TRUE_MAGIC.interruption,
+                automatic_runaway_totals=frozenset(),
+            ),
+        )
+        with seated_rules(replace(TRUE_MAGIC_RULES, true_magic=true_magic)):
+            body = magic_body(TRUE_MAGIC)
+        self.assertIn("fail by 9+, Rupture, a Runaway. A working that completes", body)
+        self.assertNotIn("Natural", body)
+
+    def test_a_true_skill_only_a_game_master_starts_is_said_so(self) -> None:
+        """#208: the sentence reads the skill rules, not the magic rules."""
+        with (
+            seated_rules(TRUE_MAGIC_RULES),
+            patch.object(
+                SkillRules, "only_a_game_master_starts", return_value=True
+            ) as only_a_game_master,
+        ):
+            body = magic_body(TRUE_MAGIC)
+        only_a_game_master.assert_called_with(TRUE_SKILL)
+        self.assertIn(" Only a GM starts the Lorecraft skill. ", body)
+
+    def test_no_familiarity_no_familiarity_sentence(self) -> None:
+        with seated_rules(
+            replace(TRUE_MAGIC_RULES, counterspell=COUNTER_RULES.counterspell)
+        ):
+            body = magic_body(COUNTERSPELL)
+        self.assertNotIn("amiliarity", body)
+        self.assertTrue(body.endswith("can trigger Runaway."))
+
+    def test_familiarity_with_no_true_magic_names_no_true_skill(self) -> None:
+        assert COUNTER_RULES.counterspell is not None
+        rules = replace(
+            COUNTER_RULES,
+            counterspell=replace(COUNTER_RULES.counterspell, familiarity_per_level=3),
+        )
+        with seated_rules(rules):
+            body = magic_body(COUNTERSPELL)
+        self.assertTrue(
+            body.endswith(
+                "can trigger Runaway. Familiarity: each side adds +3 per level of "
+                "familiarity with the spell cast. The caster's is its level in that "
+                "spell. The defender's is the highest, not the sum, of its level in "
+                "that spell and its highest Counter spell's level against a spell "
+                "of that level or less."
+            )
+        )
+
+    def test_familiarity_with_true_magic_names_the_true_skill(self) -> None:
+        assert COUNTER_RULES.counterspell is not None
+        rules = replace(
+            TRUE_MAGIC_RULES,
+            counterspell=replace(COUNTER_RULES.counterspell, familiarity_per_level=3),
+        )
+        with seated_rules(rules):
+            body = magic_body(COUNTERSPELL)
+        self.assertTrue(
+            body.endswith(
+                "can trigger Runaway. Familiarity: each side adds +3 per level of "
+                "familiarity with the spell cast. The caster's is its level in that "
+                "spell, or its Lorecraft level for a working or for a True cast of a "
+                "spell it holds no level in. The defender's is the highest, not the "
+                "sum, of its level in that spell, its Lorecraft level against any "
+                "spell and its highest Counter spell's level against a spell of "
+                "that level or less (a working's level is its tier)."
+            )
+        )
 
     def test_a_kind_of_magic_named_in_two_words_from_an_ordinary_skill(
         self,
@@ -1101,3 +1305,73 @@ class InventedRulesTest(SimpleTestCase):
         )
         self.assertNotIn("Control Roll", counterspell)
         self.assertTrue(counterspell.endswith("or let it through."))
+
+
+#: One row of the school table as a magic section's Schools line writes it:
+#: "Less Common (71-100%): Weather, Control."
+SCHOOL_ROW_SENTENCE = re.compile(
+    r"(?P<label>\w[^().:]*) \((?P<lowest>\d+)-(?P<up_to>\d+)%\): (?P<schools>[^.]+)\."
+)
+
+
+class SchoolsLineFollowsTheTableTest(SimpleTestCase):
+    """The magic section's Schools line is hand-written in the canon's
+    ``gm-prompt/magic.md``, and states the table the canon's
+    ``magic-rules.json`` rolls a school on (tarmar-studio #208, when Counter
+    and Arcane/True Magic left the table and nothing held the line to it).
+
+    The line is each row of ``schools`` as a sentence, in order, and nothing
+    else: the row's label, its reach on the d100 and its schools, so a school
+    the table does not name is on the line nowhere.
+    """
+
+    def assert_the_line_states_the_table(
+        self, section_file: str, table: SchoolTable
+    ) -> None:
+        """Hold a magic section's Schools line to a school table.
+
+        Args:
+            section_file: A canon's ``gm-prompt/magic.md``.
+            table: That canon's school table.
+        """
+        subsection = section_file.split(f"{SCHOOLS_OF_MAGIC_HEADING}\n", 1)[1]
+        line = subsection.split("\n", 1)[0]
+        stated = list(SCHOOL_ROW_SENTENCE.finditer(line))
+        # The rows are the whole line: no school is named outside one.
+        self.assertEqual(" ".join(match.group() for match in stated), line)
+        self.assertEqual(
+            [
+                (
+                    int(match["up_to"]),
+                    match["label"],
+                    tuple(
+                        # A school's flavours, "Elemental (water/fire/...)",
+                        # are the line's own and not the table's.
+                        re.sub(r"\s*\(.*\)$", "", school)
+                        for school in match["schools"].split(", ")
+                    ),
+                )
+                for match in stated
+            ],
+            [(row.up_to, row.label, row.schools) for row in table.rows],
+        )
+        # Each row after the first starts one past the reach of the row
+        # before it.
+        self.assertEqual(
+            [int(match["lowest"]) for match in stated[1:]],
+            [row.up_to + 1 for row in table.rows[:-1]],
+        )
+
+    def test_the_loaded_canons_line_states_its_school_table(self) -> None:
+        table = magic_schools()
+        if table is None:
+            self.skipTest("the loaded canon rolls no school")
+        self.assert_the_line_states_the_table(engine.load_magic_section(), table)
+
+    def test_the_default_canons_line_states_its_school_table(self) -> None:
+        # Whichever canon is loaded, as the default canon's pages are held.
+        table = load_magic_schools(DEFAULT_CANON_DIR / CANON_MAGIC_RULES_FILE_NAME)
+        assert table is not None, "the default canon rolls a caster's school"
+        self.assert_the_line_states_the_table(
+            engine.load_magic_section(DEFAULT_MAGIC_PROMPT_FILE), table
+        )

@@ -18,6 +18,7 @@ from characters.import_service import (
     player_import_notice,
 )
 from characters.models import NEEDS_ATTRIBUTES, NEEDS_FATIGUE_ROLL, Character
+from characters.refusal_words import refusal_words
 from characters.rules import character_rules
 from common.test_helpers import BaseTestCase
 
@@ -270,17 +271,28 @@ class CharacterImportTest(BaseTestCase):
             fatigue_roll=7,
             total_xp=2500,
             # 21 points is level VI on the ordinary ladder; 6 Arcane points is
-            # level II on the doubled one (issue #154).
+            # level II on the doubled one (issue #154). Arcane is by
+            # invitation (tarmar-studio #208): this record holds it as a
+            # character a Game Master invited would.
             skills={"sword": 21, "arcane": 6},
         )
         self.assertEqual(source.highest_skill_level, 6)
         body = generate_character_json(source).encode("utf-8")
 
         # By role (issue #744): the long career survives a Game Master's
-        # import; a player's is still accepted, with a new character's skills.
-        for importer, skills in (
-            (self.create_dm("long-career-dm"), {"sword": 21, "arcane": 6}),
-            (self.create_user("long-career-importer"), location_effects("Village")[0]),
+        # import, whose history names the Arcane it kept as his to give; a
+        # player's is still accepted, with a new character's skills and a
+        # notice naming the Arcane it dropped with the rest.
+        kept_arcane = refusal_words().import_service.game_master_kept_skill.format(
+            skill="arcane", points=6
+        )
+        for importer, skills, keeps_arcane in (
+            (self.create_dm("long-career-dm"), {"sword": 21, "arcane": 6}, True),
+            (
+                self.create_user("long-career-importer"),
+                location_effects("Village")[0],
+                False,
+            ),
         ):
             with self.subTest(importer=importer.username):
                 # A fresh login flushes the session, gate pass and all.
@@ -293,6 +305,20 @@ class CharacterImportTest(BaseTestCase):
                 )
                 imported = Character.objects.get(pk=response.json()["character_id"])
                 self.assertEqual(imported.skills, skills)
+                history = [
+                    (entry["field"], entry["new"], entry["by"])
+                    for entry in imported.history
+                ]
+                self.assertEqual(
+                    ("skills", kept_arcane, importer.username) in history,
+                    keeps_arcane,
+                    history,
+                )
+                self.assertEqual(
+                    "the skills (sword 21, arcane 6)" in imported.import_notice,
+                    not keeps_arcane,
+                    imported.import_notice,
+                )
 
     def test_round_trip_export_then_import_zero_total_xp(self):
         """Issue #164: total_xp defaults to 0 for a fresh character, but

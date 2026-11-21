@@ -46,17 +46,19 @@ print("SCHOOL_ROW " + json.dumps(None if row is None else {
 module.exports = { schoolRowForPercentile };
 
 /**
- * The battle's spells as the server's catalog holds them, in catalog order
- * (``characters.magic.learnable_spells``): each one's key and whether it must
- * hit, so a spec picks a spell without typing the catalog (issue #18).
- * @returns {{key: string, targeted: boolean}[]}
+ * The spells as the server's catalog holds them, in catalog order
+ * (``characters.magic.learnable_spells``): each one's key, whether it must
+ * hit, and whether it is learned and never cast (a Counter, tarmar-studio
+ * #208), so a spec picks a spell without typing the catalog (issue #18).
+ * @returns {{key: string, targeted: boolean, neverCast: boolean}[]}
  */
 function catalogSpells() {
     return readDjangoJson(`
 import json
 from characters.magic import learnable_spells
 print("SPELLS " + json.dumps([
-    {"key": spell.key, "targeted": spell.targeted} for spell in learnable_spells()
+    {"key": spell.key, "targeted": spell.targeted, "neverCast": spell.generic_counter}
+    for spell in learnable_spells()
 ]))
 `, 'SPELLS');
 }
@@ -82,6 +84,17 @@ module.exports.catalogSpells = catalogSpells;
 module.exports.lastStoryCast = lastStoryCast;
 
 /**
+ * Python both ladder readers share: one rung as a spec reads it, with the
+ * name of the rung below it (``tarmar_engine.spells.lower_tier``).
+ */
+const RUNG_READER = `
+from tarmar_engine.spells import lower_tier
+def rung(spell):
+    below = lower_tier(spell)
+    return {"key": spell.key, "name": spell.name, "below": None if below is None else below.name}
+`;
+
+/**
  * The first two elements' ladders as the server's catalog holds them (#191):
  * each one's spells from tier 1 up, with the rung below each
  * (``tarmar_engine.spells.lower_tier``), and how the loaded canon's school
@@ -94,16 +107,13 @@ module.exports.lastStoryCast = lastStoryCast;
 function elementalLadder() {
     return readDjangoJson(`
 import json
-from tarmar_engine.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS, lower_tier
+from tarmar_engine.spells import ELEMENTAL_SCHOOL, ELEMENTS, SPELLS
 from battle.magic_rules import magic_schools
+${RUNG_READER}
 table = magic_schools()
 def rungs(element):
     return [
-        {
-            "key": spell.key,
-            "name": spell.name,
-            "below": None if lower_tier(spell) is None else lower_tier(spell).name,
-        }
+        rung(spell)
         for spell in sorted(
             (spell for spell in SPELLS.values() if spell.element == element),
             key=lambda spell: spell.level,
@@ -124,3 +134,39 @@ print("LADDER " + json.dumps({
 }
 
 module.exports.elementalLadder = elementalLadder;
+
+/**
+ * The Counter ladder as the server's catalog holds it (tarmar-studio#208):
+ * the spells that are learned and never cast, from the first rung up, each
+ * with the rung below it; their school; and how the loaded canon's school
+ * table stands to that school, with one other school the table names, so a
+ * spec types no spell or school.
+ * @returns {{school: string, schoolTable: boolean, tableNamesSchool: boolean,
+ *     otherSchool: string | null,
+ *     rungs: {key: string, name: string, below: string | null}[]}}
+ */
+function counterLadder() {
+    return readDjangoJson(`
+import json
+from tarmar_engine.spells import SPELLS
+from battle.magic_rules import magic_schools
+${RUNG_READER}
+table = magic_schools()
+counters = sorted(
+    (spell for spell in SPELLS.values() if spell.generic_counter),
+    key=lambda spell: spell.level,
+)
+school = counters[0].school
+print("COUNTERS " + json.dumps({
+    "school": school,
+    "schoolTable": table is not None,
+    "tableNamesSchool": table is not None and school in table.schools,
+    "otherSchool": None if table is None else next(
+        (name for name in table.schools if name != school), None
+    ),
+    "rungs": [rung(spell) for spell in counters],
+}))
+`, 'COUNTERS');
+}
+
+module.exports.counterLadder = counterLadder;

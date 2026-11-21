@@ -5,7 +5,9 @@
  * every die pinned, started and advanced to the wizard's first choice: what
  * e2e/battle-push.spec.js and e2e/battle-magic-bounds.spec.js both stand on.
  * The seeds were chosen by running the turn on the started battle for each
- * (see e2e/battle-push.spec.js).
+ * (see e2e/battle-push.spec.js). The True Magic specs (tarmar-studio #208)
+ * stand on it too, with the test user's saved True mage claiming the seat
+ * instead (e2e/true-magic.js).
  */
 
 const {
@@ -71,16 +73,27 @@ async function claimAWizard(page, seed) {
  * @param {{
  *     beforeTurn?: (battleId: number, wizardName: string) => (void|Promise<void>),
  *     fighters?: number,
+ *     characterNames?: string[],
+ *     claim?: (page: import('@playwright/test').Page) => Promise<string>,
  * }} options - what to do to the started battle before its first turn is
- *     advanced, given the battle and the seated wizard's name; and how many
- *     generated fighters oppose the wizard (one unless said)
+ *     advanced, given the battle and the seated wizard's name; how many
+ *     generated fighters oppose the wizard (one unless said); the Game
+ *     Master's saved characters seated beside them (none unless said),
+ *     as createBattleViaSetup seats them; and how the
+ *     player claims the seat, returning the seated figure's name (a
+ *     generated wizard from WIZARD_SEED unless said: a saved True mage, for
+ *     e2e/true-magic.js)
  * @returns {Promise<import('@playwright/test').Page>} the player's page
  */
 async function openTheWizardsStage(
-    adminPage, browser, battleName, { beforeTurn, fighters = 1 } = {}
+    adminPage, browser, battleName,
+    {
+        beforeTurn, fighters = 1, characterNames = [],
+        claim = (page) => claimAWizard(page, WIZARD_SEED),
+    } = {}
 ) {
     await createBattleViaSetup(adminPage, {
-        name: battleName, fighters, seed: BATTLE_SEED, playerSeats: 1,
+        name: battleName, fighters, characterNames, seed: BATTLE_SEED, playerSeats: 1,
     });
     await expect(adminPage.locator('#battle-status')).toHaveText('Lobby');
     const battleId = Number(new URL(adminPage.url()).pathname.match(/battles\/(\d+)\//)[1]);
@@ -92,7 +105,7 @@ async function openTheWizardsStage(
     await loginAs(page, TEST_USER);
     const listRow = await battleRowOnList(page, battleName);
     await listRow.locator('a', { hasText: battleName }).first().click();
-    const wizardName = await claimAWizard(page, WIZARD_SEED);
+    const wizardName = await claim(page);
 
     await expect(adminPage.locator('.lobby-ready-chip.is-ready'))
         .toBeVisible({ timeout: 15000 });

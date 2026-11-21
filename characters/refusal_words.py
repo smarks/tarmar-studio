@@ -40,7 +40,8 @@ class CommonWords:
 @dataclass(frozen=True)
 class ServicesWords:
     """``characters.services``'s refusals: why a player may not set a value
-    the field table gives a Game Master (issue #748)."""
+    the field table gives a Game Master (issue #748), or start a skill only a
+    Game Master starts (tarmar-studio #208)."""
 
     field_attribute: str = sentence("dice", "points")
     field_appearance_roll: str = sentence()
@@ -67,6 +68,7 @@ class ServicesWords:
     roll_fixed_weight: str = sentence()
     roll_fixed_origin: str = sentence()
     nobody_sets: str = sentence("field")
+    game_master_started_skill: str = sentence("skill", required=("skill",))
 
 
 @dataclass(frozen=True)
@@ -111,11 +113,33 @@ class ViewsAccessWords:
 
 
 @dataclass(frozen=True)
+class ImportServiceWords:
+    """``characters.import_service``'s words: what the history records when a
+    Game Master's import keeps a skill only a Game Master starts
+    (tarmar-studio #208)."""
+
+    game_master_kept_skill: str = sentence(
+        "skill", "points", required=("skill", "points")
+    )
+
+
+@dataclass(frozen=True)
+class HelpTextWords:
+    """``characters.help_text``'s configured words: what the help beside the
+    free skill points says of the skills only a Game Master starts
+    (tarmar-studio #208)."""
+
+    game_master_started_skills: str = sentence("skills", required=("skills",))
+
+
+@dataclass(frozen=True)
 class MagicWords:
     """``characters.magic``'s words for learning a spell: why a player may not
-    learn one outside their school (issue #18) or above an Elemental rung they
-    do not hold (tarmar-studio#191), and how a Game Master teaching one past
-    either is recorded."""
+    learn one outside their school (issue #18) or above a rung they do not
+    hold, an element's (tarmar-studio#191) or the Counter ladder's (#208), and
+    how a Game Master teaching one past either is recorded; and why nobody
+    casts a spell that is learned and never cast (#208), with what a list of
+    known spells prints for one in place of a cost and a roll."""
 
     school_first: str = sentence()
     outside_school: str = sentence(
@@ -124,6 +148,8 @@ class MagicWords:
     game_master_outside_school: str = sentence("school", required=("school",))
     lower_rung_first: str = sentence("spell", "rung_below", required=("rung_below",))
     game_master_past_the_rung: str = sentence("rung_below", required=("rung_below",))
+    never_cast: str = sentence("spell", required=("spell",))
+    never_cast_cell: str = sentence()
 
 
 @dataclass(frozen=True)
@@ -135,6 +161,8 @@ class CharactersRefusalWords:
     purse: PurseWords
     constants: ConstantsWords
     views_access: ViewsAccessWords
+    import_service: ImportServiceWords
+    help_text: HelpTextWords
     magic: MagicWords
 
 

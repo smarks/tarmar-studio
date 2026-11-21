@@ -21,12 +21,16 @@ const { readDjangoJson } = require('./django');
  * ``natural_success_seed`` is the first seed whose pinned dice (e2e/dice.js)
  * make the skill check's natural success, found by rolling the check's dice
  * the way the server does inside ``common.rolling.pinned_dice``.
+ * ``game_master_started`` are the skills a player never starts and a Game
+ * Master does (tarmar-studio #208), and ``game_master_started_note`` what the
+ * history records when he starts one.
  * @returns {object}
  */
 function loadedSkillRules() {
     return readDjangoJson(`
 import json
 from characters.dice import roll_dice_faces
+from characters import services
 from characters.rules import character_rules
 from characters.skill_checks import MAX_DIFFICULTY
 from characters.skill_rules import AGING_ATTRIBUTES, PHYSICAL_AGING_ATTRIBUTES, skill_rules
@@ -69,6 +73,8 @@ print("SKILL_RULES " + json.dumps({
         "name": ARCANE_SKILL_NAME,
         "multiplier": rules.skill_cost.multiplier_for(ARCANE_SKILL_NAME),
     },
+    "game_master_started": list(rules.game_master_started),
+    "game_master_started_note": services.GAME_MASTER_STARTED_SKILL_NOTE,
     "aging": {
         "starting_age": age.starting,
         "years_per_stage": age.years_per_stage,

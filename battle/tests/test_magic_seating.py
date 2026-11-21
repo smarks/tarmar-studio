@@ -20,6 +20,7 @@ from django.core.checks import Error, run_checks
 from django.test import SimpleTestCase
 from django.urls import reverse
 from tarmar_engine.policy import Candidate, Decision
+from tarmar_engine.spells import generic_counter_level
 from tarmar_engine.state import BattleState, CombatantState
 
 from battle import profiles
@@ -40,6 +41,9 @@ from battle.services import (
 )
 from battle.turn_menu import borrowed_mana
 from battle.wording import words
+from characters.equipment_rules import EquipmentCatalogError
+from characters.magic import battle_loadout
+from characters.skill_rules import SkillRulesError
 from characters.skills import ARCANE_SKILL_NAME, points_for_level
 from common.rolling import Roller, RollRecord
 from common.test_helpers import BaseTestCase, create_character, says
@@ -456,6 +460,39 @@ class SeatedMagicLevelsTest(BaseTestCase):
         self.assertEqual(seated.skill_levels, {})
 
 
+class SeatedCounterTest(BaseTestCase):
+    """tarmar-studio#208: a known Counter is seated as any known spell is, at
+    its mastery, and the engine reads Counter N off the seat's spells."""
+
+    def seated(self, spells: dict[str, int]) -> CombatantState:
+        character = create_character(self.create_user("warder"), spells=spells)
+        loadout = battle_loadout(character)
+        return snapshot_character(
+            character,
+            1,
+            display_name="Warder",
+            archetype="",
+            spells=loadout.spells,
+            mana=loadout.mana,
+        )
+
+    def test_a_known_counter_is_seated_at_mastery_one(self) -> None:
+        with seated_rules():
+            seated = self.seated(
+                {"shield": points_for_level(1), "counter_2": points_for_level(1)}
+            )
+        self.assertEqual(seated.spells, ["shield", "counter_2"])
+        self.assertEqual(seated.spell_mastery, {"shield": 1, "counter_2": 1})
+        # Counter N is the highest rung the seat holds.
+        self.assertEqual(generic_counter_level(seated.spells), 2)
+
+    def test_a_counter_holding_no_points_is_not_seated(self) -> None:
+        with seated_rules():
+            seated = self.seated({"shield": points_for_level(1), "counter_2": 0})
+        self.assertEqual(seated.spells, ["shield"])
+        self.assertEqual(generic_counter_level(seated.spells), 0)
+
+
 class SnapshotWrittenBeforeSeatingTest(SimpleTestCase):
     """A ``state_json`` saved before issue #960 still casts once loaded."""
 
@@ -738,6 +775,24 @@ class MagicRulesCheckTest(SimpleTestCase):
         rules = rules_with_channel(source_skills=(ARCANE_SKILL_NAME, "literacy"))
         with seated_rules(rules):
             self.assertEqual(check_magic_rules(), [])
+
+    def test_a_refused_skills_or_catalog_file_is_left_to_its_own_check(self) -> None:
+        # A source skill is read against the canon's skills and, for a weapon
+        # skill's name, its catalog. A canon whose own file for either is
+        # refused must fail the check as characters.E002 or E003, not crash
+        # this one (the default canon's Channel reads Arcane since #208).
+        rules = rules_with_channel(source_skills=(ARCANE_SKILL_NAME,))
+        for reader, refusal in (
+            ("is_glossary_skill", SkillRulesError("skill-rules.json: is missing")),
+            ("glossary_skill", EquipmentCatalogError("equipment.json: is missing")),
+        ):
+            with (
+                self.subTest(reader=reader),
+                seated_rules(rules),
+                patch(f"battle.checks.{reader}", side_effect=refusal) as read,
+            ):
+                self.assertEqual(check_magic_rules(), [])
+                read.assert_called()
 
     def test_a_source_skill_the_glossary_lacks_is_refused(self) -> None:
         # Capitalised, with a chosen part, and a skill no glossary table has.

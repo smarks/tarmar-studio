@@ -65,6 +65,8 @@ data-popout-empty is what the disabled control says instead.
         {% if hth_agreement %}{% include "battle/_hth_agreement.html" with battle=panel_battle %}{% endif %}
         {# A Game Master's ruling lifting a figure's magic bounds (#37), from arena_context's magic_bounds. #}
         {% if magic_bounds %}{% include "battle/_magic_bounds.html" with battle=panel_battle %}{% endif %}
+        {# A Game Master's grant of a working to a figure (tarmar-studio #208), from arena_context's working_grants. #}
+        {% if working_grants %}{% include "battle/_working_grants.html" with battle=panel_battle %}{% endif %}
     </div>
     {% else %}
     <p class="gm-sheet-empty" id="gm-battle-empty">No fight on the board. Attach your characters, then press Fight (or type /fight) when the story comes to blows — name the foes, or leave it to the GM.</p>

@@ -2,8 +2,9 @@
 
 The engine (``tarmar_engine.magic``) carries the structure of the casting
 success tiers, Push, Channel, Borrowing (tarmar-engine #28), Runaway's
-later turns (tarmar-engine #30), Counterspell (tarmar-engine #31) and the
-casting roll's failing totals (tarmar-engine #46) and takes every number from
+later turns (tarmar-engine #30), Counterspell (tarmar-engine #31), the
+casting roll's failing totals (tarmar-engine #46) and True Magic
+(tarmar-engine #77) and takes every number from
 a ``MagicRules`` its caller injects. The numbers are the canon's: the Tarmar
 canon builds them from its DM-only magic-mechanics pages, and the default
 canon ships invented ones. This module is the one path that sets them, and it
@@ -62,11 +63,33 @@ The file is a JSON object::
       "counterspell": null | {
         "opposed_dice": str, "opposed_attribute": str,
         "mana_per_bonus": int, "ties_go_to_caster": bool,
-        "defender_min_mana": int, "defender_max_mana": int | null
+        "defender_min_mana": int, "defender_max_mana": int | null,
+        "familiarity_per_level": int
       },
       "casting_failure": null | {
         "fumble_floor": int, "mana_lost_totals": [int, ...],
         "runaway_total": int | null
+      },
+      "true_magic": null | {
+        "channel_kind": <kind of magic>, "skill_label": str, "school": str,
+        "effects": [
+          {"key": str, "label": str, "kind": "damage" | "healing" | null,
+           "dice_per_tier": str | null, "pool": "fatigue" | "body",
+           "targeted": bool, "ignores_armour": bool, "needs_grant": bool}
+        ],
+        "tiers_per_level": int, "turns_per_tier": int,
+        "roll_attribute": str, "roll_bonus_per_level": int,
+        "interruption": {
+          "roll": {"dice": str, "attribute": str},
+          "penalty_per_mana": int,
+          "failure_bands": [
+            {"key": str, "label": str, "is_runaway": bool,
+             "lowest_margin": int, "highest_margin": int | null}
+          ],
+          "automatic_runaway_totals": [int, ...]
+        },
+        "drain_pool": "fatigue" | "body", "drain_per_mana": int,
+        "lost_drain_per_mana": {<casting ending>: int}
       },
       "schools": null | [
         {"up_to": int, "label": str, "schools": [str, ...]}
@@ -89,14 +112,23 @@ is nothing to roll, and any caster may learn any spell.
 Field names are the engine dataclass fields they fill, and every one of them
 is required: a canon states each number rather than inheriting an engine
 default. An unknown key at any level is an error, since it is most likely a
-misspelling of a known one; so is a key repeated in one object, two tiers or
-two failure bands sharing a ``key``, and an attribute named twice in
-``borrowing.debt_attributes``. So is a natural total its dice cannot roll
-(a tier's, the casting roll's failing ones against :data:`CASTING_DICE`, and
-Push's and the Debt Roll's automatic ones against their own dice), a success
-tier at or above ``casting_failure.fumble_floor``, which the board would never
-play, and a ``borrowing.max_debt`` of 0, which leaves nothing to borrow
-(issue #48). ``rulings`` is optional and is the canon's own
+misspelling of a known one; so is a key repeated in one object, two tiers,
+two failure bands or two working effects sharing a ``key``, and an attribute
+named twice in ``borrowing.debt_attributes``. So is a natural total its dice
+cannot roll (a tier's, the casting roll's failing ones against
+:data:`CASTING_DICE`, and Push's, the Debt Roll's and the interruption roll's
+automatic ones against their own dice), a success tier at or above
+``casting_failure.fumble_floor``, which the board would never play, and a
+``borrowing.max_debt`` of 0, which leaves nothing to borrow (issue #48).
+
+``true_magic`` (tarmar-studio #208) needs ``channel``: its ``channel_kind`` is
+a key of ``channel.derivations`` whose ``source_skill`` is the True skill,
+which is written nowhere else. A working effect's ``kind`` is a rolled effect
+the engine applies or ``null`` for one the Game Master describes; any other
+is refused, as is a ``lost_drain_per_mana`` key that is no way a casting ends
+(the engine's ``CastingEnding``). An ending with no entry drains nothing.
+
+``rulings`` is optional and is the canon's own
 record of the readings its pages left open; like every canon rules file's, it
 is checked for shape and not otherwise read (``reference.rules_file``).
 """
@@ -104,11 +136,13 @@ is checked for shape and not otherwise read (``reference.rules_file``).
 import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypedDict
 
 from tarmar_engine.magic import (
     BorrowingRules,
+    CastingEnding,
     CastingFailureRules,
     CastingSuccessTier,
     ChannelDerivation,
@@ -116,16 +150,20 @@ from tarmar_engine.magic import (
     ControlBand,
     CounterspellRules,
     DebtBand,
+    InterruptionRules,
     MagicRules,
     MarginBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
     SpellEffectKind,
+    TrueMagicRules,
+    WorkingEffect,
     casting_success_ceiling,
     spell_effect_kind,
+    spell_for,
 )
-from tarmar_engine.spells import SPELLS
+from tarmar_engine.spells import SPELLS, Spell
 
 from characters.constants import MAX_MAGIC_SCHOOL_LENGTH
 from characters.rules import PercentileTable, TableRow
@@ -197,8 +235,39 @@ COUNTERSPELL_FIELDS = (
     "ties_go_to_caster",
     "defender_min_mana",
     "defender_max_mana",
+    "familiarity_per_level",
 )
 CASTING_FAILURE_FIELDS = ("fumble_floor", "mana_lost_totals", "runaway_total")
+TRUE_MAGIC_FIELDS = (
+    "channel_kind",
+    "skill_label",
+    "school",
+    "effects",
+    "tiers_per_level",
+    "turns_per_tier",
+    "roll_attribute",
+    "roll_bonus_per_level",
+    "interruption",
+    "drain_pool",
+    "drain_per_mana",
+    "lost_drain_per_mana",
+)
+WORKING_EFFECT_FIELDS = (
+    "key",
+    "label",
+    "kind",
+    "dice_per_tier",
+    "pool",
+    "targeted",
+    "ignores_armour",
+    "needs_grant",
+)
+INTERRUPTION_FIELDS = (
+    "roll",
+    "penalty_per_mana",
+    "failure_bands",
+    "automatic_runaway_totals",
+)
 SCHOOL_ROW_FIELDS = ("up_to", "label", "schools")
 #: The block :func:`magic_schools` reads; the engine's ``MagicRules`` has none.
 SCHOOLS_BLOCK = "schools"
@@ -210,6 +279,7 @@ TOP_LEVEL_FIELDS = (
     "runaway",
     "counterspell",
     "casting_failure",
+    "true_magic",
     SCHOOLS_BLOCK,
 )
 
@@ -385,19 +455,38 @@ class _MagicRulesFileReader(RulesFileReader):
             ),
         )
 
+    def member_named[Member: StrEnum](
+        self,
+        members: type[Member],
+        name: str,
+        field_path: str,
+        described_as: str,
+    ) -> Member:
+        """The member of one of the engine's vocabularies a canon names.
+
+        Args:
+            members: The engine's enumeration.
+            name: The canon's word for one of its members.
+            field_path: Where the word is in the file.
+            described_as: What a member is, for the refusal: "a kind of
+                spell effect".
+        """
+        known = sorted(member.value for member in members)
+        if name not in known:
+            self.fail(field_path, f"is not {described_as} (known: {known})")
+        return members(name)
+
     def push_bonus_by_kind(
         self, value: Any, field_path: str
     ) -> dict[SpellEffectKind, int]:
         """``push.effect_bonus_per_mana_by_kind``, keyed by the engine's kinds."""
         bonuses = self.mapping(value, field_path, self.integer)
-        known_kinds = {kind.value for kind in SpellEffectKind}
-        for kind in bonuses:
-            if kind not in known_kinds:
-                self.fail(
-                    f"{field_path}.{kind}",
-                    f"is not a kind of spell effect (known: {sorted(known_kinds)})",
-                )
-        return {SpellEffectKind(kind): bonus for kind, bonus in bonuses.items()}
+        return {
+            self.member_named(
+                SpellEffectKind, kind, f"{field_path}.{kind}", "a kind of spell effect"
+            ): bonus
+            for kind, bonus in bonuses.items()
+        }
 
     def push_bonus_by_spell(self, value: Any, field_path: str) -> dict[str, int]:
         """``push.spell_effect_bonus_per_mana``: engine spells with an effect."""
@@ -555,8 +644,8 @@ class _MagicRulesFileReader(RulesFileReader):
         return borrowing
 
     def roll_under_rule(self, value: Any, field_path: str) -> RollUnderRule:
-        """``runaway.self_anchor`` or ``runaway.helper_anchor``: dice against
-        one attribute."""
+        """``runaway.self_anchor``, ``runaway.helper_anchor`` or
+        ``true_magic.interruption.roll``: dice against one attribute."""
         fields = self.json_object(value, field_path, ROLL_UNDER_FIELDS)
         with self.wrapped_value_errors(field_path):
             return RollUnderRule(
@@ -626,6 +715,10 @@ class _MagicRulesFileReader(RulesFileReader):
                 defender_max_mana=self.optional_integer(
                     fields["defender_max_mana"], f"{field_path}.defender_max_mana"
                 ),
+                familiarity_per_level=self.integer(
+                    fields["familiarity_per_level"],
+                    f"{field_path}.familiarity_per_level",
+                ),
             )
 
     def casting_failure(
@@ -666,6 +759,141 @@ class _MagicRulesFileReader(RulesFileReader):
             f"{field_path}.mana_lost_totals",
         )
         return casting_failure
+
+    def working_effect_kind(
+        self, value: Any, field_path: str
+    ) -> SpellEffectKind | None:
+        """A working effect's ``kind``: a rolled effect the engine applies, or
+        ``None`` for a narrated one, which the Game Master describes."""
+        if value is None:
+            return None
+        return self.member_named(
+            SpellEffectKind,
+            self.text(value, field_path),
+            field_path,
+            "a kind of working effect, or null for a narrated one",
+        )
+
+    def working_effect(self, value: Any, field_path: str) -> WorkingEffect:
+        """One entry of ``true_magic.effects``. Its dice, its pool and what a
+        narrated effect may not set are the engine's to check
+        (``WorkingEffect``)."""
+        fields = self.json_object(value, field_path, WORKING_EFFECT_FIELDS)
+        kind = self.working_effect_kind(fields["kind"], f"{field_path}.kind")
+        with self.wrapped_value_errors(field_path):
+            return WorkingEffect(
+                key=self.text(fields["key"], f"{field_path}.key"),
+                label=self.text(fields["label"], f"{field_path}.label"),
+                kind=kind,
+                dice_per_tier=self.optional_text(
+                    fields["dice_per_tier"], f"{field_path}.dice_per_tier"
+                ),
+                pool=self.text(fields["pool"], f"{field_path}.pool"),
+                targeted=self.boolean(fields["targeted"], f"{field_path}.targeted"),
+                ignores_armour=self.boolean(
+                    fields["ignores_armour"], f"{field_path}.ignores_armour"
+                ),
+                needs_grant=self.boolean(
+                    fields["needs_grant"], f"{field_path}.needs_grant"
+                ),
+            )
+
+    def working_effects(self, value: Any, field_path: str) -> tuple[WorkingEffect, ...]:
+        """``true_magic.effects``, no two sharing a ``key``: a working's key
+        is built from its effect's, so a repeated one would name two
+        workings."""
+        effects = self.entries(value, field_path, self.working_effect)
+        self.unique_keys(effects, field_path)
+        return effects
+
+    def margin_band(self, value: Any, field_path: str) -> MarginBand:
+        """One entry of ``true_magic.interruption.failure_bands``: a band as
+        it stands, which says only whether the working lost there also runs
+        away."""
+        fields = self.json_object(value, field_path, MARGIN_BAND_FIELDS)
+        return MarginBand(**self.margin_band_fields(fields, field_path))
+
+    def interruption(self, value: Any, field_path: str) -> InterruptionRules:
+        """``true_magic.interruption``: the roll a crafting caster makes when
+        damage lands on it."""
+        fields = self.json_object(value, field_path, INTERRUPTION_FIELDS)
+        roll = self.roll_under_rule(fields["roll"], f"{field_path}.roll")
+        bands = self.failure_bands(
+            fields["failure_bands"], f"{field_path}.failure_bands", self.margin_band
+        )
+        with self.wrapped_value_errors(field_path):
+            interruption = InterruptionRules(
+                roll=roll,
+                penalty_per_mana=self.integer(
+                    fields["penalty_per_mana"], f"{field_path}.penalty_per_mana"
+                ),
+                failure_bands=bands,
+                automatic_runaway_totals=self.integer_set(
+                    fields["automatic_runaway_totals"],
+                    f"{field_path}.automatic_runaway_totals",
+                ),
+            )
+        self.totals_rolled_on(
+            interruption.automatic_runaway_totals,
+            roll.dice,
+            f"{field_path}.automatic_runaway_totals",
+        )
+        return interruption
+
+    def lost_drains(
+        self, value: Any, field_path: str
+    ) -> dict[CastingEnding | str, int]:
+        """``true_magic.lost_drain_per_mana``, keyed by the engine's endings:
+        every key a ``CastingEnding``, in the type the engine's field takes."""
+        drains = self.mapping(value, field_path, self.integer)
+        return {
+            self.member_named(
+                CastingEnding, ending, f"{field_path}.{ending}", "a way a casting ends"
+            ): drain
+            for ending, drain in drains.items()
+        }
+
+    def true_magic(self, value: Any, field_path: str) -> TrueMagicRules | None:
+        """``true_magic``, or ``None`` when no caster may True cast or craft a
+        working."""
+        if value is None:
+            return None
+        fields = self.json_object(value, field_path, TRUE_MAGIC_FIELDS)
+        effects = self.working_effects(fields["effects"], f"{field_path}.effects")
+        interruption = self.interruption(
+            fields["interruption"], f"{field_path}.interruption"
+        )
+        integers = self.integers(
+            fields,
+            field_path,
+            (
+                "tiers_per_level",
+                "turns_per_tier",
+                "roll_bonus_per_level",
+                "drain_per_mana",
+            ),
+        )
+        with self.wrapped_value_errors(field_path):
+            return TrueMagicRules(
+                **integers,
+                channel_kind=self.text(
+                    fields["channel_kind"], f"{field_path}.channel_kind"
+                ),
+                skill_label=self.text(
+                    fields["skill_label"], f"{field_path}.skill_label"
+                ),
+                school=self.text(fields["school"], f"{field_path}.school"),
+                effects=effects,
+                roll_attribute=self.text(
+                    fields["roll_attribute"], f"{field_path}.roll_attribute"
+                ),
+                interruption=interruption,
+                drain_pool=self.text(fields["drain_pool"], f"{field_path}.drain_pool"),
+                lost_drain_per_mana=self.lost_drains(
+                    fields["lost_drain_per_mana"],
+                    f"{field_path}.lost_drain_per_mana",
+                ),
+            )
 
     def tiers_below_the_fumble_floor(
         self,
@@ -760,6 +988,12 @@ class _MagicRulesFileReader(RulesFileReader):
         borrowing = self.borrowing(fields["borrowing"], "borrowing")
         with self.wrapped_value_errors("borrowing"):
             rules = replace(rules, borrowing=borrowing)
+        # True Magic likewise, once Channel stands, so the engine's refusal of
+        # True Magic with no Channel, or with a channel_kind that has no
+        # derivation or reads no skill, names this field.
+        true_magic = self.true_magic(fields["true_magic"], "true_magic")
+        with self.wrapped_value_errors("true_magic"):
+            rules = replace(rules, true_magic=true_magic)
         casting_failure = self.casting_failure(
             fields["casting_failure"], "casting_failure"
         )
@@ -832,6 +1066,29 @@ def magic_rules() -> MagicRules:
         MagicRulesError: The file is missing or malformed.
     """
     return load_magic_rules(MAGIC_RULES_FILE)
+
+
+def loaded_spell(key: str) -> Spell:
+    """The spell a key names, under the loaded canon.
+
+    The studio's one seam onto the engine's lookup
+    (``tarmar_engine.magic.spell_for``, tarmar-engine 0.9.22) for a key read
+    from a battle's state or a menu candidate: a catalog spell, or a working
+    the canon's ``true_magic`` block builds, which the catalog alone
+    (``tarmar_engine.spells.get_spell``) does not hold.
+
+    Args:
+        key: A catalog spell's key or a working's.
+
+    Returns:
+        The spell.
+
+    Raises:
+        KeyError: A key the catalog does not hold, or a working's key the
+            loaded canon's True Magic rules do not build.
+        MagicRulesError: The canon's file is missing or malformed.
+    """
+    return spell_for(key, magic_rules())
 
 
 def loaded_casting_success_ceiling(attribute: int) -> int:

@@ -1,10 +1,12 @@
-"""The words a Game Master's rulings on a battle are shown in (issues #867, #37).
+"""The words a Game Master's rulings on a battle are shown in (issues #867, #37;
+tarmar-studio #208).
 
 Content, not code (the house rule of 2026-10-17, issue #77): the panels'
 headings and buttons, the battle-log lines, the refusals and the turn menu's
-lines (#90), and the battle log's other lines, the roster's notes and who
-decides for a figure (#136) live in ``config/battle-rulings.toml``, which
-Spencer edits with no
+lines (#90), the battle log's other lines, the roster's notes and who
+decides for a figure (#136), and True Magic's lines on the menu, the cast
+stage, the roster card and the battle log (tarmar-studio #208) live in
+``config/battle-rulings.toml``, which Spencer edits with no
 Python, read once at startup into ``settings.BATTLE_RULINGS_WORDING`` by
 :func:`load_rulings_wording`. A missing or unknown key, a value that is not
 text, and a ``{name}`` a sentence may not use all stop the server then, not in
@@ -26,17 +28,19 @@ from pathlib import Path
 
 from django.conf import settings
 
+from common.prose_list import listed_in_words
 from common.wording import load_wording, sentence
 
 
 @dataclass(frozen=True)
 class CommonWords:
-    """Words both rulings use."""
+    """Words the rulings share."""
 
     game_master: str = sentence("name")
     and_word: str = sentence()
     or_word: str = sentence()
     unknown_figure: str = sentence()
+    undo_named: str = sentence("button", "line", required=("button", "line"))
 
 
 @dataclass(frozen=True)
@@ -175,7 +179,8 @@ class ClassicMenuWords:
 class TurnPanelWords:
     """The turn panel's own words, around the server's lines (#94): the
     prompt, each option's cost and the AI's pick, the push, borrow and counter
-    controls, the cast stage, the hex picker and the buttons."""
+    controls, the cast stage, a True mage's True casts and craft control
+    (tarmar-studio #208), the hex picker and the buttons."""
 
     waiting: str = sentence("name", required=("name",))
     waiting_played: str = sentence("name", "player", required=("name",))
@@ -213,6 +218,18 @@ class TurnPanelWords:
     counter_amount: str = sentence("mana")
     counter_group: str = sentence("caster")
     presses_again: str = sentence()
+    true_cast_tag: str = sentence()
+    ready_crafting: str = sentence("ready", required=("ready",))
+    ready_crafting_only: str = sentence()
+    craft_group: str = sentence()
+    craft_label: str = sentence("skill", "tier_cap")
+    craft_label_uncapped: str = sentence("skill")
+    craft_tier: str = sentence("tier", required=("tier",))
+    craft_granted: str = sentence()
+    craft_target_label: str = sentence()
+    craft_target_group: str = sentence()
+    craft_no_figure: str = sentence()
+    craft_withheld: str = sentence("line", required=("line",))
     moving_to: str = sentence("hex")
     pick_hex: str = sentence("count")
     leave_hex: str = sentence()
@@ -267,6 +284,155 @@ class MagicBoundsWords:
     refuse_bounds_list: str = sentence()
     refuse_combatant: str = sentence()
     refuse_classic: str = sentence()
+
+
+@dataclass(frozen=True)
+class WorkingGrantsWords:
+    """The words for a working a Game Master grants a figure (tarmar-studio
+    #208): the panel's heading, lines and buttons, the refusals and the
+    battle-log lines."""
+
+    heading: str = sentence()
+    none_granted: str = sentence()
+    grant_line: str = sentence("working", "name", "by", required=("working",))
+    figure_label: str = sentence()
+    effect_label: str = sentence()
+    tier_label: str = sentence()
+    grant_button: str = sentence()
+    withdraw_button: str = sentence()
+    withdraw_note: str = sentence()
+    game_master_only: str = sentence()
+    refuse_classic: str = sentence()
+    refuse_no_true_magic: str = sentence()
+    refuse_working: str = sentence()
+    refuse_needs_no_grant: str = sentence("working")
+    refuse_combatant: str = sentence()
+    refuse_no_true_level: str = sentence("name", "skill")
+    log_granted: str = sentence("by", "name", "working", required=("working",))
+    log_withdrawn: str = sentence("by", "name", "working", required=("working",))
+    unbuilt_working: str = sentence("key", required=("key",))
+
+
+@dataclass(frozen=True)
+class TrueMagicWords:
+    """True Magic on the turn menu, the cast stage and the roster card
+    (tarmar-studio #208): a True cast of a spell, and a working crafted over
+    several turns."""
+
+    as_true_cast: str = sentence("line", required=("line",))
+    craft_begin: str = sentence("working", required=("working",))
+    craft_continue: str = sentence("working", "turn", "turns", required=("working",))
+    craft_aimed: str = sentence("line", "aimed", required=("line",))
+    craft_healing: str = sentence("line", "aimed", required=("line",))
+    craft_named: str = sentence("line", "aimed", required=("line",))
+    craft_cost: str = sentence("mana", "turns")
+    craft_push_cost: str = sentence("total", "level", "pushed", "turns")
+    craft_borrowing_cost: str = sentence("cost", "owed", required=("cost",))
+    craft_share: str = sentence("share", "gathered", "mana")
+    craft_no_share: str = sentence("gathered", "mana")
+    craft_share_borrowed: str = sentence("cost", "owed", required=("cost",))
+    craft_share_unpaid: str = sentence("cost", "mana_left", required=("cost",))
+    drains: str = sentence("cost", "drain", "pool", "left", required=("cost",))
+    stage_craft: str = sentence("turns")
+    granted_waits: str = sentence("working", "name", required=("working",))
+    card: str = sentence("working", "done", "turns", required=("working",))
+    card_naming: str = sentence(
+        "working", "target", "done", "turns", required=("working",)
+    )
+
+
+@dataclass(frozen=True)
+class TrueMagicLogWords:
+    """The battle log's lines for True Magic (tarmar-studio #208): a craft's
+    turns and how it ends, a working going off, the drain, and a True cast."""
+
+    craft_begun: str = sentence(
+        "name",
+        "working",
+        "turn",
+        "turns",
+        "share",
+        "gathered",
+        "mana_total",
+        "channel",
+        required=("working", "share"),
+    )
+    craft_continued: str = sentence(
+        "name",
+        "working",
+        "turn",
+        "turns",
+        "share",
+        "gathered",
+        "mana_total",
+        "channel",
+        required=("working", "share"),
+    )
+    share_none: str = sentence("mana_left")
+    share_paid: str = sentence("share", "mana_left")
+    share_borrowed: str = sentence("share", "borrowed", "mana_left", "debt")
+    spell_let_go: str = sentence("name", "spell")
+    craft_kept: str = sentence("name", "working", "natural", "target")
+    craft_broken: str = sentence(
+        "name", "working", "natural", "target", "margin", "band", required=("band",)
+    )
+    craft_broken_runaway: str = sentence(
+        "name", "working", "natural", "target", "margin", "band", required=("band",)
+    )
+    lost_abandoned: str = sentence("name", "working", "mana_spent")
+    lost_blocked: str = sentence("name", "working", "mana_spent")
+    lost_unpaid: str = sentence("name", "working", "mana_spent")
+    lost_interrupted: str = sentence("name", "working", "mana_spent")
+    lost_unconscious: str = sentence("name", "working", "mana_spent")
+    lost_grappled: str = sentence("name", "working", "mana_spent")
+    lost_countered: str = sentence("name", "working", "mana_spent", "defenders")
+    casting_roll: str = sentence("total", "dice", "versus", "target")
+    completed: str = sentence(
+        "name",
+        "working",
+        "roll",
+        "mana",
+        "mana_left",
+        "channel",
+        required=("working", "roll"),
+    )
+    failed_handed_back: str = sentence(
+        "name",
+        "working",
+        "roll",
+        "mana_returned",
+        "mana_left",
+        "channel",
+        required=("working", "roll"),
+    )
+    debt_handed_back: str = sentence(
+        "line", "debt_returned", "debt", required=("line",)
+    )
+    failed_spent: str = sentence(
+        "name",
+        "working",
+        "roll",
+        "mana",
+        "mana_left",
+        "channel",
+        required=("working", "roll"),
+    )
+    narrated: str = sentence(
+        "name", "working", "tier", "magnitude", required=("working", "magnitude")
+    )
+    narrated_naming: str = sentence(
+        "name",
+        "working",
+        "target",
+        "tier",
+        "magnitude",
+        required=("working", "magnitude"),
+    )
+    magnitude_clause: str = sentence("magnitude")
+    healed_teammate: str = sentence("name", "target", "healed", "pool", "left")
+    drain: str = sentence("name", "cost", "pool", "left")
+    drain_collapse: str = sentence("name")
+    true_cast: str = sentence("line", required=("line",))
 
 
 @dataclass(frozen=True)
@@ -375,6 +541,9 @@ class RulingsWording:
     turn_panel: TurnPanelWords
     hth_agreement: HthAgreementWords
     magic_bounds: MagicBoundsWords
+    working_grants: WorkingGrantsWords
+    true_magic: TrueMagicWords
+    true_magic_log: TrueMagicLogWords
     cast_stage: CastStageWords
     services: ServicesWords
     control: ControlWords
@@ -409,10 +578,9 @@ def name_of(names: dict[int, str], combatant_id: int) -> str:
 
 
 def listed(items: list[str]) -> str:
-    """Items in prose: "A", "A and B", "A, B and C"."""
-    if len(items) < 2:
-        return "".join(items)
-    return f"{', '.join(items[:-1])} {words().common.and_word} {items[-1]}"
+    """Items in prose: "A", "A and B", "A, B and C", with the configured
+    ``common.and_word``."""
+    return listed_in_words(items, and_word=words().common.and_word)
 
 
 def game_master_name(username: str) -> str:

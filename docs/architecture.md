@@ -266,8 +266,11 @@ Notes on the edges, each checkable:
   reason.
 - `battle/magic_rules.py` reads the canon's `magic-rules.json`
   (`reference.paths.MAGIC_RULES_FILE`) into the engine's `MagicRules`: the
-  casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell and
-  casting failure numbers. It is the only path that sets them. It also reads
+  casting success tiers, Push, Channel, Borrowing, Runaway, Counterspell,
+  casting failure and True Magic numbers. It is the only path that sets them.
+  `loaded_spell()` is the one lookup for a spell key read from a battle's
+  state or a menu candidate, since a True Magic working is built from those
+  rules and is in no catalog. It also reads
   the file's `schools` block, which the engine takes nothing from, into a
   `SchoolTable` (`magic_schools()`): the percentile table a caster's school of
   magic is rolled on, which `characters.services.apply_school_roll`,
@@ -301,7 +304,12 @@ Notes on the edges, each checkable:
   modifier limit). Callers read it through the cached `skill_rules()` when
   they run, never at import, and a refused file, or a skill name that is no
   glossary skill in its own right (`characters.skills.validate_skill_names`),
-  is reported by `characters.E002`. A value built from it and cached (the
+  is reported by `characters.E002`. Its `game_master_started` list names the
+  skills a player never starts and a Game Master does (Arcane, on the public
+  pages): `characters.services.allocation_refusal` holds a player to it
+  wherever a free point is spent, and `characters.E006` refuses a canon whose
+  track tables or Origin rows would grant such a skill unasked
+  (tarmar-studio #208). A value built from it and cached (the
   Games Master's prompts, the patterns naming its skills and tracks)
   registers with `reference.rules_file.derived_from_rules`, so a test seating
   other rules clears it.
@@ -933,21 +941,57 @@ is a Game Master (`runs_the_seats`, #853).
 
 ### A Game Master's rulings on a battle
 
-Two rulings let a Game Master lift what players are held to, each stored on
-the battle and changed only through the battle's GM controls by the fight's
-runner while a Game Master (`battle/services.py::runs_the_seats`):
-hand-to-hand by agreement (`Battle.hth_agreement_json`, `battle/agreement.py`,
-#867) and a figure's lifted magic bounds (`Battle.magic_bounds_lifted_json`,
-`battle/magic_bounds.py`, #37). The second offers only the bounds the loaded
-canon imposes (Channel, the push cap, the counter's commitment bounds) and
-records who lifted each and when; the Tarmar profile writes it onto each
-figure's `lifted_magic_bounds` every turn (tarmar-engine v0.9.17), so the
-engine's menu offers that figure the wider amounts and a cast or counter past
-a lifted bound is narrated as such. Every change writes a log line; the battle
-payload carries both records and their panels (`rulings`, `rulings_html`),
-which `battle.js` repaints. Their words (headings, buttons, log lines,
-refusals) are configuration: `config/battle-rulings.toml`, read and checked at
-startup by `battle/wording.py::load_rulings_wording` into
+Three rulings let a Game Master lift what players are held to, each stored on
+the battle and changed only by the fight's runner while a Game Master
+(`battle/services.py::runs_the_seats`): hand-to-hand by agreement
+(`Battle.hth_agreement_json`, `battle/agreement.py`, #867), a figure's lifted
+magic bounds (`Battle.magic_bounds_lifted_json`, `battle/magic_bounds.py`, #37)
+and a working granted to a figure (`Battle.workings_granted_json`,
+`battle/working_grants.py`, tarmar-studio #208). The second offers only the
+bounds the loaded canon imposes (Channel, the push cap, the counter's
+commitment bounds) and records who lifted each and when; the Tarmar profile
+writes it onto each figure's `lifted_magic_bounds` every turn (tarmar-engine
+v0.9.17), so the engine's menu offers that figure the wider amounts and a cast
+or counter past a lifted bound is narrated as such. The third names one
+working, an effect at a tier, that only a granted figure may craft (the
+canon's `true_magic.effects[].needs_grant`), for a figure with a level in the
+True skill; the profile writes it onto each figure's `granted_workings`
+likewise (tarmar-engine v0.9.22), leaving off any grant the loaded canon no
+longer builds, and the engine's menu offers that figure the craft. A grant
+past the figure's tier cap is recorded and waits on Channel being lifted for
+it: `working_grants.past_tier_cap` and `waits_on_channel` put the question to
+the engine (`MagicRules.past_tier_cap`, `tier_cap`) for the figure as the
+engine reads it, the battle's lifted bounds on it
+(`working_grants.engine_figures`), and restate no rule of the engine's. A
+grant names a figure, so a seat released in the lobby loses its grants
+(`release_seat`), and the next character to claim it starts with none.
+
+The last two keep one record, written once
+(`battle/figure_rulings.py::FigureRulings`): one thing ruled for one figure,
+with who and when. The steps every ruling takes are written once too
+(`battle/services.py::_record_ruling`): lock the battle, hold the ruling to
+the fight's Game Master, refuse a classic battle and a figure not in the
+battle, write the record, clear a pause on a person's move, file one log line
+and save; `set_hth_agreement`, `set_magic_bounds_lifted` and
+`set_working_granted` each keep only their own refusals and record. The
+battle payload carries the three records and their panels (`rulings`,
+`rulings_html`), which `battle.js` repaints when a panel's `data-record`
+changes. Each panel is a partial the battle page and the GM chat's Battle tab
+both include, with the forms for the fight's Game Master alone, and each has
+one endpoint (`battle:hth-agreement`, `battle:magic-bounds`,
+`battle:working-grants`) that refuses anyone else. The three endpoints take
+the same steps, written once (`battle/views.py::_game_masters_ruling`): each
+hands it only how its own fields are read and which service is called. The two
+panels for single figures draw a recorded entry with one partial
+(`battle/_recorded_ruling.html`): the line, when it was ruled, and the form
+that undoes it, whose button a screen reader hears by the entry's own line
+(`common.undo_named`), so two buttons with the same word are told apart. The
+grant form names a working by its effect and its tier, and the key is the
+engine's for them (`working_grants.working_asked_for`); a withdrawal names the
+key the record holds, and the form offers only the figures the service would
+not refuse (`working_grants.crafts_workings`). The rulings' words (headings,
+buttons, log lines, refusals) are configuration: `config/battle-rulings.toml`,
+read and checked at startup by `battle/wording.py::load_rulings_wording` into
 `settings.BATTLE_RULINGS_WORDING` (`BATTLE_RULINGS_WORDING_FILE` names another
 file).
 
@@ -983,6 +1027,35 @@ loader,
 `common/wording.py::load_wording`, which refuses a missing or unknown key, a
 blank value or a `{name}` a sentence may not use at startup. Tests run under
 `common.wording.fixed_wording`, never the shipped sentences.
+
+### True Magic on the battle board
+
+A figure with a level in the True skill may True cast a catalog spell and
+craft a working over several turns (tarmar-engine v0.9.22, tarmar-studio
+#208). The engine's menu offers both, and a seated player records only what it
+offered: `true_cast` is one of the things that set an option apart
+(`battle/services.py::option_variant`), and a craft is the engine's craft
+option with the working's key, its push, its borrowing and the figure it names.
+The cast stage's payload (`caster_magic`, `pending.magic`) restates none of the
+engine's filters for them: `true_casts` and `craft.workings` are rows read off
+the pending menu's own options, `craft.standing` is the craft that stands, and
+`craft.granted` the workings a Game Master granted this figure, with whether
+each waits on Channel. Every number they print is the engine's count
+(`battle/workings.py`).
+
+`static/js/battle.js` pairs those rows with the menu's options and keeps the
+three kinds of casting apart (`splitCastCandidates`): a True cast has a row of
+its own beside the same spell's recipe cast and is sent with `true_cast`; the
+workings to begin sit in the stage's craft control, a card per tier under each
+effect, with the figure, the push and the borrowing the menu gives the tier
+picked; and a craft that stands is one option of the menu, naming first the
+figure its latest craft action named, or a line saying why where the menu
+withholds it. An option is known for a craft by its key being one of the
+payload's workings, so the page spells no letter of the engine's. The roster
+card carries the standing craft's line (`battle/viewmodel.py::_tarmar_craft`).
+True Magic's events are reworded from `[true_magic_log]` when the turn is
+stored (`battle/true_magic_narration.py`), so the board log, the battle JSON
+and the GM battle report print one line.
 
 ### A battle's life
 

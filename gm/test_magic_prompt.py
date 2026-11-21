@@ -36,6 +36,7 @@ from .engine import (
     assemble_magic_section,
     checked_magic_section,
     load_magic_section,
+    render_true_magic,
     section_core,
     section_magic,
     system_prompt,
@@ -74,23 +75,35 @@ from .turn_record import prompt_hash
 # graded the Debt Roll in bands, as the Control Roll is: Borrowing now rolls
 # against WIS alone, states each band and the pool and cost it takes, the band
 # a natural 18 lands in, and that the Debt is all the caster owes at the roll.
+#
+# 04e9d3d6fe119fc75cd82dc0dbe38ae7b3a4529cb833decf8cca5c41d5d4a7c6 until #208
+# built True Magic from the same file: a new generated subsection states who
+# crafts a working and makes a True cast, the tier cap and craft turns, the
+# working's mana and Channel, each effect, the interruption roll and its bands,
+# the working's roll and the drain; and Counterspell now states what
+# familiarity adds to each side and what each side's rests on.
 TARMAR_MAGIC_SECTION_HASH = (
-    "04e9d3d6fe119fc75cd82dc0dbe38ae7b3a4529cb833decf8cca5c41d5d4a7c6"
+    "f455cd147a9cf12ce349244c19b00611135cc05e27e8bcc9980cec879b784183"
 )
 
 # The subsections every magic section carries, in this order: checked here
 # file by file, and inside the whole prompt by ``gm.tests``, whose
 # ``REQUIRED_HEADINGS`` takes them from here.
+#: The hand-written subsection that restates the canon's school table; its
+#: first line is held to the table in ``gm.test_prompt_follows_the_rules``.
+SCHOOLS_OF_MAGIC_HEADING = "### Schools of Magic"
+
 MAGIC_HEADINGS = (
     "## Magic System",
     "### Special Casting Results",
-    "### Schools of Magic",
+    SCHOOLS_OF_MAGIC_HEADING,
     "### Spell Mastery",
     "### Push (Boosting)",
     "### Channel",
     "### Borrowing",
     "### Runaway",
     "### Counterspell",
+    "### True Magic",
 )
 
 
@@ -190,6 +203,7 @@ class MagicSectionFromCanonTest(SimpleTestCase):
     _BORROWING,
     _RUNAWAY,
     _COUNTERSPELL,
+    _TRUE_MAGIC,
 ) = GENERATED_MAGIC_HEADINGS
 
 #: A magic section with every generated heading empty, a subsection of prose
@@ -199,7 +213,8 @@ INVENTED_MAGIC_FILE = (
     "## Magic System\nOpening.\n\n"
     f"{_SPECIAL_CASTING_RESULTS}\n\n"
     "### Schools of Magic\nSchools.\n  Indented, kept as written.\n\n"
-    f"{_PUSH}\n\n{_CHANNEL}\n\n{_BORROWING}\n\n{_RUNAWAY}\n\n{_COUNTERSPELL}"
+    f"{_PUSH}\n\n{_CHANNEL}\n\n{_BORROWING}\n\n{_RUNAWAY}\n\n{_COUNTERSPELL}\n\n"
+    f"{_TRUE_MAGIC}"
 )
 
 
@@ -223,6 +238,7 @@ class AssembleMagicSectionTest(SimpleTestCase):
             (_CHANNEL, _BORROWING),
             (_BORROWING, _RUNAWAY),
             (_RUNAWAY, _COUNTERSPELL),
+            (_COUNTERSPELL, _TRUE_MAGIC),
         ):
             with self.subTest(heading=heading):
                 body_start = assembled.index(f"{heading}\n") + len(heading) + 1
@@ -230,16 +246,24 @@ class AssembleMagicSectionTest(SimpleTestCase):
                     assembled.index("\n\n", body_start),
                     assembled.index(f"\n\n{next_heading}\n"),
                 )
+        self.assertIn(
+            f"{_COUNTERSPELL}\nThe defender commits 1 to 5 mana and declares a "
+            "counter (on their action); opposed 2d10 + INT rolls, each side +1 per "
+            "2 mana invested (the caster's whole casting, the defender's "
+            "commitment); ties go to the defender. Defender wins: spell "
+            "countered. Caster wins: spell goes off. Only the caster can escalate "
+            "on later turns by paying again; the defender gets one shot per "
+            "casting and may oppose again (paying again) or let it through. A "
+            "failed Control Roll during escalation can trigger Runaway. "
+            "Familiarity: ",
+            assembled,
+        )
+        # The last generated heading takes its body at the end of the file,
+        # with nothing after it; the body's words are pinned in
+        # gm.test_prompt_follows_the_rules.
         self.assertTrue(
             assembled.endswith(
-                f"{_COUNTERSPELL}\nThe defender commits 1 to 5 mana and declares a "
-                "counter (on their action); opposed 2d10 + INT rolls, each side +1 per "
-                "2 mana invested (the caster's whole casting, the defender's "
-                "commitment); ties go to the defender. Defender wins: spell "
-                "countered. Caster wins: spell goes off. Only the caster can escalate "
-                "on later turns by paying again; the defender gets one shot per "
-                "casting and may oppose again (paying again) or let it through. A "
-                "failed Control Roll during escalation can trigger Runaway."
+                f"\n\n{_TRUE_MAGIC}\n{render_true_magic(DEFAULT_MAGIC_RULES)}"
             )
         )
 
