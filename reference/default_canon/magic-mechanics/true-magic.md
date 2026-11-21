@@ -1,0 +1,17 @@
+# True Magic
+
+Most mages learn spells as recipes. True Magic studies the root principles those recipes are built on.
+
+A True mage does not cast a working in a moment: they craft it over several turns. A working can be far stronger than any recipe spell, and it drains the caster who works it. A hit while the mage is still crafting can break the working.
+
+True Magic is not on the school roll. The school takes an invitation.
+
+On the battle board this default canon settles it (the `true_magic` block of its `magic-rules.json`). Only a caster with a level in the Arcane skill crafts a working or makes a True cast, and only a Game Master starts that skill. A working's tier is at most **2** for each level the caster holds in Arcane, and a Game Master who lifts the caster's Channel lifts that cap too. Its craft takes **3** turns for each tier, and the caster does nothing else meanwhile: they do not move, defend, dodge or counter, any spell they keep up ends when the craft begins, and choosing any other action loses the working. A working's mana is its tier plus any mana pushed into it, gathered in even shares over the craft turns; the push, and whether a share the pool cannot pay may be borrowed, are chosen when the craft begins. The whole of that mana is bounded by the Channel read from Arcane (see [Channel](/tarmar/reference/dm-rules/magic-mechanics/channel/)). The workings are: Sear, **1d8** damage to Fatigue per tier, which needs no Dexterity roll to hit and ignores armour; Knit, **1d4+1** healing to Body per tier, for the caster or a teammate; Figment, a narrated effect with no dice that the Game Master describes, crafted only at a tier the Game Master has granted the caster.
+
+Any damage that gets past armour onto a crafting caster forces an interruption roll of **2d10 against Wisdom less 4 for each mana gathered**. Failing it loses the working: by **1 to 10** it is a Scatter; by **11 or more** it is a Breakaway, a Runaway; a natural **20** is always a Breakaway. A Runaway that breaks from a working feeds on the mana the craft had gathered. A working that completes makes a casting roll of **3d6 against Wisdom plus 5 for each Arcane level**, with an ordinary casting roll's special results (see [Mana Pool](/tarmar/reference/dm-rules/magic-mechanics/mana-pool/)).
+
+A True cast is an instant cast of a spell the caster knows, in any element at the same rung, with its Channel read from Arcane; mana pushed past the spell's cost casts it deeper. It makes the spell's own casting roll, with no Arcane bonus.
+
+A working that goes off drains **8** Fatigue for each point of its mana; a True cast drains **8** Fatigue for each point pushed past the spell's cost. A casting that ends without going off drains, for each point the working had gathered or the True cast had pushed, by how it ended: **6** Fatigue a point when a hit interrupts it, **7** Fatigue a point when it is countered, and nothing any other way.
+
+Only a saved character holds Arcane, and a generated figure never does, so a computer-run True mage is a saved character the computer plays. It may begin a craft at any tier from 1 to its cap, and never pushes a working or borrows for one. It gives no weight to a healing or a narrated working, nor to one whose drain, when it goes off, would take its Fatigue to 0 or below. It makes no True cast, and, like every computer-run mage, it neither counters nor escalates. See the public [True Magic](/tarmar/reference/public-rules/magic/true-magic/) page.

@@ -8,3 +8,4 @@ How the risks of casting play out at the table. Each page restates what the publ
 - **[Channel](/tarmar/reference/dm-rules/magic-mechanics/channel/)** — how much mana a caster draws at once
 - **[Runaway](/tarmar/reference/dm-rules/magic-mechanics/runaway/)** — when a spell slips out of control
 - **[Counterspell](/tarmar/reference/dm-rules/magic-mechanics/counterspell/)** — one caster stopping another
+- **[True Magic](/tarmar/reference/dm-rules/magic-mechanics/true-magic/)** — workings crafted over several turns

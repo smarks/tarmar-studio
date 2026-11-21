@@ -216,6 +216,7 @@ REFERENCE_NAV = [
                     {"title": "Runaway", "slug": "runaway"},
                     {"title": "Counterspell", "slug": "counterspell"},
                     {"title": "Schools of Magic", "slug": "schools-of-magic"},
+                    {"title": "True Magic", "slug": "true-magic"},
                     {
                         "title": "Spell Descriptions",
                         "slug": "spell-descriptions",

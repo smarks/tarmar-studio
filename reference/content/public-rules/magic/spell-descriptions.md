@@ -64,7 +64,7 @@ what's coming, which puts most of it on the **WIS** side of the split.
 
 | Spell | Lvl | Affinity | Why | Description |
 | ----- | --- | -------- | --- | ------------ |
-| Counter | 1–5 | WIS | Reading an opposing caster's intent and will, not shaping force. | Invests mana to oppose an enemy spell as it's cast — this is the spell version of the [Counterspell](../counterspell) duel: commit mana, roll opposed against the attacker, and win or lose the contest. Its five tiers are the five levels of investment a caster can bring to that duel, not five different spells. |
+| Counter | 1–5 | WIS | Reading an opposing caster's intent and will, not shaping force. | Learned, never cast: the general answer, in a [Counterspell](../counterspell) duel, to a spell the caster has not studied. Each higher Counter answers stronger spells. |
 | Shield (Protection) | 1 | WIS | A defensive instinct, not a shaped effect. | A general ward that improves the target's chances against an incoming attack (mundane or magical) rather than blocking one element specifically. Where Elemental's **Shield** is a precise dampening field, this one is closer to a heightened sense of danger made physical. |
 | Detect Magic | 1 | INT | Reading a trace of worked power is perception, not judgment. | See Passage, above — the same spell, taught on this track as well. |
 | Shield Wall | 2 | WIS | Extending protective instinct to a group. | Extends a Shield-like ward across a line of allies rather than a single target — a formation spell, cast by whoever is standing where the enemy will hit hardest. |

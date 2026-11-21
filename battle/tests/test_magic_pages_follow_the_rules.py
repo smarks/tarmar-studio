@@ -1,6 +1,6 @@
 """The default canon's magic pages state the numbers in its magic-rules.json.
 
-``reference/default_canon/magic-mechanics/`` settles six mechanics for the
+``reference/default_canon/magic-mechanics/`` settles seven mechanics for the
 battle board in hand-written sentences, and
 ``reference/default_canon/magic-rules.json`` holds the same numbers as data
 (issues #42 and #47):
@@ -22,7 +22,13 @@ battle board in hand-written sentences, and
   in the spell and the amount added, and the Channel of a caster who holds no
   level; and the second kind a True cast or a working reads (tarmar-studio
   #208), its skill, its Channel per level and the amount added (the
-  ``channel`` block).
+  ``channel`` block);
+- ``counterspell.md`` also: the bonus per level of familiarity
+  (tarmar-studio #208);
+- ``true-magic.md``: the tier cap, the craft turns, each working's effect,
+  the interruption roll and its bands, the working's roll, and the drain of
+  a casting that goes off and of one that does not (the ``true_magic`` block,
+  tarmar-studio #208).
 
 They have no shared source: the rules-as-data prose of issue #68 builds the
 sheet's and the Games Master prompt's sentences from the loaded canon, but
@@ -46,13 +52,17 @@ from django.test import SimpleTestCase
 from tarmar_engine.magic import (
     UNRECORDED_SKILL_LEVEL,
     BorrowingRules,
+    CastingEnding,
     CastingFailureRules,
     ChannelRules,
     CounterspellRules,
     PushRules,
     RunawayRules,
+    SpellEffectKind,
+    TrueMagicRules,
 )
 
+from battle.magic_rules import CASTING_DICE
 from characters.constants import CORE_ATTRIBUTE_FIELDS
 from reference.paths import DEFAULT_CANON_DIR
 
@@ -65,6 +75,7 @@ MANA_POOL_PAGE = MAGIC_MECHANICS_DIR / "mana-pool.md"
 COUNTERSPELL_PAGE = MAGIC_MECHANICS_DIR / "counterspell.md"
 PUSH_PAGE = MAGIC_MECHANICS_DIR / "push.md"
 CHANNEL_PAGE = MAGIC_MECHANICS_DIR / "channel.md"
+TRUE_MAGIC_PAGE = MAGIC_MECHANICS_DIR / "true-magic.md"
 
 #: Attribute abbreviations (as ``magic-rules.json`` spells them) to the name
 #: the pages print.
@@ -120,6 +131,7 @@ COUNTERSPELL_ROLL = r"both sides roll (\d+d\d+) plus (\w+):"
 COUNTERSPELL_CASTER_BONUS = r"the caster adds \+(\d+) for every (\d+) mana"
 COUNTERSPELL_DEFENDER_BONUS = r"the defender \+(\d+) for every (\d+) mana committed"
 COUNTERSPELL_TIE = r"a tie goes to the (defender|caster)"
+COUNTERSPELL_FAMILIARITY = r"each side adds \+(\d+) for each level of familiarity"
 
 PUSH_CONTROL_ROLL = r"Control Roll \((\d+d\d+) against (\w+)\)"
 PUSH_AUTOMATIC_RUNAWAY = r"or roll an? (\d+), and the spell slips"
@@ -138,6 +150,37 @@ CHANNEL_SKILL_KIND = (
     r"a second kind of magic instead, read from the caster's (\w+):"
     r" a Channel of (\d+) for each level they hold in the (\w+) skill,"
     r" (?:with nothing added|plus (\d+)),"
+)
+
+
+TRUE_TIER_CAP = (
+    r"A working's tier is at most (\d+) for each level the caster holds in (\w+),"
+)
+TRUE_CRAFT_TURNS = r"Its craft takes (\d+) turns? for each tier"
+TRUE_WORKINGS = r"The workings are: ([^.]*)\."
+TRUE_ROLLED_EFFECT = (
+    r"^(\w+), (\d+d\d+(?:\+\d+)?) (damage|healing) to (\w+) per tier(.*)$"
+)
+TRUE_NARRATED_EFFECT = r"^(\w+), a narrated effect with no dice(.*)$"
+TRUE_UNTARGETED = "needs no Dexterity roll to hit"
+TRUE_IGNORES_ARMOUR = "ignores armour"
+TRUE_NEEDS_GRANT = "crafted only at a tier the Game Master has granted"
+TRUE_INTERRUPTION = (
+    r"interruption roll of (\d+d\d+) against (\w+) less (\d+) for each mana gathered"
+)
+TRUE_BANDS = r"Failing it loses the working: ([^.]*)\."
+TRUE_BAND = r"by (\d+) (?:to (\d+)|or more) it is an? (\w+)(, a Runaway)?"
+TRUE_AUTOMATIC = r"a natural (\d+) is always an? (\w+)"
+TRUE_WORKING_ROLL = (
+    r"casting roll of (\d+d\d+) against (\w+) plus (\d+) for each (\w+) level"
+)
+TRUE_DRAIN = (
+    r"A working that goes off drains (\d+) (\w+) for each point of its mana; a "
+    r"True cast drains (\d+) (\w+) for each point pushed"
+)
+TRUE_LOST_DRAIN = (
+    r"(\d+) (\w+) a point when a hit interrupts it, (\d+) (\w+) a point when it "
+    r"is countered, and nothing any other way"
 )
 
 
@@ -333,6 +376,7 @@ def counterspell_claims_of_page(
         "defender_bonus_step": int(defender_bonus.group(1)),
         "defender_mana_per_bonus": int(defender_bonus.group(2)),
         "ties_go_to_caster": search(COUNTERSPELL_TIE, page).group(1) == "caster",
+        "familiarity_per_level": int(search(COUNTERSPELL_FAMILIARITY, page).group(1)),
     }
 
 
@@ -348,6 +392,7 @@ def counterspell_claims_of_rules(rules: CounterspellRules) -> dict[str, object]:
         "defender_bonus_step": ENGINE_COUNTERSPELL_BONUS_STEP,
         "defender_mana_per_bonus": rules.mana_per_bonus,
         "ties_go_to_caster": rules.ties_go_to_caster,
+        "familiarity_per_level": rules.familiarity_per_level,
     }
 
 
@@ -418,6 +463,147 @@ def channel_claims_of_rules(rules: ChannelRules) -> dict[str, object]:
     }
 
 
+def working_effects_of_page(page: Page) -> list[tuple[object, ...]]:
+    """Each working the page lists: its label, dice per tier, kind, pool, and
+    for damage whether it must be aimed and whether armour stops it, and
+    whether it needs a Game Master's grant.
+
+    The page lists rolled effects and narrated ones with no dice, the two this
+    canon has; a narrated effect with dice needs the page and this parser
+    rewritten with it.
+    """
+    effects: list[tuple[object, ...]] = []
+    for item in search(TRUE_WORKINGS, page).group(1).split("; "):
+        rolled = re.match(TRUE_ROLLED_EFFECT, item)
+        if rolled is not None:
+            label, dice, kind, pool, rest = rolled.groups()
+            damage = kind == "damage"
+            effects.append(
+                (
+                    label,
+                    dice,
+                    kind,
+                    pool.casefold(),
+                    TRUE_UNTARGETED not in rest if damage else None,
+                    TRUE_IGNORES_ARMOUR in rest if damage else None,
+                    TRUE_NEEDS_GRANT in rest,
+                )
+            )
+            continue
+        narrated = re.match(TRUE_NARRATED_EFFECT, item)
+        assert narrated is not None, f"{page.name} lists a working as: {item}"
+        label, rest = narrated.groups()
+        effects.append((label, None, None, None, None, None, TRUE_NEEDS_GRANT in rest))
+    return effects
+
+
+def true_magic_claims_of_page(page: Page, rules: TrueMagicRules) -> dict[str, object]:
+    """What a ``true-magic.md`` page says about workings and their drain."""
+    tier_cap = search(TRUE_TIER_CAP, page)
+    interruption = search(TRUE_INTERRUPTION, page)
+    automatic = search(TRUE_AUTOMATIC, page)
+    working_roll = search(TRUE_WORKING_ROLL, page)
+    drain = search(TRUE_DRAIN, page)
+    lost_drain = search(TRUE_LOST_DRAIN, page)
+    return {
+        "tiers_per_level": int(tier_cap.group(1)),
+        "skills": [
+            tier_cap.group(2).casefold(),
+            working_roll.group(4).casefold(),
+        ],
+        "turns_per_tier": int(search(TRUE_CRAFT_TURNS, page).group(1)),
+        "effects": working_effects_of_page(page),
+        "interruption_dice": interruption.group(1),
+        "interruption_attribute": interruption.group(2),
+        "interruption_penalty_per_mana": int(interruption.group(3)),
+        "interruption_bands": [
+            (
+                int(lowest),
+                int(highest) if highest else None,
+                label,
+                bool(runaway),
+            )
+            for lowest, highest, label, runaway in re.findall(
+                TRUE_BAND, search(TRUE_BANDS, page).group(1)
+            )
+        ],
+        "automatic_runaway": (int(automatic.group(1)), automatic.group(2)),
+        "working_roll_dice": working_roll.group(1),
+        "working_roll_attribute": working_roll.group(2),
+        "working_roll_bonus_per_level": int(working_roll.group(3)),
+        "drain": [
+            (int(drain.group(1)), drain.group(2).casefold()),
+            (int(drain.group(3)), drain.group(4).casefold()),
+        ],
+        "lost_drain": [
+            (int(lost_drain.group(1)), lost_drain.group(2).casefold()),
+            (int(lost_drain.group(3)), lost_drain.group(4).casefold()),
+        ],
+    }
+
+
+def true_magic_claims_of_rules(
+    rules: TrueMagicRules, true_skill: str
+) -> dict[str, object]:
+    """The same claims, from the loaded ``true_magic`` block.
+
+    Args:
+        rules: The block.
+        true_skill: The skill its Channel kind reads (``channel``'s
+            derivation for ``rules.channel_kind``), which the page names
+            twice.
+    """
+    interruption = rules.interruption
+    runaway_bands = [band for band in interruption.failure_bands if band.is_runaway]
+    (automatic_total,) = interruption.automatic_runaway_totals
+    return {
+        "tiers_per_level": rules.tiers_per_level,
+        "skills": [true_skill] * 2,
+        "turns_per_tier": rules.turns_per_tier,
+        "effects": [
+            (
+                effect.label,
+                effect.dice_per_tier,
+                effect.kind.value if effect.kind else None,
+                effect.pool if effect.kind else None,
+                effect.targeted if effect.kind is SpellEffectKind.DAMAGE else None,
+                effect.ignores_armour
+                if effect.kind is SpellEffectKind.DAMAGE
+                else None,
+                effect.needs_grant,
+            )
+            for effect in rules.effects
+        ],
+        "interruption_dice": interruption.roll.dice,
+        "interruption_attribute": ATTRIBUTE_NAMES[interruption.roll.attribute],
+        "interruption_penalty_per_mana": interruption.penalty_per_mana,
+        "interruption_bands": [
+            (band.lowest_margin, band.highest_margin, band.label, band.is_runaway)
+            for band in interruption.failure_bands
+        ],
+        "automatic_runaway": (automatic_total, runaway_bands[0].label),
+        "working_roll_dice": CASTING_DICE,
+        "working_roll_attribute": ATTRIBUTE_NAMES[rules.roll_attribute],
+        "working_roll_bonus_per_level": rules.roll_bonus_per_level,
+        "drain": [(rules.drain_per_mana, rules.drain_pool)] * 2,
+        "lost_drain": [
+            (rules.lost_drain_per_mana.get(ending, 0), rules.drain_pool)
+            for ending in (CastingEnding.INTERRUPTED, CastingEnding.COUNTERED)
+        ],
+    }
+
+
+def default_true_magic() -> tuple[TrueMagicRules, str]:
+    """The default canon's ``true_magic`` block and the skill it reads."""
+    rules = DEFAULT_MAGIC_RULES.true_magic
+    channel = DEFAULT_MAGIC_RULES.channel
+    assert rules is not None, "the default canon offers True Magic"
+    assert channel is not None, "True Magic needs Channel"
+    true_skill = channel.derivations[rules.channel_kind].source_skill
+    assert true_skill is not None, "True Magic's Channel reads a skill"
+    return rules, true_skill
+
+
 class MagicPagesFollowTheRulesFileTest(SimpleTestCase):
     """Each hand-written paragraph states what the default canon's file holds."""
 
@@ -469,6 +655,13 @@ class MagicPagesFollowTheRulesFileTest(SimpleTestCase):
         self.assertEqual(
             channel_claims_of_page(read_page(CHANNEL_PAGE), rules),
             channel_claims_of_rules(rules),
+        )
+
+    def test_true_magic_page_matches_the_true_magic_block(self) -> None:
+        rules, true_skill = default_true_magic()
+        self.assertEqual(
+            true_magic_claims_of_page(read_page(TRUE_MAGIC_PAGE), rules),
+            true_magic_claims_of_rules(rules, true_skill),
         )
 
 
@@ -584,6 +777,10 @@ class MagicPageDriftIsCaughtTest(SimpleTestCase):
                 ("defender +1 for every 2", "defender +1 for every 3"),
                 ("defender +1 for every 2", "defender +2 for every 2"),
                 ("a tie goes to the defender", "a tie goes to the caster"),
+                (
+                    "each side adds +2 for each level",
+                    "each side adds +3 for each level",
+                ),
             ),
         )
 
@@ -619,6 +816,47 @@ class MagicPageDriftIsCaughtTest(SimpleTestCase):
                 ("read from the caster's Arcane:", "read from the caster's Sword:"),
                 ("they hold in the Arcane skill,", "they hold in the Sword skill,"),
                 ("Arcane skill, with nothing added,", "Arcane skill, plus 1,"),
+            ),
+        )
+
+    def test_true_magic_page_edits_are_caught(self) -> None:
+        rules, true_skill = default_true_magic()
+        self.assert_edits_are_caught(
+            TRUE_MAGIC_PAGE,
+            rules,
+            true_magic_claims_of_page,
+            true_magic_claims_of_rules(rules, true_skill),
+            (
+                ("at most 2 for each level", "at most 3 for each level"),
+                ("holds in Arcane,", "holds in Sword,"),
+                ("takes 3 turns for each tier", "takes 2 turns for each tier"),
+                ("Sear, 1d8 damage", "Sear, 1d6 damage"),
+                ("damage to Fatigue per tier", "damage to Body per tier"),
+                ("which needs no Dexterity roll", "which needs the Dexterity roll"),
+                ("and ignores armour", "and is stopped by armour"),
+                ("Knit, 1d4+1 healing", "Knit, 1d4+2 healing"),
+                ("healing to Body per tier", "healing to Fatigue per tier"),
+                ("Knit,", "Weld,"),
+                (", crafted only at a tier the Game Master has granted", ""),
+                ("2d10 against Wisdom less", "2d8 against Wisdom less"),
+                ("2d10 against Wisdom less", "2d10 against Intelligence less"),
+                ("less 4 for each mana", "less 3 for each mana"),
+                ("by 1 to 10 it is", "by 1 to 9 it is"),
+                ("by 11 or more", "by 12 or more"),
+                ("it is a Breakaway, a Runaway;", "it is a Breakaway;"),
+                ("it is a Scatter;", "it is a Scatter, a Runaway;"),
+                ("a natural 20 is always", "a natural 19 is always"),
+                ("is always a Breakaway", "is always a Scatter"),
+                ("3d6 against Wisdom plus", "2d6 against Wisdom plus"),
+                ("against Wisdom plus 5", "against Intelligence plus 5"),
+                ("plus 5 for each Arcane level", "plus 4 for each Arcane level"),
+                ("for each Arcane level", "for each Sword level"),
+                ("goes off drains 8 Fatigue", "goes off drains 7 Fatigue"),
+                ("goes off drains 8 Fatigue", "goes off drains 8 Body"),
+                ("True cast drains 8 Fatigue", "True cast drains 9 Fatigue"),
+                ("6 Fatigue a point when a hit", "5 Fatigue a point when a hit"),
+                ("7 Fatigue a point when it is", "8 Fatigue a point when it is"),
+                ("7 Fatigue a point when it is", "7 Body a point when it is"),
             ),
         )
 

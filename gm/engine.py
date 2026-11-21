@@ -37,18 +37,22 @@ from types import MappingProxyType
 
 from tarmar_engine.combat_math import with_article
 from tarmar_engine.magic import (
+    CastingEnding,
     CastingFailureRules,
     CastingSuccessTier,
     ChannelDerivation,
     ControlBand,
     CounterspellRules,
     DebtBand,
+    InterruptionRules,
     MagicRules,
     MarginBand,
     PushRules,
     RollUnderRule,
     RunawayRules,
     SpellEffectKind,
+    TrueMagicRules,
+    WorkingEffect,
     spell_effect_kind,
 )
 from tarmar_engine.spells import SPELLS
@@ -73,6 +77,7 @@ from characters.equipment_rules import (
     equipment_rules,
 )
 from characters.rules import (
+    PROMPT_AND_WORD,
     PROMPT_OR_WORD,
     CharacterRules,
     character_rules,
@@ -87,6 +92,7 @@ from characters.skills import (
     track_keys,
 )
 from characters.weapon_skill import WEAPON_PARRY_SKILL, is_weapon_skill
+from common.prose_list import listed_in_words
 from common.rolling import RollRecord, dice_total_range
 from reference.paths import (
     CANON_MAGIC_RULES_FILE_NAME,
@@ -888,9 +894,10 @@ def _refuse_a_tarmar_canon_without(
 # directory as
 # ``gm-prompt/magic.md``. A canon without one gets the default canon's, which
 # says only what the public rules say; the Tarmar canon without one is an
-# error. Six of its subsections are not the file's (Special Casting Results
+# error. Seven of its subsections are not the file's (Special Casting Results
 # and Borrowing since issue #48; Push, Channel, Runaway and Counterspell since
-# #127): they state numbers the canon's ``magic-rules.json`` holds and the
+# #127; True Magic since tarmar-studio #208): they state numbers the canon's
+# ``magic-rules.json`` holds and the
 # battle board plays, so the engine builds them from that file
 # (:data:`GENERATED_MAGIC_SUBSECTIONS`) and the file leaves them empty.
 def load_magic_section(
@@ -1101,6 +1108,12 @@ NO_CHANNEL_SENTENCE = (
     "where the rules set them, bound a casting."
 )
 
+#: True Magic when the canon has no ``true_magic`` block: the engine offers
+#: no craft and no True cast (tarmar-studio #208).
+NO_TRUE_MAGIC_SENTENCE = (
+    "There is no True Magic: no caster crafts a working or makes a True cast."
+)
+
 #: Runaway when the canon has no ``runaway`` block: the engine narrates and
 #: flags a Runaway but gives it no later turns.
 NO_RUNAWAY_SENTENCE = (
@@ -1120,6 +1133,15 @@ _ORIGINAL_COST = "the original casting cost"
 #: The word a kind of magic's key is named by in the Channel subsection:
 #: "recipe" is "Recipe Magic", as an encumbrance level's key is its label.
 _MAGIC_WORD = "Magic"
+
+
+def _kind_name(kind: str) -> str:
+    """A kind of magic as the prompt names it: "rote" is "Rote Magic".
+
+    Args:
+        kind: A key of the canon's ``channel.derivations``.
+    """
+    return f"{kind.replace('_', ' ').title()} {_MAGIC_WORD}"
 
 
 def _times(multiplier: int, quantity: str) -> str:
@@ -1355,7 +1377,7 @@ def _channel_derivation_sentence(kind: str, derivation: ChannelDerivation) -> st
         )
         if cost_multiplier != 1:
             rule += f" (costs {cost_multiplier}× the skill points to advance)"
-    return f"{kind.replace('_', ' ').title()} {_MAGIC_WORD}: {rule}."
+    return f"{_kind_name(kind)}: {rule}."
 
 
 def render_channel(rules: MagicRules) -> str:
@@ -1511,6 +1533,205 @@ def render_counterspell(rules: MagicRules) -> str:
         sentences.append(
             f"A failed Control Roll during escalation can trigger {_RUNAWAY}."
         )
+    if counterspell.familiarity_per_level > 0:
+        sentences.append(_familiarity_sentence(counterspell, rules.true_magic))
+    return " ".join(sentences)
+
+
+def _familiarity_sentence(
+    counterspell: CounterspellRules, true_magic: TrueMagicRules | None
+) -> str:
+    """What familiarity adds to each side of a counter (tarmar-studio #208).
+
+    The canon's ``counterspell.familiarity_per_level``, read as the engine
+    reads it (``CounterspellRules.caster_familiarity`` and
+    ``defender_familiarity``): the caster's level in the spell cast, or its
+    True skill's for a working and for a True cast of a spell it holds no
+    level in; the defender's highest of its level in the spell, its True
+    skill's and its highest Counter spell's against a spell no higher. With no
+    True Magic neither the True skill nor a working is named.
+
+    Args:
+        counterspell: The canon's Counterspell rules, with familiarity above 0.
+        true_magic: The canon's True Magic rules, or ``None``.
+    """
+    bonus = rules_lookup.signed(counterspell.familiarity_per_level)
+    caster = "its level in that spell"
+    defender = ["its level in that spell"]
+    if true_magic is not None:
+        skill = f"its {true_magic.skill_label} level"
+        caster += (
+            f", or {skill} for a working or for a True cast of a spell it holds "
+            "no level in"
+        )
+        defender.append(f"{skill} against any spell")
+    counter = "its highest Counter spell's level against a spell of that level or less"
+    if true_magic is not None:
+        counter += " (a working's level is its tier)"
+    defender.append(counter)
+    return (
+        f"Familiarity: each side adds {bonus} per level of familiarity with the "
+        f"spell cast. The caster's is {caster}. The defender's is the highest, "
+        f"not the sum, of {listed_in_words(defender, and_word=PROMPT_AND_WORD)}."
+    )
+
+
+def _turns(count: int) -> str:
+    """A count of craft turns: "1 turn", "3 turns".
+
+    Args:
+        count: How many turns.
+    """
+    return f"{count} turn" if count == 1 else f"{count} turns"
+
+
+def _working_effect_phrase(effect: WorkingEffect) -> str:
+    """One effect a working may have, as the True Magic subsection names it
+    (tarmar-studio #208): its label, what it rolls per tier and to which
+    pool, how it is aimed and whether armour stops it, and whether it needs
+    the GM's grant.
+
+    Args:
+        effect: One of the canon's ``true_magic.effects``.
+    """
+    if effect.kind is None:
+        what = (
+            "narrated: the GM says what it does"
+            if effect.dice_per_tier is None
+            else f"narrated: the board rolls {effect.dice_per_tier} per tier and "
+            "applies nothing, and the GM says what the total does"
+        )
+    else:
+        what = (
+            f"{effect.dice_per_tier} {effect.kind.value} to "
+            f"{_pool_name(effect.pool)} per tier"
+        )
+        if effect.kind is SpellEffectKind.DAMAGE:
+            what += (
+                ", needing the DEX roll to hit"
+                if effect.targeted
+                else ", with no DEX roll to hit"
+            )
+            what += (
+                ", ignoring armour" if effect.ignores_armour else ", stopped by armour"
+            )
+        else:
+            what += ", for the caster or a teammate"
+    if effect.needs_grant:
+        what += "; only at a tier the GM has granted the figure"
+    return f"{effect.label}, {what}"
+
+
+def _interruption_sentences(interruption: InterruptionRules) -> list[str]:
+    """The roll a hit on a crafting caster forces, and what failing it costs.
+
+    Args:
+        interruption: The canon's ``true_magic.interruption``.
+    """
+    target = interruption.roll.attribute
+    if interruption.penalty_per_mana:
+        target += f" − {_times(interruption.penalty_per_mana, 'mana gathered')}"
+    bands = "; ".join(
+        f"fail by {_band_margins(band)}, {_band_label(band)}"
+        for band in interruption.failure_bands
+    )
+    sentences = [
+        "Damage that lands on a crafting caster forces an interruption roll: "
+        f"{interruption.roll.dice} ≤ {target}.",
+        f"A failed roll loses the working: {bands}.",
+    ]
+    runaway_band = next(
+        (band for band in interruption.failure_bands if band.is_runaway), None
+    )
+    if interruption.automatic_runaway_totals and runaway_band is not None:
+        totals = totals_in_words(
+            interruption.automatic_runaway_totals, or_word=PROMPT_OR_WORD
+        )
+        sentences.append(
+            f"Natural {totals}: always {_named_runaway(runaway_band.label)}."
+        )
+    return sentences
+
+
+def _drain_sentences(true_magic: TrueMagicRules) -> list[str]:
+    """What a working and a True cast drain, going off and ending otherwise.
+
+    Args:
+        true_magic: The canon's True Magic rules.
+    """
+    pool = _pool_name(true_magic.drain_pool)
+    drain = f"{true_magic.drain_per_mana} {pool}"
+    lost = [
+        f"{ending.value} {true_magic.lost_drain_per_mana[ending]} {pool}"
+        for ending in CastingEnding
+        if true_magic.lost_drain_per_mana.get(ending)
+    ]
+    return [
+        f"A working that goes off drains {drain} for each point of its mana; a "
+        f"True cast drains {drain} for each point pushed past the spell's cost.",
+        (
+            "A casting that ends without going off drains, for each point the "
+            "working had gathered or the True cast had pushed, by how it ended: "
+            f"{', '.join(lost)}; any other ending drains nothing."
+            if lost
+            else "A casting that ends without going off drains nothing."
+        ),
+    ]
+
+
+def render_true_magic(rules: MagicRules) -> str:
+    """The body of ``### True Magic``, from the canon's ``true_magic`` block
+    (tarmar-studio #208).
+
+    Who crafts a working and makes a True cast, and whether a player may
+    start that skill (``skill-rules.json``); the tier cap and the craft's
+    turns; the working's mana and its Channel; each effect; the interruption
+    roll and its bands; the working's own roll; what a True cast is; and the
+    drain (``magic-rules.json``), as the battle board plays them.
+
+    Args:
+        rules: The canon's magic rules.
+    """
+    true_magic = rules.true_magic
+    if true_magic is None:
+        return NO_TRUE_MAGIC_SENTENCE
+    channel = rules.channel
+    assert channel is not None, "the engine refuses True Magic with no Channel"
+    skill_key = channel.derivations[true_magic.channel_kind].source_skill
+    skill = true_magic.skill_label
+    kind = _kind_name(true_magic.channel_kind)
+    working_target = true_magic.roll_attribute
+    if true_magic.roll_bonus_per_level:
+        working_target += (
+            f" + {_times(true_magic.roll_bonus_per_level, f'{skill} level')}"
+        )
+    sentences = [
+        f"A caster with a level in the {skill} skill may craft a working of the "
+        f"{true_magic.school} school over several turns, and may True cast a "
+        "spell they know."
+    ]
+    if skill_key is not None and skill_rules().only_a_game_master_starts(skill_key):
+        sentences.append(f"Only a GM starts the {skill} skill.")
+    sentences.extend(
+        (
+            f"A working's tier is at most {_times(true_magic.tiers_per_level, f'the {skill} level')}, "
+            "unless the GM lifts the caster's Channel, which lifts the cap too; its "
+            f"craft takes {_turns(true_magic.turns_per_tier)} per tier, and the "
+            "caster does nothing else meanwhile.",
+            "Its mana is its tier plus any mana pushed, gathered in even shares "
+            f"over the craft turns, and {kind}'s Channel caps the whole of it.",
+            "Workings: "
+            + "; ".join(_working_effect_phrase(effect) for effect in true_magic.effects)
+            + ".",
+            *_interruption_sentences(true_magic.interruption),
+            f"A working that completes rolls {CASTING_DICE} ≤ {working_target}, "
+            "with the casting roll's special results.",
+            "A True cast is an instant cast of a spell the caster knows, in any "
+            f"element of its rung, with Channel from the {skill} skill ({kind}); "
+            "mana pushed past the spell's cost casts it deeper.",
+            *_drain_sentences(true_magic),
+        )
+    )
     return " ".join(sentences)
 
 
@@ -1525,6 +1746,7 @@ GENERATED_MAGIC_SUBSECTIONS: tuple[tuple[str, Callable[[MagicRules], str]], ...]
     ("### Borrowing", render_borrowing),
     ("### Runaway", render_runaway),
     ("### Counterspell", render_counterspell),
+    ("### True Magic", render_true_magic),
 )
 
 #: The headings of :data:`GENERATED_MAGIC_SUBSECTIONS`.

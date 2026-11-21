@@ -34,9 +34,11 @@ import functools
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from common.prose_list import listed_in_words
 from reference.rules_file import derived_from_rules
 
 from .equipment_rules import equipment_catalog, equipment_rules
+from .rules import PROMPT_OR_WORD
 
 # What one item's own ``category`` may be, in the custom-item form's order and
 # with its labels. Only shields differ from their group: the group is
@@ -253,12 +255,9 @@ def list_gaits(gaits: Sequence[str]) -> str:
     Returns:
         The list, or ``""`` for none.
     """
-    names = [gait.title() for gait in gaits]
-    if len(names) <= 1:
-        return "".join(names)
-    if len(names) == 2:
-        return f"{names[0]} or {names[1]}"
-    return f"{', '.join(names[:-1])}, or {names[-1]}"
+    return listed_in_words(
+        [gait.title() for gait in gaits], and_word=PROMPT_OR_WORD, serial_comma=True
+    )
 
 
 def describe_movement_restrictions(restrictions: Sequence[str]) -> str:

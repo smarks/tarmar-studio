@@ -33,6 +33,11 @@
         "title": "Counterspell",
         "slug": "counterspell",
         "dm_only": true
+      },
+      {
+        "title": "True Magic",
+        "slug": "true-magic",
+        "dm_only": true
       }
     ]
   },

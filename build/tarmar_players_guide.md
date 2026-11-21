@@ -38,6 +38,7 @@
 - [Runaway](#page-public-rules-magic-runaway)
 - [Counterspell](#page-public-rules-magic-counterspell)
 - [Schools of Magic](#page-public-rules-magic-schools-of-magic)
+- [True Magic](#page-public-rules-magic-true-magic)
 - [Spell Descriptions](#page-public-rules-magic-spell-descriptions)
 - [Combat](#page-public-rules-combat)
 - [Turn Sequence](#page-public-rules-combat-turn-sequence)
@@ -1186,6 +1187,8 @@ on. Reaching level N therefore costs **N(N+1)/2** points in total:
 **Exception:** the **Arcane** skill (True Magic) costs **double** — level 1
 costs 2 points, level N costs 2×N more, so reaching level N costs **N(N+1)**
 points in total.
+The Arcane skill is learned only by invitation (see
+[True Magic](../../../magic/true-magic)).
 
 (See [Prior Experience](../../prior-experience) for where the points come
 from.) A level V skill (+5) is worth as much as a peak attribute, and climbing
@@ -1366,6 +1369,8 @@ Every character has a Mana Pool, built from the **Spell Points** earned through 
 
 Spells themselves are learned with skill points: see [Spell Mastery](spell-mastery). Level I in a spell lets you cast it, paying mana equal to the spell's level.
 
+A few mages are invited past recipes into [True Magic](true-magic).
+
 Mana is completely separate from other attributes. A clever weakling may have vast magical reserves; a brilliant scholar may have almost none.
 
 ---
@@ -1452,6 +1457,8 @@ If the caster wins, the spell goes through. If the defender wins, the spell is c
 
 These duels can drain both parties quickly, and a failed Control Roll during escalation can trigger Runaway.
 
+You counter best what you know: the better you know the spell being cast, the stronger your counter. Against a spell you have not studied, the general answer is the [Counter](../spell-descriptions) spell.
+
 ---
 
 <a id="page-public-rules-magic-schools-of-magic"></a>
@@ -1526,6 +1533,18 @@ True Magic is not on this table: it is learned by invitation. See [True Magic](.
 
 ---
 
+<a id="page-public-rules-magic-true-magic"></a>
+
+## True Magic
+
+Most mages learn spells as recipes. True Magic studies the root principles those recipes are built on.
+
+A True mage does not cast a working in a moment: they craft it over several turns. A working can be far stronger than any recipe spell, and it drains the caster who works it. A hit while the mage is still crafting can break the working.
+
+True Magic is not on the school roll. The school takes an invitation.
+
+---
+
 <a id="page-public-rules-magic-spell-descriptions"></a>
 
 ## Spell Descriptions
@@ -1594,7 +1613,7 @@ what's coming, which puts most of it on the **WIS** side of the split.
 
 | Spell | Lvl | Affinity | Why | Description |
 | ----- | --- | -------- | --- | ------------ |
-| Counter | 1–5 | WIS | Reading an opposing caster's intent and will, not shaping force. | Invests mana to oppose an enemy spell as it's cast — this is the spell version of the [Counterspell](../counterspell) duel: commit mana, roll opposed against the attacker, and win or lose the contest. Its five tiers are the five levels of investment a caster can bring to that duel, not five different spells. |
+| Counter | 1–5 | WIS | Reading an opposing caster's intent and will, not shaping force. | Learned, never cast: the general answer, in a [Counterspell](../counterspell) duel, to a spell the caster has not studied. Each higher Counter answers stronger spells. |
 | Shield (Protection) | 1 | WIS | A defensive instinct, not a shaped effect. | A general ward that improves the target's chances against an incoming attack (mundane or magical) rather than blocking one element specifically. Where Elemental's **Shield** is a precise dampening field, this one is closer to a heightened sense of danger made physical. |
 | Detect Magic | 1 | INT | Reading a trace of worked power is perception, not judgment. | See Passage, above — the same spell, taught on this track as well. |
 | Shield Wall | 2 | WIS | Extending protective instinct to a group. | Extends a Shield-like ward across a line of allies rather than a single target — a formation spell, cast by whoever is standing where the enemy will hit hardest. |

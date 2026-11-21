@@ -19,3 +19,5 @@ Level 1: can cast. Level 2: no hand gestures. Level 3: no verbal incantation; un
 ### Runaway
 
 ### Counterspell
+
+### True Magic

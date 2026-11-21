@@ -28,6 +28,7 @@ from pathlib import Path
 
 from django.conf import settings
 
+from common.prose_list import listed_in_words
 from common.wording import load_wording, sentence
 
 
@@ -577,10 +578,9 @@ def name_of(names: dict[int, str], combatant_id: int) -> str:
 
 
 def listed(items: list[str]) -> str:
-    """Items in prose: "A", "A and B", "A, B and C"."""
-    if len(items) < 2:
-        return "".join(items)
-    return f"{', '.join(items[:-1])} {words().common.and_word} {items[-1]}"
+    """Items in prose: "A", "A and B", "A, B and C", with the configured
+    ``common.and_word``."""
+    return listed_in_words(items, and_word=words().common.and_word)
 
 
 def game_master_name(username: str) -> str:
