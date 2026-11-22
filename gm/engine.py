@@ -393,9 +393,10 @@ def _render_anchor_fragment(runaway: RunawayRules | None) -> str:
     """The Runaway's Anchor rolls, after the attributes they read (#150).
 
     The canon's ``runaway.self_anchor`` and ``helper_anchor``
-    (``magic-rules.json``), as the battle board rolls them: " During a
-    Runaway the caster's Anchor roll is 3d6 ≤ WIS and a third-party mage's
-    is 3d6 ≤ INT." "" when the canon has no Runaway rules.
+    (``magic-rules.json``), as the battle board rolls them, the default
+    canon's being " During a Runaway the caster's Anchor roll is 3d6 ≤ WIS
+    and a third-party mage's is 2d10 ≤ INT." "" when the canon has no
+    Runaway rules.
 
     Args:
         runaway: The canon's Runaway rules, or ``None``.
@@ -974,8 +975,8 @@ def _render_casting_success_fragment(tiers: tuple[CastingSuccessTier, ...]) -> s
     """The casting roll's special successes, from the canon's tiers (#48).
 
     The canon's ``casting_success_tiers`` (``magic-rules.json``), lowest
-    natural total first: "3: Critical success (+2 to the spell's rolled damage
-    or healing, 1 mana handed back)". "" when the canon has no tiers.
+    natural total first, the default canon's being "3: Lucky cast (+1 to the
+    spell's rolled damage or healing)". "" when the canon has no tiers.
     """
     items: list[str] = []
     for tier in sorted(tiers, key=lambda tier: min(tier.natural_totals)):
@@ -1130,8 +1131,20 @@ NO_COUNTERSPELL_SENTENCE = (
 #: What a casting's later costs are reckoned from, in the Runaway subsection.
 _ORIGINAL_COST = "the original casting cost"
 
-#: The word a kind of magic's key is named by in the Channel subsection:
-#: "recipe" is "Recipe Magic", as an encumbrance level's key is its label.
+#: What a kind of magic's Channel caps, by its ``counts_cost``
+#: (:attr:`~tarmar_engine.magic.ChannelDerivation.counts_cost`,
+#: tarmar-studio #196): the casting's whole mana, or only the mana past the
+#: spell's cost, which then always fits.
+_CHANNEL_CAPS = {
+    True: "the spell's cost and any pushed mana together",
+    False: "only the mana pushed or borrowed past the spell's cost, which always fits",
+}
+
+#: How the Channel subsection opens, alone or with what every kind caps.
+_CHANNEL_OPENING = "Hard cap on mana per casting"
+
+#: The word a kind of magic's key is named by in the Channel subsection
+#: (:func:`_kind_name`), as an encumbrance level's key is its label.
 _MAGIC_WORD = "Magic"
 
 
@@ -1270,9 +1283,9 @@ def _render_push_payoff(push: PushRules) -> str:
 
     The canon's ``push.effect_bonus_per_mana_by_kind`` and
     ``spell_effect_bonus_per_mana``, as the battle board adds them
-    (:meth:`~tarmar_engine.magic.PushRules.bonus_per_mana`): "The push's
-    bonus: +1 to the spell's rolled damage or healing for each mana pushed.
-    Only a spell that rolls damage or healing can be pushed." A push with
+    (:meth:`~tarmar_engine.magic.PushRules.bonus_per_mana`), the default
+    canon's being "The push's bonus: +1 to the spell's rolled damage for each
+    mana pushed. Only a spell that rolls damage can be pushed." A push with
     nothing pushable is :data:`NOTHING_PUSHABLE_SENTENCE`, not this.
 
     Args:
@@ -1348,7 +1361,9 @@ def render_push(rules: MagicRules) -> str:
     return " ".join(sentences)
 
 
-def _channel_derivation_sentence(kind: str, derivation: ChannelDerivation) -> str:
+def _channel_derivation_sentence(
+    kind: str, derivation: ChannelDerivation, *, names_its_cap: bool
+) -> str:
     """How one kind of magic's Channel derives, from its skill level (#127).
 
     A kind whose Channel reads a general skill names that skill, and what
@@ -1358,6 +1373,9 @@ def _channel_derivation_sentence(kind: str, derivation: ChannelDerivation) -> st
     Args:
         kind: The kind of magic's key in ``channel.derivations``.
         derivation: How that kind's Channel derives.
+        names_its_cap: Whether to say what the kind's Channel caps
+            (:data:`_CHANNEL_CAPS`), as a canon whose kinds cap different
+            mana must (tarmar-studio #196).
     """
     if derivation.source_skill is None:
         level = "skill level in that specific spell"
@@ -1377,6 +1395,8 @@ def _channel_derivation_sentence(kind: str, derivation: ChannelDerivation) -> st
         )
         if cost_multiplier != 1:
             rule += f" (costs {cost_multiplier}× the skill points to advance)"
+    if names_its_cap:
+        rule += f"; it caps {_CHANNEL_CAPS[derivation.counts_cost]}"
     return f"{_kind_name(kind)}: {rule}."
 
 
@@ -1385,7 +1405,10 @@ def render_channel(rules: MagicRules) -> str:
 
     The cap on one casting's mana, each kind of magic's derivation, and that
     Borrowing cannot pass it (``magic-rules.json``; a source skill's cost from
-    ``skill-rules.json``), as the battle board bounds a cast.
+    ``skill-rules.json``), as the battle board bounds a cast. What the cap
+    counts, the casting's whole mana or only the mana past the spell's cost
+    (tarmar-studio #196), is said once when every kind agrees, and with each
+    kind when they differ.
 
     Args:
         rules: The canon's magic rules.
@@ -1393,11 +1416,15 @@ def render_channel(rules: MagicRules) -> str:
     channel = rules.channel
     if channel is None:
         return NO_CHANNEL_SENTENCE
+    caps = {derivation.counts_cost for derivation in channel.derivations.values()}
+    names_each_cap = len(caps) > 1
     sentences = [
-        "Hard cap on mana per casting, the spell's cost and any pushed mana together."
+        f"{_CHANNEL_OPENING}."
+        if names_each_cap
+        else f"{_CHANNEL_OPENING}, {_CHANNEL_CAPS[caps.pop()]}."
     ]
     sentences.extend(
-        _channel_derivation_sentence(kind, derivation)
+        _channel_derivation_sentence(kind, derivation, names_its_cap=names_each_cap)
         for kind, derivation in channel.derivations.items()
     )
     if rules.borrowing is not None:

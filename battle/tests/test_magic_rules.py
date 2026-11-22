@@ -563,6 +563,24 @@ class LoadMagicRulesTest(MagicRulesFileTestCase):
             CastingFailureRules(fumble_floor=14),
         )
 
+    def test_a_derivation_may_leave_the_cost_out(self) -> None:
+        # tarmar-studio #196: the one derivation field a canon may omit.
+        rules = invented_rules()
+        rules["channel"]["derivations"]["hedge"]["counts_cost"] = False
+        loaded = load_magic_rules(self.write_rules(rules))
+        assert loaded.channel is not None
+        self.assertFalse(loaded.channel.derivations["hedge"].counts_cost)
+        self.assertTrue(loaded.channel.derivations["deep"].counts_cost)
+
+    def test_a_derivation_saying_it_counts_the_cost_loads_as_one_silent(
+        self,
+    ) -> None:
+        rules = invented_rules()
+        rules["channel"]["derivations"]["hedge"]["counts_cost"] = True
+        self.assertEqual(
+            load_magic_rules(self.write_rules(rules)), INVENTED_MAGIC_RULES
+        )
+
     def test_borrowing_with_no_cap_loads_beside_channel(self) -> None:
         rules = invented_rules()
         rules["borrowing"]["max_debt"] = None
@@ -748,6 +766,20 @@ MALFORMED_SHAPES: list[tuple[str, Callable[[dict[str, Any]], None]]] = [
         lambda rules: rules["channel"].update(kind_by_spell={"fireball": "deep"}),
     ),
     ("channel.default_kind", lambda rules: rules["channel"].update(default_kind=7)),
+    (
+        "channel.derivations.hedge.counts_cost",
+        lambda rules: rules["channel"]["derivations"]["hedge"].update(counts_cost=0),
+    ),
+    (
+        "channel.derivations.hedge.counts_cost",
+        lambda rules: rules["channel"]["derivations"]["hedge"].update(counts_cost=None),
+    ),
+    (
+        "channel.derivations.hedge.counts_the_cost",
+        lambda rules: rules["channel"]["derivations"]["hedge"].update(
+            counts_the_cost=False
+        ),
+    ),
     ("channel.derivations", lambda rules: rules["channel"].update(derivations=[])),
     (
         "channel.kind_by_spell has an empty key",
@@ -1453,6 +1485,14 @@ class EngineValidationTest(MagicRulesFileTestCase):
             rules, "true_magic: ", "channel_kind 'wild' has no Channel derivation"
         )
 
+    def test_a_true_kind_that_leaves_the_cost_out(self) -> None:
+        rules = invented_rules()
+        kind = rules["true_magic"]["channel_kind"]
+        rules["channel"]["derivations"][kind]["counts_cost"] = False
+        self.assert_engine_refused(
+            rules, "true_magic: ", f"channel_kind {kind!r} leaves the cost out"
+        )
+
     def test_a_true_kind_that_reads_no_skill(self) -> None:
         rules = invented_rules()
         rules["true_magic"]["channel_kind"] = "hedge"
@@ -1721,6 +1761,10 @@ class TarmarMagicRulesTest(SimpleTestCase):
             "automatic_runaway_totals": sorted(rules.push.automatic_runaway_totals),
             "channel_source_skills": {
                 kind: derivation.source_skill
+                for kind, derivation in rules.channel.derivations.items()
+            },
+            "channel_counts_cost": {
+                kind: derivation.counts_cost
                 for kind, derivation in rules.channel.derivations.items()
             },
             "borrowing": {

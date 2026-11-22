@@ -1,15 +1,15 @@
 """tarmar-studio#191: each element is its own track, climbed tier by tier.
 
-Spencer's ruling (the canon's ``elemental_tracks_climb_tier_by_tier``): a
-student of Elemental magic picks an element and studies that track. Learning
-tier N of an element needs tier N-1 of the same element, so Fire Bolt needs
-Fire Ball and Fire Ball needs Fire Missile; a mage who switches element starts
-the new one at tier 1. Spells already on the record stay usable and may be
-raised. Players are held to the rule; a Game Master may teach any spell.
+Spencer's ruling: a student of Elemental magic picks an element and studies
+that track. Learning tier N of an element needs tier N-1 of the same element,
+so Fire Bolt needs Fire Ball and Fire Ball needs Fire Missile; a mage who
+switches element starts the new one at tier 1. Spells already on the record
+stay usable and may be raised. Players are held to the rule; a Game Master may
+teach any spell.
 
-tarmar-studio#208 (the canon's ``counter_n_is_five_spells``): Protection's
-Counter 1 to Counter 5 are five spells on a ladder of their own, climbed the
-same way, so Counter N needs Counter N-1.
+tarmar-studio#208 (Spencer's ruling): Protection's Counter 1 to Counter 5 are
+five spells on a ladder of their own, climbed the same way, so Counter N needs
+Counter N-1.
 
 The rung below a spell is the engine's (``tarmar_engine.spells.lower_tier``),
 so no test here types a ladder. The refusal's words are configuration, so the

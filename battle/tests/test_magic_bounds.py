@@ -98,7 +98,7 @@ class BoundsTheCanonImposesTest(BaseTestCase):
         uncapped = replace(
             default_canon, push=replace(default_canon.push, max_push_mana=None)
         )
-        # The Tarmar canon's Push has no cap, so there is no push cap to lift.
+        # A Push with no cap leaves no push cap to lift.
         self.assertEqual(
             magic_bounds.bounds_imposed_by(uncapped), (CHANNEL, COUNTER_BOUNDS)
         )
@@ -392,7 +392,7 @@ class SetMagicBoundsTest(CanonImposesTestCase):
 
 @with_fixed_words
 class BoundTheCanonDoesNotImposeTest(CanonImposesTestCase):
-    """The Tarmar canon's Push has no cap: there is no push cap to lift."""
+    """A canon whose Push has no cap has no push cap to lift."""
 
     imposed = (CHANNEL, COUNTER_BOUNDS)
 

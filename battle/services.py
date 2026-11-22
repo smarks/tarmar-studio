@@ -3527,6 +3527,34 @@ def _advance_turn_once(battle_id: int) -> tuple[Battle, list[BattleEvent]]:
     return battle, events
 
 
+def _shown_channel(
+    rules: MagicRules, actor: CombatantState, spell: Spell, kind: str | None = None
+) -> int | None:
+    """The caster's Channel for a casting of ``spell``, as the cast stage shows it.
+
+    The engine's :meth:`~tarmar_engine.magic.MagicRules.channel_for`, not its
+    :meth:`~tarmar_engine.magic.MagicRules.channel_bound`: for a kind of magic
+    that leaves the spell's cost out of Channel the bound is the Channel plus
+    the cost (tarmar-engine #83, tarmar-studio #196), and the stage names the
+    Channel. ``None`` where the bound is: with no Channel rules, or for a
+    caster a Game Master has lifted Channel for (#37).
+
+    Args:
+        rules: The canon's magic rules.
+        actor: The caster.
+        spell: The spell cast, or the working crafted.
+        kind: The kind of magic the casting names
+            (:meth:`~tarmar_engine.magic.MagicRules.cast_kind`), or ``None``
+            for the spell's own.
+
+    Raises:
+        ChannelUnclassifiedSpell: for a spell the rules give no kind.
+    """
+    if rules.channel_bound(actor, spell, kind=kind) is None:
+        return None
+    return rules.channel_for(actor, spell, kind)
+
+
 def _channel_reading(
     rules: MagicRules, actor: CombatantState, spell: Spell
 ) -> tuple[int | None, str]:
@@ -3534,12 +3562,11 @@ def _channel_reading(
 
     The engine's own test, the one the menu withholds by and ``cast_spell``
     refuses by (:meth:`~tarmar_engine.magic.MagicRules.cast_within_channel`,
-    tarmar-engine #41), and the bound it holds the casting to
-    (:meth:`~tarmar_engine.magic.MagicRules.channel_bound`): ``None`` with no
-    Channel rules, or for a caster a Game Master has lifted Channel for
-    (#37), whose cast is not withheld. A spell the Channel rules give no kind
-    of magic raises in both, and is withheld. Only the words are the cast
-    stage's.
+    tarmar-engine #41), and the caster's Channel the stage shows
+    (:func:`_shown_channel`): ``None`` with no Channel rules, or for a caster
+    a Game Master has lifted Channel for (#37), whose cast is not withheld. A
+    spell the Channel rules give no kind of magic raises in both, and is
+    withheld. Only the words are the cast stage's.
 
     Args:
         rules: The canon's magic rules.
@@ -3554,12 +3581,16 @@ def _channel_reading(
     """
     try:
         within = rules.cast_within_channel(actor, spell)
-        limit = rules.channel_bound(actor, spell)
+        channel = _shown_channel(rules, actor, spell)
     except ChannelUnclassifiedSpell:
         return None, words().cast_stage.no_kind_of_magic
     if within:
-        return limit, ""
-    return limit, words().cast_stage.past_channel.format(level=spell.level, limit=limit)
+        return channel, ""
+    # Only a kind that counts the cost refuses an unpushed cast, so the Channel
+    # shown is the very bound the cast passes.
+    return channel, words().cast_stage.past_channel.format(
+        level=spell.level, limit=channel
+    )
 
 
 def _cast_chance_note(rules: MagicRules, actor: CombatantState, spell: Spell) -> str:
@@ -3651,8 +3682,8 @@ def _stage_row(
             not be cast even by borrowing; "" for any other.
         borrowed: The mana it borrows, for a casting only borrowing pays
             for; 0 for any other.
-        channel: The most mana one casting of it may take, cost and push
-            together (issue #960); ``None`` when the canon bounds no casting
+        channel: The caster's Channel for it (issue #960,
+            :func:`_shown_channel`); ``None`` when the canon bounds no casting
             by it, or a Game Master has lifted Channel for the caster (#37).
     """
     stage = words().cast_stage
@@ -3744,9 +3775,9 @@ def _offered_rows(
     Nothing here decides what may be cast: a row is castable because the
     menu holds its casting paid from the pool, and borrowable because the
     menu holds only a borrowing copy of it, whose borrowed mana is the
-    menu's. A casting the menu withholds has no row. Each row's Channel is
-    the engine's bound for a True cast or a working, by the True skill's
-    kind of magic (``MagicRules.cast_kind``).
+    menu's. A casting the menu withholds has no row. Each row shows the
+    caster's Channel (:func:`_shown_channel`) for a True cast or a working,
+    by the True skill's kind of magic (``MagicRules.cast_kind``).
 
     Args:
         state: The board, for the names of the figures the castings name.
@@ -3774,8 +3805,8 @@ def _offered_rows(
             castable=casting.plain,
             withheld="",
             borrowed=0 if casting.plain else casting.borrowed,
-            channel=rules.channel_bound(
-                actor, spell, kind=rules.cast_kind(spell, true_cast=True)
+            channel=_shown_channel(
+                rules, actor, spell, rules.cast_kind(spell, true_cast=True)
             ),
         )
         row.update(added)
@@ -4042,9 +4073,8 @@ def caster_magic(
             other_reason = channel_refusal
         shortfall = turn_menu.mana_short(actor, spell.level)
         # A borrowing casting's bound is the engine's own
-        # (:meth:`~tarmar_engine.magic.MagicRules.channel_bound`): with Channel
-        # lifted for the caster, the debt cap, or with none the purse plus
-        # the Channel (#37).
+        # (:meth:`~tarmar_engine.magic.MagicRules.channel_bound`), cost
+        # included, lifted (#37) or not; nothing here restates it.
         borrowable = (
             bool(shortfall)
             and not other_reason

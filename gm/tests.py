@@ -20,6 +20,7 @@ from common.test_helpers import (
     CANON_EXPECTATIONS,
     BaseTestCase,
     skip_unless_canon_expects,
+    tracked_text_files,
 )
 from reference.paths import CANON_NAME, TARMAR_CANON_NAME
 
@@ -1483,25 +1484,13 @@ class GMModelDefaultSingleSourceTest(SimpleTestCase):
     )
 
     @staticmethod
-    def _tracked_files(*, with_suffixes: tuple[str, ...]) -> list[Path]:
-        """Tracked files with one of ``with_suffixes``, or with none at all."""
-        listing = subprocess.run(
-            ["git", "ls-files", "-z"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        candidates = [REPO_ROOT / name for name in listing.split("\0") if name]
+    def _tracked_texts(*, with_suffixes: tuple[str, ...]) -> list[tuple[Path, str]]:
+        """Tracked text files with one of ``with_suffixes``, or with none at all."""
         return [
-            path
-            for path in candidates
-            if path.is_file() and path.suffix in (*with_suffixes, "")
+            (path, text)
+            for path, text in tracked_text_files()
+            if path.suffix in (*with_suffixes, "")
         ]
-
-    @staticmethod
-    def _text(path: Path) -> str:
-        return path.read_text(encoding="utf-8", errors="replace")
 
     def test_default_is_not_the_fallback(self):
         from gm.model_config import DEFAULT_GM_MODEL, FALLBACK_GM_MODEL
@@ -1550,7 +1539,8 @@ class GMModelDefaultSingleSourceTest(SimpleTestCase):
 
         for relative_path, phrase_template in self.DOCUMENTED_DEFAULT_PHRASES:
             phrase = phrase_template.format(model=DEFAULT_GM_MODEL)
-            collapsed = " ".join(self._text(REPO_ROOT / relative_path).split())
+            text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+            collapsed = " ".join(text.split())
             with self.subTest(file=relative_path, phrase=phrase):
                 self.assertIn(phrase, collapsed)
 
@@ -1558,8 +1548,7 @@ class GMModelDefaultSingleSourceTest(SimpleTestCase):
         from gm.model_config import FALLBACK_GM_MODEL
 
         python_and_prose = (".py", *self.PROSE_SUFFIXES, *self.NON_PYTHON_SUFFIXES)
-        for path in self._tracked_files(with_suffixes=python_and_prose):
-            text = self._text(path)
+        for path, text in self._tracked_texts(with_suffixes=python_and_prose):
             if FALLBACK_GM_MODEL not in text:
                 continue
             if path.suffix in self.PROSE_SUFFIXES:
@@ -1582,10 +1571,9 @@ class GMModelDefaultSingleSourceTest(SimpleTestCase):
 
         offenders: list[str] = []
         model_config_path = (REPO_ROOT / "gm" / "model_config.py").resolve()
-        for path in self._tracked_files(with_suffixes=(".py",)):
+        for path, source in self._tracked_texts(with_suffixes=(".py",)):
             if path.suffix != ".py" or path.resolve() == model_config_path:
                 continue
-            source = self._text(path)
             if DEFAULT_GM_MODEL not in source:
                 continue
             tree = ast.parse(source)
@@ -1615,8 +1603,10 @@ class GMModelDefaultSingleSourceTest(SimpleTestCase):
 
         offenders = [
             str(path.relative_to(REPO_ROOT))
-            for path in self._tracked_files(with_suffixes=self.NON_PYTHON_SUFFIXES)
-            if DEFAULT_GM_MODEL in self._text(path)
+            for path, text in self._tracked_texts(
+                with_suffixes=self.NON_PYTHON_SUFFIXES
+            )
+            if DEFAULT_GM_MODEL in text
         ]
         self.assertEqual(offenders, [])
 

@@ -108,9 +108,8 @@ _SKILL_LEVEL_CYCLE: tuple[int, ...] = (4, 3, 5)
 
 # Spell loadouts rotate per caster index. Keys are battle.spells catalog keys.
 # Each Elemental spell carries the rungs below it in its element, as a player's
-# own caster must (the canon's elemental_tracks_climb_tier_by_tier ruling,
-# tarmar-studio#191): the first wizard climbs fire to its Bolt, the second
-# holds the Missile under its Ball.
+# own caster must (Spencer's ruling on tarmar-studio#191): the first wizard
+# climbs fire to its Bolt, the second holds the Missile under its Ball.
 _WIZARD_LOADOUTS: tuple[tuple[str, ...], ...] = (
     ("fire_missile", "fire_ball", "fire_bolt", "shield"),
     ("fire_missile", "fire_ball", "fatigue", "blur"),

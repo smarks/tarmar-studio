@@ -91,12 +91,11 @@ test.describe('Magic bounds lifted', () => {
 
     test("a Game Master lifts the bound that holds a wizard's push, whose menu then offers the cast past it", async ({ adminPage, browser }, testInfo) => {
         // The bound is the one the loaded canon holds the wizard's Fire
-        // Missile to: under the Tarmar canon Channel (the wizard's Fire
-        // Missile level, which leaves no room to push), under the default
-        // canon Push's own cap of three, since its Channel leaves room past
-        // that cap at any level. Either way the wizard's Fire Missile is
-        // offered pushed copies past it once the Game Master lifts it, and
-        // the log says the cast went past it by the ruling. Under the
+        // Missile's push to: under the Tarmar canon Channel, under the
+        // default canon Push's own cap of three, since its Channel leaves
+        // room past that cap at any level. Either way the wizard's Fire
+        // Missile is offered pushed copies past it once the Game Master lifts
+        // it, and the log says the cast went past it by the ruling. Under the
         // default canon those copies now stop at the wizard's Channel,
         // which stays held.
         await adminPage.goto('/tarmar/gm/');
@@ -131,7 +130,8 @@ test.describe('Magic bounds lifted', () => {
             await missileGroup.locator('.turn-spell').click();
             const amounts = missileGroup.locator('.turn-push-amount');
             // "None", then the amounts: under the default canon more than its
-            // cap of three, under the Tarmar canon any at all.
+            // cap of three, under the Tarmar canon at least one. The last is
+            // past the lifted bound either way, as its cost line says.
             await expect.poll(() => amounts.count()).toBeGreaterThan(defaultCanon ? 4 : 1);
             await amounts.last().click();
             await expect(missileGroup.locator('.turn-push-cost')).toContainText(past.menu);

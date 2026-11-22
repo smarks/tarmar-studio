@@ -1,8 +1,10 @@
 """A Game Master's ruling lifting a figure's magic bounds on a battle (issue #37).
 
-The canon's magic rules bound every cast: the whole mana of a casting lies
-within the caster's Channel for the spell, a push takes no more than the push
-cap, and a counter commits an amount within the counter's commitment bounds
+The canon's magic rules bound every cast: a casting puts no more mana
+against the caster's Channel for the spell than that Channel (its whole mana,
+or for a kind of magic that leaves the cost out only what it pushes or borrows
+past the cost, tarmar-studio #196), a push takes no more than the push cap,
+and a counter commits an amount within the counter's commitment bounds
 (``battle.magic_rules``). Players are held to them. Spencer's ruling of
 2026-10-14, under the standing rule that a Game Master may override what
 players are held to: the Game Master records "Channel lifted for <figure>",

@@ -34,7 +34,8 @@ The file is a JSON object::
       },
       "channel": null | {
         "derivations": {<kind of magic>: {"source_skill": str | null,
-                                          "multiplier": int, "offset": int}},
+                                          "multiplier": int, "offset": int,
+                                          "counts_cost"?: bool}},
         "kind_by_spell": {<engine spell key>: <kind of magic>},
         "default_kind": str | null
       },
@@ -111,8 +112,12 @@ is nothing to roll, and any caster may learn any spell.
 
 Field names are the engine dataclass fields they fill, and every one of them
 is required: a canon states each number rather than inheriting an engine
-default. An unknown key at any level is an error, since it is most likely a
-misspelling of a known one; so is a key repeated in one object, two tiers,
+default. The one exception is a derivation's ``counts_cost`` (tarmar-studio
+#196), which may be left out: whether that kind's Channel counts the spell's
+cost, or bounds only the mana pushed or borrowed past it. Left out, it counts
+the cost, as every canon's Channel did before the field existed. An unknown
+key at any level is an error, since it is most likely a misspelling of a
+known one; so is a key repeated in one object, two tiers,
 two failure bands or two working effects sharing a ``key``, and an attribute
 named twice in ``borrowing.debt_attributes``. So is a natural total its dice
 cannot roll (a tier's, the casting roll's failing ones against
@@ -207,6 +212,9 @@ PUSH_FIELDS = (
 )
 CHANNEL_FIELDS = ("derivations", "kind_by_spell", "default_kind")
 DERIVATION_FIELDS = ("source_skill", "multiplier", "offset")
+#: The derivation field a canon may leave out (tarmar-studio #196); without it
+#: the kind counts the spell's cost against Channel, the engine's default.
+DERIVATION_OPTIONAL_FIELDS = ("counts_cost",)
 BORROWING_FIELDS = (
     "debt_dice",
     "debt_attributes",
@@ -549,7 +557,15 @@ class _MagicRulesFileReader(RulesFileReader):
 
     def channel_derivation(self, value: Any, field_path: str) -> ChannelDerivation:
         """One entry of ``channel.derivations``."""
-        fields = self.json_object(value, field_path, DERIVATION_FIELDS)
+        fields = self.json_object(
+            value, field_path, DERIVATION_FIELDS, DERIVATION_OPTIONAL_FIELDS
+        )
+        # Left out, the engine's own default stands rather than one restated here.
+        optional = {
+            name: self.boolean(fields[name], f"{field_path}.{name}")
+            for name in DERIVATION_OPTIONAL_FIELDS
+            if name in fields
+        }
         with self.wrapped_value_errors(field_path):
             return ChannelDerivation(
                 source_skill=self.optional_text(
@@ -559,6 +575,7 @@ class _MagicRulesFileReader(RulesFileReader):
                     fields["multiplier"], f"{field_path}.multiplier"
                 ),
                 offset=self.integer(fields["offset"], f"{field_path}.offset"),
+                **optional,
             )
 
     def kind_by_spell(self, value: Any, field_path: str) -> dict[str, str]:

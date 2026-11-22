@@ -92,8 +92,8 @@ def tarmar_state(snapshot: dict) -> BattleState:
 
     A figure snapshotted before issue #960 carries no ``spell_skill_levels``
     (or carries the engine's empty default), and the engine reads a missing
-    spell at level 0, so a Channel derived from it would allow no cast at
-    all. Its ``spell_mastery`` is the same reading of the same record (a
+    spell at level 0, so a Channel derived from it would be 0 for every
+    spell. Its ``spell_mastery`` is the same reading of the same record (a
     spell's mastery is its skill level, ``battle.services.snapshot_character``),
     so an entry with no spell skill levels takes its mastery's. A figure
     snapshotted since has the two equal, so the fill changes nothing for it.

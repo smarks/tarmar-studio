@@ -1573,8 +1573,7 @@ def allocation_refusal(skills: Mapping[str, int] | None, skill: str) -> str | No
     A skill the canon lists under ``game_master_started`` (tarmar-studio
     #208: Arcane, which comes by invitation) is the Game Master's to start
     though the glossary names it; a player whose character holds it raises
-    it as any other skill (the canon's
-    ``arcane_once_granted_is_the_players_to_raise`` ruling).
+    it as any other skill (Spencer's ruling on #208).
 
     Args:
         skills: The character's stored skills.

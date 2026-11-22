@@ -10,19 +10,24 @@
  * action sends it; and the turn's log carries the pushed cast, its Control
  * Roll and that roll's outcome.
  *
- * Under the Tarmar canon the same generated wizard is offered no push: the
- * spec drives the same claim and turn and pins that the stage lists Fire
- * Missile with no push control, then ends. The spec says only that no push
- * is offered there, not why; the reasons are the canon's.
+ * Under the Tarmar canon the same generated wizard is offered the push its
+ * Channel allows past Fire Missile's cost (tarmar-studio #196): the spec
+ * reads the wizard's Channel, the spell's cost and the most the engine lets
+ * it push from the running server, checks the Channel is no more than the
+ * cost, so that with the cost counted against Channel nothing could be
+ * pushed, and that the stage offers exactly the amounts the server gives,
+ * under a label naming that Channel; then it pushes the most and the log
+ * carries the pushed cast. The numbers are the canon's.
  *
  * Borrowing (tarmar-engine #28), in the second test: the same wizard, its
  * pool emptied before the turn, is short of mana for every spell. Under the
  * default canon the stage still opens, Fire Missile offers a borrowing
  * control listing exactly the copies the engine put on the menu (no plain
  * cast), and borrowing the mana it lacks logs the borrowed cast and its
- * debt roll against WIS. Under the Tarmar canon the spec pins only that one
- * borrowing copy is offered and that the debt roll is logged; why, and the
- * numbers, are the canon's.
+ * debt roll against WIS. Under the Tarmar canon the spec pins that the
+ * control lists exactly the borrowing copies the menu holds, which it reads
+ * from the server, and that the debt roll is logged; why, and the numbers,
+ * are the canon's.
  *
  * A failed Debt Roll (tarmar-studio #190), in the third and fourth tests,
  * one for the canon's first band that takes a pool and one for its last,
@@ -43,8 +48,8 @@
  * a Runaway on its Control Roll's automatic total: the roster card shows it
  * running, the next turn's Renew Spells phase drains the wizard's mana, and
  * the wizard takes the anchor the menu offers, whose roll holds and ends it.
- * Under the Tarmar canon, where this wizard pushes nothing, the Runaway is
- * started on the board before the turn, and the spec pins only that the card
+ * Under the Tarmar canon, whose turns the spec pins no seed for, the Runaway
+ * is started on the board before the turn, and the spec pins only that the card
  * shows it, the wizard's own anchor is the AI's pick, and the drain and the
  * anchor roll are logged; the numbers are the canon's.
  *
@@ -320,15 +325,39 @@ print("CASTING_FAILURE " + json.dumps(None if block is None else {
 }
 
 /**
- * The Channel bounding the battle's wizard's casting of a spell, as the
- * engine reckons it for the cast stage (MagicRules.channel_bound), or null
- * when nothing bounds it.
+ * The mana pushed by each borrowing copy of a spell the battle's paused menu
+ * offers the wizard, least first, as the server stored the menu.
  *
  * @param {number} battleId
  * @param {string} spellKey - the engine's spell key, e.g. "fire_missile"
- * @returns {number|null}
+ * @returns {number[]}
  */
-function wizardsChannel(battleId, spellKey) {
+function offeredBorrowingPushes(battleId, spellKey) {
+    return readDjangoJson(`
+import json
+from battle.models import Battle
+pending = Battle.objects.get(pk=${battleId}).pending_input_json
+pushes = {
+    entry.get("push_mana") or 0
+    for entry in pending["candidates"]
+    if entry.get("spell_key") == ${JSON.stringify(spellKey)} and entry.get("borrow")
+}
+print('BORROWING_PUSHES', json.dumps(sorted(pushes)))
+`, 'BORROWING_PUSHES');
+}
+
+/**
+ * What the engine lets the battle's wizard push into a casting of a spell,
+ * as the cast stage reckons it: the wizard's Channel for the spell
+ * (MagicRules.channel_for, which the push control's label names), the
+ * spell's cost, and the most mana it may push past that cost
+ * (PushRules.push_room within MagicRules.channel_bound, tarmar-studio #196).
+ *
+ * @param {number} battleId
+ * @param {string} spellKey - the engine's spell key, e.g. "fire_missile"
+ * @returns {{channel: number|null, cost: number, most_push: number}}
+ */
+function wizardsPush(battleId, spellKey) {
     return readDjangoJson(`
 import json
 from battle import profiles
@@ -338,9 +367,16 @@ from tarmar_engine.spells import get_spell
 battle = Battle.objects.get(pk=${battleId})
 state = profiles.for_battle(battle).load(battle.state_json)
 (wizard,) = [figure for figure in state.combatants if figure.spells]
-channel = magic_rules().channel_bound(wizard, get_spell(${JSON.stringify(spellKey)}))
-print('WIZARDS_CHANNEL', json.dumps(channel))
-`, 'WIZARDS_CHANNEL');
+spell = get_spell(${JSON.stringify(spellKey)})
+rules = magic_rules()
+print('WIZARDS_PUSH', json.dumps({
+    'channel': rules.channel_for(wizard, spell),
+    'cost': spell.level,
+    'most_push': rules.push.push_room(
+        spell, wizard.mana, rules.channel_bound(wizard, spell)
+    ),
+}))
+`, 'WIZARDS_PUSH');
 }
 
 /**
@@ -402,36 +438,21 @@ test.describe('Pushing mana into a cast', () => {
 
     test('a seated wizard is offered the push its canon allows, and a pushed cast is logged', async ({ adminPage, browser }, testInfo) => {
         test.setTimeout(120000);
-        // The push amounts below are the default canon's; under any other
-        // canon the spec pins that this wizard is offered no push.
+        // The push amounts and the rolls below are the default canon's; under
+        // any other canon the spec reads the amounts from the server.
         await adminPage.goto('/tarmar/gm/');
-        const pushOffered = (await loadedCanon(adminPage)) === DEFAULT_CANON;
+        const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
         const battleName = uniqueName('E2E Push');
         let wizardsBattle = null;
 
         playerPage = await openTheWizardsStage(adminPage, browser, battleName, {
-            beforeTurn: pushOffered
-                ? (battleId) => {
-                    wizardsBattle = battleId;
-                    pinTheTurns(battleId, PUSH_TURNS_SEED);
-                }
-                : undefined,
+            beforeTurn: (battleId) => {
+                wizardsBattle = battleId;
+                if (defaultCanon) { pinTheTurns(battleId, PUSH_TURNS_SEED); }
+            },
         });
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
-
-        if (!pushOffered) {
-            // Fire Missile is on the stage, castable, with no push control
-            // and not a word about pushing.
-            const missile = stage.locator('.turn-spell', {
-                has: playerPage.locator('.turn-spell-name', { hasText: 'Fire Missile' }),
-            });
-            await expect(missile).toBeEnabled();
-            await expect(stage.locator('.turn-push')).toHaveCount(0);
-            await expect(stage.locator('.turn-push-amount')).toHaveCount(0);
-            await expect(stage).not.toContainText(/push/i);
-            await stopCoverage(playerPage, `${testInfo.title} (player context)`);
-            return;
-        }
+        const { channel, cost, most_push: mostPush } = wizardsPush(wizardsBattle, 'fire_missile');
 
         // The spell stage: Fire Missile carries the push control, with
         // nothing pushed until the player picks an amount.
@@ -443,37 +464,55 @@ test.describe('Pushing mana into a cast', () => {
         await expect(missileGroup.locator('.turn-push')).toBeVisible();
         await missileGroup.locator('.turn-spell').click();
         const amounts = missileGroup.locator('.turn-push-amount');
-        // The default canon caps a push at three mana, and the wizard has
-        // the mana for all three.
+        if (defaultCanon) {
+            // The default canon caps a push at three mana, and the wizard
+            // has the mana for all three.
+            expect(mostPush).toBe(3);
+        } else {
+            // A Channel no more than the spell's cost: counted with the cost,
+            // as before tarmar-studio #196, it would leave nothing to push.
+            expect(channel).not.toBeNull();
+            expect(channel).toBeLessThanOrEqual(cost);
+            expect(mostPush).toBeGreaterThan(0);
+        }
         const { panel, tarmar } = menuWords();
+        const offered = Array.from({ length: mostPush }, (_, index) => index + 1);
         await expect(amounts).toHaveText([
             menuLine(panel.push_none),
-            ...[1, 2, 3].map((mana) => menuLine(panel.push_amount, { mana: String(mana) })),
+            ...offered.map((mana) => menuLine(panel.push_amount, { mana: String(mana) })),
         ]);
         await expect(amounts.first()).toHaveAttribute('aria-pressed', 'true');
-        // The default canon bounds the cast by Channel, so the control's
-        // label names the wizard's, as the server reckons it.
+        // Both canons bound the cast by Channel, so the control's label
+        // names the wizard's, as the server reckons it.
         await expect(missileGroup.locator('.turn-push-label')).toHaveText(
-            menuLine(panel.push_label_channel, {
-                channel: String(wizardsChannel(wizardsBattle, 'fire_missile')),
-            })
+            menuLine(panel.push_label_channel, { channel: String(channel) })
         );
 
-        await amounts.nth(2).click();
-        await expect(amounts.nth(2)).toHaveAttribute('aria-pressed', 'true');
+        // Under the default canon two, which its pinned turn rolls for; under
+        // any other the most offered.
+        const pushed = defaultCanon ? 2 : mostPush;
+        await amounts.nth(pushed).click();
+        await expect(amounts.nth(pushed)).toHaveAttribute('aria-pressed', 'true');
         await expect(missileGroup.locator('.turn-push-cost')).toHaveText(
             menuLine(panel.costs, {
-                cost: sentencePattern(tarmar.push_cost, { total: '3', level: '1', pushed: '2' }),
+                cost: sentencePattern(tarmar.push_cost, {
+                    total: String(cost + pushed), level: String(cost), pushed: String(pushed),
+                }),
             })
         );
         await playerPage.click('#turn-panel .turn-confirm');
 
-        // The turn ran: the player's pushed cast, its Control Roll against
-        // INT, and the roll's outcome, all in the log.
+        // The turn ran: the player's pushed cast, and under the default
+        // canon its Control Roll against INT and the roll's outcome, all in
+        // the log.
         await expect(playerPage.locator('#battle-turn')).toHaveText('1');
         await expect(playerPage.locator('.event-decision', {
             hasText: chosenBy(TEST_USER.username),
-        })).toContainText('Fire Missile (PUSH 2 MANA)');
+        })).toContainText(`Fire Missile (PUSH ${pushed} MANA)`);
+        if (!defaultCanon) {
+            await stopCoverage(playerPage, `${testInfo.title} (player context)`);
+            return;
+        }
         const controlRoll = playerPage.locator('.event-roll', { hasText: 'control 3d6' });
         await expect(controlRoll).toHaveCount(1);
         await expect(controlRoll).toContainText('vs INT');
@@ -487,9 +526,15 @@ test.describe('Pushing mana into a cast', () => {
         test.setTimeout(120000);
         await adminPage.goto('/tarmar/gm/');
         const defaultCanon = (await loadedCanon(adminPage)) === DEFAULT_CANON;
+        let wizardsBattle = null;
         playerPage = await openTheWizardsStage(
             adminPage, browser, uniqueName('E2E Borrow'),
-            { beforeTurn: emptyTheWizardsPool }
+            {
+                beforeTurn: (battleId) => {
+                    wizardsBattle = battleId;
+                    emptyTheWizardsPool(battleId);
+                },
+            }
         );
         const stage = playerPage.locator('#turn-panel .turn-cast-stage');
         // The configured words, the pool named as the server names it.
@@ -524,7 +569,17 @@ test.describe('Pushing mana into a cast', () => {
                 panel.borrow_pushed, { pushed: String(pushed), borrowed: String(pushed + 1) }
             ))]);
         } else {
-            await expect(copies).toHaveText([borrowOne]);
+            // The pool is empty, so each copy borrows its pushed mana and the
+            // 1 the cost lacks.
+            await expect(copies).toHaveText(
+                offeredBorrowingPushes(wizardsBattle, 'fire_missile').map((pushed) => (
+                    pushed === 0
+                        ? borrowOne
+                        : menuLine(panel.borrow_pushed, {
+                            pushed: String(pushed), borrowed: String(pushed + 1),
+                        })
+                ))
+            );
         }
         await expect(copies.first()).toHaveAttribute('aria-pressed', 'false');
 

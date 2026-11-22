@@ -364,7 +364,7 @@ def _tarmar_craft(state: BattleState, combatant: CombatantState) -> dict | None:
     working, the craft turns taken of those it takes, and the figure its
     latest craft action named, when that figure is still on the board. The
     board names a working, its tier and its turn to every viewer, as the log
-    does (the note's ``board_names_what_is_cast`` reading). ``line`` is the
+    does (a reading on #208). ``line`` is the
     sentence the card prints, in the configured words.
 
     Unlike a Runaway's line and a contest's, this one does not ask whether

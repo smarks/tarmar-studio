@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import string
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -21,7 +22,7 @@ from accounts.models import User
 from common.middleware import PublicPathPassphraseMiddleware
 from common.refusal_words import refusal_words as common_refusal_words
 from common.rolling import Roller, RollRecord
-from reference.paths import CANON_TESTS_DIR_NAME, DM_RULES_DIR
+from reference.paths import CANON_TESTS_DIR_NAME, DM_RULES_DIR, REPO_ROOT
 
 if TYPE_CHECKING:
     # The test client's response type exists only in django-stubs.
@@ -33,6 +34,41 @@ if TYPE_CHECKING:
 # no such file, and a test that needs a key skips without it (but fails when
 # the file is there and the key is not: see skip_unless_canon_expects).
 CANON_EXPECTATIONS_FILE = DM_RULES_DIR / CANON_TESTS_DIR_NAME / "expectations.json"
+
+
+#: How many leading bytes git reads to tell a binary file from text: one with
+#: a NUL among them is binary (git's own test, ``buffer_is_binary``).
+BINARY_SNIFF_BYTES = 8000
+
+
+@functools.cache
+def tracked_text_files(*pathspecs: str) -> tuple[tuple[Path, str], ...]:
+    """Every text file this repository tracks, with its text (#192).
+
+    ``pathspecs`` narrows the listing as ``git ls-files`` takes them (``"*.html"``);
+    none lists every tracked file. A file the working tree no longer has is
+    left out, as is a binary one (an image), as git leaves it out of a diff.
+    The rest decode as strict UTF-8, so a tracked text file that is not UTF-8
+    fails the test that reads it rather than being read with its bytes
+    replaced.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-z", "--", *pathspecs],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    files: list[tuple[Path, str]] = []
+    for name in listing.split("\0"):
+        path = REPO_ROOT / name
+        if not name or not path.is_file():
+            continue
+        content = path.read_bytes()
+        if b"\0" in content[:BINARY_SNIFF_BYTES]:
+            continue
+        files.append((path, content.decode("utf-8")))
+    return tuple(files)
 
 
 def load_canon_expectations(path: Path = CANON_EXPECTATIONS_FILE) -> dict[str, Any]:

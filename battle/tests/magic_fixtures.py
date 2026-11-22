@@ -93,23 +93,23 @@ INVENTED_RULES = MagicRules(
 )
 
 
-#: The invented Debt Roll's first failure band: missed by 1 to 3, 1 Fatigue
+#: The invented Debt Roll's first failure band: missed by 1 or 2, 1 Fatigue
 #: per point owed.
 SLIP_BAND = DebtBand(
     key="slip",
     label="Slip of the purse",
     is_runaway=False,
     lowest_margin=1,
-    highest_margin=3,
+    highest_margin=2,
     cost_pool="fatigue",
     cost_per_debt=1,
 )
-#: Its last: missed by 4 or more, 2 Body per point owed.
+#: Its last: missed by 3 or more, 2 Body per point owed.
 TORN_BAND = DebtBand(
     key="torn",
     label="Torn purse",
     is_runaway=False,
-    lowest_margin=4,
+    lowest_margin=3,
     highest_margin=None,
     cost_pool="body",
     cost_per_debt=2,
@@ -254,6 +254,25 @@ TRUE_MAGIC_RULES = replace(
         },
     ),
     true_magic=TRUE_MAGIC,
+)
+
+#: :data:`TRUE_MAGIC_RULES` with the studied kind's Channel leaving the spell's
+#: cost out (tarmar-engine #83, tarmar-studio #196): a studied spell's cost
+#: always fits, and Channel bounds only the mana pushed or borrowed past it.
+#: The True kind still counts it, as the engine requires.
+_TRUE_MAGIC_CHANNEL = TRUE_MAGIC_RULES.channel
+assert _TRUE_MAGIC_CHANNEL is not None, "True Magic needs Channel"
+COST_LEFT_OUT_RULES = replace(
+    TRUE_MAGIC_RULES,
+    channel=replace(
+        _TRUE_MAGIC_CHANNEL,
+        derivations={
+            **_TRUE_MAGIC_CHANNEL.derivations,
+            STUDIED_KIND: replace(
+                _TRUE_MAGIC_CHANNEL.derivations[STUDIED_KIND], counts_cost=False
+            ),
+        },
+    ),
 )
 
 
