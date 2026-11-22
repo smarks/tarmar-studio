@@ -417,7 +417,7 @@ def spell_mastery(character: Character, spells: tuple[str, ...]) -> dict[str, in
     Channel may derive from (#960). A seated spell the record holds no points
     in is left out, and the engine reads the two maps differently there: its
     mastery at level 1, "Can cast the spell", and its skill level at 0, so a
-    Channel derived from the spell's level allows it no mana.
+    Channel derived from the spell's level is 0 for it.
 
     Args:
         character: The character being seated.

@@ -58,8 +58,9 @@ from .turn_record import prompt_hash
 # 88512526e0974102379bef1acb65aa38494176cfd2f6ad701e2907defd4e386c: changed by #150.
 # e366288c7f1051d571e0c160f7d5cf2a08ad4d5d0ed405b1fe3baee0e7307cea: changed by #190.
 # 04e9d3d6fe119fc75cd82dc0dbe38ae7b3a4529cb833decf8cca5c41d5d4a7c6: changed by #208.
+# f455cd147a9cf12ce349244c19b00611135cc05e27e8bcc9980cec879b784183: changed by #196.
 TARMAR_MAGIC_SECTION_HASH = (
-    "f455cd147a9cf12ce349244c19b00611135cc05e27e8bcc9980cec879b784183"
+    "d96f244d11d1a86f2b316b0c63642588811511bdd5f6aab5d1c131db19f5d281"
 )
 
 #: The canon's expectations key for the words the Tarmar prompt must carry,

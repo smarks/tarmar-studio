@@ -1169,6 +1169,56 @@ class InventedRulesTest(SimpleTestCase):
             "by Borrowing.",
         )
 
+    def test_kinds_capping_different_mana_each_say_what_they_cap(self) -> None:
+        """tarmar-studio #196: a kind whose Channel leaves the spell's cost out
+        beside one that counts it, so each says what its Channel caps."""
+        channel = UNLIKE_EITHER_CANONS_MAGIC_RULES.channel
+        assert channel is not None
+        studied = channel.derivations["studied"]
+        rules = replace(
+            UNLIKE_EITHER_CANONS_MAGIC_RULES,
+            channel=replace(
+                channel,
+                derivations={
+                    **channel.derivations,
+                    "studied": replace(studied, counts_cost=False),
+                },
+            ),
+        )
+        with seated_rules(rules):
+            body = magic_body(CHANNEL)
+        self.assertEqual(
+            body,
+            "Hard cap on mana per casting. Studied Magic: equals 2 × skill level in "
+            "that specific spell + 1; it caps only the mana pushed or borrowed past "
+            "the spell's cost, which always fits. Sorcerous Magic: equals Sorcery "
+            "skill level − 1, never below 0 (costs 3× the skill points to advance); "
+            "it caps the spell's cost and any pushed mana together. Channel cannot "
+            "be exceeded even by Borrowing.",
+        )
+
+    def test_every_kind_leaving_the_cost_out_says_so_once(self) -> None:
+        rules = replace(
+            UNLIKE_EITHER_CANONS_MAGIC_RULES,
+            borrowing=None,
+            channel=ChannelRules(
+                derivations={
+                    "hedge": ChannelDerivation(
+                        source_skill=None, multiplier=3, offset=0, counts_cost=False
+                    )
+                },
+                default_kind="hedge",
+            ),
+        )
+        with seated_rules(rules):
+            body = magic_body(CHANNEL)
+        self.assertEqual(
+            body,
+            "Hard cap on mana per casting, only the mana pushed or borrowed past the "
+            "spell's cost, which always fits. Hedge Magic: equals 3 × skill level in "
+            "that specific spell.",
+        )
+
     def test_a_channel_that_reads_no_level_states_its_number(self) -> None:
         rules = replace(
             UNLIKE_EITHER_CANONS_MAGIC_RULES,

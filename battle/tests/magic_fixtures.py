@@ -256,6 +256,25 @@ TRUE_MAGIC_RULES = replace(
     true_magic=TRUE_MAGIC,
 )
 
+#: :data:`TRUE_MAGIC_RULES` with the studied kind's Channel leaving the spell's
+#: cost out (tarmar-engine #83, tarmar-studio #196): a studied spell's cost
+#: always fits, and Channel bounds only the mana pushed or borrowed past it.
+#: The True kind still counts it, as the engine requires.
+_TRUE_MAGIC_CHANNEL = TRUE_MAGIC_RULES.channel
+assert _TRUE_MAGIC_CHANNEL is not None, "True Magic needs Channel"
+COST_LEFT_OUT_RULES = replace(
+    TRUE_MAGIC_RULES,
+    channel=replace(
+        _TRUE_MAGIC_CHANNEL,
+        derivations={
+            **_TRUE_MAGIC_CHANNEL.derivations,
+            STUDIED_KIND: replace(
+                _TRUE_MAGIC_CHANNEL.derivations[STUDIED_KIND], counts_cost=False
+            ),
+        },
+    ),
+)
+
 
 #: Casting failure totals (tarmar-engine #46): a natural 12 or more fails
 #: whatever the attribute, a 12 or a 13 spends the mana anyway, and a 13 starts

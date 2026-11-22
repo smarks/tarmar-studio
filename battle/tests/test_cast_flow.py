@@ -53,6 +53,7 @@ from common.test_helpers import BaseTestCase, FacesRoller
 from .magic_fixtures import (
     BORROWING_RULES,
     CASTING_FAILURE,
+    COST_LEFT_OUT_RULES,
     INVENTED_RULES,
     REND_EFFECT,
     TRUE_MAGIC,
@@ -335,6 +336,35 @@ class CasterMagicTest(SimpleTestCase):
         self.assertFalse(bolt["castable"])
         self.assertEqual(bolt["reason"], "cast_stage.past_channel 3 2")
 
+    def test_a_kind_leaving_the_cost_out_shows_the_channel_not_the_bound(self):
+        # tarmar-studio #196: such a kind's bound is its Channel plus the
+        # spell's cost, and the row names the Channel, twice the level.
+        with seated_rules(COST_LEFT_OUT_RULES):
+            magic = caster_magic(wizard_state(), 1)
+        assert magic is not None
+        self.assertEqual(
+            {spell["key"]: spell["channel"] for spell in magic["spells"]},
+            {key: 2 * level for key, level in WIZARD_SPELL_LEVELS.items()},
+        )
+
+    def test_a_spell_past_the_channel_casts_where_the_cost_is_left_out(self):
+        # Level 1 in Lightning Bolt: a Channel of 2 and a cost of 3, which
+        # always fits.
+        with seated_rules(COST_LEFT_OUT_RULES):
+            magic = caster_magic(
+                wizard_state(
+                    spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1}
+                ),
+                1,
+            )
+        assert magic is not None
+        bolt = next(
+            spell for spell in magic["spells"] if spell["key"] == "lightning_bolt"
+        )
+        self.assertTrue(bolt["castable"])
+        self.assertEqual(bolt["reason"], "")
+        self.assertEqual(bolt["channel"], 2)
+
 
 @with_fixed_words
 class BorrowableSpellTest(SimpleTestCase):
@@ -384,6 +414,20 @@ class BorrowableSpellTest(SimpleTestCase):
             "lightning_bolt",
         )
         self.assertFalse(bolt["borrowable"])
+
+    def test_a_spell_past_the_channel_borrows_where_the_cost_is_left_out(self):
+        assert BORROWING_RULES.borrowing is not None
+        rules = replace(COST_LEFT_OUT_RULES, borrowing=BORROWING_RULES.borrowing)
+        with seated_rules(rules):
+            bolt = self.row(
+                wizard_state(
+                    mana=1,
+                    spell_skill_levels={**WIZARD_SPELL_LEVELS, "lightning_bolt": 1},
+                ),
+                "lightning_bolt",
+            )
+        self.assertTrue(bolt["borrowable"])
+        self.assertEqual(bolt["shortfall"], 2)
 
     def test_no_borrowing_rules_borrow_nothing(self):
         with seated_rules(INVENTED_RULES):
