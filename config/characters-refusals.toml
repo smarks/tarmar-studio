@@ -123,10 +123,9 @@ game_master_started_skills = "By invitation only: {skills}. A Game Master starts
 
 # characters.magic's words for learning a spell. The school (issue #18, the
 # canon's school_gates_a_new_spell ruling): a player learns a new spell only
-# from their own school, rolled and chosen first. The ladder (tarmar-studio
-# #191, the canon's elemental_tracks_climb_tier_by_tier ruling, and #208, its
-# counter_n_is_five_spells ruling): an Elemental spell is learned tier by
-# tier in its element, and a Counter rung by rung on the Counter ladder.
+# from their own school, rolled and chosen first. The ladder (Spencer's
+# rulings on tarmar-studio #191 and #208): an Elemental spell is learned tier
+# by tier in its element, and a Counter rung by rung on the Counter ladder.
 # {spell}: the spell asked for; {spell_school}: its school; {school}: the
 # character's school ("unchosen" when none is); {rung_below}: the spell one
 # rung down the same ladder, which the character does not hold.

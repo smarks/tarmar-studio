@@ -22,15 +22,14 @@ The rules, from ``reference/content``:
   chosen from the row it lands on (:func:`choose_school`); a player learns a
   new spell only from that school (:func:`school_refusal`), and a Game Master
   may teach any.
-* The canon's ``elemental_tracks_climb_tier_by_tier`` ruling (Spencer's,
-  tarmar-studio#191): each element is its own track, learned from tier 1 and
-  climbed tier by tier, so a player learns an Elemental spell only with the
-  same element's tier below it on the record (:func:`ladder_refusal`); a
-  Game Master may teach any.
-* The canon's ``counter_n_is_five_spells`` ruling (tarmar-studio#208):
-  Protection's Counter 1 to Counter 5 are five spells on one ladder of their
-  own, climbed rung by rung as an element's is, so the same gate holds a
-  player to Counter N-1 before Counter N. A Counter is learned and never
+* Spencer's ruling on tarmar-studio#191: each element is its own track,
+  learned from tier 1 and climbed tier by tier, so a player learns an
+  Elemental spell only with the same element's tier below it on the record
+  (:func:`ladder_refusal`); a Game Master may teach any.
+* Spencer's ruling on tarmar-studio#208: Protection's Counter 1 to Counter 5
+  are five spells on one ladder of their own, climbed rung by rung as an
+  element's is, so the same gate holds a player to Counter N-1 before
+  Counter N. A Counter is learned and never
   cast (the engine's ``Spell.generic_counter``): it is seated with the
   caster's other spells and left off every list of spells to cast
   (:func:`castable_spells`, :func:`cast_in_story`).
@@ -202,12 +201,11 @@ def school_refusal(character: Character, spell: Spell) -> str | None:
 def rung_not_held(character: Character, spell: Spell) -> Spell | None:
     """The rung below ``spell`` that a new learning of it lacks (#191, #208).
 
-    The canon's ``elemental_tracks_climb_tier_by_tier`` ruling: tier N of an
-    element needs tier N-1 of the same element on the record, so a mage who
-    takes up another element starts it at tier 1. Its
-    ``counter_n_is_five_spells`` ruling climbs the Counter ladder the same
-    way: Counter N needs Counter N-1 on the record. A spell already on the
-    record lacks nothing, whatever is below it, and may be raised. Which
+    Spencer's ruling on #191: tier N of an element needs tier N-1 of the
+    same element on the record, so a mage who takes up another element
+    starts it at tier 1. His ruling on #208 climbs the Counter ladder the
+    same way: Counter N needs Counter N-1 on the record. A spell already on
+    the record lacks nothing, whatever is below it, and may be raised. Which
     spell stands below which is the engine's
     (``tarmar_engine.spells.lower_tier``).
 
@@ -232,9 +230,8 @@ def ladder_refusal(character: Character, spell: Spell) -> str | None:
     """Why a player may not put points into ``spell``, by its ladder: its
     element's, or the Counter ladder.
 
-    tarmar-studio#191 and #208 (the canon's
-    ``elemental_tracks_climb_tier_by_tier`` and ``counter_n_is_five_spells``
-    rulings): :func:`rung_not_held`'s rung, in the words of
+    tarmar-studio#191 and #208 (Spencer's rulings on each):
+    :func:`rung_not_held`'s rung, in the words of
     ``config/characters-refusals.toml``. A Game Master is never asked this.
 
     Args:
@@ -449,10 +446,9 @@ def learn_spell(
     ruling on the #774 review, marked for Spencer). A player learns a new
     spell only from their school of magic (:func:`school_refusal`, issue
     #18), and a rung above a ladder's first only with the rung below it on
-    the record (:func:`ladder_refusal`: an element's tier, #191, the canon's
-    ``elemental_tracks_climb_tier_by_tier`` ruling, or a Counter, #208, its
-    ``counter_n_is_five_spells`` ruling); a Game Master teaching one past
-    either is recorded as such.
+    the record (:func:`ladder_refusal`: an element's tier, Spencer's ruling
+    on #191, or a Counter, his ruling on #208); a Game Master teaching one
+    past either is recorded as such.
 
     Args:
         character: The character, changed in memory and not saved.

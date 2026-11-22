@@ -267,12 +267,12 @@ class CasterMagicTest(SimpleTestCase):
         )
 
     def test_a_floor_above_the_attribute_is_not_named(self):
-        # A floor of 16 lowers neither INT 14 nor WIS 12.
+        # A floor of 15 lowers neither INT 14 nor WIS 12.
         high_floor = replace(
             CASTING_FAILURE,
-            fumble_floor=16,
-            mana_lost_totals=frozenset({16, 17}),
-            runaway_total=17,
+            fumble_floor=15,
+            mana_lost_totals=frozenset({15, 16}),
+            runaway_total=16,
         )
         with seated_rules(replace(INVENTED_RULES, casting_failure=high_floor)):
             magic = caster_magic(wizard_state(), 1)

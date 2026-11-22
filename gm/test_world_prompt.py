@@ -24,6 +24,7 @@ from common.test_helpers import (
     CANON_EXPECTATIONS,
     BaseTestCase,
     skip_unless_canon_expects,
+    tracked_text_files,
 )
 from reference import search_index
 from reference.paths import (
@@ -309,9 +310,10 @@ def names_a(name: str, text: str) -> bool:
 
 
 class UnpublishedNamesStayOffPublicTextTest(SimpleTestCase):
-    """No public page, default canon page or default prompt section names one
-    of the Tarmar canon's unpublished names (#208), as
-    :class:`DefaultCanonWorldDigestTest` holds the default digest."""
+    """No public page, default canon page, default prompt section or other
+    tracked file names one of the Tarmar canon's unpublished names (#208,
+    #192), as :class:`DefaultCanonWorldDigestTest` holds the default
+    digest."""
 
     def test_the_public_text_files_are_found(self) -> None:
         files = public_text_files()
@@ -332,6 +334,24 @@ class UnpublishedNamesStayOffPublicTextTest(SimpleTestCase):
             for name in CANON_EXPECTATIONS["proper_nouns"]:
                 with self.subTest(path=path.relative_to(REPO_ROOT), name=name):
                     self.assertFalse(names_a(name, text))
+
+    def test_the_tracked_text_files_are_found(self) -> None:
+        files = {path for path, _text in tracked_text_files()}
+        self.assertIn(REPO_ROOT / "gm" / "engine.py", files)
+        self.assertIn(REPO_ROOT / "config" / "characters-refusals.toml", files)
+        self.assertIn(PUBLIC_RULES_DIR / "magic" / "true-magic.md", files)
+        self.assertNotIn(REPO_ROOT / "static" / "images" / "maja-island.png", files)
+
+    @skip_unless_canon_expects("proper_nouns")
+    def test_no_tracked_file_names_one(self) -> None:
+        """Not only the pages: a comment, a test or a document names none."""
+        naming = [
+            (str(path.relative_to(REPO_ROOT)), name)
+            for path, text in tracked_text_files()
+            for name in CANON_EXPECTATIONS["proper_nouns"]
+            if names_a(name, text)
+        ]
+        self.assertEqual(naming, [])
 
     @skip_unless_canon_expects("proper_nouns")
     def test_the_default_canons_prompt_names_none(self) -> None:

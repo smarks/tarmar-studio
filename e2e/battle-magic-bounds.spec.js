@@ -91,8 +91,7 @@ test.describe('Magic bounds lifted', () => {
 
     test("a Game Master lifts the bound that holds a wizard's push, whose menu then offers the cast past it", async ({ adminPage, browser }, testInfo) => {
         // The bound is the one the loaded canon holds the wizard's Fire
-        // Missile to: under the Tarmar canon Channel (the wizard's Fire
-        // Missile level, which leaves no room to push), under the default
+        // Missile to: under the Tarmar canon Channel, under the default
         // canon Push's own cap of three, since its Channel leaves room past
         // that cap at any level. Either way the wizard's Fire Missile is
         // offered pushed copies past it once the Game Master lifts it, and

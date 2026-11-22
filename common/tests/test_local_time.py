@@ -13,8 +13,6 @@ text it replaced.
 
 import datetime
 import re
-import subprocess
-from pathlib import Path
 
 from django.template import Context, Template
 from django.test import SimpleTestCase
@@ -23,7 +21,8 @@ from django.utils import timezone
 from battle.services import create_battle
 from characters.models import Character
 from common.templatetags.local_time import local_time
-from common.test_helpers import BaseTestCase, create_character
+from common.test_helpers import BaseTestCase, create_character, tracked_text_files
+from reference.paths import REPO_ROOT
 
 
 class LocalTimeTagTest(SimpleTestCase):
@@ -182,18 +181,12 @@ class NoTimestampIsLeftInUtcTest(SimpleTestCase):
     }
 
     def test_only_the_named_exceptions_use_the_date_filter(self):
-        root = Path(__file__).resolve().parents[2]
         # The templates the repository holds, not whatever a coverage run or a
         # collectstatic left beside them.
-        tracked = subprocess.run(
-            ["git", "ls-files", "*.html"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.split()
         users = {
-            name for name in tracked if self.FILTER.search((root / name).read_text())
+            str(path.relative_to(REPO_ROOT))
+            for path, text in tracked_text_files("*.html")
+            if self.FILTER.search(text)
         }
 
         self.assertEqual(users, set(self.EXEMPT))

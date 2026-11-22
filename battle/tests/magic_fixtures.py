@@ -93,23 +93,23 @@ INVENTED_RULES = MagicRules(
 )
 
 
-#: The invented Debt Roll's first failure band: missed by 1 to 3, 1 Fatigue
+#: The invented Debt Roll's first failure band: missed by 1 or 2, 1 Fatigue
 #: per point owed.
 SLIP_BAND = DebtBand(
     key="slip",
     label="Slip of the purse",
     is_runaway=False,
     lowest_margin=1,
-    highest_margin=3,
+    highest_margin=2,
     cost_pool="fatigue",
     cost_per_debt=1,
 )
-#: Its last: missed by 4 or more, 2 Body per point owed.
+#: Its last: missed by 3 or more, 2 Body per point owed.
 TORN_BAND = DebtBand(
     key="torn",
     label="Torn purse",
     is_runaway=False,
-    lowest_margin=4,
+    lowest_margin=3,
     highest_margin=None,
     cost_pool="body",
     cost_per_debt=2,

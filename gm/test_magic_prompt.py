@@ -47,44 +47,25 @@ from .test_world_prompt import (
 )
 from .turn_record import prompt_hash
 
-# ``prompt_hash`` of the assembled Tarmar ``section_magic()``. It was
-# 5cb0048b89a637f26c95041afe21b8990bbda1fc3d7bd548f766cd5c18ce17d1, the old
-# ``SECTION_MAGIC`` constant byte for byte (#922), until #48 built the Special
-# Casting Results and Borrowing from the canon's ``magic-rules.json``: the
-# table now states the critical success's +2 and 1 mana back and that a 16
-# keeps its mana, and Borrowing states the natural 18 that always fails, that
-# a failure is a Runaway, and that refunds pay the Debt first. That was
-# d13c58b26bbfe092f3d704371fbd3ae991d4f3d97c06d27219a1772d40662741 until #127
-# built Push, Channel, Runaway and Counterspell from the same file: Push's
-# penalty now counts the "mana pushed" (the canon's base cost does not count)
-# and each failure band says whether the spell takes effect; Channel says the
-# cap covers the cost and the pushed mana and that Arcane costs 2× to advance;
-# Runaway's growth states the +1 a turn it ran that the board banks and adds
-# once to the anchorer's next cast of that spell (a continuing spell's growth
-# stays the GM's, ruling runaway_effect_growth), and
-# the helper pays "the original casting cost"; Counterspell states the least
-# commitment (3), the opposed dice (3d6 + INT) and that the bonus is each
-# side's.
+# ``prompt_hash`` of the assembled Tarmar ``section_magic()``. Each hash it
+# held before, oldest first, with the issue that changed it. Only the issue
+# says why: the section is the Tarmar canon's GM-side rules and this
+# repository is public, so nothing here restates them (#192).
 #
-# 88512526e0974102379bef1acb65aa38494176cfd2f6ad701e2907defd4e386c until #150
-# stated the push's payoff from the same file, which the section had never
-# said: +1 to the spell's rolled damage or healing for each mana pushed, and
-# only a spell that rolls damage or healing can be pushed.
-#
-# e366288c7f1051d571e0c160f7d5cf2a08ad4d5d0ed405b1fe3baee0e7307cea until #190
-# graded the Debt Roll in bands, as the Control Roll is: Borrowing now rolls
-# against WIS alone, states each band and the pool and cost it takes, the band
-# a natural 18 lands in, and that the Debt is all the caster owes at the roll.
-#
-# 04e9d3d6fe119fc75cd82dc0dbe38ae7b3a4529cb833decf8cca5c41d5d4a7c6 until #208
-# built True Magic from the same file: a new generated subsection states who
-# crafts a working and makes a True cast, the tier cap and craft turns, the
-# working's mana and Channel, each effect, the interruption roll and its bands,
-# the working's roll and the drain; and Counterspell now states what
-# familiarity adds to each side and what each side's rests on.
+# 5cb0048b89a637f26c95041afe21b8990bbda1fc3d7bd548f766cd5c18ce17d1: the old
+# ``SECTION_MAGIC`` constant byte for byte (#922); changed by #48.
+# d13c58b26bbfe092f3d704371fbd3ae991d4f3d97c06d27219a1772d40662741: changed by #127.
+# 88512526e0974102379bef1acb65aa38494176cfd2f6ad701e2907defd4e386c: changed by #150.
+# e366288c7f1051d571e0c160f7d5cf2a08ad4d5d0ed405b1fe3baee0e7307cea: changed by #190.
+# 04e9d3d6fe119fc75cd82dc0dbe38ae7b3a4529cb833decf8cca5c41d5d4a7c6: changed by #208.
 TARMAR_MAGIC_SECTION_HASH = (
     "f455cd147a9cf12ce349244c19b00611135cc05e27e8bcc9980cec879b784183"
 )
+
+#: The canon's expectations key for the words the Tarmar prompt must carry,
+#: by what they state. They are its GM-side numbers, so the canon supplies
+#: them rather than this repository spelling them out (#192).
+MAGIC_PROMPT_PINS = "magic_prompt_pins"
 
 # The subsections every magic section carries, in this order: checked here
 # file by file, and inside the whole prompt by ``gm.tests``, whose
@@ -113,27 +94,25 @@ class TarmarMagicSectionTest(SimpleTestCase):
 
     A change to it changes the production prompt, and with it the prompt
     snapshot every later turn records (``GMPromptSnapshot``), so it is made
-    on purpose: update the hash and say why beside it.
+    on purpose: update the hash, and add the old one to the list beside it
+    with the issue that changed it and nothing more.
     """
 
     def test_the_magic_section_is_the_pinned_text(self) -> None:
         self.assertEqual(prompt_hash(section_magic()), TARMAR_MAGIC_SECTION_HASH)
 
+    @skip_unless_canon_expects(MAGIC_PROMPT_PINS)
     def test_the_push_states_its_payoff(self) -> None:
         """#150: the bonus a push adds, which no hand-written text stated."""
         self.assertIn(
-            "Invest extra mana for greater effect. The push's bonus: +1 to the "
-            "spell's rolled damage or healing for each mana pushed. Only a spell "
-            "that rolls damage or healing can be pushed. Control Roll: ",
-            section_magic(),
+            CANON_EXPECTATIONS[MAGIC_PROMPT_PINS]["push_payoff"], section_magic()
         )
 
+    @skip_unless_canon_expects(MAGIC_PROMPT_PINS)
     def test_the_core_section_names_both_anchor_rolls(self) -> None:
         """#150: the caster anchors on WIS, a third-party mage on INT."""
         self.assertIn(
-            "During a Runaway the caster's Anchor roll is 3d6 ≤ WIS and a third-party "
-            "mage's is 3d6 ≤ INT.",
-            section_core(),
+            CANON_EXPECTATIONS[MAGIC_PROMPT_PINS]["anchor_rolls"], section_core()
         )
 
 

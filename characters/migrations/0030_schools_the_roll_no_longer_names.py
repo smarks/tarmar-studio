@@ -13,8 +13,7 @@ against the table.
 This migration clears the school on every such character and keeps the school
 roll. The player then chooses again from the list the roll opened; a
 character with no roll rolls first, as any character does. Each gets a
-history line saying why. The canon's ruling for it is
-``removed_school_is_chosen_again``.
+history line saying why. The canon records the reading as a ruling.
 
 The two schools are named here and not read from the canon: this is a dated
 record of what was removed on 2026-11-18, and the canon goes on changing.
